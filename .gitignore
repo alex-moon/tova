@@ -13,6 +13,7 @@ dist
 .firebase/
 .fusebox/
 .grunt
+.idea
 jspm_packages/
 *.lcov
 lerna-debug.log*
