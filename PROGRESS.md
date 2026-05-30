@@ -7,6 +7,8 @@
 - Model Router Service: ✓ (Step 2 complete)
 - Frontend Architecture: ✓ (Step 3 complete)
 - Chat UI & Session Management: ✓ (Step 4 complete)
+- Docker & Dev Tooling: ✓ (Makefile and Docker Compose ready)
+- Single Server Dev Experience: ✓ (Proxy consolidation and unified dev command)
 
 ## Detailed Activity
 
@@ -25,6 +27,19 @@
   - Implemented Semantic CSS architecture using CSS Variables.
   - Built core layout with `Sidebar`, `ChatWindow`, and `Login` components.
   - Implemented `AuthContext` and custom `useAuth` hook for state management.
+- **Docker & Dev Experience**:
+  - Created multi-stage `Dockerfile` for production-ready single container deployment.
+  - Created `src/client/Dockerfile` for frontend development.
+  - Implemented `docker-compose.yml` for local development with hot-reloading and MongoDB.
+  - Created `Makefile` with shortcuts for common workflows.
+  - Updated `src/server/index.ts` to serve frontend assets in production mode.
+  - Updated `README.md` with comprehensive setup and development instructions.
+- **Unified Dev Experience**:
+  - Installed `concurrently` for simultaneous backend and frontend development.
+  - Implemented `http-proxy-middleware` in Express to proxy to Vite during development.
+  - Updated `Makefile` and root `package.json` with a single `make dev` command.
+  - Configured Vite to load environment variables from the root `.env` file.
+  - Updated `README.md` with new local development instructions for the unified port (5000).
 - **Testing & Quality**:
   - Added unit tests for `routerService.ts`.
   - Configured `MongoMemoryServer` for isolated database testing.
@@ -35,4 +50,4 @@
   - Refactored frontend structure to satisfy ESLint "only export components" rule.
 
 ## Final Result
-The HFG (Heroku for Groq) application is now fully implemented according to the plan. It features a secure authentication flow, intelligent model routing, and a persistent chat interface.
+The HFG (Heroku for Groq) application is now fully implemented and optimized for local development with a single unified server experience. It features a secure authentication flow, intelligent model routing, and a persistent chat interface.

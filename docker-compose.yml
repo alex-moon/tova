@@ -1,0 +1,44 @@
+services:
+  mongodb:
+    image: mongo:latest
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodb_data:/data/db
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: npm run dev
+    ports:
+      - "5000:5000"
+    environment:
+      - MONGODB_URI=mongodb://mongodb:27017/hfg
+      - PORT=5000
+      - NODE_ENV=development
+      - JWT_SECRET=${JWT_SECRET:-supersecretkey}
+      - GROQ_API_KEY=${GROQ_API_KEY}
+    depends_on:
+      - mongodb
+    volumes:
+      - .:/app
+      - /app/node_modules
+      - /app/src/client/node_modules
+
+  frontend:
+    build:
+      context: ./src/client
+      dockerfile: Dockerfile
+    ports:
+      - "5173:5173"
+    environment:
+      - VITE_API_URL=http://backend:5000
+    volumes:
+      - ./src/client:/app
+      - /app/node_modules
+    depends_on:
+      - backend
+
+volumes:
+  mongodb_data:
