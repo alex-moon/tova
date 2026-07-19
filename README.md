@@ -9,6 +9,14 @@ Tova is an intelligent model router and chat interface for Groq LLMs. Think of i
 - **Secure Auth**: JWT-based authentication with HTTP-only cookies.
 - **Modern UI**: Semantic React-based chat interface.
 
+## Current Root Contract
+
+The repository root is intentionally limited right now.
+
+- Supported from the root today: dependency installation for the workspace and building the React client.
+- Not yet supported from the root today: a runnable backend build/start path, a unified dev workflow, root-level tests, or the Docker/Compose flow described in later packets.
+- The existing implementation work lives under `src/server` and `src/client`, but the honest top-level workflow is being restored packet by packet.
+
 ## Local Development
 
 ### Prerequisites
@@ -34,41 +42,32 @@ Tova is an intelligent model router and chat interface for Groq LLMs. Think of i
     NODE_ENV=development
     ```
 
-### Running with NPM/Makefile
+You can also install the frontend dependencies directly without `make`:
 
-- **Start Dev Environment**: `make dev` (starts both backend and frontend)
-- **Start Backend Only**: `make dev-server`
-- **Start Frontend Only**: `make dev-client`
-- **Run Tests**: `make test`
-- **Lint Code**: `make lint`
+```bash
+npm install
+npm run install:client
+```
 
-When running in development mode, you can access the application via:
-- **Unified Port**: `http://localhost:5000` (Express proxying to Vite)
-- **Vite Port**: `http://localhost:5173` (Vite proxying to Express)
+### Supported Root Commands
 
-### Running with Docker
+- `make install` — installs the root workspace dependencies and the frontend dependencies.
+- `make build` — builds the frontend bundle from the repository root.
+- `make clean` — removes installed dependencies and the frontend build output.
+- `npm run install:client` — installs only the frontend dependencies.
+- `npm run build:client` — builds only the frontend from the repository root.
 
-You can run the entire stack (including MongoDB) using Docker Compose:
+### Deferred Root Workflows
 
-1.  **Build and Start**:
-    ```bash
-    make docker-up
-    ```
-2.  **Access the application**:
-    - Frontend: `http://localhost:5173`
-    - Backend API: `http://localhost:5000`
+- Root backend install/build/start wiring is tracked by `docs/plan-002-stabilize-server-runtime-and-dependencies.md`.
+- The unified browser-visible dev workflow is tracked by `docs/plan-003-make-the-unified-dev-workflow-runnable.md`.
+- The Docker and Compose assets are not yet a supported top-level workflow and should be treated as in-progress scaffolding.
 
-## Deployment
+Until those packets land, contributors should treat the backend and the unified local MVP path as not yet reconciled at the repository root.
 
-The application is configured to serve the frontend static files from the backend in production mode.
+## Implementation Pointers
 
-1.  **Build**:
-    ```bash
-    make build
-    ```
-2.  **Run**:
-    ```bash
-    NODE_ENV=production npm start
-    ```
-
-Or use the provided `Dockerfile` for a containerized production deployment.
+- Backend entry: `src/server/index.ts`
+- Frontend app: `src/client/src/App.tsx`
+- Delivery plan: `docs/plan.md`
+- Packet progress log: `docs/progress.md`

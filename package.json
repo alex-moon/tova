@@ -1,10 +1,10 @@
 {
   "name": "tova",
   "version": "1.0.0",
-  "description": "",
-  "main": "dist/index.js",
+  "description": "Groq-focused chat application workspace",
   "scripts": {
-    "build": "tsc"
+    "install:client": "npm --prefix src/client install",
+    "build:client": "npm --prefix src/client run build"
   },
   "dependencies": {},
   "devDependencies": {
