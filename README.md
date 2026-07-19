@@ -1,6 +1,6 @@
-# HFG: Heroku for Groq
+# Tova
 
-HFG is an intelligent model router and chat interface for Groq LLMs.
+Tova is an intelligent model router and chat interface for Groq LLMs. Think of it as "Heroku for Groq".
 
 ## Features
 
