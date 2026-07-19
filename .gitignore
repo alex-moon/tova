@@ -12,4 +12,6 @@ yarn-error.log*
 /.env
 /.idea
 /dist
+/.junie
+/docs
 

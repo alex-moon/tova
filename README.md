@@ -28,7 +28,7 @@ Tova is an intelligent model router and chat interface for Groq LLMs. Think of i
     Create a `.env` file in the root directory:
     ```env
     PORT=5000
-    MONGODB_URI=mongodb://localhost:27017/hfg
+    MONGODB_URI=mongodb://localhost:27017/tova
     JWT_SECRET=your_secret_key
     GROQ_API_KEY=your_groq_api_key
     NODE_ENV=development
