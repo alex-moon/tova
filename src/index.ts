@@ -1,3 +1,6 @@
-console.log(
-  'The repository root does not expose a runnable app entry yet. See README.md for the current supported root workflow.'
-)
+import { startServer } from './server';
+
+void startServer().catch((err) => {
+  console.error('Failed to start server:', err);
+  process.exit(1);
+});

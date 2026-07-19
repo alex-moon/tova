@@ -1,4 +1,5 @@
-import express from 'express';
+import express, { type Express } from 'express';
+import { type Server } from 'http';
 import mongoose from 'mongoose';
 import cookieParser from 'cookie-parser';
 import path from 'path';
@@ -8,54 +9,67 @@ import chatRoutes from './routes/chat';
 
 dotenv.config();
 
-const app = express();
-const PORT = process.env.PORT || 5000;
+const DEFAULT_PORT = 5000;
+const DEFAULT_MONGODB_URI = 'mongodb://localhost:27017/tova';
 
-app.use(express.json());
-app.use(cookieParser());
+const getPort = () => {
+  const parsedPort = Number(process.env.PORT);
+  return Number.isInteger(parsedPort) && parsedPort >= 0 ? parsedPort : DEFAULT_PORT;
+};
 
-// Database connection
-const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/tova';
-mongoose
-  .connect(MONGODB_URI)
-  .then(() => console.log('Connected to MongoDB'))
-  .catch((err) => console.error('MongoDB connection error:', err));
+export const connectToDatabase = async (mongoUri = process.env.MONGODB_URI || DEFAULT_MONGODB_URI) => {
+  await mongoose.connect(mongoUri);
+  console.log('Connected to MongoDB');
+};
 
-// Routes
-app.use('/api/auth', authRoutes);
-app.use('/api/chat', chatRoutes);
+export const createApp = (): Express => {
+  const app = express();
 
-app.get('/api/health', (req, res) => {
-  res.json({ status: 'ok' });
-});
+  app.use(express.json());
+  app.use(cookieParser());
 
-// Serve frontend static files in production
-if (process.env.NODE_ENV === 'production') {
-  const clientBuildPath = path.join(__dirname, '../../src/client/dist');
-  app.use(express.static(clientBuildPath));
+  app.use('/api/auth', authRoutes);
+  app.use('/api/chat', chatRoutes);
 
-  app.get('*', (req, res) => {
-    res.sendFile(path.join(clientBuildPath, 'index.html'));
+  app.get('/api/health', (_req, res) => {
+    res.json({ status: 'ok' });
   });
-} else {
-  // In development, proxy all other requests to Vite dev server
-  // This allows running both on a single port (the backend port)
-  try {
-    const { createProxyMiddleware } = require('http-proxy-middleware');
-    app.use(
-      '/',
-      createProxyMiddleware({
-        target: 'http://localhost:5173',
-        changeOrigin: true,
-        ws: true,
-        logLevel: 'error',
-      })
-    );
-  } catch (_err) {
-    console.warn('http-proxy-middleware not found, dev proxy disabled');
-  }
-}
 
-app.listen(PORT, () => {
-  console.log(`Server is running on port ${PORT}`);
-});
+  if (process.env.NODE_ENV === 'production') {
+    const clientBuildPath = path.join(__dirname, '../../src/client/dist');
+    app.use(express.static(clientBuildPath));
+
+    app.get(/.*/, (_req, res) => {
+      res.sendFile(path.join(clientBuildPath, 'index.html'));
+    });
+  } else if (process.env.NODE_ENV !== 'test') {
+    try {
+      const { createProxyMiddleware } = require('http-proxy-middleware');
+      app.use(
+        '/',
+        createProxyMiddleware({
+          target: 'http://localhost:5173',
+          changeOrigin: true,
+          ws: true,
+        })
+      );
+    } catch (_err) {
+      console.warn('http-proxy-middleware not found, dev proxy disabled');
+    }
+  }
+
+  return app;
+};
+
+export const startServer = async (): Promise<Server> => {
+  const app = createApp();
+  const port = getPort();
+
+  void connectToDatabase().catch((err) => {
+    console.error('MongoDB connection error:', err);
+  });
+
+  return app.listen(port, () => {
+    console.log(`Server is running on port ${port}`);
+  });
+};

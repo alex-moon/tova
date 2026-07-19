@@ -23,5 +23,6 @@ In short: it is aiming to be an application-layer “Heroku for Groq” with a b
 
 - Prefer `docs/plan.md` for goals, scope, architecture, and intended next steps.
 - Prefer `docs/progress.md` for completed work, current status, and historical delivery notes.
+- Move completed packet files into `docs/done/` and keep references current when their status changes.
 - When updating project coordination docs, keep the shared version in `docs/` current first.
 

@@ -2,12 +2,37 @@
   "name": "tova",
   "version": "1.0.0",
   "description": "Groq-focused chat application workspace",
+  "main": "dist/index.js",
   "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev:server": "tsx watch src/index.ts",
     "install:client": "npm --prefix src/client install",
-    "build:client": "npm --prefix src/client run build"
+    "build:client": "npm --prefix src/client run build",
+    "start": "node dist/index.js",
+    "test": "jest --runInBand"
   },
-  "dependencies": {},
+  "dependencies": {
+    "bcryptjs": "^3.0.3",
+    "cookie-parser": "^1.4.7",
+    "dotenv": "^17.2.1",
+    "express": "^5.1.0",
+    "groq-sdk": "^0.30.0",
+    "http-proxy-middleware": "^3.0.5",
+    "jsonwebtoken": "^9.0.2",
+    "mongoose": "^8.18.0"
+  },
   "devDependencies": {
+    "@types/cookie-parser": "^1.4.9",
+    "@types/express": "^5.0.3",
+    "@types/jest": "^30.0.0",
+    "@types/jsonwebtoken": "^9.0.10",
+    "@types/node": "^24.1.0",
+    "@types/supertest": "^6.0.3",
+    "jest": "^30.0.5",
+    "mongodb-memory-server": "^10.2.0",
+    "supertest": "^7.1.4",
+    "ts-jest": "^29.4.1",
+    "tsx": "^4.20.3",
     "typescript": "^5.5.3"
   },
   "private": true
