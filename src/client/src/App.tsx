@@ -60,24 +60,80 @@ function App() {
 
   const handleSendMessage = async (content: string) => {
     setIsChatLoading(true);
+    // Show the user message immediately
+    setMessages((prev) => [...prev, { _id: Date.now().toString(), role: 'user', content }]);
+    const streamId = `stream-${Date.now()}`;
+    setMessages((prev) => [...prev, { _id: streamId, role: 'assistant', content: '' }]);
     try {
-      const res = await axios.post('/api/chat', {
-        sessionId: activeSessionId,
-        content,
+      const res = await fetch('/api/chat/stream', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ sessionId: activeSessionId, content }),
       });
 
-      if (!activeSessionId) {
-        setActiveSessionId(res.data.sessionId);
-        fetchSessions();
+      if (!res.ok || !res.body) {
+        throw new Error(`Stream request failed: ${res.status}`);
       }
 
-      setMessages((prev) => [
-        ...prev,
-        { _id: Date.now().toString(), role: 'user', content },
-        res.data.message,
-      ]);
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      let currentSessionId = activeSessionId;
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+
+        const parts = buffer.split('\n\n');
+        buffer = parts.pop() || '';
+
+        for (const part of parts) {
+          const lines = part.split('\n');
+          const eventLine = lines.find((l) => l.startsWith('event: '));
+          const dataLine = lines.find((l) => l.startsWith('data: '));
+          if (!eventLine || !dataLine) continue;
+          const event = eventLine.slice(7).trim();
+          let data: Record<string, unknown>;
+          try {
+            data = JSON.parse(dataLine.slice(6));
+          } catch {
+            continue;
+          }
+
+          if (event === 'meta') {
+            const newSessionId = data.sessionId as string;
+            if (newSessionId && newSessionId !== currentSessionId) {
+              currentSessionId = newSessionId;
+              setActiveSessionId(newSessionId);
+              fetchSessions();
+            }
+          } else if (event === 'delta') {
+            const delta = (data.content as string) || '';
+            setMessages((prev) =>
+              prev.map((m) => (m._id === streamId ? { ...m, content: m.content + delta } : m)),
+            );
+          } else if (event === 'done' && data.complete) {
+            const saved = data.message as Message | undefined;
+            setMessages((prev) =>
+              prev.map((m) =>
+                m._id === streamId && saved
+                  ? {
+                      ...m,
+                      _id: saved._id || m._id,
+                      content: saved.content,
+                      modelName: saved.modelName,
+                    }
+                  : m,
+              ),
+            );
+          }
+        }
+      }
     } catch (err) {
       console.error('Chat error:', err);
+      setMessages((prev) => prev.filter((m) => m._id !== streamId || m.content !== ''));
     } finally {
       setIsChatLoading(false);
     }

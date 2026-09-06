@@ -35,7 +35,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ messages, onSendMessage, isLoad
           padding: '0 1rem',
         }}
       >
-        <h3>HFG - Heroku for Groq</h3>
+        <h3>Tova - Heroku for Groq</h3>
       </header>
       <div
         style={{
@@ -51,17 +51,19 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ messages, onSendMessage, isLoad
             <h1>How can I help you today?</h1>
           </div>
         )}
-        {messages.map((msg) => (
-          <div key={msg._id} className={`chat-bubble chat-bubble-${msg.role}`}>
-            {msg.content}
-            {msg.modelName && (
-              <div style={{ fontSize: '0.7rem', opacity: 0.5, marginTop: '0.25rem' }}>
-                Model: {msg.modelName}
-              </div>
-            )}
-          </div>
-        ))}
-        {isLoading && (
+        {messages.map((msg) =>
+          msg.role === 'assistant' && msg.content.length === 0 ? null : (
+            <div key={msg._id} className={`chat-bubble chat-bubble-${msg.role}`}>
+              {msg.content}
+              {msg.modelName && (
+                <div style={{ fontSize: '0.7rem', opacity: 0.5, marginTop: '0.25rem' }}>
+                  Model: {msg.modelName}
+                </div>
+              )}
+            </div>
+          ),
+        )}
+        {isLoading && messages.some((m) => m.role === 'assistant' && m.content === '') && (
           <div className="chat-bubble chat-bubble-assistant" style={{ opacity: 0.7 }}>
             Thinking...
           </div>

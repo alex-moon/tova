@@ -3,14 +3,15 @@ import axios from 'axios';
 
 interface User {
   id: string;
-  username: string;
+  email: string;
+  role: string;
 }
 
 interface AuthContextType {
   user: User | null;
   loading: boolean;
-  login: (username: string, password: string) => Promise<void>;
-  register: (username: string, password: string) => Promise<void>;
+  login: (email: string, password: string) => Promise<void>;
+  register: (email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
 }
 
@@ -34,13 +35,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     checkAuth();
   }, []);
 
-  const login = async (username: string, password: string) => {
-    const res = await axios.post('/api/auth/login', { username, password });
+  const login = async (email: string, password: string) => {
+    const res = await axios.post('/api/auth/login', { email, password });
     setUser(res.data.user);
   };
 
-  const register = async (username: string, password: string) => {
-    const res = await axios.post('/api/auth/register', { username, password });
+  const register = async (email: string, password: string) => {
+    const res = await axios.post('/api/auth/register', { email, password });
     setUser(res.data.user);
   };
 

@@ -5,7 +5,7 @@
 }
 
 body {
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
   font-size: var(--font-size-base);
   line-height: var(--line-height-base);
   color: var(--color-text);
@@ -14,7 +14,12 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
-h1, h2, h3, h4, h5, h6 {
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
   margin-bottom: var(--space-md);
   line-height: 1.2;
 }
@@ -23,7 +28,8 @@ p {
   margin-bottom: var(--space-md);
 }
 
-ul, ol {
+ul,
+ol {
   margin-bottom: var(--space-md);
   margin-left: var(--space-lg);
 }
@@ -37,7 +43,9 @@ a:hover {
   text-decoration: underline;
 }
 
-button, input, textarea {
+button,
+input,
+textarea {
   font-family: inherit;
   font-size: inherit;
 }

@@ -4,6 +4,7 @@ import mongoose from 'mongoose';
 import cookieParser from 'cookie-parser';
 import path from 'path';
 import dotenv from 'dotenv';
+import { createProxyMiddleware } from 'http-proxy-middleware';
 import authRoutes from './routes/auth';
 import chatRoutes from './routes/chat';
 
@@ -17,7 +18,9 @@ const getPort = () => {
   return Number.isInteger(parsedPort) && parsedPort >= 0 ? parsedPort : DEFAULT_PORT;
 };
 
-export const connectToDatabase = async (mongoUri = process.env.MONGODB_URI || DEFAULT_MONGODB_URI) => {
+export const connectToDatabase = async (
+  mongoUri = process.env.MONGODB_URI || DEFAULT_MONGODB_URI,
+) => {
   await mongoose.connect(mongoUri);
   console.log('Connected to MongoDB');
 };
@@ -43,19 +46,14 @@ export const createApp = (): Express => {
       res.sendFile(path.join(clientBuildPath, 'index.html'));
     });
   } else if (process.env.NODE_ENV !== 'test') {
-    try {
-      const { createProxyMiddleware } = require('http-proxy-middleware');
-      app.use(
-        '/',
-        createProxyMiddleware({
-          target: 'http://localhost:5173',
-          changeOrigin: true,
-          ws: true,
-        })
-      );
-    } catch (_err) {
-      console.warn('http-proxy-middleware not found, dev proxy disabled');
-    }
+    app.use(
+      '/',
+      createProxyMiddleware({
+        target: 'http://localhost:5173',
+        changeOrigin: true,
+        ws: true,
+      }),
+    );
   }
 
   return app;

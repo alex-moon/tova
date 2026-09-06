@@ -5,11 +5,32 @@
   "main": "dist/index.js",
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "dev:server": "tsx watch src/index.ts",
+    "clean": "rm -rf src/client/dist node_modules src/client/node_modules",
+    "install:all": "npm install && npm run install:client",
     "install:client": "npm --prefix src/client install",
+    "postinstall": "npm --prefix src/client install",
     "build:client": "npm --prefix src/client run build",
-    "start": "node dist/index.js",
-    "test": "jest --runInBand"
+    "dev:server": "tsx watch src/index.ts",
+    "dev:client": "npm --prefix src/client run dev",
+    "dev": "concurrently -k -n server,client \"npm run dev:server\" \"npm run dev:client\"",
+    "stack": "docker compose -f docker-compose.local.yml up -d",
+    "stack:down": "docker compose -f docker-compose.local.yml down",
+    "db:migrate": "tsx migrations/index.ts up",
+    "db:migrate:down": "tsx migrations/index.ts down --last",
+    "migrate": "npm run db:migrate",
+    "test": "jest --runInBand",
+    "lint": "eslint src migrations --ext .ts,.tsx",
+    "lint:fix": "npm run lint -- --fix",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "lint:server": "npm run lint",
+    "format:server": "npm run format",
+    "test:server": "npm test",
+    "lint:client": "npm --prefix src/client run lint",
+    "format:client": "npm --prefix src/client run format",
+    "test:client": "npm --prefix src/client run test",
+    "ci": "npm run lint:server && npm run format:check && npm run typecheck && npm run test:server && npm --prefix src/client run lint && npm --prefix src/client run format:check && npm --prefix src/client run test && npm --prefix src/client run build"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",
@@ -19,6 +40,7 @@
     "groq-sdk": "^0.30.0",
     "http-proxy-middleware": "^3.0.5",
     "jsonwebtoken": "^9.0.2",
+    "mongo-migrate-ts": "^2.0.0",
     "mongoose": "^8.18.0"
   },
   "devDependencies": {
@@ -28,12 +50,22 @@
     "@types/jsonwebtoken": "^9.0.10",
     "@types/node": "^24.1.0",
     "@types/supertest": "^6.0.3",
+    "@typescript-eslint/eslint-plugin": "^8.69.0",
+    "@typescript-eslint/parser": "^8.69.0",
+    "concurrently": "^10.0.5",
+    "eslint": "^9.39.5",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-prettier": "^5.5.6",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "globals": "^17.12.0",
     "jest": "^30.0.5",
     "mongodb-memory-server": "^10.2.0",
+    "prettier": "^3.9.6",
     "supertest": "^7.1.4",
     "ts-jest": "^29.4.1",
     "tsx": "^4.20.3",
-    "typescript": "^5.5.3"
+    "typescript": "^5.5.3",
+    "typescript-eslint": "^8.69.0"
   },
   "private": true
 }

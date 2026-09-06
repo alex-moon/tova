@@ -3,7 +3,7 @@ import axios from 'axios';
 import { useAuth } from '../hooks/useAuth';
 
 const Login: React.FC = () => {
-  const [username, setUsername] = useState('');
+  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [isRegistering, setIsRegistering] = useState(false);
   const [error, setError] = useState('');
@@ -14,9 +14,9 @@ const Login: React.FC = () => {
     setError('');
     try {
       if (isRegistering) {
-        await register(username, password);
+        await register(email, password);
       } else {
-        await login(username, password);
+        await login(email, password);
       }
     } catch (err: unknown) {
       if (axios.isAxiosError(err)) {
@@ -30,7 +30,7 @@ const Login: React.FC = () => {
   return (
     <main>
       <div style={{ margin: 'auto', width: '300px' }} className="card">
-        <h2>{isRegistering ? 'Create Account' : 'Login to HFG'}</h2>
+        <h2>{isRegistering ? 'Create Account' : 'Login to Tova'}</h2>
         {error && (
           <div style={{ color: 'var(--color-error)', marginBottom: '1rem', fontSize: '0.9rem' }}>
             {error}
@@ -38,22 +38,30 @@ const Login: React.FC = () => {
         )}
         <form onSubmit={handleSubmit}>
           <div style={{ marginBottom: '1rem' }}>
-            <label style={{ display: 'block', marginBottom: '0.25rem', fontSize: '0.9rem' }}>
-              Username
+            <label
+              htmlFor="email"
+              style={{ display: 'block', marginBottom: '0.25rem', fontSize: '0.9rem' }}
+            >
+              Email
             </label>
             <input
-              type="text"
+              id="email"
               className="input-field"
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              type="email"
               required
             />
           </div>
           <div style={{ marginBottom: '1rem' }}>
-            <label style={{ display: 'block', marginBottom: '0.25rem', fontSize: '0.9rem' }}>
+            <label
+              htmlFor="password"
+              style={{ display: 'block', marginBottom: '0.25rem', fontSize: '0.9rem' }}
+            >
               Password
             </label>
             <input
+              id="password"
               type="password"
               className="input-field"
               value={password}
