@@ -1,5 +1,8 @@
 import React, { useState } from 'react';
 import axios from 'axios';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { useAuth } from '../hooks/useAuth';
 
 const Login: React.FC = () => {
@@ -28,64 +31,54 @@ const Login: React.FC = () => {
   };
 
   return (
-    <main>
-      <div style={{ margin: 'auto', width: '300px' }} className="card">
-        <h2>{isRegistering ? 'Create Account' : 'Login to Tova'}</h2>
-        {error && (
-          <div style={{ color: 'var(--color-error)', marginBottom: '1rem', fontSize: '0.9rem' }}>
-            {error}
-          </div>
-        )}
-        <form onSubmit={handleSubmit}>
-          <div style={{ marginBottom: '1rem' }}>
-            <label
-              htmlFor="email"
-              style={{ display: 'block', marginBottom: '0.25rem', fontSize: '0.9rem' }}
+    <main className="flex h-screen w-screen overflow-hidden">
+      <Card className="mx-auto my-auto w-80">
+        <CardHeader>
+          <CardTitle>{isRegistering ? 'Create Account' : 'Login to Tova'}</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {error && <div className="mb-4 text-sm text-destructive">{error}</div>}
+          <form onSubmit={handleSubmit}>
+            <div className="mb-4">
+              <label htmlFor="email" className="mb-1 block text-sm text-muted-foreground">
+                Email
+              </label>
+              <Input
+                id="email"
+                className="mb-1"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                type="email"
+                required
+              />
+            </div>
+            <div className="mb-4">
+              <label htmlFor="password" className="mb-1 block text-sm text-muted-foreground">
+                Password
+              </label>
+              <Input
+                id="password"
+                type="password"
+                className="mb-1"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                required
+              />
+            </div>
+            <Button type="submit" className="mb-4 w-full">
+              {isRegistering ? 'Register' : 'Login'}
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              className="w-full text-xs"
+              onClick={() => setIsRegistering(!isRegistering)}
             >
-              Email
-            </label>
-            <input
-              id="email"
-              className="input-field"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              type="email"
-              required
-            />
-          </div>
-          <div style={{ marginBottom: '1rem' }}>
-            <label
-              htmlFor="password"
-              style={{ display: 'block', marginBottom: '0.25rem', fontSize: '0.9rem' }}
-            >
-              Password
-            </label>
-            <input
-              id="password"
-              type="password"
-              className="input-field"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              required
-            />
-          </div>
-          <button
-            type="submit"
-            className="btn btn-primary"
-            style={{ width: '100%', marginBottom: '1rem' }}
-          >
-            {isRegistering ? 'Register' : 'Login'}
-          </button>
-          <button
-            type="button"
-            className="btn btn-ghost"
-            style={{ width: '100%', fontSize: '0.8rem' }}
-            onClick={() => setIsRegistering(!isRegistering)}
-          >
-            {isRegistering ? 'Already have an account? Login' : "Don't have an account? Register"}
-          </button>
-        </form>
-      </div>
+              {isRegistering ? 'Already have an account? Login' : "Don't have an account? Register"}
+            </Button>
+          </form>
+        </CardContent>
+      </Card>
     </main>
   );
 };

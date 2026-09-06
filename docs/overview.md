@@ -1,7 +1,3 @@
----
-sessionId: session-260530-130246-velj
----
-
 # Tova Overview
 
 ## Product Intent

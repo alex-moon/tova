@@ -6,20 +6,33 @@ const getGroqClient = () => {
   });
 };
 
-const SMALL_MODEL = 'llama3-8b-8192';
-const LARGE_MODEL = 'llama3-70b-8192';
+export interface RouterConfig {
+  smallModel: string;
+  largeModel: string;
+  guardModel: string;
+}
 
 export interface RoutingResult {
   model: string;
   reason: string;
 }
 
-export const routeQuery = async (query: string): Promise<RoutingResult> => {
+const DEFAULT_CONFIG: RouterConfig = {
+  smallModel: process.env.ROUTER_SMALL_MODEL || 'openai/gpt-oss-20b',
+  largeModel: process.env.ROUTER_LARGE_MODEL || 'openai/gpt-oss-120b',
+  guardModel: process.env.ROUTER_GUARD_MODEL || 'allam-2-7b',
+};
+
+export const routeQuery = async (
+  query: string,
+  config: RouterConfig = DEFAULT_CONFIG,
+): Promise<RoutingResult> => {
+  const { smallModel, largeModel, guardModel } = config;
   // Tier 1: Deterministic Rules
 
   // Rule 1: Short queries (greetings, simple confirmations)
   if (query.length < 20 && /^(hello|hi|hey|yes|no|ok|thanks|thank you)/i.test(query)) {
-    return { model: SMALL_MODEL, reason: 'deterministic-short' };
+    return { model: smallModel, reason: 'deterministic-short' };
   }
 
   // Rule 2: Code blocks or explicit coding requests
@@ -29,23 +42,18 @@ export const routeQuery = async (query: string): Promise<RoutingResult> => {
     query.toLowerCase().includes('script') ||
     /```/.test(query)
   ) {
-    return { model: LARGE_MODEL, reason: 'deterministic-code' };
+    return { model: largeModel, reason: 'deterministic-code' };
   }
 
-  // Tier 2: Classifier (Llama-3-8B)
+  // Tier 2: Guard model classification
   try {
     const groq = getGroqClient();
     const response = await groq.chat.completions.create({
-      model: SMALL_MODEL,
+      model: guardModel,
       messages: [
         {
-          role: 'system',
-          content:
-            'Classify the following user query into "simple" or "complex". Return only one word.',
-        },
-        {
           role: 'user',
-          content: query,
+          content: `Classify the following user query into "simple" or "complex". Reply with only one word.\n\nQuery: ${query}`,
         },
       ],
       temperature: 0,
@@ -55,13 +63,13 @@ export const routeQuery = async (query: string): Promise<RoutingResult> => {
     const classification = response.choices[0]?.message?.content?.trim().toLowerCase();
 
     if (classification === 'complex') {
-      return { model: LARGE_MODEL, reason: 'classifier-complex' };
+      return { model: largeModel, reason: 'classifier-complex' };
     }
   } catch (err) {
     console.error('Classifier error:', err);
     // Fallback to large model on error for safety
-    return { model: LARGE_MODEL, reason: 'classifier-error' };
+    return { model: largeModel, reason: 'classifier-error' };
   }
 
-  return { model: SMALL_MODEL, reason: 'classifier-simple' };
+  return { model: smallModel, reason: 'classifier-simple' };
 };

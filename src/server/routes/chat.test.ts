@@ -14,6 +14,18 @@ jest.mock('groq-sdk', () => {
   }));
 });
 
+const mockRouteQuery = jest.fn();
+
+jest.mock('../services/routerService', () => ({
+  routeQuery: (...args: unknown[]) => mockRouteQuery(...args),
+}));
+
+jest.mock('../services/titleService', () => ({
+  generateChatTitle: jest.fn().mockResolvedValue('Hello'),
+}));
+
+const MOCK_ROUTING = { model: 'mock-small-model', reason: 'deterministic-short' };
+
 const registerUser = async (app: ReturnType<typeof createApp>, email: string) => {
   const response = await request(app)
     .post('/api/auth/register')
@@ -26,6 +38,7 @@ describe('Chat route routing metadata', () => {
     mockCreate.mockReset().mockResolvedValueOnce({
       choices: [{ message: { content: 'e2e-ok' } }],
     });
+    mockRouteQuery.mockReset().mockResolvedValue(MOCK_ROUTING);
   });
 
   it('exposes the routing decision (model, reason) in the response', async () => {
@@ -38,13 +51,10 @@ describe('Chat route routing metadata', () => {
       .send({ content: 'Hello' });
 
     expect(response.status).toBe(200);
-    expect(response.body.routing).toEqual({
-      model: 'llama3-8b-8192',
-      reason: 'deterministic-short',
-    });
-    expect(response.body.message.modelName).toBe('llama3-8b-8192');
+    expect(response.body.routing).toEqual(MOCK_ROUTING);
+    expect(response.body.message.modelName).toBe('mock-small-model');
 
-    const saved = await Message.exists({ role: 'assistant', modelName: 'llama3-8b-8192' });
+    const saved = await Message.exists({ role: 'assistant', modelName: 'mock-small-model' });
     expect(saved).toBeTruthy();
   });
 });

@@ -11,6 +11,10 @@ const sessionSchema = new mongoose.Schema(
       type: String,
       default: 'New Chat',
     },
+    deletedAt: {
+      type: Date,
+      default: null,
+    },
   },
   {
     timestamps: true,

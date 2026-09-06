@@ -1,14 +1,12 @@
+import 'dotenv/config';
 import express, { type Express } from 'express';
 import { type Server } from 'http';
 import mongoose from 'mongoose';
 import cookieParser from 'cookie-parser';
 import path from 'path';
-import dotenv from 'dotenv';
 import { createProxyMiddleware } from 'http-proxy-middleware';
 import authRoutes from './routes/auth';
 import chatRoutes from './routes/chat';
-
-dotenv.config();
 
 const DEFAULT_PORT = 5000;
 const DEFAULT_MONGODB_URI = 'mongodb://localhost:27017/tova';

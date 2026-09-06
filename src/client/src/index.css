@@ -1,3 +1,156 @@
-@import './styles/variables.css';
-@import './styles/base.css';
-@import './styles/components.css';
+@import 'tailwindcss';
+@import '@fontsource-variable/raleway';
+@import '@fontsource-variable/roboto';
+@import '@fontsource-variable/jetbrains-mono';
+
+@theme {
+  --font-sans: 'Roboto Variable', ui-sans-serif, system-ui, sans-serif;
+  --font-heading: 'Raleway Variable', 'Raleway', ui-sans-serif, system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono Variable', ui-monospace, monospace;
+
+  --color-background: var(--color-bg);
+  --color-foreground: var(--color-text);
+  --color-card: var(--color-bg);
+  --color-primary: #007bff;
+  --color-primary-hover: #0056b3;
+  --color-ring: #007bff;
+  --color-border: #e0e0e0;
+  --color-accent: var(--color-border);
+  --color-card-foreground: var(--color-text);
+  --color-muted-foreground: #737373;
+  --color-destructive: #dc3545;
+  --color-error: #dc3545;
+  --color-success: #28a745;
+  --color-msg-user: #f0f4ff;
+  --color-msg-assistant: #ffffff;
+
+  --radius-default: 8px;
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
+  --shadow-md: 0 4px 6px rgba(0, 0, 0, 0.1);
+  --header-height: 60px;
+  --sidebar-width: 260px;
+}
+
+:root {
+  --color-bg: #ffffff;
+  --color-text: #171717;
+  --color-sidebar: #f5f5f5;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-bg: #1e1e1e;
+    --color-text: #e0e0e0;
+    --color-border: #333333;
+    --color-sidebar: #121212;
+    --color-msg-user: #2d2d2d;
+    --color-msg-assistant: #1e1e1e;
+    --color-muted-foreground: #a3a3a3;
+  }
+}
+
+body {
+  font-family: 'Roboto Variable', 'Roboto', ui-sans-serif, system-ui, sans-serif;
+  font-size: 16px;
+  color: var(--color-text);
+  background-color: var(--color-bg);
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  font-family: 'Raleway Variable', 'Raleway', ui-sans-serif, system-ui, sans-serif;
+}
+
+.markdown-body {
+  line-height: 1.6;
+}
+
+.markdown-body h1 {
+  font-size: 1.5rem;
+  font-weight: 600;
+}
+
+.markdown-body h2 {
+  font-size: 1.25rem;
+  font-weight: 600;
+}
+
+.markdown-body h3 {
+  font-size: 1.125rem;
+  font-weight: 600;
+}
+
+.markdown-body h1,
+.markdown-body h2,
+.markdown-body h3,
+.markdown-body h4,
+.markdown-body h5,
+.markdown-body h6 {
+  font-family: 'Roboto Variable', 'Roboto', ui-sans-serif, system-ui, sans-serif;
+}
+
+.markdown-body h1,
+.markdown-body h2,
+.markdown-body h3 {
+  margin: 1.25rem 0 0.625rem;
+}
+
+.markdown-body > :first-child,
+.markdown-body h1:first-child,
+.markdown-body h2:first-child,
+.markdown-body h3:first-child {
+  margin-top: 0;
+}
+
+.markdown-body > :last-child {
+  margin-bottom: 0;
+}
+
+.markdown-body pre {
+  background-color: var(--color-bg);
+  font-family: 'JetBrains Mono Variable', ui-monospace, monospace;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  padding: 0.5rem;
+  overflow-x: auto;
+}
+
+.markdown-body code {
+  font-family: 'JetBrains Mono Variable', ui-monospace, monospace;
+  font-size: 0.9em;
+  background-color: var(--color-bg);
+  padding: 0.1em 0.3em;
+  border-radius: 3px;
+}
+
+.markdown-body pre code {
+  padding: 0;
+  background: none;
+}
+
+.markdown-body p,
+.markdown-body ul,
+.markdown-body ol,
+.markdown-body blockquote,
+.markdown-body table {
+  margin: 0 0 0.875rem;
+}
+
+.markdown-body ul,
+.markdown-body ol {
+  padding-left: 1.5rem;
+  list-style: revert;
+}
+
+.markdown-body li {
+  margin-bottom: 0.375rem;
+}
+
+.markdown-body ul:last-child,
+.markdown-body ol:last-child {
+  margin-bottom: 0;
+}

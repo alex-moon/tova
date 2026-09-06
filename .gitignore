@@ -12,3 +12,7 @@ yarn-error.log*
 /.env
 /.idea
 /dist
+# Playwright CLI output (may contain credentials)
+.playwright-cli/
+.opencode/
+.playwright/

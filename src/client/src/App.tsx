@@ -1,15 +1,16 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useRef, useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 import { useAuth } from './hooks/useAuth';
 import Sidebar from './components/Sidebar';
 import ChatWindow from './components/ChatWindow';
 import Login from './components/Login';
 
-interface Message {
+export interface Message {
   _id: string;
   role: 'user' | 'assistant';
   content: string;
   modelName?: string;
+  isError?: boolean;
 }
 
 interface Session {
@@ -23,6 +24,7 @@ function App() {
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [isChatLoading, setIsChatLoading] = useState(false);
+  const streamingRef = useRef(false);
 
   const fetchSessions = useCallback(async () => {
     try {
@@ -34,9 +36,12 @@ function App() {
   }, []);
 
   const fetchMessages = useCallback(async (sessionId: string) => {
+    if (streamingRef.current) return;
     try {
       const res = await axios.get(`/api/chat/sessions/${sessionId}`);
-      setMessages(res.data.messages);
+      if (!streamingRef.current) {
+        setMessages(res.data.messages);
+      }
     } catch (err) {
       console.error('Error fetching messages:', err);
     }
@@ -60,6 +65,7 @@ function App() {
 
   const handleSendMessage = async (content: string) => {
     setIsChatLoading(true);
+    streamingRef.current = true;
     // Show the user message immediately
     setMessages((prev) => [...prev, { _id: Date.now().toString(), role: 'user', content }]);
     const streamId = `stream-${Date.now()}`;
@@ -114,6 +120,18 @@ function App() {
             setMessages((prev) =>
               prev.map((m) => (m._id === streamId ? { ...m, content: m.content + delta } : m)),
             );
+          } else if (event === 'error') {
+            setMessages((prev) =>
+              prev.map((m) =>
+                m._id === streamId
+                  ? {
+                      ...m,
+                      content: 'Something went wrong on our end. Please try again.',
+                      isError: true,
+                    }
+                  : m,
+              ),
+            );
           } else if (event === 'done' && data.complete) {
             const saved = data.message as Message | undefined;
             setMessages((prev) =>
@@ -133,8 +151,15 @@ function App() {
       }
     } catch (err) {
       console.error('Chat error:', err);
-      setMessages((prev) => prev.filter((m) => m._id !== streamId || m.content !== ''));
+      setMessages((prev) =>
+        prev.map((m) =>
+          m._id === streamId && m.content === ''
+            ? { ...m, content: 'Something went wrong on our end. Please try again.', isError: true }
+            : m,
+        ),
+      );
     } finally {
+      streamingRef.current = false;
       setIsChatLoading(false);
     }
   };
@@ -142,6 +167,28 @@ function App() {
   const handleNewChat = () => {
     setActiveSessionId(null);
     setMessages([]);
+  };
+
+  const handleDeleteSession = async (sessionId: string) => {
+    try {
+      await axios.delete(`/api/chat/sessions/${sessionId}`);
+      setSessions((prev) => prev.filter((s) => s._id !== sessionId));
+      if (activeSessionId === sessionId) {
+        setActiveSessionId(null);
+        setMessages([]);
+      }
+    } catch (err) {
+      console.error('Error deleting session:', err);
+      setMessages((prev) => [
+        ...prev,
+        {
+          _id: `system-${Date.now()}`,
+          role: 'assistant',
+          content: 'Something went wrong deleting this chat. Please try again.',
+          isError: true,
+        },
+      ]);
+    }
   };
 
   if (loading) {
@@ -164,12 +211,13 @@ function App() {
   }
 
   return (
-    <main>
+    <main className="flex h-screen w-full overflow-hidden">
       <Sidebar
         sessions={sessions}
         activeSessionId={activeSessionId}
         onSelectSession={setActiveSessionId}
         onNewChat={handleNewChat}
+        onDeleteSession={handleDeleteSession}
       />
       <ChatWindow messages={messages} onSendMessage={handleSendMessage} isLoading={isChatLoading} />
     </main>

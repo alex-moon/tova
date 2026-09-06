@@ -3,9 +3,22 @@ import { authenticate, AuthRequest } from '../middleware/auth';
 import { Session } from '../models/Session';
 import { Message } from '../models/Message';
 import { routeQuery } from '../services/routerService';
+import { generateChatTitle } from '../services/titleService';
 import Groq from 'groq-sdk';
 
 const router = express.Router();
+
+const createSessionWithUser = async (userId: string, content: string) => {
+  const title = await generateChatTitle(content);
+  return Session.create({ userId, title });
+};
+
+const SYSTEM_PROMPT =
+  'You are Tova, a helpful chat assistant. Keep answers focused and reasonably concise: ' +
+  'prefer a few short paragraphs or a compact list over long exhaustive explanations, ' +
+  'but never at the cost of leaving the question unanswered. ' +
+  'Do not pad answers with introductions, summaries, or filler.';
+
 const groq = new Groq({
   apiKey: process.env.GROQ_API_KEY || 'dummy_key',
 });
@@ -22,13 +35,12 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
 
     let session;
     if (sessionId) {
-      session = await Session.findOne({ _id: sessionId, userId });
+      session = await Session.findOne({ _id: sessionId, userId, deletedAt: null });
       if (!session) {
         return res.status(404).json({ message: 'Session not found' });
       }
     } else {
-      session = new Session({ userId, title: content.substring(0, 30) });
-      await session.save();
+      session = await createSessionWithUser(userId as string, content);
     }
 
     // Save user message
@@ -46,12 +58,14 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
     const history = await Message.find({ sessionId: session._id })
       .sort({ timestamp: -1 })
       .limit(10);
-    const messages = history.reverse().map((m) => ({
-      role: m.role as 'user' | 'assistant',
-      content: m.content,
-    }));
+    const messages: { role: 'system' | 'user' | 'assistant'; content: string }[] = history
+      .reverse()
+      .map((m) => ({
+        role: m.role as 'user' | 'assistant',
+        content: m.content,
+      }));
+    messages.unshift({ role: 'system', content: SYSTEM_PROMPT });
 
-    // Call Groq
     const chatCompletion = await groq.chat.completions.create({
       messages,
       model: routingResult.model,
@@ -91,13 +105,12 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
 
     let session;
     if (sessionId) {
-      session = await Session.findOne({ _id: sessionId, userId });
+      session = await Session.findOne({ _id: sessionId, userId, deletedAt: null });
       if (!session) {
         return res.status(404).json({ message: 'Session not found' });
       }
     } else {
-      session = new Session({ userId, title: content.substring(0, 30) });
-      await session.save();
+      session = await createSessionWithUser(userId as string, content);
     }
 
     // Save user message
@@ -115,10 +128,13 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
     const history = await Message.find({ sessionId: session._id })
       .sort({ timestamp: -1 })
       .limit(10);
-    const messages = history.reverse().map((m) => ({
-      role: m.role as 'user' | 'assistant',
-      content: m.content,
-    }));
+    const messages: { role: 'system' | 'user' | 'assistant'; content: string }[] = history
+      .reverse()
+      .map((m) => ({
+        role: m.role as 'user' | 'assistant',
+        content: m.content,
+      }));
+    messages.unshift({ role: 'system', content: SYSTEM_PROMPT });
 
     // Set SSE headers
     res.setHeader('Content-Type', 'text/event-stream');
@@ -184,11 +200,27 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
   }
 });
 
+// Soft-delete a session
+router.delete('/sessions/:id', authenticate, async (req: AuthRequest, res) => {
+  try {
+    const updated = await Session.findOneAndUpdate(
+      { _id: req.params.id, userId: req.user?.id, deletedAt: null },
+      { deletedAt: new Date() },
+    );
+    if (!updated) {
+      return res.status(404).json({ message: 'Session not found' });
+    }
+    res.json({ success: true });
+  } catch (_err) {
+    res.status(500).json({ message: 'Error deleting session' });
+  }
+});
+
 // Get all sessions for user
 router.get('/sessions', authenticate, async (req: AuthRequest, res) => {
   try {
     const userId = req.user?.id;
-    const sessions = await Session.find({ userId }).sort({ updatedAt: -1 });
+    const sessions = await Session.find({ userId, deletedAt: null }).sort({ updatedAt: -1 });
     res.json(sessions);
   } catch (_err) {
     res.status(500).json({ message: 'Error fetching sessions' });
@@ -199,7 +231,7 @@ router.get('/sessions', authenticate, async (req: AuthRequest, res) => {
 router.get('/sessions/:id', authenticate, async (req: AuthRequest, res) => {
   try {
     const userId = req.user?.id;
-    const session = await Session.findOne({ _id: req.params.id, userId });
+    const session = await Session.findOne({ _id: req.params.id, userId, deletedAt: null });
     if (!session) {
       return res.status(404).json({ message: 'Session not found' });
     }

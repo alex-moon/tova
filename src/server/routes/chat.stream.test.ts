@@ -15,6 +15,18 @@ jest.mock('groq-sdk', () => {
   }));
 });
 
+const mockRouteQuery = jest.fn();
+
+jest.mock('../services/routerService', () => ({
+  routeQuery: (...args: unknown[]) => mockRouteQuery(...args),
+}));
+
+jest.mock('../services/titleService', () => ({
+  generateChatTitle: jest.fn().mockResolvedValue('Hello'),
+}));
+
+const MOCK_ROUTING = { model: 'mock-small-model', reason: 'deterministic-short' };
+
 const mockStream = async (chunks: string[]) => {
   mockCreate.mockResolvedValueOnce({
     [Symbol.asyncIterator]: async function* () {
@@ -35,6 +47,10 @@ const registerUser = async (email: string): Promise<string[]> => {
 };
 
 describe('Chat streaming route', () => {
+  beforeEach(() => {
+    mockRouteQuery.mockReset().mockResolvedValue(MOCK_ROUTING);
+  });
+
   it('rejects unauthenticated requests', async () => {
     const app = createApp();
     const response = await request(app).post('/api/chat/stream').send({ content: 'hello' });
@@ -78,7 +94,7 @@ describe('Chat streaming route', () => {
     const meta = events.find((e) => e.event === 'meta');
     expect(meta?.data).toMatchObject({
       sessionId: expect.any(String),
-      routing: { model: 'llama3-8b-8192', reason: 'deterministic-short' },
+      routing: MOCK_ROUTING,
     });
 
     const deltas = events.filter((e) => e.event === 'delta');
@@ -94,7 +110,7 @@ describe('Chat streaming route', () => {
     expect(persisted[1]).toMatchObject({
       role: 'assistant',
       content: 'Hello! Done.',
-      modelName: 'llama3-8b-8192',
+      modelName: 'mock-small-model',
     });
     const session = await Session.findById(sessionId);
     expect(session).not.toBeNull();
