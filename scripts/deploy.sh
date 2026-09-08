@@ -1,13 +1,9 @@
 #!/usr/bin/env bash
-# Deploy tova to ajmoon.com (see issue #8).
-# Pattern from the ported Makefile.bak: keeps the app under /opt/tova on the
-# server, resets it to origin/main, installs, builds, and redeploys the
-# docker stack from docker-compose.live.yml.
 set -euo pipefail
 
 APP_NAME=tova
 
-ssh -t ajmoon "
+ssh -t root@142.93.42.191 "
   if [[ ! -d '/opt/${APP_NAME}' ]]; then
     mkdir -p /opt/${APP_NAME};
     cd /opt/${APP_NAME};
