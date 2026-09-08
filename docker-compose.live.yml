@@ -10,35 +10,27 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    command: npm run dev
+    command: npm start
     ports:
-      - '5000:5000'
+      - '15000:5000'
     environment:
       - MONGODB_URI=mongodb://mongodb:27017/tova
       - PORT=5000
-      - NODE_ENV=development
-      - JWT_SECRET=${JWT_SECRET}
-      - GROQ_API_KEY=${GROQ_API_KEY}
+      - NODE_ENV=production
+    env_file:
+      - .env
     depends_on:
       - mongodb
-    volumes:
-      - .:/app
-      - /app/node_modules
-      - /app/src/client/node_modules
 
   frontend:
     build:
       context: ./src/client
       dockerfile: Dockerfile
     ports:
-      - '5173:5173'
-    environment:
-      - VITE_API_URL=http://backend:5000
-    volumes:
-      - ./src/client:/app
-      - /app/node_modules
+      - '15173:4173'
     depends_on:
       - backend
 
 volumes:
   mongodb_data:
+
