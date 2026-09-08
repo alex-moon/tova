@@ -18,8 +18,10 @@ ssh -t ajmoon "
   npm install;
   npm run build;
   npm run build:client;
-  npm run db:migrate;
   docker compose -f docker-compose.live.yml build;
   docker compose -f docker-compose.live.yml up -d --remove-orphans;
+  npm run db:migrate;
+  # The backend reads the DB state on boot; give it the migrated DB.
+  docker compose -f docker-compose.live.yml restart backend;
   docker system prune -f
 "
