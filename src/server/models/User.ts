@@ -19,6 +19,14 @@ const userSchema = new mongoose.Schema(
       enum: ['user', 'admin'],
       default: 'user',
     },
+    googleId: {
+      type: String,
+      default: null,
+    },
+    permissions: {
+      type: [String],
+      default: [],
+    },
   },
   {
     timestamps: true,
@@ -46,6 +54,8 @@ export interface UserDocument extends mongoose.Document {
   email: string;
   passwordHash: string;
   role: 'user' | 'admin';
+  googleId: string | null;
+  permissions: string[];
   comparePassword: (password: string) => Promise<boolean>;
 }
 

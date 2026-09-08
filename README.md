@@ -31,6 +31,9 @@ Backing services (MongoDB) run in Docker Compose; the backend and frontend run d
    MONGODB_URI=mongodb://localhost:27017/tova
    JWT_SECRET=your_secret_key
    GROQ_API_KEY=your_groq_api_key
+   GOOGLE_CLIENT_ID=your_google_client_id
+   GOOGLE_CLIENT_SECRET=your_google_client_secret
+   GOOGLE_CALLBACK_URL=http://localhost:5173/api/auth/google/callback
    NODE_ENV=development
    ```
 3. **Start the stack** (MongoDB in Docker)
@@ -54,7 +57,11 @@ Backing services (MongoDB) run in Docker Compose; the backend and frontend run d
    - Log in with the admin email from step 4. Password: `ADMIN_PASSWORD` from `.env` (default `admin`).
    - Send a chat message. You get a reply from a Groq model.
 
-Admin password comes from `ADMIN_PASSWORD` in `.env` (defaults to `admin` — change it before seeding a shared environment). The seeded user (`formsatz@gmail.com`) has `role: admin`.
+Admin password comes from `ADMIN_PASSWORD` in `.env` (defaults to `admin` — change it before seeding a shared environment). The seeded user (`formsatz@gmail.com`) has `role: admin` and the `routing` permission.
+
+### Google sign-in
+
+"Continue with Google" uses `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, and `GOOGLE_CALLBACK_URL` from `.env`. Register a Google OAuth client (Web application) with authorized redirect URI `http://localhost:5173/api/auth/google/callback` for dev and `https://<prod-host>/api/auth/google/callback` for prod. If the email already exists, the Google identity is linked to that user; otherwise a new user is created. New users do not have the `routing` permission, so they cannot use the model router until it is granted.
 
 ### Individual commands
 

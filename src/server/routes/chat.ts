@@ -4,9 +4,12 @@ import { Session } from '../models/Session';
 import { Message } from '../models/Message';
 import { routeQuery } from '../services/routerService';
 import { generateChatTitle } from '../services/titleService';
+import { hasPermission, ROUTING_PERMISSION } from '../services/userService';
 import Groq from 'groq-sdk';
 
 const router = express.Router();
+
+const NO_ROUTING_PERMISSION = "You don't have permission to use the model router.";
 
 const createSessionWithUser = async (userId: string, content: string) => {
   const title = await generateChatTitle(content);
@@ -31,6 +34,10 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
 
     if (!content) {
       return res.status(400).json({ message: 'Content is required' });
+    }
+
+    if (!(await hasPermission(userId as string, ROUTING_PERMISSION))) {
+      return res.status(403).json({ message: NO_ROUTING_PERMISSION });
     }
 
     let session;
@@ -101,6 +108,10 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
 
     if (!content) {
       return res.status(400).json({ message: 'Content is required' });
+    }
+
+    if (!(await hasPermission(userId as string, ROUTING_PERMISSION))) {
+      return res.status(403).json({ message: NO_ROUTING_PERMISSION });
     }
 
     let session;

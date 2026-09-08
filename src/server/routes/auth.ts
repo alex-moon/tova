@@ -1,9 +1,40 @@
 import express from 'express';
+import crypto from 'crypto';
 import jwt from 'jsonwebtoken';
-import { User } from '../models/User';
+import { User, UserDocument } from '../models/User';
+import { resolveOrCreateUser } from '../services/userService';
 
 const router = express.Router();
 const JWT_SECRET = process.env.JWT_SECRET || 'fallback_secret';
+
+const GOOGLE_AUTH_URL = 'https://accounts.google.com/o/oauth2/v2/auth';
+const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token';
+
+const getGoogleConfig = () => {
+  if (
+    !process.env.GOOGLE_CLIENT_ID ||
+    !process.env.GOOGLE_CLIENT_SECRET ||
+    !process.env.GOOGLE_CALLBACK_URL
+  ) {
+    return null;
+  }
+  return {
+    clientId: process.env.GOOGLE_CLIENT_ID,
+    clientSecret: process.env.GOOGLE_CLIENT_SECRET,
+    callbackUrl: process.env.GOOGLE_CALLBACK_URL,
+  };
+};
+
+const issueSessionCookie = (user: UserDocument, res: express.Response) => {
+  const token = jwt.sign({ id: user._id, email: user.email, role: user.role }, JWT_SECRET, {
+    expiresIn: '7d',
+  });
+  res.cookie('token', token, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+  });
+};
 
 router.post('/register', async (req, res) => {
   try {
@@ -21,15 +52,7 @@ router.post('/register', async (req, res) => {
     const user = new User({ email, passwordHash: password });
     await user.save();
 
-    const token = jwt.sign({ id: user._id, email: user.email, role: user.role }, JWT_SECRET, {
-      expiresIn: '7d',
-    });
-
-    res.cookie('token', token, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
-    });
+    issueSessionCookie(user, res);
 
     res.status(201).json({ user: { id: user._id, email: user.email, role: user.role } });
   } catch (_err) {
@@ -46,19 +69,100 @@ router.post('/login', async (req, res) => {
       return res.status(401).json({ message: 'Invalid credentials' });
     }
 
-    const token = jwt.sign({ id: user._id, email: user.email, role: user.role }, JWT_SECRET, {
-      expiresIn: '7d',
-    });
-
-    res.cookie('token', token, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      maxAge: 7 * 24 * 60 * 60 * 1000,
-    });
+    issueSessionCookie(user, res);
 
     res.json({ user: { id: user._id, email: user.email, role: user.role } });
   } catch (_err) {
     res.status(500).json({ message: 'Error logging in' });
+  }
+});
+
+router.get('/google', (req, res) => {
+  const config = getGoogleConfig();
+  if (!config) {
+    return res.status(503).json({ message: 'Google sign-in is not configured' });
+  }
+
+  const url = new URL(GOOGLE_AUTH_URL);
+  url.searchParams.set('client_id', config.clientId);
+  url.searchParams.set('redirect_uri', config.callbackUrl);
+  url.searchParams.set('response_type', 'code');
+  url.searchParams.set('scope', 'openid email profile');
+  url.searchParams.set('prompt', 'select_account');
+  const state = crypto.randomBytes(16).toString('hex');
+  url.searchParams.set('state', state);
+  res.cookie('google_state', state, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    maxAge: 10 * 60 * 1000, // 10 minutes
+  });
+  res.redirect(url.toString());
+});
+
+router.get('/google/callback', async (req, res) => {
+  const config = getGoogleConfig();
+  if (!config) {
+    return res.status(503).send('Google sign-in is not configured');
+  }
+
+  const code = req.query.code;
+  const expectedState = req.cookies.google_state;
+  res.clearCookie('google_state');
+  const state = req.query.state;
+  if (typeof code !== 'string' || !code) {
+    return res.status(400).send('Missing authorization code');
+  }
+
+  try {
+    if (
+      !expectedState ||
+      typeof state !== 'string' ||
+      state.length !== expectedState.length ||
+      !crypto.timingSafeEqual(Buffer.from(state), Buffer.from(expectedState))
+    ) {
+      return res.status(400).send('Invalid state');
+    }
+
+    const tokenRes = await fetch(GOOGLE_TOKEN_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        code,
+        client_id: config.clientId,
+        client_secret: config.clientSecret,
+        redirect_uri: config.callbackUrl,
+        grant_type: 'authorization_code',
+      }),
+    });
+
+    if (!tokenRes.ok) {
+      throw new Error(`Token exchange failed with status ${tokenRes.status}`);
+    }
+
+    const body = (await tokenRes.json()) as { id_token?: string };
+    if (!body.id_token) {
+      throw new Error('Missing id_token in token response');
+    }
+
+    const payload = JSON.parse(
+      Buffer.from(body.id_token.split('.')[1], 'base64url').toString('utf8'),
+    ) as {
+      sub: string;
+      email?: string;
+      email_verified?: boolean;
+    };
+
+    if (!payload.email || payload.email_verified === false) {
+      return res.status(401).send('Google account email could not be verified');
+    }
+
+    const email = payload.email.toLowerCase();
+    const user = await resolveOrCreateUser(email, payload.sub);
+    issueSessionCookie(user, res);
+    res.redirect('/');
+  } catch (err) {
+    console.error('Google OAuth error:', err);
+    res.status(502).send('Error completing Google sign-in');
   }
 });
 

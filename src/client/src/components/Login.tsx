@@ -76,6 +76,11 @@ const Login: React.FC = () => {
             >
               {isRegistering ? 'Already have an account? Login' : "Don't have an account? Register"}
             </Button>
+            <a href="/api/auth/google" className="block w-full">
+              <Button type="button" variant="outline" className="w-full">
+                Continue with Google
+              </Button>
+            </a>
           </form>
         </CardContent>
       </Card>

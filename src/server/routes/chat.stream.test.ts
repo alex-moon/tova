@@ -2,6 +2,7 @@ import request from 'supertest';
 import { createApp } from '../index';
 import { Message } from '../models/Message';
 import { Session } from '../models/Session';
+import { User } from '../models/User';
 
 const mockCreate = jest.fn();
 
@@ -42,6 +43,7 @@ const registerUser = async (email: string): Promise<string[]> => {
   const response = await request(app)
     .post('/api/auth/register')
     .send({ email, password: 'password123' });
+  await User.updateOne({ email }, { permissions: ['routing'] });
   const cookies = response.headers['set-cookie'];
   return Array.isArray(cookies) ? cookies : [cookies];
 };
