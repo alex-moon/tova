@@ -27,6 +27,25 @@ install + build, docker-based deploy.
 - [x] npm script `deploy` + `scripts/deploy.sh` added
 - [x] `.github/workflows/ci.yml` added
 - [x] Verified locally where possible (deploy is ssh-gated; CI verified by push)
+- [x] Production compose: backend runs `npm start` (node on compiled tsc output, serves
+      compiled React from `src/client/dist` under NODE_ENV=production, port 5000 → host 15000);
+      frontend serves the compiled React build via `vite preview` (port 4173 → host 15173); no
+      dev bind mounts. Dev-mode leftovers tracked as issue #9 (closed by this).
+- [x] Secrets via server-side `/opt/tova/.env` loaded with `env_file` (no secrets in repo);
+      `.env.example` documents required vars.
+- [x] nginx entry added for `tova.ajmoon.com` (in `/opt/ajmoon/nginx/ajmoon.conf`, deployed
+      to `/etc/nginx/nginx.conf`): ports follow the +10000 scheme — backend 5000 → 15000,
+      frontend 5173 → 15173 (no collisions with existing 10000/10001/18002/10083-10086).
+      `/api` → 15000 (unbuffered for streaming), `/` → 15173.
+
+## Notes
+
+- The Express backend in NODE_ENV=production serves the compiled React build itself
+  (`src/server/index.ts`), so `/` could also point straight at 15000; the separate
+  `vite preview` frontend container is kept for parity with the +10000/expose-both pattern.
+- Decision: deploy to ajmoon.com done as part of this issue after PR merge.
+
+## Verification
 
 ## Follow-ups
 
