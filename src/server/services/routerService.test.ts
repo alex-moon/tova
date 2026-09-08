@@ -22,6 +22,10 @@ jest.mock('groq-sdk', () => {
 
 type Routing = Awaited<ReturnType<typeof routeQuery>>;
 
+// The error-path tests intentionally break the mocked classifier; keep that
+// expected fallback error out of the test output.
+const consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+
 const classifyAs = (content: string, error = false) => {
   mockCreate.mockReset();
   if (error) {
@@ -104,6 +108,10 @@ describe('Router Service', () => {
       classifyAs('', true);
       const result = await routeQueryWithCfg('Should I buy this car or that car?');
       expect(result).toEqual({ model: 'test-large-model', reason: 'classifier-error' });
+      expect(consoleErrorSpy).toHaveBeenCalledWith(
+        'Classifier error:',
+        expect.objectContaining({ message: 'classifier down' }),
+      );
     });
 
     it('should fall back to the smaller model on an unrecognized classification', async () => {
