@@ -21,3 +21,20 @@ jobs:
       - run: npm ci
 
       - run: npm run ci
+
+  # `workflow_run` can report `conclusion: success` for a cancelled run
+  # (known Actions quirk), which would trigger deploy. This gate always
+  # runs and fails unless `ci` itself succeeded — including when it was
+  # cancelled — so a cancelled run never looks successful.
+  ci-gate:
+    needs: ci
+    if: always()
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Fail unless ci succeeded
+        run: |
+          if [[ "${{ needs.ci.result }}" != "success" ]]; then
+            echo "ci result: ${{ needs.ci.result }}"
+            exit 1
+          fi
