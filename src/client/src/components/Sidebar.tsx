@@ -36,7 +36,7 @@ const Sidebar: React.FC<SidebarProps> = ({
       <nav
         className={cn(
           'fixed inset-y-0 left-0 z-40 flex h-full w-(--sidebar-width) shrink-0 flex-col border-r border-border bg-sidebar transition-transform md:static md:translate-x-0',
-          open ? 'translate-x-0' : '-translate-x-full',
+          open ? 'translate-x-0' : '-translate-x-full invisible md:visible',
         )}
       >
         <div className="flex h-(--header-height) shrink-0 items-center justify-between border-b border-border px-4">

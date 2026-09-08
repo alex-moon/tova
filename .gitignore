@@ -16,3 +16,7 @@ yarn-error.log*
 .playwright-cli/
 .opencode/
 .playwright/
+
+# Playwright test output
+/test-results/
+/playwright-report/

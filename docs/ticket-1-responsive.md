@@ -43,8 +43,32 @@ Tracking doc so work can be picked up by another agent at any point. Source of t
 - [x] Drawer: hamburger opens overlay + backdrop; closes via X, session select, and New Chat
 - [x] New chat + streaming: sent message streams reply with model attribution
 - [x] Session switch via drawer loads history, drawer closes
+- [x] Human eyeball check by project owner (window resize down to mobile)
 - Verified against `npm run ci` (all green) and dev stack (client :5173, api :5000)
+
+## Automated e2e
+
+- `npm run test:e2e` (Playwright, `e2e/playwright.config.ts`, two projects: mobile 375x667 + desktop).
+- Requires the dev stack + client running (`npm run stack:up`, `npm run db:migrate`, `npm run dev`).
+- Login happens via `POST /api/auth/login` (cookie) — `E2E_EMAIL` / `E2E_PASSWORD` env override the seeded admin defaults.
+- **No LLM calls:** `/api/chat/stream` is mocked per-test with canned `meta`/`delta`/`done` SSE in `e2e/app.spec.ts`.
+- Suite is 8 tests (4 per project), all passing.
+
+## Known open question (candidate for a follow-up ticket)
+
+Under the mocked SSE stream, the assistant's model-attribution line (`Model: {{modelName}}`, rendered in `ChatWindow.tsx`) never appeared, while the `delta` content did. The `done` handler (`App.tsx` ~line 136) looks correct and the same line renders fine in production runs against the real server, so this is most likely a mock/SSE-shape artifact rather than an app bug — but it was not conclusively root-caused. Possible angles when revisiting:
+
+- how `route.fulfill` (Playwright) emits the single-string SSE body vs. the real server's chunked writes;
+- whether the `done` event reached the parser at all (log `buffer` in `App.tsx`);
+- React state timing of the `setMessages` merge on `done`.
+
+A failing-assert repro is one assertion away (`e2e/app.spec.ts` used to assert `text=/Model: e2e-mock\/model/`).
+
+## Known non-issues ruled out during verification
+
+- Session loss after "reload": worked correctly on every clean repro; earlier observation was a test-harness artifact (fresh in-memory browser contexts).
+- Sidebar transparent background: `--color-sidebar` token was not in the Tailwind v4 `@theme` block, so `bg-sidebar` generated no color. Fixed in `index.css` this ticket.
 
 ## If interrupted
 
-Next agent: verify `npm run ci`, then commit/push/PR if not done. Handover notes above cover what changed and why.
+Next agent: nothing outstanding — this ticket is done. `npm run ci` and `npm run test:e2e` must both be green before merge of PR #6. The only open thread is the "Known open question" above (candidate for a follow-up ticket, not blocking).

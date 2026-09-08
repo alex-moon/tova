@@ -38,8 +38,15 @@ userSchema.pre('save', async function () {
 });
 
 // Method to check password
-userSchema.methods.comparePassword = async function (password: string) {
+userSchema.methods.comparePassword = async function (this: UserDocument, password: string) {
   return bcrypt.compare(password, this.passwordHash);
 };
 
-export const User = mongoose.model('User', userSchema);
+export interface UserDocument extends mongoose.Document {
+  email: string;
+  passwordHash: string;
+  role: 'user' | 'admin';
+  comparePassword: (password: string) => Promise<boolean>;
+}
+
+export const User = mongoose.model<UserDocument>('User', userSchema);
