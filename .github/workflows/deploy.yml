@@ -24,23 +24,17 @@ jobs:
 
       - run: npm ci
 
-      - name: Set up SSH
-        run: |
-          mkdir -p ~/.ssh
-          ssh-keyscan -H ajmoon.com >> ~/.ssh/known_hosts
-
       - name: Set up SSH key
         uses: webfactory/ssh-agent@v0.9.1
         with:
           ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
 
-      # The ssh `ajmoon` alias (host 142.93.42.191, user root) is configured on
-      # the fly so the existing scripts/deploy.sh works unchanged on the runner.
+      - name: Set up SSH
+        run: |
+          mkdir -p ~/.ssh
+          ssh-keyscan -H 142.93.42.191 >> ~/.ssh/known_host
+          chmod 600 ~/.ssh/known_hosts
+
       - name: Deploy to ajmoon.com
         run: |
-          cat >> ~/.ssh/config <<EOF
-          Host ajmoon
-              HostName 142.93.42.191
-              User root
-          EOF
           npm run deploy
