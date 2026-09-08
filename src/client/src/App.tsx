@@ -203,7 +203,7 @@ function App() {
           justifyContent: 'center',
         }}
       >
-        Loading...
+        <span className="animate-pulse text-muted-foreground">Loading...</span>
       </div>
     );
   }
