@@ -1,6 +1,7 @@
 import React from 'react';
 import { LogOut, Plus, Trash2, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import ThemeToggle from './ThemeToggle';
 import { cn } from '@/lib/utils';
 import { useAuth } from '../hooks/useAuth';
 
@@ -63,8 +64,8 @@ const Sidebar: React.FC<SidebarProps> = ({
             <div key={session._id} className="mb-1 flex items-center">
               <button
                 className={cn(
-                  'min-w-0 flex-1 truncate rounded-lg px-4 py-2 text-left text-sm hover:bg-accent',
-                  activeSessionId === session._id && 'bg-accent',
+                  'min-w-0 flex-1 cursor-pointer truncate rounded-lg px-4 py-2 text-left text-sm transition-colors hover:bg-accent focus-visible:outline-2 focus-visible:outline-primary',
+                  activeSessionId === session._id && 'bg-accent font-medium text-accent-foreground',
                 )}
                 onClick={() => onSelectSession(session._id)}
               >
@@ -83,11 +84,12 @@ const Sidebar: React.FC<SidebarProps> = ({
             </div>
           ))}
         </div>
-        <div className="border-t border-border p-4 pb-[calc(1rem+env(safe-area-inset-bottom))]">
-          <Button variant="ghost" className="w-full" onClick={logout}>
+        <div className="flex items-center border-t border-border p-4 pb-[calc(1rem+env(safe-area-inset-bottom))]">
+          <Button variant="ghost" className="flex-1" onClick={logout}>
             <LogOut />
             Logout
           </Button>
+          <ThemeToggle />
         </div>
       </nav>
     </>
