@@ -32,7 +32,7 @@ jobs:
       - name: Set up SSH
         run: |
           mkdir -p ~/.ssh
-          ssh-keyscan -H 142.93.42.191 >> ~/.ssh/known_host
+          ssh-keyscan -H 142.93.42.191 >> ~/.ssh/known_hosts
           chmod 600 ~/.ssh/known_hosts
 
       - name: Deploy to ajmoon.com
