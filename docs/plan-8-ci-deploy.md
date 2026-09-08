@@ -24,7 +24,9 @@ install + build, docker-based deploy.
 
 ## Done
 
-- [x] npm script `deploy` + `scripts/deploy.sh` added
+- [x] npm script `deploy` + `scripts/deploy.sh` added. Migrations run on deploy **after**
+      `docker compose up` (the stack must be up first; Mongo is on localhost:27017 with published
+      port) and the backend is restarted afterwards, since it reads DB state at boot.
 - [x] `.github/workflows/ci.yml` added
 - [x] Verified locally where possible (deploy is ssh-gated; CI verified by push)
 - [x] Production compose: backend runs `npm start` (node on compiled tsc output, serves
