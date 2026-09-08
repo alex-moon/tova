@@ -1,0 +1,13 @@
+node_modules
+src/client/node_modules
+src/client/dist
+dist
+.git
+.github
+docs
+e2e
+*.md
+docker-compose*.yml
+.env*
+!.env.example
+Dockerfile*
