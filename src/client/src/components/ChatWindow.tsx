@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { Send } from 'lucide-react';
+import { Menu, Send } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import type { Message } from '../App';
 
@@ -9,6 +9,7 @@ interface ChatWindowProps {
   messages: Message[];
   onSendMessage: (content: string) => void;
   isLoading: boolean;
+  onOpenSidebar: () => void;
 }
 
 const PLACEHOLDERS = [
@@ -40,7 +41,12 @@ const MessageContent: React.FC<{ content: string; markdown: boolean }> = ({
   );
 };
 
-const ChatWindow: React.FC<ChatWindowProps> = ({ messages, onSendMessage, isLoading }) => {
+const ChatWindow: React.FC<ChatWindowProps> = ({
+  messages,
+  onSendMessage,
+  isLoading,
+  onOpenSidebar,
+}) => {
   const [input, setInput] = useState('');
   const [placeholder] = useState(pickPlaceholder);
   const textareaRef = React.useRef<HTMLTextAreaElement>(null);
@@ -61,11 +67,19 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ messages, onSendMessage, isLoad
   };
 
   return (
-    <section className="flex flex-1 flex-col overflow-hidden">
-      <div className="flex flex-1 flex-col overflow-y-auto px-6 py-6">
+    <section className="flex min-w-0 flex-1 flex-col overflow-hidden">
+      <header className="flex h-(--header-height) shrink-0 items-center gap-2 border-b border-border px-3 md:hidden">
+        <Button variant="ghost" size="icon" aria-label="Open menu" onClick={onOpenSidebar}>
+          <Menu />
+        </Button>
+        <h1 className="font-heading text-lg font-semibold">Tova</h1>
+      </header>
+      <div className="flex flex-1 flex-col overflow-y-auto px-3 py-4 md:px-6 md:py-6">
         {messages.length === 0 && !isLoading && (
-          <div className="mx-auto my-auto text-center">
-            <h1 className="text-3xl font-bold text-muted-foreground">How can I help you today?</h1>
+          <div className="mx-auto my-auto max-w-full text-center">
+            <h1 className="text-2xl font-bold text-muted-foreground md:text-3xl">
+              How can I help you today?
+            </h1>
           </div>
         )}
         {messages
@@ -75,10 +89,10 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ messages, onSendMessage, isLoad
               key={msg._id}
               className={
                 msg.isError
-                  ? 'mb-6 max-w-[85%] self-start rounded-lg rounded-bl-sm border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive'
+                  ? 'mb-4 max-w-[92%] self-start rounded-lg rounded-bl-sm border border-destructive/40 bg-destructive/10 px-3 py-2.5 text-sm text-destructive md:mb-6 md:max-w-[85%] md:px-4 md:py-3'
                   : msg.role === 'user'
-                    ? 'mb-6 max-w-[85%] self-end rounded-lg rounded-br-sm bg-msg-user px-5 py-4'
-                    : 'mb-8 w-full self-stretch'
+                    ? 'mb-4 max-w-[92%] self-end rounded-lg rounded-br-sm bg-msg-user px-4 py-3 md:mb-6 md:max-w-[85%] md:px-5 md:py-4'
+                    : 'mb-6 w-full self-stretch md:mb-8'
               }
             >
               {msg.isError ? (
@@ -92,20 +106,17 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ messages, onSendMessage, isLoad
             </div>
           ))}
         {isLoading && messages.some((m) => m.role === 'assistant' && m.content === '') && (
-          <div className="mb-6 max-w-[85%] self-start rounded-lg rounded-bl-sm border border-border bg-msg-assistant px-5 py-4 opacity-70">
+          <div className="mb-4 max-w-[92%] self-start rounded-lg rounded-bl-sm border border-border bg-msg-assistant px-4 py-3 text-sm opacity-70 md:mb-6 md:max-w-[85%] md:px-5 md:py-4">
             Thinking...
           </div>
         )}
       </div>
-      <footer className="pointer-events-none relative h-28 shrink-0">
-        <form
-          className="pointer-events-auto absolute bottom-0 left-0 right-0 p-4"
-          onSubmit={handleSubmit}
-        >
+      <footer className="pointer-events-auto shrink-0 border-t border-border bg-background p-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] md:px-6">
+        <form onSubmit={handleSubmit}>
           <div className="relative rounded-lg border border-border bg-msg-assistant px-3 py-2 shadow-sm">
             <textarea
               ref={textareaRef}
-              className="block max-h-[40vh] w-full resize-none overflow-y-auto bg-transparent pr-24 text-base outline-none placeholder:text-muted-foreground"
+              className="block max-h-[40dvh] w-full resize-none overflow-y-auto bg-transparent pr-20 text-base outline-none placeholder:text-muted-foreground"
               rows={2}
               placeholder={placeholder}
               value={input}

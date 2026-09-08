@@ -31,8 +31,8 @@ const Login: React.FC = () => {
   };
 
   return (
-    <main className="flex h-screen w-screen overflow-hidden">
-      <Card className="mx-auto my-auto w-80">
+    <main className="flex h-dvh w-full overflow-hidden">
+      <Card className="mx-auto my-auto w-[min(20rem,calc(100vw-2rem))]">
         <CardHeader>
           <CardTitle>{isRegistering ? 'Create Account' : 'Login to Tova'}</CardTitle>
         </CardHeader>
