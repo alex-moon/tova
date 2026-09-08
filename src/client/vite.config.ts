@@ -25,6 +25,11 @@ export default defineConfig(({ mode }) => {
         },
       },
     },
+    preview: {
+      // The live stack serves the built app through `vite preview`
+      // (see src/client/Dockerfile); allow the production host.
+      allowedHosts: ['tova.ajmoon.com'],
+    },
     test: {
       environment: 'jsdom',
       globals: false,
