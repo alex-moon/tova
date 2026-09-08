@@ -24,6 +24,7 @@ function App() {
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [isChatLoading, setIsChatLoading] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const streamingRef = useRef(false);
 
   const fetchSessions = useCallback(async () => {
@@ -167,6 +168,7 @@ function App() {
   const handleNewChat = () => {
     setActiveSessionId(null);
     setMessages([]);
+    setSidebarOpen(false);
   };
 
   const handleDeleteSession = async (sessionId: string) => {
@@ -195,8 +197,8 @@ function App() {
     return (
       <div
         style={{
+          height: '100dvh',
           display: 'flex',
-          height: '100vh',
           alignItems: 'center',
           justifyContent: 'center',
         }}
@@ -211,15 +213,25 @@ function App() {
   }
 
   return (
-    <main className="flex h-screen w-full overflow-hidden">
+    <main className="flex h-dvh w-full overflow-hidden">
       <Sidebar
         sessions={sessions}
         activeSessionId={activeSessionId}
-        onSelectSession={setActiveSessionId}
+        open={sidebarOpen}
+        onSelectSession={(id) => {
+          setActiveSessionId(id);
+          setSidebarOpen(false);
+        }}
         onNewChat={handleNewChat}
         onDeleteSession={handleDeleteSession}
+        onClose={() => setSidebarOpen(false)}
       />
-      <ChatWindow messages={messages} onSendMessage={handleSendMessage} isLoading={isChatLoading} />
+      <ChatWindow
+        messages={messages}
+        onSendMessage={handleSendMessage}
+        isLoading={isChatLoading}
+        onOpenSidebar={() => setSidebarOpen(true)}
+      />
     </main>
   );
 }
