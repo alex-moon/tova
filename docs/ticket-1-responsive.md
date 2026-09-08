@@ -27,7 +27,7 @@ Tracking doc so work can be picked up by another agent at any point. Source of t
 - [x] `100dvh` + composer flow rework + safe-area padding
 - [x] Breakpoint scaling of empty state / message padding
 - [x] `npm --prefix src/client run lint`, client tests + build pass
-- [x] Committed & pushed; PR opened
+- [x] Committed & pushed; PR opened: https://github.com/alex-moon/tova/pull/6
 
 ## Implementation notes (for handover)
 
