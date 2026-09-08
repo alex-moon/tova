@@ -15,6 +15,7 @@
     "dev": "concurrently -k -n server,client \"npm run dev:server\" \"npm run dev:client\"",
     "stack:up": "docker compose -f docker-compose.local.yml up -d",
     "stack:down": "docker compose -f docker-compose.local.yml down",
+    "deploy": "bash scripts/deploy.sh",
     "db:migrate": "tsx migrations/index.ts up",
     "db:migrate:down": "tsx migrations/index.ts down --last",
     "test": "jest --runInBand",

@@ -13,5 +13,6 @@ This document previously defined a packet-based backlog workflow (packets named 
 - `docs/overview.md`: product intent (stable).
 - `docs/progress.md`: closed packet history and current status (static log).
 - `docs/plan.md`: this reconciled closure note.
+- `docs/workflow.md`: the standard process for all new work (ticket → branch → plan → implement → verify → PR → archive).
 
-Do not add new packet files. If recurring local coordination is needed later, re-instate the packet process deliberately rather than by drift.
+Do not recreate the old packet backlog. New work follows `docs/workflow.md`: the "plan" filenames are similar, but each new plan doc is tied to a GitHub issue (see that file), not a local backlog.

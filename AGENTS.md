@@ -25,6 +25,29 @@ In short: it is aiming to be an application-layer “Heroku for Groq” with a b
 - Prefer `docs/progress.md` for historical delivery notes; it is a static log, not a live tracker.
 - The repo is not a git-hygiene surface: only commit when explicitly asked.
 
+### Standard workflow for any work larger than a tweak
+
+Follow `docs/workflow.md` as the specification. In short, every piece of work larger than a tweak goes through these steps in order:
+
+1. **Ticket** — create a GitHub issue in `alex-moon/tova`; if a matching one already exists, use it instead of duplicating.
+2. **Branch** — create a branch named `<feat or fix>/tv/<ticket number>-<one or two word summary>` (e.g. `feat/tv/123-deploy-script`).
+3. **Plan** — document the plan in `docs/` following the specification in `docs/workflow.md`.
+4. **Implement** — complete the work, keeping the plan doc updated as decisions and scope change.
+5. **Verify** — run lint, format, test, and (where possible) e2e; fix any issues. See "Code quality commands" below.
+6. **Ship** — push the branch and open a PR with a short summary.
+7. **Archive** — move the plan doc to `docs/done/`.
+
+Tweaks (trivial one-line fixes, typos, config nudges) may skip steps 1–3 but still require verification and a PR.
+
+### Local MongoDB
+
+A local MongoDB is available at `mongodb://localhost:27017/tova` at any time. If it is not running, start the stack with `npm run stack:up`.
+
+There is no `mongosh` binary in this environment (yet). To query or mutate the local database, write a small script with `scripts/mongo.ts` (helper built on `mongodb` driver, async by default):
+
+- `npx tsx scripts/mongo.ts <js-expression>` — evaluates a snippet with `db` bound to the `tova` database, prints the result. Examples: `npx tsx scripts/mongo.ts "await db.listCollections().toArray()"`, `npx tsx scripts/mongo.ts "await db.collection('sessions').countDocuments()"`.
+- Prefer small, explicit snippets; this is a debugging tool, not an ORM.
+
 ### Code quality commands
 
 Run these before finishing any code change:
