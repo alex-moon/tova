@@ -16,8 +16,9 @@ In short: it is aiming to be an application-layer “Heroku for Groq” with a b
 ### Documentation structure
 
 - `docs/overview.md`: a high-level summary of the overall intent
-- `docs/progress.md`: the delivery log and current status snapshot (packet system is closed; no outstanding local tasks)
-- `docs/plan.md`: a closure note for the retired packet backlog
+- `docs/workflow.md`: the standard process for new work (see "Standard workflow" below)
+- `docs/plan-<ticket>-<summary>.md`: plan docs for in-flight work; archived to `docs/done/` after merge
+- `docs/progress.md`: static delivery log; history lives here, not a live tracker
 
 ### Working rules for agents
 
