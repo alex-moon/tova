@@ -80,6 +80,16 @@ function App() {
       });
 
       if (!res.ok || !res.body) {
+        if (res.body) {
+          const msg = (await res.json().catch(() => null)) as { message?: string } | null;
+          if (res.status === 403 && msg?.message) {
+            setMessages((prev) =>
+              prev.map((m) =>
+                m._id === streamId ? { ...m, content: msg.message as string, isError: true } : m,
+              ),
+            );
+          }
+        }
         throw new Error(`Stream request failed: ${res.status}`);
       }
 
@@ -127,7 +137,9 @@ function App() {
                 m._id === streamId
                   ? {
                       ...m,
-                      content: 'Something went wrong on our end. Please try again.',
+                      content:
+                        (data.message as string) ||
+                        'Something went wrong on our end. Please try again.',
                       isError: true,
                     }
                   : m,

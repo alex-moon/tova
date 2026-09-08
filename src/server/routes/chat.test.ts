@@ -1,6 +1,7 @@
 import request from 'supertest';
 import { createApp } from '../index';
 import { Message } from '../models/Message';
+import { User } from '../models/User';
 
 const mockCreate = jest.fn();
 
@@ -30,6 +31,7 @@ const registerUser = async (app: ReturnType<typeof createApp>, email: string) =>
   const response = await request(app)
     .post('/api/auth/register')
     .send({ email, password: 'password123' });
+  await User.updateOne({ email }, { permissions: ['routing'] });
   return response.headers['set-cookie'];
 };
 
