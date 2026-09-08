@@ -37,6 +37,14 @@ Tracking doc so work can be picked up by another agent at any point. Source of t
 - `h-screen` → `h-dvh` in App main and Login. Footer is now a normal flex child with `env(safe-area-inset-bottom)` padding.
 - Note: `Login.tsx` card is fixed `w-80` (320px) — fits 375px viewport, left as-is to avoid drifting into issue #2 territory.
 
+## Manual verification (browser, 375x667, 2026-09-08)
+
+- [x] Login → chat renders: hamburger header, empty state, composer at bottom
+- [x] Drawer: hamburger opens overlay + backdrop; closes via X, session select, and New Chat
+- [x] New chat + streaming: sent message streams reply with model attribution
+- [x] Session switch via drawer loads history, drawer closes
+- Verified against `npm run ci` (all green) and dev stack (client :5173, api :5000)
+
 ## If interrupted
 
 Next agent: verify `npm run ci`, then commit/push/PR if not done. Handover notes above cover what changed and why.
