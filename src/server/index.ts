@@ -9,7 +9,6 @@ import authRoutes from './routes/auth';
 import chatRoutes from './routes/chat';
 
 const DEFAULT_PORT = 5000;
-const DEFAULT_MONGODB_URI = 'mongodb://localhost:27017/tova';
 
 const getPort = () => {
   const parsedPort = Number(process.env.PORT);
@@ -17,7 +16,7 @@ const getPort = () => {
 };
 
 export const connectToDatabase = async (
-  mongoUri = process.env.MONGODB_URI || DEFAULT_MONGODB_URI,
+  mongoUri = `mongodb://tova:${process.env.MONGODB_PASSWORD}@${process.env.MONGODB_HOST ?? 'localhost'}/tova?authSource=admin`,
 ) => {
   await mongoose.connect(mongoUri);
   console.log('Connected to MongoDB');
