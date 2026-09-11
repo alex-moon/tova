@@ -89,6 +89,14 @@ immutable`; `/index.html` gets `no-cache` so deploys picked up immediately; ever
   primitives (`Button` from `@/components/ui/button`) and Tailwind token classes consistent
   with Sidebar/ChatWindow styling. This is a code fix, not a config fix.
 
+- **Review pass (same branch)**: steps 1-4 were delivered unreviewed; step 5 had genuinely
+  not been implemented (owner's styles deliverable missing) and is now done in this review:
+  AdminView given a shadcn-consistent layout (loadstate, error panel, bordered table) with
+  all test IDs preserved, Admin/Back links styled with Tailwind tokens, a loading-state
+  test added, and nginx hardened with `X-Forwarded-For`, `X-Forwarded-Proto`, and
+  `proxy_read_timeout 300s` (guards against the default 60s idle timeout killing slow
+  model streams). Full `npm run ci` + docker e2e re-verified after the changes.
+
 ## Implementation steps
 
 - [x] 1. Write `src/client/nginx.conf`:
@@ -117,7 +125,7 @@ proxy_buffering off; }`
 - [x] 4. Remove `preview.allowedHosts` from `src/client/vite.config.ts` and update its
       comment (the live stack no longer serves via preview). Keep `server.proxy` — it is
       for local dev, unrelated.
-- [ ] 5. Style the admin surfaces (issue-comment deliverable):
+- [x] 5. Style the admin surfaces (issue-comment deliverable):
   - `App.tsx:242`: replace bare `<a href="/admin">Admin</a>` with a styled element
     (e.g. `Button` variant/`asChild`-style link or Tailwind classes consistent with the
     app); same for the "Back to chat" link at App.tsx:237.
@@ -141,7 +149,7 @@ Mirrors the implementation steps; each is a single deliverable commit:
 - [x] 2. Dockerfile multi-stage node-build → nginx-serve; npm ci.
 - [x] 3. docker-compose.live.yml consistent with the nginx image (ports unchanged).
 - [x] 4. vite preview config removed from vite.config.ts.
-- [ ] 5. AdminView styled + admin/back links styled, tests updated if needed.
+- [x] 5. AdminView styled + admin/back links styled, tests updated if needed.
 - [x] 6. E2E verification via docker compose curl checks + `npm run ci`.
 
 ## Open questions
@@ -151,13 +159,24 @@ Mirrors the implementation steps; each is a single deliverable commit:
    (`rollupOptions.input`). plan-15 recorded the owner choosing an in-SPA `/admin` route,
    and this plan assumes that (single HTML + hashed assets + `try_files`). If the owner
    wants literal per-path HTML files, step 1's `try_files` and the build config expand —
-   this is the only open question with build-shape impact.
+   this is the only open question with build-shape impact. Already posted on the issue
+   for visibility; blocks nothing.
 2. **Deploy host nginx**: lives outside this repo (`/opt/ajmoon/nginx/ajmoon.conf`) and
    targets 15173; plan keeps 15173 so no change is required there. Risk is only if the
    owner wants a different internal topology — flagged in the PR for visibility, not
    blocking.
-3. **Verification depth for streaming**: confirming incremental delivery of
-   `/api/chat/stream` through nginx needs either a scripted SSE client against the local
-   stack or acceptance of manual observation. A script (curl + timestamps) is planned;
-   if local/streaming specifics get messy, fall back to confirming `proxy_buffering off`
-   is in effect and defer live-stream proof to deploy review.
+3. **Verification depth for streaming**: — resolved. A local nginx replica of this
+   branch's conf (fake chunked upstream emitting every 1.5s) showed chunks arriving
+   incrementally (not batch-flushed at the end), confirming `proxy_buffering off`
+   behaves as intended.
+4. **Local live-compose MongoDB credentials are stale** (found during verification):
+   the backend in `docker-compose.live.yml` logs `MongoServerError: Authentication
+failed.` against the existing `mongodb_data` volume — `.env` `MONGODB_PASSWORD` and
+   the volume's initialized credentials disagree, so `register`/`login` (any DB write)
+   400/500 on the local live stack. This predates and is unrelated to this branch's
+   changes; it did not block cache/proxy/fallback verification, only authenticated
+   in-stack streaming. Posted on the issue for the owner to confirm whether the deploy
+   host is affected.
+5. **Vite build warning**: bundle is >500 kB minified after this change (pre-existing
+   scale, surfaced now that the built output is the deliverable). Not a blocker; noting
+   as possible future follow-up, not an open question for the owner.
