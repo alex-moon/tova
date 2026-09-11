@@ -46,6 +46,16 @@ const modelSettingsFrom = (options: CompletionOptions) => ({
   ...(options.max_tokens !== undefined ? { maxOutputTokens: options.max_tokens } : {}),
 });
 
+/*
+ * Abort/disconnect plumbing: forward a caller-supplied signal to Mastra's
+ * call options (AI-SDK style) instead of sending undefined keys.
+ */
+const callOptionsFrom = (options: CompletionOptions) => ({
+  ...(options.abortSignal ? { abortSignal: options.abortSignal } : {}),
+  maxSteps: 1,
+  modelSettings: modelSettingsFrom(options),
+});
+
 const buildConnector = (provider: LlmProvider): LlmConnector => {
   // Our neutral message shape is structurally Core-compatible; the cast is
   // needed only because the union `role` in the neutral type does not narrow
@@ -63,17 +73,17 @@ const buildConnector = (provider: LlmProvider): LlmConnector => {
 
   return {
     createCompletion: async (options: CompletionOptions): Promise<NeutralCompletion> => {
-      const result = await agentFor(options.model).generate(asMessageList(options.messages), {
-        maxSteps: 1,
-        modelSettings: modelSettingsFrom(options),
-      });
+      const result = await agentFor(options.model).generate(
+        asMessageList(options.messages),
+        callOptionsFrom(options),
+      );
       return { choices: [{ message: { content: result.text ?? null } }] };
     },
     createStreamingCompletion: async (options: CompletionOptions): Promise<NeutralChunkStream> => {
-      const result = await agentFor(options.model).stream(asMessageList(options.messages), {
-        maxSteps: 1,
-        modelSettings: modelSettingsFrom(options),
-      });
+      const result = await agentFor(options.model).stream(
+        asMessageList(options.messages),
+        callOptionsFrom(options),
+      );
       return toNeutralStream(result.fullStream);
     },
   };

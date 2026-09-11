@@ -111,6 +111,7 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
     const chatCompletion = await inferenceService.createCompletion({
       messages,
       model: routingResult.model,
+      provider: routingResult.provider,
     });
 
     const assistantContent = chatCompletion.choices[0]?.message?.content || '';
@@ -196,10 +197,20 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
 
     let assistantContent = '';
 
+    // Abort the provider call when the client disconnects mid-stream. 'close'
+    // also fires after a normal end, so only abort when the response did not
+    // finish cleanly.
+    const abortController = new AbortController();
+    req.on('close', () => {
+      if (!res.writableEnded) abortController.abort();
+    });
+
     try {
       const stream = await inferenceService.createStreamingCompletion({
         messages,
         model: routingResult.model,
+        provider: routingResult.provider,
+        abortSignal: abortController.signal,
       });
 
       for await (const chunk of stream) {

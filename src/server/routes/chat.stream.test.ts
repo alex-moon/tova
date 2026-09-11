@@ -125,6 +125,26 @@ describe('Chat streaming route', () => {
     const session = await Session.findById(sessionId);
     expect(session).not.toBeNull();
   });
+
+  it('passes a client-disconnect abort signal into the provider stream call', async () => {
+    const cookies = await registerUser('stream-abort@example.com');
+    await mockStream(['ok']);
+
+    const app = createApp();
+    const response = await request(app)
+      .post('/api/chat/stream')
+      .set('Cookie', cookies)
+      .send({ content: 'hello there' });
+
+    expect(response.status).toBe(200);
+    const [messages, options] = mockAgentStream.mock.calls[0] as unknown as [
+      unknown,
+      { abortSignal: AbortSignal },
+    ];
+    expect(messages).toBeDefined();
+    expect(options.abortSignal).toBeInstanceOf(AbortSignal);
+    expect(options.abortSignal.aborted).toBe(false);
+  });
 });
 
 const CLASSIFIER_REPLY =

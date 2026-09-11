@@ -53,6 +53,29 @@ describe('Mastra service neutral mapping', () => {
       });
     });
 
+    it('keeps slash-containing model ids intact after the provider prefix', async () => {
+      // Env-default ids legitimately contain slashes (e.g. Groq's public id
+      // `openai/gpt-oss-20b`); Mastra's router parses on the first slash
+      // only, so the rest must pass through unsplit.
+      mockGenerate.mockResolvedValueOnce({ text: 'x' });
+      await groqConnector.createCompletion({ model: 'openai/gpt-oss-20b', messages: [] });
+      const ctorCall = agentCtor.mock.calls[agentCtor.mock.calls.length - 1] as unknown as [
+        { model: string },
+      ];
+      expect((ctorCall?.[0] ?? {}).model).toBe('groq/openai/gpt-oss-20b');
+    });
+
+    it('forwards an abort signal into the call options when supplied', async () => {
+      mockGenerate.mockResolvedValueOnce({ text: 'x' });
+      const controller = new AbortController();
+      await groqConnector.createCompletion({
+        model: 'm',
+        messages: [],
+        abortSignal: controller.signal,
+      });
+      expect(mockGenerate.mock.calls[0][1]).toMatchObject({ abortSignal: controller.signal });
+    });
+
     it('forwards temperature and max_tokens as model settings and caps maxSteps at 1', async () => {
       mockGenerate.mockResolvedValueOnce({ text: 'x' });
       await groqConnector.createCompletion({

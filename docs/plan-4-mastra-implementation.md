@@ -125,23 +125,8 @@ Concrete, individually commit-safe steps:
    the task-5 note below)._
 6. **Reroute the blocking paths through provider-aware config**, split so
    it does _not_ depend on task 7 (which is gated on D):
-   - **6a — provider plumbing, no DB dependency:** extend `RoutingResult`
-     with `provider?: LlmProvider`. `routeQuery` fills it from the env-path
-     config it already resolves — always `'groq'` until task 7 exists
-     (the DB pool cannot reach the router before task 7). `routes/chat.ts`
-     passes `provider: routingResult.provider` into `CompletionOptions`
-     for both the blocking and streaming call sites; remember the
-     `meta` SSE event may also carry it (additive, contract-safe).
-     Key fact for this task (verified 2026-09-11 in
-     `node_modules/@mastra/core/dist/provider-registry-CSsjhpKB.cjs:17519`):
-     Mastra's `parseModelString` splits model router ids on the _first_
-     slash only (`"fireworks/accounts/etc/model"` is a documented example),
-     so multi-slash ids produced by env defaults — `groq` +
-     `openai/gpt-oss-20b`, `deepinfra` + `Qwen/Qwen2.5-72B-Instruct` — are
-     handled by Mastra itself. Provider identity therefore always comes
-     from the DB/config field next to the model, never parsed out of the
-     model string; add a unit test pinning `mastraService`'s router-id
-     construction with a slash-containing model id.
+   - **6a — provider plumbing, no DB dependency:** _shipped (see the
+     task-6a/6c note below)._
    - **6b — real-provider smoke (H-residual),** per the task-5 note:
      with keys present, one call per provider, checking
      (i) mapping still holds, (ii) whether Mastra retries mid-stream
@@ -153,7 +138,8 @@ Concrete, individually commit-safe steps:
    - **6c — cheap hardening from the fourth critic pass:** wire
      `req.on('close')` → `abortSignal` through `CompletionOptions`
      (task 6 already touches both streaming call sites; behaviour gap is
-     pre-existing, not a regression).
+     pre-existing, not a regression). — _shipped (see the task-6a/6c
+     note below)._
    - `titleService` / `metricsService` / guard-classifier callers stay
      untagged — they get `groq` implicitly. Their migration is task 8.
 7. **ε-random tier routing in `routerService`.** _Hard-gated on Open
@@ -458,6 +444,29 @@ an open question: nothing user-decision shaped in it.
 Remaining open questions unchanged: D, E, F, G (all already posted to the
 issue; tasks 6, 9, 10 do not depend on them). No new user-side questions
 were raised by this pass.
+
+### Task-6a/6c implementation note (shipped on this branch, uncommitted)
+
+- **6a:** `RoutingResult` now carries `provider: LlmProvider`, filled with
+  the constant `'groq'` on every env-path return (as planned — the DB pool
+  cannot reach the router before task 7). `routes/chat.ts` passes
+  `provider: routingResult.provider` into `CompletionOptions` at both the
+  blocking and streaming call sites; the `meta` SSE event carries the
+  routing object unchanged, so it now also includes `provider` (additive
+  only). The slash-id pin (task 9's 6a bullet) landed with it: unit test
+  asserting `openai/gpt-oss-20b` builds the router id
+  `groq/openai/gpt-oss-20b` unsplit; `routerService` metadata-contract test
+  asserts `provider === 'groq'`.
+- **6c:** `CompletionOptions.abortSignal?` added to the neutral types;
+  `mastraService` forwards it into Mastra call options (both `generate` and
+  `stream`) via a shared `callOptionsFrom` that omits it when unset;
+  `routes/chat.ts` streaming route wires `req.on('close')` → abort, guarded
+  by `!res.writableEnded` so a normal end never aborts. Pinned by a
+  mastraService unit test (forwarding) and a route test (a real signal on
+  the call, not aborted).
+- Task 6b (real-provider smoke, H-residual) remains pending on keys; tasks
+  7/8 remain gated on D/E. `npm run ci` fully green after this task
+  (117 server tests + client suites/build).
 
 ### Fifth revision pass (this branch, pre-task-6)
 

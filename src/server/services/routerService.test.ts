@@ -85,13 +85,21 @@ describe('Router Service', () => {
         'Explain the tradeoffs of event sourcing in distributed systems',
       );
       expect(mockGenerate).toHaveBeenCalledTimes(1);
-      expect(result).toEqual({ model: 'test-large-model', reason: 'classifier-complex' });
+      expect(result).toEqual({
+        model: 'test-large-model',
+        reason: 'classifier-complex',
+        provider: 'groq',
+      });
     });
 
     it('should route queries classified as simple to the smaller model', async () => {
       classifyAs('simple');
       const result = await routeQueryWithCfg('Give me a one-line haiku about rain');
-      expect(result).toEqual({ model: 'test-small-model', reason: 'classifier-simple' });
+      expect(result).toEqual({
+        model: 'test-small-model',
+        reason: 'classifier-simple',
+        provider: 'groq',
+      });
     });
 
     it('should normalize classifier output when deciding', async () => {
@@ -103,7 +111,11 @@ describe('Router Service', () => {
     it('should fall back to the larger model when the classifier errors', async () => {
       classifyAs('', true);
       const result = await routeQueryWithCfg('Should I buy this car or that car?');
-      expect(result).toEqual({ model: 'test-large-model', reason: 'classifier-error' });
+      expect(result).toEqual({
+        model: 'test-large-model',
+        reason: 'classifier-error',
+        provider: 'groq',
+      });
       expect(consoleErrorSpy).toHaveBeenCalledWith(
         'Classifier error:',
         expect.objectContaining({ message: 'classifier down' }),
@@ -113,7 +125,11 @@ describe('Router Service', () => {
     it('should fall back to the smaller model on an unrecognized classification', async () => {
       classifyAs('unsure');
       const result = await routeQueryWithCfg('Tell me about classic cars');
-      expect(result).toEqual({ model: 'test-small-model', reason: 'classifier-simple' });
+      expect(result).toEqual({
+        model: 'test-small-model',
+        reason: 'classifier-simple',
+        provider: 'groq',
+      });
     });
 
     it('sends the query to the guard classifier', async () => {
@@ -147,10 +163,12 @@ describe('Router Service', () => {
         })(),
       ];
       const results = await Promise.all(cases);
-      for (const { model, reason } of results) {
+      for (const { model, reason, provider } of results) {
         expect(model).toMatch(/^test-(small|large)-model$/);
         expect(typeof reason).toBe('string');
         expect(reason.length).toBeGreaterThan(0);
+        // Until DB-pool routing lands (#4 task 7), the env path is Groq-only.
+        expect(provider).toBe('groq');
       }
     });
   });

@@ -1,4 +1,5 @@
 import { inferenceService } from './inferenceService';
+import { LlmProvider } from './llmTypes';
 
 export interface RouterConfig {
   smallModel: string;
@@ -9,6 +10,13 @@ export interface RouterConfig {
 export interface RoutingResult {
   model: string;
   reason: string;
+  /*
+   * Provider rides beside the model, never inside it (env default model
+   * strings contain slashes — Mastra's router parses ids on the first slash
+   * only). Until DB-pool routing lands (#4 task 7), the env path always
+   * resolves to the Groq defaults, so this is the constant `'groq'`.
+   */
+  provider: LlmProvider;
 }
 
 const DEFAULT_CONFIG: RouterConfig = {
@@ -26,7 +34,7 @@ export const routeQuery = async (
 
   // Rule 1: Short queries (greetings, simple confirmations)
   if (query.length < 20 && /^(hello|hi|hey|yes|no|ok|thanks|thank you)/i.test(query)) {
-    return { model: smallModel, reason: 'deterministic-short' };
+    return { model: smallModel, reason: 'deterministic-short', provider: 'groq' };
   }
 
   // Rule 2: Code blocks or explicit coding requests
@@ -36,7 +44,7 @@ export const routeQuery = async (
     query.toLowerCase().includes('script') ||
     /```/.test(query)
   ) {
-    return { model: largeModel, reason: 'deterministic-code' };
+    return { model: largeModel, reason: 'deterministic-code', provider: 'groq' };
   }
 
   // Tier 2: Guard model classification
@@ -56,13 +64,13 @@ export const routeQuery = async (
     const classification = response.choices[0]?.message?.content?.trim().toLowerCase();
 
     if (classification === 'complex') {
-      return { model: largeModel, reason: 'classifier-complex' };
+      return { model: largeModel, reason: 'classifier-complex', provider: 'groq' };
     }
   } catch (err) {
     console.error('Classifier error:', err);
     // Fallback to large model on error for safety
-    return { model: largeModel, reason: 'classifier-error' };
+    return { model: largeModel, reason: 'classifier-error', provider: 'groq' };
   }
 
-  return { model: smallModel, reason: 'classifier-simple' };
+  return { model: smallModel, reason: 'classifier-simple', provider: 'groq' };
 };

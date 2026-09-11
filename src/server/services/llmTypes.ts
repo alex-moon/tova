@@ -19,6 +19,11 @@ export interface CompletionOptions {
   messages: { role: 'system' | 'user' | 'assistant'; content: string }[];
   temperature?: number;
   max_tokens?: number;
+  /*
+   * Client-disconnect signal (wired by `routes/chat.ts` from `req.on('close')`).
+   * Optional: only the streaming call site supplies it today.
+   */
+  abortSignal?: AbortSignal;
 }
 
 export interface NeutralCompletion {
