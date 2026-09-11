@@ -4,6 +4,7 @@ import { useAuth } from './hooks/useAuth';
 import Sidebar from './components/Sidebar';
 import ChatWindow from './components/ChatWindow';
 import Login from './components/Login';
+import AdminView from './components/AdminView';
 
 export interface Message {
   _id: string;
@@ -18,8 +19,13 @@ interface Session {
   title: string;
 }
 
+export function isAdminRoute() {
+  return typeof window !== 'undefined' && window.location.pathname.startsWith('/admin');
+}
+
 function App() {
   const { user, loading } = useAuth();
+  const showAdminView = isAdminRoute();
   const [sessions, setSessions] = useState<Session[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -226,24 +232,34 @@ function App() {
 
   return (
     <main className="flex h-dvh w-full overflow-hidden">
-      <Sidebar
-        sessions={sessions}
-        activeSessionId={activeSessionId}
-        open={sidebarOpen}
-        onSelectSession={(id) => {
-          setActiveSessionId(id);
-          setSidebarOpen(false);
-        }}
-        onNewChat={handleNewChat}
-        onDeleteSession={handleDeleteSession}
-        onClose={() => setSidebarOpen(false)}
-      />
-      <ChatWindow
-        messages={messages}
-        onSendMessage={handleSendMessage}
-        isLoading={isChatLoading}
-        onOpenSidebar={() => setSidebarOpen(true)}
-      />
+      {showAdminView && user.role === 'admin' ? (
+        <>
+          <a href="/">Back to chat</a>
+          <AdminView />
+        </>
+      ) : (
+        <>
+          {user.role === 'admin' && <a href="/admin">Admin</a>}
+          <Sidebar
+            sessions={sessions}
+            activeSessionId={activeSessionId}
+            open={sidebarOpen}
+            onSelectSession={(id) => {
+              setActiveSessionId(id);
+              setSidebarOpen(false);
+            }}
+            onNewChat={handleNewChat}
+            onDeleteSession={handleDeleteSession}
+            onClose={() => setSidebarOpen(false)}
+          />
+          <ChatWindow
+            messages={messages}
+            onSendMessage={handleSendMessage}
+            isLoading={isChatLoading}
+            onOpenSidebar={() => setSidebarOpen(true)}
+          />
+        </>
+      )}
     </main>
   );
 }

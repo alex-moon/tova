@@ -56,6 +56,8 @@ export interface UserDocument extends mongoose.Document {
   role: 'user' | 'admin';
   googleId: string | null;
   permissions: string[];
+  createdAt: Date;
+  updatedAt: Date;
   comparePassword: (password: string) => Promise<boolean>;
 }
 
