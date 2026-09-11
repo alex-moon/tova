@@ -228,3 +228,33 @@ No task depends on an open question.
 
 Nothing else remains open: Q1–Q5 and Q7 are each confirmed in the issue
 comments and folded into the design above.
+
+## Critique pass 2 (2026-09-11, CI green after changes)
+
+Full `npm run ci` was already green before this pass; the changes below
+are hardening + documented behavior, and CI was re-run green after them
+(107 server / 16 client tests).
+
+- **Fixed — `recordFeedback` guard parity:** it checked the band but not
+  `modelName` (`clearFeedback` checks both), so a band-bearing message
+  with no `modelName` would upsert a junk `modelName: ''` stat row. Now
+  skips on either blank; test added.
+- **Fixed — empty-band short-circuit in `getFitWeight`:** legacy/featureless
+  turns pass no band; previously every classifier-path chat turn issued
+  two `ModelMetricStat.findOne` queries anyway. Now returns neutral
+  immediately.
+- **Documented edge (test):** an empty rival cell (neutral 1.0) *can* flip
+  routing when the chosen cell has ≥ MIN_SAMPLE tallies and a strongly
+  negative ratio (e.g. 0↑/5↓ → weight 0.143, rival 0 data → 1.0).
+  Deliberate "rival can't be worse" semantics; pinned by a unit test and
+  the reason string `;feedback-weight:1.00:0/0` makes it inspectable in
+  LangSmith (#5). If this should not flip, the MIN_SAMPLE gate must apply
+  to the rival before comparing — say so and it's a two-line change.
+- **A11y:** thumbs now carry `aria-pressed`, matching the visible
+  active-thumb state; client test added.
+- **Standing, accepted (no change):** the per-message one-tally
+  concurrency skew (NQ1 thread), the client's fail-silent feedback error
+  path (thumb state merely stays stale, no revert needed since state is
+  bound to the server-confirmed message), and the existence-probe 404/403
+  distinction on unknown message ids (auth-gated and consistent with the
+  chat permission tests). No open questions raised here.

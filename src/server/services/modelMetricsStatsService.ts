@@ -28,7 +28,7 @@ export const recordFeedback = async (
   value: FeedbackValue,
   prevValue?: FeedbackValue | null,
 ): Promise<void> => {
-  if (!band) return;
+  if (!band || !modelName) return;
   if (value === prevValue) return;
   const inc: Record<string, number> = { [value === 'up' ? 'up' : 'down']: 1 };
   if (prevValue) {
@@ -57,6 +57,7 @@ export const clearFeedback = async (
 // stats can never break routing.
 export const getFitWeight = async (band: string, modelName: string): Promise<FitWeight> => {
   try {
+    if (!band) return { weight: 1, ups: 0, downs: 0 };
     const stat = await ModelMetricStat.findOne({ band, modelName });
     const ups = stat?.up ?? 0;
     const downs = stat?.down ?? 0;

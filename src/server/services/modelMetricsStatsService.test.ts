@@ -34,4 +34,16 @@ describe('modelMetricsStatsService', () => {
     expect(await ModelMetricStat.countDocuments({ band: '' })).toBe(0);
     expect(await ModelMetricStat.countDocuments()).toBe(1);
   });
+
+  it('ignores blank model names so no junk modelName:"" rows are created', async () => {
+    await recordFeedback('medium|code', '', 'up');
+    expect(await ModelMetricStat.countDocuments({ modelName: '' })).toBe(0);
+  });
+
+  it('is neutral for a blank band (legacy messages never reach the router)', async () => {
+    await recordFeedback('long|code', 'm-large', 'up');
+    const fit = await getFitWeight('', 'm-large');
+    expect(fit).toEqual({ weight: 1, ups: 0, downs: 0 });
+    expect(await ModelMetricStat.findOne({ band: 'long|code', modelName: 'm-large' })).toBeTruthy();
+  });
 });

@@ -155,6 +155,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
                           <button
                             type="button"
                             aria-label="Good response"
+                            aria-pressed={msg.feedback?.value === 'up'}
                             disabled={pendingFeedbackId !== null}
                             onClick={() => handleThumbClick(msg, 'up')}
                             className="rounded p-1 transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-2 focus-visible:outline-primary disabled:opacity-50"
@@ -167,6 +168,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
                           <button
                             type="button"
                             aria-label="Poor response"
+                            aria-pressed={msg.feedback?.value === 'down'}
                             disabled={pendingFeedbackId !== null}
                             onClick={() => handleThumbClick(msg, 'down')}
                             className="rounded p-1 transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-2 focus-visible:outline-primary disabled:opacity-50"

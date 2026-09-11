@@ -63,4 +63,19 @@ describe('ChatWindow feedback thumbs', () => {
     expect(screen.getByLabelText('Poor response')).toBeDisabled();
     expect(screen.getByLabelText('Good response')).toBeDisabled();
   });
+
+  it('exposes the active vote as aria-pressed for screen readers', () => {
+    render(
+      <ChatWindow
+        messages={[msg({ value: 'up' })]}
+        onSendMessage={vi.fn()}
+        isLoading={false}
+        onOpenSidebar={vi.fn()}
+        onFeedback={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByLabelText('Good response').getAttribute('aria-pressed')).toBe('true');
+    expect(screen.getByLabelText('Poor response').getAttribute('aria-pressed')).toBe('false');
+  });
 });

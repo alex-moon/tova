@@ -184,6 +184,20 @@ describe('Router Service', () => {
       expect(result.reason).toContain(';feedback-weight:');
     });
 
+    it('flips to an empty rival cell when the chosen cell is strongly negative', async () => {
+      // Deliberate edge: the chosen model has ≥ MIN_SAMPLE tallies and a very
+      // lopsided down ratio, the rival has no data (neutral weight 1.0).
+      // "Rival can't be worse" wins — documented so this is not accidental.
+      classifyAs('simple');
+      const result = await routeQuery('Give me a one-line haiku about rain', TEST_CONFIG, {
+        band: 'long|prose',
+        getFitWeight: async (_band, model) =>
+          model === 'test-small-model' ? stat(0, 5) : emptyStat(),
+      });
+      expect(result.model).toBe('test-large-model');
+      expect(result.reason).toContain(';feedback-weight:1.00:0/0');
+    });
+
     it('does not flip on lopsided votes under the ratio', async () => {
       classifyAs('simple');
       const result = await routeQuery('What is the capital of France?', TEST_CONFIG, {
