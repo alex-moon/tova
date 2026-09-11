@@ -22,144 +22,194 @@ This ticket adds:
    scores into the model choice alongside the existing heuristics, and log
    the applied weight in the routing reason (LangSmith, #5, can surface it).
 
-## Current state (verified from the repo, 2026-09-11)
+## Ticket status (verified from the repo, 2026-09-11)
 
-- Dependency check: #17 is done and merged (PRs #22/#23, branch
-  `fix/tv/17-prompt-metrics` merged to main; head commit `4ba6e5a`).
-  No blocking reason remains: `DEEPINFRA_API_KEY` route unblocks #4
-  independently; nothing here depends on #4.
-- No feedback code exists anywhere: grep for `feedback|thumbs|upvote|
-  modelMetricsStats` over `src/` and `docs/` returns only #17's plan doc
-  (as forward references). Not already done.
-- `src/server/models/Message.ts` — schema has `sessionId`, `role`,
-  `content`, `modelName`, `timestamp`, `metrics` (deterministic + `llm`
-  + `llmSkipReason`). **No `feedback` field.** Messages are create-only
-  except for the post-save LLM classification update (proof the
-  `findByIdAndUpdate` pattern works).
-- `src/server/routes/chat.ts` — all routes use `authenticate`
-  (`src/server/middleware/auth.ts`); user identity available as
-  `req.user` (check exact shape when implementing — see Open questions).
-  Endpoints: `POST /` and `POST /stream` (persist user + assistant
-  messages with metrics), `GET /sessions`, `GET /sessions/:id`.
-- `routerService.routeQuery(query)` takes only the query string and
-  returns `{ model, reason }`. It does **not** consume `metrics.llm`
-  today; there is currently no multi-candidate scoring — the router it
-  picks between exactly two configured models via rules/classifier.
-- Assistant messages already carry `modelName` at save time
-  (`chat.ts`), so the aggregation band key is available where the
-  feedback endpoint runs.
-- Client: `src/client/src/components/ChatWindow.tsx` renders messages
-  (`messages.map`, line ~113); assistant bubbles already show
-  `msg.modelName` when present. `Message.vue`-equivalent type lives in
-  `src/client/src/types/`; history endpoint is
-  `GET /sessions/:id` (which returns messages with metrics).
-- Tests: Jest + `MongoMemoryServer` (`src/server/test/setup.ts`);
-  integration patterns in `chat.test.ts` / `chat.stream.test.ts` /
-  `chat.permissions.test.ts`; unit pattern in `routerService.test.ts`.
-  Client tests run with vitest.
+- Trunk `94b9fc5` contains only a plan doc for #18 and #17 work (PRs
+  #22/#23). **No feedback code exists anywhere**: grep for
+  `feedback|thumbs|upvote|modelMetricsStats` over `src/` and `docs/`
+  matches nothing beyond this plan and #17's plan. Branch
+  `feat/tv/18-feedback-weighting` is clean and ahead-of-main by zero
+  commits. Not already done.
+- GitHub issue #18 has **zero comments**, so this plan cannot be informed
+  by discussion beyond the issue body; everything below is derived from
+  the body plus repo inspection.
+- Blocking check: dependency #17 is merged (`4ba6e5a`). No posted blocking
+  reason; nothing here depends on #4.
 
-## Decisions so far
+## Decisions (each is taken _unconditionally_, not contingent on an open question)
 
 1. **`feedback` subdocument on Message** — `{ value: 'up'|'down',
-   updatedAt }` (one slot, not an array; revote overwrites = idempotent,
-   per the issue). Matches #17's precedent of embedding analysis data on
-   the message doc.
-2. **Aggregation store is a Mongo collection, not in-memory** —
-   `modelMetricsStats` with documents keyed on `(modelName, band)` and
-   `{ up, down }` counters, updated with `$inc` on each feedback write.
-   Survives restarts and lets the router read without scanning messages.
-3. **Metric band from the *user* prompt's deterministic metrics** of the
-   turn, not the assistant reply — the issue's intent ("model's fit for
-   the metrics collected per message") and #17's rationale are about
-   correlating with the *prompt*. Band composition is an open question
-   (below); the likely v1 band is `llm.technical` boolean ×
-   `lengthBucket`, both already persisted on the user message.
-4. **Router consumes stats via a second scoring pass, additive not
-   destructive** — the existing two-tier rules remain the skeleton; the
-   empirical weight *perturbs* the choice only when the deterministic
-   and classifier tiers don't strongly decide, and the applied weight is
-   appended to `reason` (e.g. `classifier-simple;feedback-weight:0.6:16/2`
-   — weight:ups/downs). Kept simple so it cannot regress baseline
-   routing until the stats are meaningful.
-5. **Cold start** — below a minimum sample count (MIN_SAMPLE, default
-   5) in a band, the weight is neutral (1.0) and omitted from the reason.
-6. **Auth enforcement at the route level** — `POST
-   /api/messages/:messageId/feedback` returns 401 when unauthenticated
-   and 404/403 for messages the user can't see; porcelain over the
-   existing `authenticate` middleware.
+updatedAt: Date }` (one slot, not an array; revote overwrites = the
+   issue's literal idempotence semantics). Matches #17's precedent of
+   embedding analysis data on the message doc. No voter identity is
+   stored: the issue asks for auth _enforcement_, not a per-user ledger,
+   and a single overwrite slot cannot honor per-user votes anyway (a
+   per-user stream of votes is a possible future ticket, not planned
+   here).
+2. **Revoting corrects the aggregate, never double-counts** — outvoting
+   `up`→`down` does `$inc: { up: -1, down: +1 }`; re-clicking the same
+   value does nothing to counters. Tested explicitly.
+3. **Aggregation store is a Mongo collection, not in-memory** —
+   `modelMetricsStats` documents keyed `(band, modelName)` with `{ up,
+down }` counters and a minimal-query unique index for `$inc`-style
+   upserts (`findOneAndUpdate ... { upsert: true }`). Survives restarts;
+   router reads without scanning messages.
+4. **Band = deterministic prompt metrics of the user turn, captured at
+   route time, written onto the assistant message before save.** Concretely
+   `routingBand` (string) on the assistant message, e.g.
+   `medium|code`. Rationale for determinism (not `llm.technical`): the
+   LLM classification is fire-and-forget _after_ the user message save
+   (`chat.ts:54-58` while routing happens immediately after, `chat.ts:97`),
+   so `metrics.llm.technical` is virtually always `null` at routing time —
+   an LLM-based band would collapse to a single `null` key in practice.
+   The issue's "high-technical" wording is treated as intent, not spec;
+   whether to widen the band once #4/async classification can feed routing
+   is raised in Open questions. A string key needs no migration to widen
+   later.
+5. **Router weighting is a perturbation, not a replacement** —
+   `routeQuery(query, config, deps?)` gains a third optional argument (a
+   small `{ getFitWeight(band, model): Promise<number> }` reader,
+   defaulting to the real stats service) so unit tests inject stubs
+   without Mongo. The empirical weight applies **only** on the
+   `classifier-simple` / `classifier-complex` threshold path (the two
+   deterministic rules and `classifier-error` stay untouched), and flips
+   the choice only when the weight ratio between the two candidates
+   exceeds a threshold (see task 4). The applied weight and tallies are
+   appended to `reason` (e.g.
+   `classifier-simple;feedback-weight:0.85:12/2`), matching #17's
+   reasons-as-trace convention.
+6. **Cold start neutral** — below MIN_SAMPLE = 5 tallies in a `(band,
+model)` cell, weight is neutral (1.0), no flip, no reason suffix. Any
+   read error in the stats service routes to the same neutral path: a
+   stale/missing stats collection must never 500 a chat request.
+7. **Auth + authorization at the route level** — `POST
+/api/messages/:messageId/feedback` (new `src/server/routes/feedback.ts`,
+   mounted next to chat) uses `authenticate` (401 unauthenticated) and
+   authorization via the message's session: `Message` has no `userId`, so
+   the handler looks up `{ sessionId, userId: req.user.id,
+deletedAt: null }` in `Session` (403 foreign session, 404 unknown
+   message id). `req.user.id` shape verified against `chat.ts:74/249`, so
+   no confirmation needed at implementation time.
+8. **Buttons are overwrite-only** — clicking the active thumb again does
+   nothing (no vote clearing, no DELETE), and a pending/hover style lifts
+   inactive thumbs. Rationale: overwrite-only is exactly what the issue
+   specifies (`{ value: 'up'|'down' }`, revote-overwrite) and a clearing
+   protocol would need an explicit "cleared" state on the subdocument —
+   invented behavior. Clearing could come later as a tiny follow-up; not a
+   blocker.
 
-## Critiqued assumptions
+## Critiqued assumptions (each with the honest risk attached)
 
-- **`routeQuery` currently scores only two models.** The issue talks
-  about "scoring candidate models", but the codebase has no candidate
-  list beyond `smallModel`/`largeModel`. The v1 weighting therefore
-  biases the *choice between the two*, not a ranked catalog. Making the
-  router multi-candidate is out of scope (would be its own ticket).
-- **Revote idempotence is overwrite semantics at the message doc** — but
-  the aggregate counters must not double-count: i.e. outvoting from `up`
-  to `down` must `$inc` down and `$inc` up `-1`. This is handled in the
-  single commit where both sides land; tested.
-- **Where the band comes from in the feedback endpoint:** the feedback
-  is on the *assistant* message but the band comes from the *user*
-  message of the same turn — correlate via `sessionId` +
-  `sessionMessageIndex` (assistant index = user index + 1) or store the
-  band on the assistant message at routing time. The second is simpler
-  and race-free (the router already knows the features at route time);
-  this plan prefers writing the band onto the assistant message when it
-  is saved. Needs one look at the exact save flow to confirm; see
-  task 1.
-- **Feedback from unauthenticated users:** history GET is behind
-  `authenticate`; there is no anonymous message exposure, so the 401
-  acceptance criterion is satisfied by route-level middleware alone.
-- **Stats service error handling:** a missing/stale stats document must
-  never break routing — read failures return neutral weight (same
-  cold-start path).
-- **Client state after reload:** thumbs render their value from the
-  message `feedback` field that already comes back in
-  `GET /sessions/:id` messages — no extra fetch per message needed.
-- **Spanish/unicode prompts:** band extraction uses already-computed
-  deterministic metrics, which are total functions (guaranteed in #17);
-  null LLM flags degrade to a `null` band segment and simply produce a
-  different aggregation key — fine.
+- **The router is not a multi-candidate scorer.** The issue says "when the
+  router scores candidate models", but `routeQuery` (`routerService.ts:20`)
+  has exactly two candidates. v1 biases the binary choice; making the
+  router a ranked catalog is a separate ticket. Risk of scope creep if the
+  acceptance test is written before the router signature is settled —
+  mitigated task-by-task below.
+- **The router does not consume `metrics.llm` at route time.** There is no
+  hook in `chat.ts` where the router sees analysed features, and every
+  attempt to key the weight off LLM flags would read them before
+  classification completes (`chat.ts:54-67` saves → routes → the
+  classification lands later). Decision 4 follows from this; the possible
+  widening is parked in Open questions **Q2** rather than baked into task
+  1's field shape.
+- **Two-tier parity of the aggregation key.** The turn-level band is
+  derived from the _user_ message, but the feedback row and `modelName`
+  live on the _assistant_ message; the two must join by construction (the
+  band is written onto the assistant message at creation, decision 4),
+  not re-derived from `sessionMessageIndex` parity inside the feedback
+  handler (index computation is count-based and racy per plan-17's own
+  admission, `chat.ts:16-19`).
+- **Idempotence under concurrency.** Two quick revotes can interleave
+  plain writes; counters are corrected by reading the _previous_ value in
+  the same handler commit as the message write (`findOneAndUpdate` on the
+  message, then a single `$inc` delta computed from before vs after). A
+  truly guarded transaction is more machinery than needed here since the
+  worst-case leak from exact double votes within a window is one tally.
+- **Feedback for stale/foreign messages remains readable forever** — the
+  feedback endpoint should not demand `metrics`, `modelMetricsStats` keys
+  or any particular roll of the dice; only messageId existence + session
+  ownership.
+- **`status` of the modelMetricsStats design's correctness under
+  preference-learning is a critique, not a plan.** A band with 12↑/3↓ does
+  not prove the model was good on _this_ prompt; it may track reply
+  quality correlates (length, topic) not routed features. That limitation
+  is accepted (the issue frames it as an empirical multiplier, not
+  attribution) and the reason string keeps tallies visible so drift is
+  inspectable.
+- **Client fetch correctness after reload** — the thumbs' value comes from
+  the returned message's `feedback` field, already returned by
+  `GET /sessions/:id` (`chat.ts:281-284`); optimistic local state updates
+  on click and reconciles on reload. Unknown-state handling (message
+  without feedback) renders no active thumb — just default disabled
+  pair.
+- **Spanish/unicode prompts:** the band is a string built from totals-when-guaranteed
+  deterministic metrics (`computeDeterministicMetrics`) — no text
+  parsing at feedback time beyond what #17 already holds safe; `lengthBucket`
+  enumerates `short|medium|long` on the schema (`Message.ts:28`).
 
 ## Task checklist
 
-Each item is a small, self-contained commit.
+Each item is a self-contained commit; none _starts_ on an open question.
 
-- [ ] 1. **Schema + band capture**: add `feedback: { value:
-      'up'|'down', updatedAt: Date }` to `Message`; also persist
-      `routingBand` (string) on the assistant message at save time in
-      both chat endpoints (derived from the user message's metrics that
-      the router already had; e.g. `technical:true|long`). Unit-tested
-      via the existing chat integration tests (assert the field).
-- [ ] 2. **Feedback route**: `POST /api/messages/:messageId/feedback` in
-      a new `src/server/routes/feedback.ts` (mounted next to chat), with
-      `authenticate`: validates `value`, overwrites the subdocument,
-      updates `modelMetricsStats` (`$inc`) in the same handler,
-      401/404/400 semantics. Integration tests: authed round-trip,
-      revote overwrite + counters not double-counted, 401 unauthed, 400
-      bad value, 404 foreign/message-less (pinned to the existing
-      permissions test style).
-- [ ] 3. **Stats service**: `src/server/services/modelMetricsStats.ts` —
-      `recordFeedback(band, model, value)` and
-      `getFitWeight(band, model)` with the MIN_SAMPLE neutral fallback
-      (`getFitWeight` must also be total on read errors). Unit tests
-      with MongoMemoryServer: cold start neutral, aggregation math,
-      revote correction.
-- [ ] 4. **Router weighting**: extend `routeQuery` (new optional arg or
-      a small injected stats reader so unit tests don't need Mongo) so
-      that on the `classifier-simple`/`classifier-complex` tiebreak path
-      the fit weight of both candidate models is compared and a large-enough
-      empirical preference flips the choice; append the applied weight +
-      tallies to `reason`. Test seeding both bands and asserting the
-      *different model choice* (the issue's acceptance criterion). Also
-      assert no behavior change when stats are empty.
-- [ ] 5. **Client**: thumbs button pair on assistant messages in
-      `ChatWindow.tsx` (subtle disabled-pending state, opt-out = click
-      again to clear? — see Open questions), POST via the existing
-      lib/fetch helper, and render persisted state from the message
-      object. Client vitest covering render + click + error toast.
-- [ ] 6. **Docs**: `docs/progress.md` entry on merge; one
+- [ ] 1. **Schema** — add to `Message`: `feedback: { value: {
+     type: String, enum: ['up','down'] }, updatedAt: { type: Date } }`
+      and `routingBand: { type: String }` (both sparse-optional; no
+      migration needed for existing documents). In `chat.ts` (both
+      endpoints), compute `routingBand` at route time from the user
+      message's persisted deterministic metrics just after routeQuery
+      (e.g. `${metrics.lengthBucket}|${metrics.codeIndicators?.fences > 0 ? 'code' : 'prose'}`) and persist it on the assistant message at creation.
+      Test via the existing
+      chat integration tests: assistant message carries
+      `routingBand` after POST `/` and `/stream`, `feedback` is null.
+- [ ] 2. **Stats service** — new `src/server/services/modelMetricsStatsService.ts`
+      with `recordFeedback(band, modelName, value, prevValue?)` and
+      `getFitWeight(band, modelName)` returning `{ weight, ups, downs }`.
+      Word on the contract: upsert `.findOneAndUpdate` of a unique
+      `(band, modelName)` doc, `$inc` counters adjusted by the
+      correction delta (decision 2). `getFitWeight` must be total: on
+      read error or below MIN_SAMPLE (5) returns `{ weight: 1.0, ups: 0,
+     downs: 0 }`; weight = `(ups + 1) / (ups + downs + 2)` — a
+      Laplace-smoothed ratio so a brand-new band with 1↑/0↓ cannot
+      immediately max out the weight.
+- [ ] 3. **Feedback route** — `POST /api/messages/:messageId/feedback`
+      (`routes/feedback.ts`, mounted next to chat in the app's router
+      list) with `authenticate`; body validation (400 on missing /
+      non-`up|down` value); authorization via the message's session
+      (decision 7); overwrite the message's `feedback` in the same
+      handler and `recordFeedback` the corrected counters (decision 2),
+      returning the updated message. Integration tests in
+      `feedback.test.ts`: authed round trip, re-vote overwrite ups/
+      downs corrected, 401 unauthenticated (from the
+      `chat.permissions.test.ts` patterns), 400 bad value, 403 foreign
+      session, 404 unknown message.
+- [ ] 4. **Router weighting** — extend `routeQuery` signature to
+      `routeQuery(query, config?, deps?)` where `deps.stats` reads
+      `{ weight, ups, downs }` and `deps.now()`. On the classifier
+      tiebreak path, fetch weights for `(band, smallModel)` and `(band,
+     largeModel)`; flip the choice when the winner-vs-runner-up weight
+      ratio exceeds `FEEDBACK_FLIP_RATIO = 1.25` (a constant, not a
+      tunable, in v1); append `;feedback-weight:<w>:<ups>/<downs>` to
+      `reason`. Unit tests in `routerService.test.ts` (stubbed deps,
+      no Mongo): empty stats → identical to today's behavior (a
+      golden assertion exists before the feature);
+      seed 12↑/3↓ against small on a band commonly routed by the
+      large candidate (e.g. `classifier-complex` tiebreak, small
+      band weight high → flips to small) and vice versa; the issue's
+      acceptance criterion "different model choice" is this one;
+      MIN_SAMPLE below. Chat integration tests carry `routingBand` for
+      both models' bands and stubs the stats service.
+- [ ] 5. **Client** — thumbs pair under assistant messages in
+      `ChatWindow.tsx`: an `onThumbFeedback(messageId, 'up' | 'down')`
+      path calling the feedback endpoint, mid-face POST body `{ value }`. Buttons render from the message's
+      persisted `feedback` field; while the POST is in-flight both are
+      disabled; error surfaces as a
+      toast (existing pattern if app has one, otherwise inline).
+      Client vitest: click sends correct POST, pending disables buttons,
+      reload state renders from message. Note that the type augment for
+      `feedback` belongs in the shared `Message` interface — where #17
+      added `metrics` already.
+- [ ] 6. **Docs** — `docs/progress.md` entry on merge; one
       `scripts/mongo.ts` snippet for inspecting `modelMetricsStats`.
 
 ## Verification
@@ -174,30 +224,32 @@ Each item is a small, self-contained commit.
 - Feedback round-trips for authed users; 401 for unauthenticated.
 - Thumbs show their current state after reload.
 - Router decisions demonstrably shift with accumulated feedback —
-  covered by a test seeding stats and asserting a different model choice.
+  covered by the task 4 test seeding stats and asserting a different
+  model choice.
 
 ## Open questions
 
-No planned task *starts* on an open question, but task 5's final shape
-depends on two of them; both come with a default that can be implemented
-unilaterally and revised on PR review:
+No task in the checklist above depends on these; each has an implemented
+default (decisions 4 and 8). They are questions _because the interaction
+semantics of an opaque notion ("weights the model's fit") should be
+confirmed on PR review_, not because the build is blocked.
 
-- **Opt-out behavior of the buttons** — does clicking the active thumb
-  again *clear* the feedback, or is feedback only ever overwritten
-  up↔down (issue says `{ value: 'up'|'down' }` with revote-overwrite and
-  doesn't mention clearing)? *Default:* overwrite-only (matches the
-  issue literally, no DELETE endpoint); raise on the PR so it is a
-  decision, not a surprise.
-- **Exact band key for aggregation** — the issue's example band
-  ("high-technical + long prompt") implies LLM-classified `technical`
-  plus `lengthBucket`, but `metrics.llm.technical` may be `null`
-  (skip-gated or parse-failed prompts) and the classification model has
-  not been production-swapped (that rides on #4). *Default:* band =
-  `technical:true|false|null` × `lengthBucket`, with `null` aggregating
-  into its own key; the shape can be widened later without a migration
-  because keys are strings.
-- **Which user a feedback row belongs to** — the issue says
-  "authenticated" but doesn't ask to store *who* voted, and my read of
-  `req.user`'s shape (`authenticate` middleware) needs confirming
-  during task 2. *Default:* enforce auth, don't store the voter (single
-  overwrite slot can't honor per-user votes anyway).
+- **Q1: Opt-out (clearing) semantics** — should clicking the active thumb
+  again clear the vote to a null state, or is feedback
+  once-given/switchable-only? _Currently built:_ overwrite-only, per the
+  issue's literal wording; the API path for clearing would need a
+  slightly different shape (`{ value: null }` or DELETE) if wanted.
+- **Q2: Band key on LLM flags** — the issue's example band
+  ("high-technical + long prompt") implies LLM-classified `technical`,
+  but `metrics.llm.technical` is populated asynchronously _after_
+  routing, so it is null at route time in the current save flow
+  (`chat.ts:54-67`). _Currently built:_ deterministic-only band
+  (lengthBucket × code/prose). If callers later await classification or
+  the router reads post-hoc analysis, the band needs widening plus a
+  reconciliation of the routing-time vs. learned-time key (possible
+  future ticket).
+- **Q3: Stored voter identity / history** — not needed by the single-slot
+  overwrite shape; if per-user data ever wants to be honored (audit,
+  per-user weighting), either the message subdocument gains a
+  `valueByUser` array or votes get their own collection. Out of scope
+  here; raised only so the choice is on the record.
