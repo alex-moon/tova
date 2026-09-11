@@ -69,13 +69,20 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
       sessionId: session._id,
       role: 'user',
       content,
-      metrics: await buildMessageMetrics(String(session._id), content),
+      metrics: {
+        ...(await buildMessageMetrics(String(session._id), content)),
+        // Auditable skip: llmSkipReason 'trivial' distinguishes the skip gate
+        // from failed ('parse'/'error') classification in the DB.
+        ...(isTriviallyNeutral(content) ? { llmSkipReason: 'trivial' as const } : {}),
+      },
     });
     await userMessage.save();
 
     // LLM classification runs post-save, fire-and-forget; never awaited.
     // Trivially neutral prompts (short confirmations/continuations) skip it —
-    // docs/plan-17-prompt-metrics.md task 9. Skipped messages keep null flags.
+    // docs/plan-17-prompt-metrics.md task 9. Skipped messages keep null flags
+    // but record 'trivial' in metrics.llmSkipReason so skips are distinguishable
+    // in the DB from failed/unparsed classification.
     if (!isTriviallyNeutral(content)) {
       classifyAndPersistPromptDimensions(String(userMessage._id), content).catch((err) =>
         console.error('Prompt classification error:', err),
@@ -154,13 +161,20 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
       sessionId: session._id,
       role: 'user',
       content,
-      metrics: await buildMessageMetrics(String(session._id), content),
+      metrics: {
+        ...(await buildMessageMetrics(String(session._id), content)),
+        // Auditable skip: llmSkipReason 'trivial' distinguishes the skip gate
+        // from failed ('parse'/'error') classification in the DB.
+        ...(isTriviallyNeutral(content) ? { llmSkipReason: 'trivial' as const } : {}),
+      },
     });
     await userMessage.save();
 
     // LLM classification runs post-save, fire-and-forget; never awaited.
     // Trivially neutral prompts (short confirmations/continuations) skip it —
-    // docs/plan-17-prompt-metrics.md task 9. Skipped messages keep null flags.
+    // docs/plan-17-prompt-metrics.md task 9. Skipped messages keep null flags
+    // but record 'trivial' in metrics.llmSkipReason so skips are distinguishable
+    // in the DB from failed/unparsed classification.
     if (!isTriviallyNeutral(content)) {
       classifyAndPersistPromptDimensions(String(userMessage._id), content).catch((err) =>
         console.error('Prompt classification error:', err),

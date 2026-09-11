@@ -105,24 +105,42 @@ describe('metricsService', () => {
           },
         ],
       });
-      const flags = await classifyPromptDimensions('hello');
-      expect(flags).toEqual({
-        emotional: true,
-        technical: false,
-        abstract: false,
-        sentiment: 'positive',
-        openEnded: true,
+      expect(await classifyPromptDimensions('hello')).toEqual({
+        llm: {
+          emotional: true,
+          technical: false,
+          abstract: false,
+          sentiment: 'positive',
+          openEnded: true,
+        },
+        skipReason: null,
       });
     });
 
-    it('returns all nulls when the Groq call throws', async () => {
+    it('reports skipReason error when the Groq call throws', async () => {
       mockCreate.mockRejectedValueOnce(new Error('boom'));
-      expect(await classifyPromptDimensions('hello')).toEqual(parseLlmFlags(null));
+      expect(await classifyPromptDimensions('hello')).toEqual({
+        llm: parseLlmFlags(null),
+        skipReason: 'error',
+      });
     });
 
-    it('returns all nulls when the response shape is unexpected', async () => {
+    it('reports skipReason parse when the response shape is unexpected', async () => {
       mockCreate.mockResolvedValueOnce({});
-      expect(await classifyPromptDimensions('hello')).toEqual(parseLlmFlags(null));
+      expect(await classifyPromptDimensions('hello')).toEqual({
+        llm: parseLlmFlags(null),
+        skipReason: 'parse',
+      });
+    });
+
+    it('reports skipReason parse when the output contains no JSON', async () => {
+      mockCreate.mockResolvedValueOnce({
+        choices: [{ message: { content: 'definitely emotional, very technical' } }],
+      });
+      expect(await classifyPromptDimensions('hello')).toEqual({
+        llm: parseLlmFlags(null),
+        skipReason: 'parse',
+      });
     });
   });
 

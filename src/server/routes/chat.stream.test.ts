@@ -200,6 +200,7 @@ describe('Chat streaming prompt metrics', () => {
       sentiment: 'neutral',
       openEnded: false,
     });
+    expect(userMessage.metrics?.llmSkipReason).toBeNull();
     expect(assistantMessage.metrics?.llm).toMatchObject({
       emotional: null,
       technical: null,

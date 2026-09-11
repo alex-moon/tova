@@ -124,6 +124,7 @@ describe('Chat route prompt metrics', () => {
       sentiment: 'negative',
       openEnded: true,
     });
+    expect(updated?.metrics?.llmSkipReason).toBeNull();
     // Assistant turns are never LLM-classified
     expect((await Message.findOne({ role: 'assistant' }))?.metrics?.llm).toMatchObject({
       emotional: null,
@@ -163,6 +164,30 @@ describe('Chat route prompt metrics', () => {
       sentiment: null,
       openEnded: null,
     });
+    // The DB records why the flags are missing
+    expect(userMessage?.metrics?.llmSkipReason).toBe('error');
+  });
+
+  it('skips classification for trivially neutral prompts but records the skip', async () => {
+    const app = createApp();
+    const cookies = await registerUser(app, 'metrics-trivial@example.com');
+    const response = await request(app)
+      .post('/api/chat')
+      .set('Cookie', Array.isArray(cookies) ? cookies : [cookies])
+      .send({ content: 'tell me more' });
+
+    expect(response.status).toBe(200);
+    await flush();
+    expect(isClassifierCall(mockCreate.mock.calls[0]?.[0])).toBe(false);
+    const userMessage = await Message.findOne({ role: 'user' });
+    expect(userMessage?.metrics?.llm).toMatchObject({
+      emotional: null,
+      technical: null,
+      abstract: null,
+      sentiment: null,
+      openEnded: null,
+    });
+    expect(userMessage?.metrics?.llmSkipReason).toBe('trivial');
   });
 
   it('increments session indices across 12 turns in one session', async () => {

@@ -44,6 +44,7 @@ const messageSchema = new mongoose.Schema({
       sentiment: { type: String, enum: ['positive', 'negative', 'neutral'], default: null },
       openEnded: { type: Boolean, default: null },
     },
+    llmSkipReason: { type: String, enum: ['trivial', 'parse', 'error'], default: null },
   },
 });
 

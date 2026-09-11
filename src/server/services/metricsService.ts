@@ -81,7 +81,19 @@ export const parseLlmFlags = (raw: string | null | undefined): LlmMetrics => {
   return NULL_LLM;
 };
 
-export const classifyPromptDimensions = async (content: string): Promise<LlmMetrics> => {
+const isAllNullLlm = (llm: LlmMetrics): boolean =>
+  llm.emotional === null &&
+  llm.technical === null &&
+  llm.abstract === null &&
+  llm.sentiment === null &&
+  llm.openEnded === null;
+
+// Classify a prompt and report why flags could be missing when they are:
+// 'parse' means the call succeeded but produced unusable output, 'error'
+// means the inference call itself failed. Null when flags were parsed.
+export const classifyPromptDimensions = async (
+  content: string,
+): Promise<{ llm: LlmMetrics; skipReason: 'parse' | 'error' | null }> => {
   try {
     const completion = await inferenceService.createCompletion({
       model: LLM_MODEL,
@@ -89,22 +101,28 @@ export const classifyPromptDimensions = async (content: string): Promise<LlmMetr
       temperature: 0,
       max_tokens: 100,
     });
-    return parseLlmFlags(completion?.choices?.[0]?.message?.content);
+    const llm = parseLlmFlags(completion?.choices?.[0]?.message?.content);
+    return { llm, skipReason: isAllNullLlm(llm) ? 'parse' : null };
   } catch (err) {
     console.error('Prompt classification error:', err);
-    return NULL_LLM;
+    return { llm: NULL_LLM, skipReason: 'error' };
   }
 };
 
 // Classify a user message and persist the flags into its metrics subdocument.
 // Never throws for classification problems; only a failed DB update rejects,
-// and callers keep that non-fatal for the chat request.
+// and callers keep that non-fatal for the chat request. `metrics.llmSkipReason`
+// records why the flags are null when they are ('parse' or 'error');
+// 'trivial' is set by the chat routes for prompts that skip the call entirely.
+// Clearing the reason on success keeps a retried message's audit trail accurate.
 export const classifyAndPersistPromptDimensions = async (
   messageId: string,
   content: string,
 ): Promise<void> => {
-  const llm = await classifyPromptDimensions(content);
-  await Message.findByIdAndUpdate(messageId, { $set: { 'metrics.llm': llm } });
+  const { llm, skipReason } = await classifyPromptDimensions(content);
+  await Message.findByIdAndUpdate(messageId, {
+    $set: { 'metrics.llm': llm, 'metrics.llmSkipReason': skipReason },
+  });
 };
 
 /*
