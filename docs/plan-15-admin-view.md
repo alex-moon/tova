@@ -2,162 +2,232 @@
 
 ## Motivation
 
-From [issue #15](https://github.com/alex-moon/tova/issues/15): add a new
-`admin` permission that grants access to an admin view where the owner can
-manage users (and later other things, e.g. models).
+From [issue #15](https://github.com/alex-moon/tova/issues/15): add a way for
+the owner to manage users (and later other things, e.g. models) from an
+admin view.
 
 Repo state on branch `feat/tv/15-admin-view` (verified from code, not just
 issue comments):
 
-- `src/server/models/User.ts` already has `role: 'user' | 'admin'`
-  (enum, default `'user'`) and `permissions: string[]`.
-- `src/server/middleware/auth.ts:31` defines `requireRole(...roles)` but
-  **nothing uses it** — there is no admin API surface. Routes mounted in
-  `src/server/index.ts` are only `/api/auth` and `/api/chat`.
-- There is **no frontend router**; `src/client/src/App.tsx` is a single-page
-  chat UI switching between `<Login />` and the chat layout based on
-  `useAuth()`. No admin UI exists anywhere.
-- Prior art: `docs/plan-3-user-permissions.md` — admin is already seeded as
-  `formsatz@gmail.com` with `role: 'admin'` and the `routing` permission.
-- The issue has **no comments and no answers from the owner**; every
-  interpretation of the one-sentence issue body is ours.
+- `src/server/models/User.ts` has `role: 'user' | 'admin'` (enum, default
+  `'user'`) and `permissions: string[]`.
+- `src/server/middleware/auth.ts:31` defines `requireRole(...roles)`;
+  nothing used it until this branch.
+- `src/server/routes/admin.ts` now exists on this branch with
+  `GET /users`, `PUT /users/:id/permissions`, `PUT /users/:id/role`,
+  all guarded by `authenticate` + `requireRole('admin')`, mounted via
+  `/api/admin` in `src/server/index.ts`.
+- `src/server/routes/auth.ts` `/me` now returns live `{ id, email, role,
+permissions }` from the DB instead of re-deriving from the JWT.
+- `src/client/src/components/AdminView.tsx` exists and is rendered in
+  `App.tsx` behind an in-app `showAdmin` toggle button for
+  `user.role === 'admin'`.
+- Server tests in `src/server/routes/admin.test.ts` and client tests
+  cover auth guards, validation, last-admin demotion, 404s.
+- Prior owner-decision context: `docs/plan-3-user-permissions.md` —
+  admin seeded as `formsatz@gmail.com`, `role: 'admin'`,
+  `permissions: ['routing']`.
+- `npm run ci` reported green in an earlier pass on this branch (commit
+  `72c3d5c`, 2026-09-11); re-verify before shipping.
 
-So the ticket splits into: (a) an admin-guarded backend API for user
-management, and (b) a frontend admin view rendered only for admin users.
+## Resolved owner decisions (from issue #15 comments, 2026-09-11)
+
+These were once plan "open questions"; the owner has answered all six.
+They are now requirements, several of which the current implementation
+does **not** yet satisfy:
+
+1. **Role semantics** — key on `role`, not `permissions`. Matches what
+   was implemented (`requireRole('admin')`); no change needed.
+2. **Navigation** — the owner does **not** want the in-app toggle the
+   branch currently implements. Verbatim intent: panels around the chat
+   view for non-admins are fine, but for admins the admin view "should
+   be almost like a whole separate app", leaning toward **native HTTP
+   routes** ("start there and we can migrate later"). The owner asks us
+   to check how frontend routes are handled today and to update docker
+   compose and vite configs as needed.
+   ➜ Requires rework of the step-4 UI mounting (see step 5) and a
+   clarifying question (open question 1). The owner said "I could be
+   convinced otherwise", so the exact mechanism is not fully pinned
+   down — the plan structurally avoids depending on the answer by
+   isolating all routing/config changes in one step.
+3. **Token staleness** (demoted admin keeps up-to-7-day working API
+   access) — accepted for now; revisit on a separate ticket. Matches the
+   implemented default. Do not do token re-issue work here; it must be
+   tracked as a GitHub issue when this ticket closes.
+4. **Self-demotion / protected owner account** — `formsatz@gmail.com`
+   cannot be demoted **at all** (email-based hard guard, regardless of
+   how many other admins exist). This is NOT implemented: the current
+   code only has the count-based "last admin" check.
+   ➜ Requires rework (see step 5).
+5. Permission-name handling — validate against a known in-app set (the
+   "ditto" reinforces formsatz@gmail.com handling). Matches what was
+   implemented (`KNOWN_PERMISSIONS`); no change needed.
+6. **Permission UI** — draw a dropdown/checkbox-style control for
+   permissions; do **not** enforce at the database level. The current
+   implementation uses a plain button toggle; visually adequate but the
+   owner asked for a dropdown/checkbox control.
+   ➜ Minor rework (see step 5), folded into the same UI pass.
 
 ## Decisions (with critique)
 
-- **Use the existing `role: 'admin'` + `requireRole` middleware** rather
-  than adding a separate `admin` entry to `permissions`. _Critique:_ the
-  issue literally says "a new **permission**: admin", so this is an
-  interpretation, not a settled requirement (see open question 1). It is
-  used because the codebase already treats `role` as the admin marker and
-  `permissions` as feature grants (`routing`); the change is cheap to
-  reverse — swapping the guard to a permissions check is a one-line edit
-  in one middleware, no route rework.
-- **No react-router.** The client is a single page with no routing; adding
-  the admin view as a conditional view in `App.tsx` mirrors the existing
-  login/chat switch. _Critique:_ without a URL, a refresh or shared link
-  always lands on chat, and deep-linking can never work. Acceptable for a
-  single-owner tool, but see open question 2.
-- **Model management is out of scope** — the issue explicitly defers it.
-- **No user deletion/disabling** — not mentioned in the issue, and
-  deletion touches dependent data (sessions) that this plan does not
-  cover. See open question 3.
+- **`role: 'admin'` + `requireRole` guard** — owner-confirmed (resolved
+  1). No doubt left; the fallback (guarding on
+  `permissions.includes('admin')`) is dead.
+- **Email-based protection for `formsatz@gmail.com`** — owner-confirmed
+  (resolved 4): demotion must be refused with 400 for that specific
+  email even if other admins exist. _Critique:_ hardcoding an email in
+  application code is brittle (what if the owner's identity provider
+  account changes?), and the protected account becomes a lynchpin: it
+  can only be re-sited by editing code. Accept for now because the
+  owner explicitly chose it; a config/env value instead of a literal
+  would be the cheap future escape hatch — but do not build that
+  without a request (only one admin exists).
+- **Count-based last-admin check stays alongside the email guard** —
+  the email guard is the owner's chosen blanket rule; the count check
+  still protects every other admin from demoting the last one. Keep
+  both. _Critique (accepted previously, still true):_ the check is
+  count-then-write, not atomic — two concurrent demotions could race;
+  with a single human owner this is a practical non-issue. A Mongo
+  partial-index scheme was considered and rejected.
+- **Admin view as "almost a separate app" at a real URL** —
+  owner-confirmed direction (resolved 2). _Critique:_ "native HTTP
+  routes" is ambiguous for this stack: the client is a Vite SPA whose
+  only express-served artifact is a single `index.html`
+  (`src/server/index.ts:41` serves `src/client/dist`; the live stack
+  serves the build through `vite preview`, per `src/client/Dockerfile`
+  and `vite.config.ts` `preview.allowedHosts`). Genuinely different
+  mechanisms exist — (a) a second Vite entry HTML (`/admin.html` →
+  `/admin`) rendered by the same react app, (b) a `/admin` route inside
+  the SPA via URL parsing + history API (no react-router dependency),
+  (c) an express-served server-rendered page. (a) and (b) are close
+  cousins (static, cookie-authenticated, `vite preview` compatible);
+  (c) is a real architectural departure. Only (a)/(b) fit "almost a
+  whole separate app" without replacing the deployment story; the swing
+  factor is answered in open question 1 and no later step depends on
+  which of (a)/(b) is chosen.
+- **Non-admin "panels around the chat view"** — owner mentioned these,
+  but nothing in this ticket defines what they are. Deliberately out of
+  scope (open question 2); this ticket's non-admin-visible change stays
+  the removal of the admin toggle button.
+- **No react-router dependency** — maintained: the client has no
+  router, and for approach (b) hand-rolled URL handling for two paths
+  is smaller than introducing a dependency. Revisit only if the admin
+  app grows nav of its own.
+- **Model management out of scope** — issue explicitly defers it.
+- **No user deletion/disabling** — not raised by the owner; deletion
+  touches dependent sessions data. If wanted, it belongs on its own
+  ticket, not a plan amendment.
+- **Token staleness accepted** — owner-confirmed (resolved 3). The
+  implemented behavior (API reads role from 7-day JWT; `/me` reflects
+  live DB role) is the end state for this ticket. Only follow-up is the
+  separate-ticket note in step 6.
 
 ## Steps
 
-Each step is scoped to a single reviewable commit. _Status: steps 1–5 are
-implemented and verified on this branch; step 6 is done up to and including
-`npm run ci` (hostile pass, all green)._
+Status is honest per step. Steps 1–3 + 7 (verification) are implemented
+and consistent with owner answers. Steps 4–5 are rework required by
+owner answers 2 and 4/6 that landed **after** the original
+implementation. Step 6-M remains a known bug found during this revison.
 
-- [ ] 1. Backend: create `src/server/routes/admin.ts` and mount it as
-      `app.use('/api/admin', adminRoutes)` in `src/server/index.ts` (after
-      the existing mounts, alongside `/api/auth` and `/api/chat`).
-      `GET /api/admin/users` returns `bcrypt`-free user projections:
-      `id`, `email`, `role`, `permissions`, `hasGoogle` (boolean,
-      `googleId != null`), `createdAt`, `updatedAt` — never `passwordHash`
-      nor raw `googleId`. Guard: `authenticate` then
-      `requireRole('admin')` (403 for non-admins, 401 without a cookie —
-      reuse `middleware/auth.ts` as-is).
-- [ ] 2. Backend: mutation endpoints in the same `admin.ts` file. - `PUT /api/admin/users/:id/permissions` — body must be a
-      `string[]` whose entries are all `routing` (the only permission
-      that exists today; reject unknown permission names with 400 so we
-      don't invent a grant vocabulary silently). Persist with
-      `User.findByIdAndUpdate(id, { permissions: value }, { new: true })`
-      and return the same projection as step 1. - `PUT /api/admin/users/:id/role` — body `{ role: 'user' | 'admin' }`;
-      before saving an admin→user change, check
-      `User.countDocuments({ role: 'admin' })`. If the target is an admin
-      and the count is 1, return 400 ("cannot demote the last admin").
-      Critique: this is a count-then-write check, not atomic — two
-      concurrent demotions could race. With a single human owner this is
-      a practical non-issue; do not build a Mongo partial-index scheme
-      (noted so a reviewer knows it was considered and rejected).
-      Important edge: an admin demoting _themselves_ passes this check
-      and is precisely the risky-ish case — it is also the existing
-      seeded admin, so resolve intended behavior (open question 5). - Guard both endpoints identically to step 1. Return 404 for
-      unknown user ids (validate before treating cast errors as 500s:
-      check the ObjectId shape or catch CastError).
-- [ ] 3. Backend: expose live role + permissions on `GET /api/auth/me`.
-      Today `/me` re-derives everything from the JWT, and role changes
-      made in step 2 would not be visible until token expiry (7 days).
-      Rewrite `/me` to look the user up in the DB (`User.findById`) and
-      return `{ id, email, role, permissions }`; 401 if the user has been
-      deleted. Keep `authenticate`/`requireRole` reading the _token_ role
-      for existing routes (data available is stale but cannot newly
-      escalate); the staleness window for admin access is flagged in
-      open question 4 rather than silently accepted.
-- [ ] 4. Frontend: create `src/client/src/components/AdminView.tsx` and
-      render it conditionally from `App.tsx` for `user.role === 'admin'`
-      with a small toggle/button (same conditional-render pattern as the
-      `user ? chat : Login` switch). Contents: user table (email, role,
-      `hasGoogle`, permission badges, timestamps), per-row actions to
-      grant/revoke `routing` and toggle admin. Data via `axios` using the
-      same `credentials`/cookie pattern the chat and session code already
-      uses (`axios` defaults already include cookies in this app). Show
-      API errors inline (e.g. 400 for last-admin protection). Note
-      `useAuth`'s user object comes from `/api/auth/me`, which step 3
-      upgrades — non-admins simply never see the toggle.
-- [ ] 5. Tests. - Server (Jest + supertest, pattern from
-      `src/server/routes/chat.permissions.test.ts` — mock what must be
-      mocked, real Mongo through the existing test Mongo setup used by
-      that suite): 401 unauthenticated, 403 non-admin on all three
-      endpoints; 200 list for admin with `passwordHash` absent;
-      permission body validation (unknown permission → 400, valid →
-      persisted); role toggle both directions; last-admin demotion →
-      400; unknown id → 404. - Client (Vitest, pattern from `src/client/src/App.test.tsx`): admin
-      menu/button hidden for `role === 'user'`, shown for
-      `role === 'admin'`; AdminView renders rows and calls the API on
-      toggle actions.
-- [ ] 6. Verify, ship, archive — `npm run lint`, `npm run typecheck`,
-      `npm test`, `npm --prefix src/client run lint`, client format check,
-      then `npm run ci` as the final gate. PR; after merge move the plan
-      doc to `docs/done/`.
+- [x] 1. Backend admin list API: `src/server/routes/admin.ts` serving
+      `GET /api/admin/users` with the bcrypt-free projection (`id`,
+      `email`, `role`, `permissions`, `hasGoogle`, `createdAt`,
+      `updatedAt`; never `passwordHash`/`googleId`), guarded by
+      `authenticate` + `requireRole('admin')`. Implemented.
+- [x] 2. Backend mutation endpoints in the same file:
+      `PUT /users/:id/permissions` (validated against
+      `KNOWN_PERMISSIONS = ['routing']`, unknown strings → 400; whole
+      array replaces) and `PUT /users/:id/role` with the
+      count-based "cannot demote the last admin" 400. ObjectId-shaped
+      bad ids map to 404 rather than CastError 500s. Implemented.
+- [x] 3. `GET /api/auth/me` rewritten to look the user up in the DB and
+      return live `{ id, email, role, permissions }`; 401 if deleted.
+      Implemented. (Note: this makes newly granted `role`/permissions
+      visible but does not fix `requireRole` reading the stale token —
+      owner-accepted, see resolved 3 / follow-up in step 6.)
+- [ ] 4. ⚠ Rework: **protected owner account (resolved 4)**. In
+      `src/server/routes/admin.ts`, before role demotion of any admin,
+      refuse with 400 when `user.email === 'formsatz@gmail.com'`
+      (blanket rule; the count-based last-admin check stays for all
+      other admins). Update `admin.test.ts`: (a) demoting
+      `formsatz@gmail.com` → 400 even when a second admin exists; (b)
+      demoting a second admin still allowed while formsatz remains
+      admin. Express the email as a module-level constant in
+      `admin.ts` (not inline in the route handler) so the future
+      config-ification is a one-line move.
+- [ ] 5. ⚠ Rework: **admin view mounting + permission control (resolved
+      2 and 6)**. Current state: in-app toggle in `App.tsx` +
+      `AdminView` with a button-based toggle per permission — both
+      diverge from owner answers. Concrete rework:
+      a. Replace the `showAdmin` toggle with URL-based mounting, per
+      open question 1 default (approach (b): no dependency, no
+      server change): in the admin app view, render
+      `<AdminView />` when `window.location.pathname.startsWith('/admin')`,
+      chat otherwise; admin toggle becomes a
+      `window.location.assign('/admin')` link, chat access becomes a
+      link back to `/`. Cleanup: while touching this, delete the
+      duplicated `<ChatWindow/>` render (`App.tsx:257-262`) — a
+      plausible copy-paste bug that also breaks the `main` layout
+      when admin view replaced one of the two panes.
+      b. Deployment check the owner explicitly asked for: the admin
+      view lives behind `/admin` **on the frontend server**, i.e.
+      `src/client/vite.config.ts` `preview` must allow the path to
+      fall back to `index.html` for `/admin` (SPA fallback is
+      default in vite preview; verify, don't assume — add an
+      `npm --prefix src/client run build && vite preview` smoke check
+      that `/admin` serves the app). Both compose files
+      (`docker-compose.live.yml` frontend, `docker-compose.local.yml`)
+      keep their current single frontend container; docker compose
+      only needs changes if verification shows the SPA fallback
+      breaks — note the finding either way in the PR.
+      c. Permission control in `AdminView.tsx`: a per-user checkbox
+      (single permission today → checkbox is the cheapest UI that
+      satisfies "drop-down or checkboxes") writing the full
+      permissions array via the existing PUT endpoint. Server-side
+      validation already rejects unknown strings (resolved 6); no
+      database-level enforcement (per owner).
+      d. Update client tests (`App.test.tsx`, AdminView tests) for the
+      URL mounting and checkbox control.
+- [ ] 6. Tests for step 4's email-protection behavior (in addition to
+      existing suites, which are green as of commit `72c3d5c`).
+- [ ] 7. Verify, ship, archive — run `npm run lint`, `npm run
+typecheck`, `npm test`,
+      `npm --prefix src/client run lint` + format check + tests, then
+      `npm run ci` as the final gate (re-run even though it was green
+      at `72c3d5c`, because steps 4–6 change code). Open/refresh the
+      PR with a note listing the owner-answer rework items; after
+      merge move this plan to `docs/done/`. Before closing, file the
+      follow-up GitHub ticket for token re-issue/staleness (resolved 3) so it does not get lost.
+
+## Known bugs in the current branch
+
+- `src/client/src/App.tsx:251-262`: `<ChatWindow />` is rendered twice
+  in the non-admin branch. Unintended (the plan's original step 4
+  rendered it once); fix as part of step 5a. Note: a fix here is expected
+  to keep existing client tests green — they were written against this
+  state and should be re-checked after the fix.
 
 ## Open questions
 
-No answers exist in the issue comments (the issue has none), so no
-question can be answered from the issue. Every blocker-free assumption
-above is explicitly critiqued in "Decisions". None of steps 1–6 depends
-on an unresolved question; each question only changes shape, not
-feasibility, and has a stated default.
+Verified state: the owner answered all six original questions in the
+issue comments (2026-09-11), so those are requirements above. Nothing in
+steps 4–7 depends on either remaining question; each has a default the
+plan proceeds with, and each touches only the shape of step 5.
 
-**Findings from the verification pass (new, 2026-09-11):**
-
-- The branch as inherited from the prior "implementation" commit contained
-  **no code at all** — only docs and a log file. All of steps 1–5 had to be
-  written from scratch in this pass.
-- The stale-JWT behavior flagged in open question 4 was confirmed by test:
-  `requireRole` reads the role from the token, so a newly promoted admin
-  must re-login (fresh JWT) before the admin API accepts them. Tests
-  encode this by re-logging in after promotion. A demoted admin keeps API
-  access until token expiry (up to 7 days) — worst case for a
-  single-owner tool, but owner sign-off is still wanted (question 4).
-- The `react-hooks/set-state-in-effect` rule fires on the standard
-  fetch-in-effect data loading pattern; suppressed with a per-line
-  eslint-disable, matching the existing pattern in `App.tsx`.
-
-1. **Role vs. permission semantics** — should `admin` be a
-   `permissions[]` entry instead of the existing `role`? The codebase
-   currently encodes admin in `role`. Default in this plan: `role`.
-   Fallback if owner insists: guard via `permissions.includes('admin')`.
-2. **URL-routed admin view?** (`/#admin`, react-router) vs. the planned
-   in-app toggle. Planned default: toggle; adding routing later is
-   non-breaking.
-3. **Should admins ever be deletable/disablable?** Not mentioned in the
-   issue; out of scope here regardless of answer (touches sessions
-   cascade).
-4. **Stale admin access window** — because `authenticate`/`requireRole`
-   read the 7-day JWT, a demoted admin keeps working API access up to
-   token expiry, and a promoted user needs a re-login (step 3 fixes
-   `/me` visibility but not `requireRole`). Is re-issuing/shortening
-   tokens required, or is this acceptable for a single-owner app?
-   Planned default: accept with `/me` reflecting live role.
-5. **Admin demoting themselves** — permitted by the current count-based
-   check as long as another admin remains; but today only one admin is
-   seeded, so self-demotion is refused until a second admin exists.
-   Confirm intended behavior; default: allow only when another admin
-   exists (covered by the count check).
-6. **Permission names beyond `routing`** — should step 2 accept arbitrary
-   permission strings (paying forward for future grants), or validate
-   against the known set? Planned default: reject unknown strings.
+1. **What does "native HTTP routes" concretely mean for the admin
+   view?** Read literally, an express-served server-rendered page
+   (approach (c) in Decisions) would be the most "native HTTP" reading,
+   but that departs from the SPA and forces deployment rework. The plan
+   defaults to approach (b) — real URLs (`/admin`, `/`) handled in the
+   SPA with hand-rolled routing, no react-router, no server change —
+   because it satisfies "separate app at a URL it can be reached at,
+   refreshable, deep-linkable" without a build-stack change. If the
+   owner wants a truly separate HTML entry (approach (a), Vite
+   multi-page), that is additive and cheap. If they meant server-side
+   rendering, that is a bigger ticket.
+2. **"Panels around the chat view for non-admins"** — what belongs in
+   these panels? Nothing in the issue body (one sentence) or this
+   ticket's scope defines them; the ticket's backend surface is
+   admin-guarded so nothing ships yet that would need them. The plan
+   excludes them. If they are meant to be shared-UI chrome (e.g. an
+   account info panel), they likely belong in a separate ticket too.
