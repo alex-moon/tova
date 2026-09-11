@@ -47,7 +47,9 @@ management, and (b) a frontend admin view rendered only for admin users.
 
 ## Steps
 
-Each step is scoped to a single reviewable commit.
+Each step is scoped to a single reviewable commit. _Status: steps 1–5 are
+implemented and verified on this branch; step 6 is done up to and including
+`npm run ci` (hostile pass, all green)._
 
 - [ ] 1. Backend: create `src/server/routes/admin.ts` and mount it as
       `app.use('/api/admin', adminRoutes)` in `src/server/index.ts` (after
@@ -119,6 +121,21 @@ question can be answered from the issue. Every blocker-free assumption
 above is explicitly critiqued in "Decisions". None of steps 1–6 depends
 on an unresolved question; each question only changes shape, not
 feasibility, and has a stated default.
+
+**Findings from the verification pass (new, 2026-09-11):**
+
+- The branch as inherited from the prior "implementation" commit contained
+  **no code at all** — only docs and a log file. All of steps 1–5 had to be
+  written from scratch in this pass.
+- The stale-JWT behavior flagged in open question 4 was confirmed by test:
+  `requireRole` reads the role from the token, so a newly promoted admin
+  must re-login (fresh JWT) before the admin API accepts them. Tests
+  encode this by re-logging in after promotion. A demoted admin keeps API
+  access until token expiry (up to 7 days) — worst case for a
+  single-owner tool, but owner sign-off is still wanted (question 4).
+- The `react-hooks/set-state-in-effect` rule fires on the standard
+  fetch-in-effect data loading pattern; suppressed with a per-line
+  eslint-disable, matching the existing pattern in `App.tsx`.
 
 1. **Role vs. permission semantics** — should `admin` be a
    `permissions[]` entry instead of the existing `role`? The codebase

@@ -176,8 +176,15 @@ router.get('/me', async (req, res) => {
   if (!token) return res.status(401).json({ message: 'Not authenticated' });
 
   try {
-    const decoded = jwt.verify(token, JWT_SECRET) as { id: string; email: string; role: string };
-    res.json({ user: { id: decoded.id, email: decoded.email, role: decoded.role } });
+    const decoded = jwt.verify(token, JWT_SECRET) as { id: string };
+    const user = await User.findById(decoded.id);
+    if (!user) {
+      res.clearCookie('token');
+      return res.status(401).json({ message: 'User no longer exists' });
+    }
+    res.json({
+      user: { id: user._id, email: user.email, role: user.role, permissions: user.permissions },
+    });
   } catch (_err) {
     res.status(401).json({ message: 'Invalid token' });
   }
