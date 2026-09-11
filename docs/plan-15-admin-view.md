@@ -27,8 +27,35 @@ permissions }` from the DB instead of re-deriving from the JWT.
 - Prior owner-decision context: `docs/plan-3-user-permissions.md` —
   admin seeded as `formsatz@gmail.com`, `role: 'admin'`,
   `permissions: ['routing']`.
-- `npm run ci` reported green in an earlier pass on this branch (commit
-  `72c3d5c`, 2026-09-11); re-verify before shipping.
+- `npm run ci` re-verified green on this branch in this pass (2026-09-11,
+  commit `7373686` pushed to origin): server 37 tests, client 12 tests,
+  lint/format/typecheck/build all clean. CI on PR #19 is also green
+  (`ci` + `ci-gate` SUCCESS) and all four pending-review threads from the
+  owner are addressed by that commit.
+- `docker-compose.live.yml` and `src/client/Dockerfile` still serve the
+  frontend via **vite preview** (`CMD ["npm", "run", "preview", ...]`);
+  no nginx/static-serving change exists anywhere on the branch.
+- `src/client/src/components/AdminView.tsx` contains **zero**
+  `className` attributes — no styling pass has happened.
+
+## Not-done directives (verified from repo state, 2026-09-11)
+
+The ticket is **not** finished. Three owner directives from the issue
+comments are not yet satisfied in code:
+
+1. **Static frontend / nginx in the live stack** — comment 7: "we're
+   currently using Vite Preview - this seems wrong for production
+   anyway - front-end should be static - if we need nginx for routing
+   that is fine by me! Add it to docker-compose.live.yml :)" Both
+   `src/client/Dockerfile` and `docker-compose.live.yml` are untouched.
+   ➜ New step 8.
+2. **Admin view styling, minimal** — comment (answer to styling
+   question): "it would be good to bring it into line stylistically
+   with the chat UI but don't go overboard on this, minimal is fine for
+   now. Ideally don't duplicate CSS :)" Not done at all.
+   ➜ New step 9.
+3. **Follow-up ticket for token staleness** — never filed (issue #20 is
+   the contracts ticket, not this). ➜ Orchestrator handoff in step 11b.
 
 ## Resolved owner decisions (from issue #15 comments, 2026-09-11)
 
@@ -105,7 +132,8 @@ does **not** yet satisfy:
   (c) is a real architectural departure. Only (a)/(b) fit "almost a
   whole separate app" without replacing the deployment story; the swing
   factor is answered in open question 1 and no later step depends on
-  which of (a)/(b) is chosen.
+  which of (a)/(b) is chosen; the owner confirmed (b) via answer 7
+  below.
 - **Non-admin "panels around the chat view"** — owner mentioned these,
   but nothing in this ticket defines what they are. Deliberately out of
   scope (open question 2); this ticket's non-admin-visible change stays
@@ -122,6 +150,23 @@ does **not** yet satisfy:
   implemented behavior (API reads role from 7-day JWT; `/me` reflects
   live DB role) is the end state for this ticket. Only follow-up is the
   separate-ticket note in step 6.
+
+## Resolved owner decisions, part 2 (later issue comments, 2026-09-11)
+
+7. **Route mechanism confirmed** — the owner accepted the reading that
+   the admin view mounts at a real URL (`/admin`) handled inside the
+   SPA (approach (b)). The same comment adds the static-frontend
+   directive implemented in step 8: vite preview "seems wrong for
+   production anyway", nginx is fine, add it to `docker-compose.live.yml`.
+8. **Non-admin deep-linking `/admin`** — owner: prefer "not authorized"
+   or a 3xx redirect back to `/` with an error growler, "but this can
+   be done against another ticket, the silent fallback is fine for
+   now" → step 11c files that ticket.
+9. **Admin view styling** — owner: bring it in line with the chat UI,
+   "minimal is fine for now. Ideally don't duplicate CSS" → step 9.
+10. **Non-admins should never see any routes generally** — the
+    principle under answer 8; the shipped `Admin` link is already
+    `role === 'admin'`-gated, consistent with this principle.
 
 ## Rectifications from the pending review on PR #19 (2026-09-11)
 
@@ -175,44 +220,77 @@ implementation.
       `src/server/routes/admin.ts` exports
       `PROTECTED_OWNER_EMAIL = 'formsatz@gmail.com'` as a module-level
       constant; the role route returns 400
-      "This account cannot be demoted" for that email before the
-      count-based last-admin check, which stays for all other admins.
-      Covered by two new tests: (a) demoting the owner → 400 even with a
-      second admin present, (b) demoting a second admin is still allowed
-      while the owner stays admin.
-- [x] 5. ⚠ Rework: **admin view mounting + permission control (resolved
-      2 and 6)**. DONE 2026-09-11 (approach (b), open question 1 default):
-      a. `App.tsx`: `showAdmin` state removed; exports
-      `isAdminRoute()` (`window.location.pathname.startsWith('/admin')`)
-      and renders `<AdminView />` plus a `Back to chat` link to `/`
-      when an admin is at `/admin`. The admin entry point is a
-      `<a href="/admin">Admin</a>` link (full page navigation, so no
-      popstate/router code is needed). A non-admin deep-linking
-      `/admin` falls back to the chat view (client-side only; the
-      API is already `requireRole('admin')`-guarded).
-      b. Deployment check the owner explicitly asked for: verified
-      empirically — `vite preview` serves `/admin` with HTTP 200 and
-      the app HTML (SPA fallback is default). No compose or vite
-      config change needed; noted in the PR.
-      c. Permission control in `AdminView.tsx`: per-user checkbox
-      (`data-testid="perm-routing-<email>"`) writing the full
-      permissions array via the existing PUT endpoint. Server-side
-      validation already rejects unknown strings (resolved 6); no
-      database-level enforcement (per owner).
-      d. Client tests updated: App tests now exercise `/admin` URL
-      mounting (admin sees AdminView + back link; non-admin falls
-      back to chat; non-admins/`/` hide the Admin link);
-      `AdminView.test.tsx` covers checkbox on→off and off→on array
-      replaces.
+      "This account cannot be demoted" for that email. The count-based
+      last-admin check originally kept here was REMOVED on the same day
+      per an additional directive review comment on PR #19 ("this
+      should just be formsatz@gmail.com" — see Rectifications §4); the
+      email guard is now the only demotion block.
+      Covered by two tests: (a) demoting the owner → 400, (b) demoting
+      a sole non-owner admin → 200.
+
+5. ⚠ Rework: **admin view mounting + permission control (resolved
+   2 and 6)**. DONE 2026-09-11 (approach (b), owner-confirmed via
+   resolved 7):
+   a. `App.tsx`: `showAdmin` state removed; exports
+   `isAdminRoute()` (`window.location.pathname.startsWith('/admin')`)
+   and renders `<AdminView />` plus a `Back to chat` link to `/`
+   when an admin is at `/admin`. The admin entry point is a
+   `<a href="/admin">Admin</a>` link (full page navigation, so no
+   popstate/router code is needed). A non-admin deep-linking
+   `/admin` falls back to the chat view (client-side only; the
+   API is already `requireRole('admin')`-guarded).
+   b. Deployment: `vite preview` empirically serves `/admin` with
+   HTTP 200 and the app HTML (SPA fallback is default), so
+   `/admin` works today. However the owner's separate directive
+   to retire vite preview in favour of a static/nginx frontend
+   (comment 7) was NOT part of that check and is unfinished
+   deployment work — see step 8.
+   c. Permission control in `AdminView.tsx`: per-user checkbox
+   (`data-testid="perm-routing-<email>"`) writing the full
+   permissions array via the existing PUT endpoint. Server-side
+   validation already rejects unknown strings (resolved 6); no
+   database-level enforcement (per owner).
+   d. Client tests updated: App tests now exercise `/admin` URL
+   mounting (admin sees AdminView + back link; non-admin falls
+   back to chat; non-admins/`/` hide the Admin link);
+   `AdminView.test.tsx` covers checkbox on→off and off→on array
+   replaces.
+
 - [x] 6. Tests for step 4's email-protection behavior (see step 4).
-- [x] 7. Verify — `npm run lint`, `typecheck`, `test`,
-      `npm --prefix src/client run lint`/format/`test`, and
-      `npm run ci` all green after this pass; format check clean.
-      Remaining in step 7 (for the orchestrator): open/refresh the PR
-      with a note listing the owner-answer rework items; after merge
-      move this plan to `docs/done/`. Before closing, file the
-      follow-up GitHub ticket for token re-issue/staleness (resolved 3)
-      so it does not get lost.
+- [ ] 8. ⚠ Outstanding: **static frontend in the live stack (owner
+      directive, comment 7)**. Replace vite preview as the production
+      frontend server:
+      a. Add a Vite build stage or a second Dockerfile stage that
+      produces `src/client/dist` and serves it with nginx
+      (`nginx` base image, config with `try_files $uri
+ /index.html;` for `/admin` SPA fallback).
+      b. Update `docker-compose.live.yml`: the `frontend` service uses
+      the nginx image and no longer runs vite; no new routing
+      behavior needed because the fallback covers `/admin`.
+      c. Verify `/` and `/admin` return 200 with the app HTML from the
+      nginx container. Concrete wiring detail (verified from code):
+      `src/client/src/services/admin.ts` calls same-origin
+      `/api/...` and auth is a cookie, so nginx must proxy the API
+      rather than the client reaching the backend on another port:
+      `location /api/ { proxy_pass http://backend:5000; }` in the
+      nginx config keeps it same-origin (this is also what
+      `vite.config.ts` warm-up dev proxy does today).
+- [ ] 9. ⚠ Outstanding: **minimal AdminView styling (owner directive)**.
+      Bring the table/checkbox/buttons in line with the chat UI's
+      design tokens; reuse existing CSS classes from the chat
+      components and do not duplicate CSS. Acceptance: visually
+      consistent with the chat view, no new CSS file.
+- [x] 10. Verify — `npm run ci` green on this pass (2026-09-11). Re-run
+      after steps 8–9 land.
+- [ ] 11. Orchestrator handoff (no code):
+      a. Update the stale PR #19 body — it still describes the removed
+      in-app toggle and the removed last-admin check.
+      b. File the follow-up GitHub ticket for token re-issue/staleness
+      (resolved 3) so it does not get lost.
+      c. File the follow-up ticket for a "not authorized" page or
+      redirect-with-growler at `/admin` for non-admins (see
+      resolved 8).
+      d. After merge, move this plan to `docs/done/`.
 
 ## Known bugs in the current branch
 
@@ -222,36 +300,20 @@ implementation.
 
 ## Open questions
 
-Verified state: the owner answered all six original questions in the
-issue comments (2026-09-11), so those are requirements above. Nothing in
-steps 4–7 depends on either remaining question; each has a default the
-plan proceeds with, and each touches only the shape of step 5.
+Verified state: the owner has answered every question previously listed
+here (original 1–6 above, plus the later 7–10 on the issue). The four
+items formerly open (route mechanism, non-admin panels, non-admin
+deep-linking, admin styling) are now resolved owner decisions above or
+concrete steps (9, 11c) that no longer depend on an answer.
 
-1. **What does "native HTTP routes" concretely mean for the admin
-   view?** Read literally, an express-served server-rendered page
-   (approach (c) in Decisions) would be the most "native HTTP" reading,
-   but that departs from the SPA and forces deployment rework. The plan
-   defaults to approach (b) — real URLs (`/admin`, `/`) handled in the
-   SPA with hand-rolled routing, no react-router, no server change —
-   because it satisfies "separate app at a URL it can be reached at,
-   refreshable, deep-linkable" without a build-stack change. If the
-   owner wants a truly separate HTML entry (approach (a), Vite
-   multi-page), that is additive and cheap. If they meant server-side
-   rendering, that is a bigger ticket.
-2. **"Panels around the chat view for non-admins"** — what belongs in
-   these panels? Nothing in the issue body (one sentence) or this
-   ticket's scope defines them; the ticket's backend surface is
-   admin-guarded so nothing ships yet that would need them. The plan
-   excludes them. If they are meant to be shared-UI chrome (e.g. an
-   account info panel), they likely belong in a separate ticket too.
-3. **Non-admin at `/admin` gets the chat view silently.** With approach
-   (b), deep-linking `/admin` as a non-admin silently renders the chat
-   app (the admin API itself is still `requireRole('admin')`-guarded).
-   Alternative: an explicit "not authorized" page. Default in the
-   shipped code: silent fallback to chat. If a redirect/explicit denial
-   is preferred, it is a few lines in `App.tsx`.
-4. **Admin view styling.** `AdminView.tsx` is functional but bare
-   (table, checkbox, buttons, unstyled) relative to the chat UI's
-   design tokens. The owner called it "almost a whole separate app";
-   whether it deserves a full visual pass is out of scope for this
-   ticket's rework and is tracked here as a styling follow-up.
+1. **NEW — static-frontend topology for `/api` behind nginx (feeds step
+   8).** The owner approved nginx ("if we need nginx for routing that
+   is fine by me"), but did not specify the container topology. Two
+   credible designs: (a) nginx as the single front door on port 4173
+   serving static files and proxying `/api/` to the backend service
+   (cookie auth stays same-origin; the `frontend:15173` port exposure
+   ends up replaced); (b) a second nginx that only proxies, leaving the
+   express app direct. (a) is the standard pattern and the plan's
+   default; it changes the live top-level port mapping, which is why
+   this is worth one confirmation before it ships. No other step
+   depends on the answer.
