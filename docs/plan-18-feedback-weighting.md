@@ -243,7 +243,7 @@ are hardening + documented behavior, and CI was re-run green after them
   turns pass no band; previously every classifier-path chat turn issued
   two `ModelMetricStat.findOne` queries anyway. Now returns neutral
   immediately.
-- **Documented edge (test):** an empty rival cell (neutral 1.0) *can* flip
+- **Documented edge (test):** an empty rival cell (neutral 1.0) _can_ flip
   routing when the chosen cell has ≥ MIN_SAMPLE tallies and a strongly
   negative ratio (e.g. 0↑/5↓ → weight 0.143, rival 0 data → 1.0).
   Deliberate "rival can't be worse" semantics; pinned by a unit test and
