@@ -59,6 +59,22 @@ describe('Chat route routing metadata', () => {
     const saved = await Message.exists({ role: 'assistant', modelName: 'mock-small-model' });
     expect(saved).toBeTruthy();
   });
+
+  it('persists a routingBand captured from the user turn on the assistant message', async () => {
+    const app = createApp();
+    const cookies = await registerUser(app, 'band-meta-1@example.com');
+
+    const response = await request(app)
+      .post('/api/chat')
+      .set('Cookie', Array.isArray(cookies) ? cookies : [cookies])
+      .send({ content: 'Hello there' });
+
+    expect(response.status).toBe(200);
+    const assistantMessage = await Message.findOne({ role: 'assistant' });
+    // "Hello there" is a short prose prompt → short|prose band
+    expect(assistantMessage?.routingBand).toBe('short|prose');
+    expect(assistantMessage?.feedback).toMatchObject({ value: null, updatedAt: null });
+  });
 });
 
 const CLASSIFIER_REPLY =
@@ -114,6 +130,8 @@ describe('Chat route prompt metrics', () => {
     expect(assistantMessage?.metrics).toMatchObject({
       sessionMessageIndex: 1,
     });
+    // Code-fenced user prompts get the code band, deterministically
+    expect(assistantMessage?.routingBand).toBe('short|prose');
 
     await flush();
     const updated = await Message.findOne({ role: 'user' });

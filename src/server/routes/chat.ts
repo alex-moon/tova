@@ -13,6 +13,20 @@ const router = express.Router();
 
 const NO_ROUTING_PERMISSION = "You don't have permission to use the model router.";
 
+// Feedback aggregation key (issue #18): deterministic prompt features of the
+// user turn, captured at route time — not LLM flags, which are classified
+// fire-and-forget only after routing (plan decisions 4 and 6, Q2).
+const buildRoutingBand = (
+  metrics:
+    | {
+        lengthBucket?: 'short' | 'medium' | 'long' | null;
+        codeIndicators?: { fences?: number | null } | null;
+      }
+    | null
+    | undefined,
+): string =>
+  `${metrics?.lengthBucket ?? 'unknown'}|${(metrics?.codeIndicators?.fences ?? 0) > 0 ? 'code' : 'prose'}`;
+
 // Session indices count only prior messages (computed before .save()), so a
 // session's first message gets index 0. Count-based indices are racy under
 // concurrent turns in one session; accepted in the plan
@@ -91,7 +105,7 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
       session = await createSessionWithUser(userId as string, content);
     }
     // Save user message
-    await saveUserMessageWithMetrics(String(session._id), content);
+    const userMessage = await saveUserMessageWithMetrics(String(session._id), content);
 
     // Determine model
     const routingResult = await routeQuery(content);
@@ -121,6 +135,7 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
       role: 'assistant',
       content: assistantContent,
       modelName: routingResult.model,
+      routingBand: buildRoutingBand(userMessage.metrics),
       metrics: await buildMessageMetrics(String(session._id), assistantContent),
     });
     await assistantMessage.save();
@@ -161,7 +176,7 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
     }
 
     // Save user message
-    await saveUserMessageWithMetrics(String(session._id), content);
+    const userMessage = await saveUserMessageWithMetrics(String(session._id), content);
 
     // Determine model
     const routingResult = await routeQuery(content);
@@ -223,6 +238,7 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
       role: 'assistant',
       content: assistantContent,
       modelName: routingResult.model,
+      routingBand: buildRoutingBand(userMessage.metrics),
       metrics: await buildMessageMetrics(String(session._id), assistantContent),
     });
     await assistantMessage.save();

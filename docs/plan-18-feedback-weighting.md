@@ -152,8 +152,8 @@ deletedAt: null }` in `Session` (403 foreign session, 404 unknown
 
 Each item is a self-contained commit; none _starts_ on an open question.
 
-- [ ] 1. **Schema** — add to `Message`: `feedback: { value: {
-     type: String, enum: ['up','down'] }, updatedAt: { type: Date } }`
+- [x] 1. **Schema** — add to `Message`: `feedback: { value: {
+   type: String, enum: ['up','down'] }, updatedAt: { type: Date } }`
       and `routingBand: { type: String }` (both sparse-optional; no
       migration needed for existing documents). In `chat.ts` (both
       endpoints), compute `routingBand` at route time from the user
@@ -162,17 +162,17 @@ Each item is a self-contained commit; none _starts_ on an open question.
       Test via the existing
       chat integration tests: assistant message carries
       `routingBand` after POST `/` and `/stream`, `feedback` is null.
-- [ ] 2. **Stats service** — new `src/server/services/modelMetricsStatsService.ts`
+- [x] 2. **Stats service** — new `src/server/services/modelMetricsStatsService.ts`
       with `recordFeedback(band, modelName, value, prevValue?)` and
       `getFitWeight(band, modelName)` returning `{ weight, ups, downs }`.
       Word on the contract: upsert `.findOneAndUpdate` of a unique
       `(band, modelName)` doc, `$inc` counters adjusted by the
       correction delta (decision 2). `getFitWeight` must be total: on
       read error or below MIN_SAMPLE (5) returns `{ weight: 1.0, ups: 0,
-     downs: 0 }`; weight = `(ups + 1) / (ups + downs + 2)` — a
+   downs: 0 }`; weight = `(ups + 1) / (ups + downs + 2)` — a
       Laplace-smoothed ratio so a brand-new band with 1↑/0↓ cannot
       immediately max out the weight.
-- [ ] 3. **Feedback route** — `POST /api/messages/:messageId/feedback`
+- [x] 3. **Feedback route** — `POST /api/messages/:messageId/feedback`
       (`routes/feedback.ts`, mounted next to chat in the app's router
       list) with `authenticate`; body validation (400 on missing /
       non-`up|down` value); authorization via the message's session
@@ -187,7 +187,7 @@ Each item is a self-contained commit; none _starts_ on an open question.
       `routeQuery(query, config?, deps?)` where `deps.stats` reads
       `{ weight, ups, downs }` and `deps.now()`. On the classifier
       tiebreak path, fetch weights for `(band, smallModel)` and `(band,
-     largeModel)`; flip the choice when the winner-vs-runner-up weight
+   largeModel)`; flip the choice when the winner-vs-runner-up weight
       ratio exceeds `FEEDBACK_FLIP_RATIO = 1.25` (a constant, not a
       tunable, in v1); append `;feedback-weight:<w>:<ups>/<downs>` to
       `reason`. Unit tests in `routerService.test.ts` (stubbed deps,
