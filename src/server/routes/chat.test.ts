@@ -3,16 +3,14 @@ import { createApp } from '../index';
 import { Message } from '../models/Message';
 import { User } from '../models/User';
 
-const mockCreate = jest.fn();
+const mockGenerate = jest.fn();
 
-jest.mock('groq-sdk', () => {
-  return jest.fn().mockImplementation(() => ({
-    chat: {
-      completions: {
-        create: (...args: unknown[]) => mockCreate(...args),
-      },
-    },
-  }));
+jest.mock('@mastra/core/agent', () => {
+  return {
+    Agent: jest.fn().mockImplementation(() => ({
+      generate: (...args: unknown[]) => mockGenerate(...args),
+    })),
+  };
 });
 
 const mockRouteQuery = jest.fn();
@@ -37,8 +35,8 @@ const registerUser = async (app: ReturnType<typeof createApp>, email: string) =>
 
 describe('Chat route routing metadata', () => {
   beforeEach(() => {
-    mockCreate.mockReset().mockResolvedValue({
-      choices: [{ message: { content: 'e2e-ok' } }],
+    mockGenerate.mockReset().mockResolvedValue({
+      text: 'e2e-ok',
     });
     mockRouteQuery.mockReset().mockResolvedValue(MOCK_ROUTING);
   });
@@ -77,20 +75,18 @@ const flush = async () => {
 describe('Chat route prompt metrics', () => {
   beforeEach(() => {
     mockRouteQuery.mockReset().mockResolvedValue(MOCK_ROUTING);
-    mockCreate.mockReset().mockResolvedValue({
-      choices: [{ message: { content: 'e2e-ok' } }],
+    mockGenerate.mockReset().mockResolvedValue({
+      text: 'e2e-ok',
     });
   });
 
   it('persists deterministic metrics for both turns and the LLM classification for the user turn', async () => {
-    mockCreate.mockImplementation(
-      async (args?: { messages?: { role: string; content: string }[] }) => {
-        if (isClassifierCall(args)) {
-          return { choices: [{ message: { content: `\`\`\`json\n${CLASSIFIER_REPLY}\n\`\`\`` } }] };
-        }
-        return { choices: [{ message: { content: 'e2e-ok' } }] };
-      },
-    );
+    mockGenerate.mockImplementation(async (messages?: { role: string; content: string }[]) => {
+      if (isClassifierCall({ messages })) {
+        return { text: `\`\`\`json\n${CLASSIFIER_REPLY}\n\`\`\`` };
+      }
+      return { text: 'e2e-ok' };
+    });
 
     const app = createApp();
     const cookies = await registerUser(app, 'metrics-happy@example.com');
@@ -136,14 +132,12 @@ describe('Chat route prompt metrics', () => {
   });
 
   it('keeps the chat response intact with null LLM flags when classification fails', async () => {
-    mockCreate.mockImplementation(
-      async (args?: { messages?: { role: string; content: string }[] }) => {
-        if (isClassifierCall(args)) {
-          throw new Error('groq down');
-        }
-        return { choices: [{ message: { content: 'e2e-ok' } }] };
-      },
-    );
+    mockGenerate.mockImplementation(async (messages?: { role: string; content: string }[]) => {
+      if (isClassifierCall({ messages })) {
+        throw new Error('groq down');
+      }
+      return { text: 'e2e-ok' };
+    });
 
     const app = createApp();
     const cookies = await registerUser(app, 'metrics-fail@example.com');
@@ -178,7 +172,7 @@ describe('Chat route prompt metrics', () => {
 
     expect(response.status).toBe(200);
     await flush();
-    expect(isClassifierCall(mockCreate.mock.calls[0]?.[0])).toBe(false);
+    expect(isClassifierCall({ messages: mockGenerate.mock.calls[0]?.[0] })).toBe(false);
     const userMessage = await Message.findOne({ role: 'user' });
     expect(userMessage?.metrics?.llm).toMatchObject({
       emotional: null,

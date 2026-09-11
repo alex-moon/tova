@@ -114,62 +114,12 @@ Concrete, individually commit-safe steps:
    DeepInfra guard model should exist is part of D._
 3. **Define neutral result/chunk types (prerequisite, no Mastra import
    yet).** — _shipped (see critic note below)._
-   - Add `NeutralCompletion` (fields actually consumed:
-     `message.content`) and `NeutralChunkStream` =
-     `AsyncIterable<{ delta?: string | null }>` as exported types from
-     `inferenceService` (or a sibling `llmTypes.ts` to avoid a cycle).
-   - Validate that narrowing the streaming type to delta-only does not
-     hide behaviour `routes/chat.ts` needs. Verified above: it only
-     touches `choices[0]?.delta?.content`. The spike has since answered
-     the adjacent worry: Mastra emits lifecycle chunks
-     (`start`/`step-start`/`finish`) and plain `text-delta` chunks, with
-     no "thinking"/annotation delta type observed against the mock
-     provider — task 5's real-provider smoke should watch for reasoning
-     deltas from reasoning-capable models before assuming that holds
-     universally.
-   - Move `LlmConnector` to the neutral types. `groq-sdk` types are dropped
-     from the public interface in this step even before Mastra lands, so
-     callers cannot accidentally depend on provider shapes. This step is
-     _not_ gated by any open question.
 4. ~~**Feasibility spike: pin Mastra packages (research, no app code).** —
    _shipped; results recorded in "Resolved questions (from the task-4
    spike)" below and posted to issue #4. Tasks 5–6 are unblocked._~~
-5. **Centralised Mastra service + two provider classes.**
-   - Spike-informed details (no longer assumptions): no
-     `@mastra/groq`/`@mastra/deepinfra` packages exist — the model router
-     bundled in `@mastra/core` v1 ships both (`groq/<model>`,
-     `deepinfra/<model>` ids, or the explicit OpenAI-compatible object
-     `{ providerId, modelId, url?, apiKey? }`). @mastra/core@1.66.0 ships
-     dual ESM/CJS builds, so the jest/ts-jest CJS pipeline is expected to
-     load the package untouched (still verify once in an actual jest
-     worker — see open question I-residual). `DEEPINFRA_API_KEY` is the
-     env name the bundled `createDeepInfra` reads, matching the plan.
-   - New `src/server/services/mastraService.ts` owning all `@mastra/*`
-     imports and all provider construction (`GROQ_API_KEY`,
-     `DEEPINFRA_API_KEY`).
-   - Real-provider smoke (queued here by the spike, only possible with
-     local keys): one streamed + one blocking call per provider with real
-     Groq/DeepInfra endpoints. This answers the retry-behaviour concern
-     (open question J) empirically before the suite leans on it.
-   - `GroqProvider` / `DeepInfraProvider` as thin adapters exposing
-     `createCompletion` / `createStreamingCompletion` over the neutral
-     types; Mastra `fullStream` `text-delta` chunks (`.delta`) onto
-     `{ delta }` inside the central service only; filter out
-     lifecycle chunks (`start`/`step-start`/`text-start`/`text-end`/
-     `step-finish`/`finish`) — the SSE contract is untouched.
-   - Wire `inferenceService` to dispatch on `options.provider` (the
-     `CompletionOptions` grows an optional `provider` field, defaulting to
-     `groq`, so un-tagged callers stay on Groq until task 8 flips them).
-     Delete the module-level hard-wired `connector`
-     (inferenceService.ts:35) only after dispatch is in.
-   - Migration order inside this task, each independently green:
-     1. groq path only (pure transport swap, zero config work).
-     2. deepinfra path added but unused by routing.
-   - `chat.stream.test.ts`'s module-level `groq-sdk` mock (see verified
-     facts) will stop intercepting once the import moves into
-     `mastraService`; that test file may need its mock retargeted to the
-     new module boundary in the same commit. Do not leave a suite red
-     between commits.
+
+5. ~~**Centralised Mastra service + two provider classes.** — _shipped (see
+   the task-5 note below)._
 6. **Reroute callers through DB config (blocking paths only).**
    - `routes/chat.ts` builds `CompletionOptions` with
      `provider: routingResult.provider` once the router returns a
@@ -290,6 +240,59 @@ No in-flight task assumes an answer to any unresolved item:
   fallback — a DI seam so tests mock the central service without loading
   `@mastra/core` — is a decision task 5 makes deliberately if the
   require-path check fails there, not by accident in task 10.
+
+### Task-5 implementation note (shipped on this branch)
+
+What landed:
+
+- `@mastra/core@1.66.0` added to `dependencies` (dual ESM/CJS build confirmed;
+  runtime loads under tsx/Node 22 — `boot-ok` check passed).
+- `src/server/services/mastraService.ts` — the single owner of all
+  `@mastra/*` imports and provider construction. Exports `groqConnector` /
+  `deepinfraConnector` (`LlmConnector`); both aim a per-call `Agent` at the
+  bundled-router id `groq/<model>` / `deepinfra/<model>` and normalise
+  `agent.generate` (`{ text }`) / `agent.stream().fullStream`
+  (`text-delta → { delta }`, lifecycle chunks filtered) to the neutral
+  types. `maxSteps` hard-capped at 1 so a plain completion cannot loop;
+  `max_tokens` maps to `maxOutputTokens` inside `modelSettings`.
+- `inferenceService` now dispatches on `options.provider`
+  (`CompletionOptions.provider?: 'groq' | 'deepinfra'`, default `groq`);
+  the `groq-sdk` module-level import is gone entirely. Un-tagged callers
+  (guard classifier, title, metrics) still land on Groq, so only routing
+  work (task 6/8) can flip them.
+- Test mocks retargeted in the same change: all `groq-sdk` module mocks
+  (route + service tests) now mock `@mastra/core/agent`, keeping the real
+  Mastra→neutral mapping under test end-to-end; new `mastraService.test.ts`
+  pins the mapping (text-delta/lifecycle filtering, defensive missing-delta,
+  router-id construction for both providers, error propagation);
+  `inferenceService.test.ts` pins provider dispatch (incl. the default).
+- `npm run ci` fully green after this task (131 checks incl. client build).
+
+Open-question resolutions from this task:
+
+- **I-residual resolved — jest transform:** `@mastra/core`'s CJS build does
+  NOT load inside a jest worker: its transitive dep `@sindresorhus/slugify`
+  is ESM-only and ts-jest in CJS mode cannot `require` it. Decision taken
+  deliberately per plan: jest config maps
+  `'@mastra/core/agent' → src/server/test/mastraAgentStub.ts`
+  (a stressy stub whose `Agent` throws if ever constructed), and every suite
+  needing agent behaviour replaces the module wholesale via
+  `jest.mock('@mastra/core/agent', ...)` — so the real Mastra machinery is
+  never loaded in Jest, but the mapping boundary in `mastraService` (the
+  part this ticket owns) is fully unit-pinned. Production/runtime under tsx
+  loads the real package fine (verified with a boot check).
+- **H-residual (real-provider smoke): NOT done** — no provider keys in this
+  environment; the empirical retry/duplicate-delta question stays open and
+  is carried into task 6's smoke step verbatim. The mock test suite does not
+  lean on unverified retry behaviour.
+- Guard model note surfaced by the wiring: an un-tagged `ROUTER_GUARD_MODEL`
+  default (`allam-2-7b`) now routes as `groq/allam-2-7b` — the Mastra router
+  form requires a provider prefix. Whether `allam-2-7b` is a Groq-hosted
+  model at all remains part of open question D (tasks before 8 are not
+  affected: existing routes/tests keep using mocked routing).
+
+Remaining open questions: D, E, F, G (unchanged; tasks 6, 9, 10 do not
+depend on them).
 
 ### Critic-pass revision (after first deliverable on this branch)
 

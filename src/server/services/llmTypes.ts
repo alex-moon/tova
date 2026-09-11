@@ -6,7 +6,15 @@
  * central service only.
  */
 
+/*
+ * Provider toggle carried on options; un-tagged callers default to `groq`
+ * (see `inferenceService`). DeepInfra callers get tagged during routing
+ * work in #4.
+ */
+export type LlmProvider = 'groq' | 'deepinfra';
+
 export interface CompletionOptions {
+  provider?: LlmProvider;
   model: string;
   messages: { role: 'system' | 'user' | 'assistant'; content: string }[];
   temperature?: number;

@@ -1,134 +1,87 @@
 import { inferenceService } from './inferenceService';
 
 /*
- * Tests the Groq→neutral mapping boundary directly. The route-level tests
- * (chat.test.ts / chat.stream.test.ts) mock `groq-sdk` and exercise the full
- * consume path, but the mapping failures that would silently change call-site
- * behaviour (missing choices, missing message, null deltas) are pinned here.
+ * Tests the provider dispatch in the delegating service. The connectors now
+ * live in `mastraService` (the single `@mastra/*` boundary, whose mapping is
+ * pinned in `mastraService.test.ts`); this suite pins that options dispatch
+ * to the right connector and that un-tagged callers default to `groq`.
  */
 
-const mockCreate = jest.fn();
+const mockGroqCompletion = jest.fn();
+const mockGroqStream = jest.fn();
+const mockDeepinfraCompletion = jest.fn();
+const mockDeepinfraStream = jest.fn();
 
-jest.mock('groq-sdk', () => {
-  return jest.fn().mockImplementation(() => ({
-    chat: {
-      completions: {
-        create: (...args: unknown[]) => mockCreate(...args),
-      },
-    },
-  }));
-});
+jest.mock('./mastraService', () => ({
+  groqConnector: {
+    createCompletion: (...args: unknown[]) => mockGroqCompletion(...args),
+    createStreamingCompletion: (...args: unknown[]) => mockGroqStream(...args),
+  },
+  deepinfraConnector: {
+    createCompletion: (...args: unknown[]) => mockDeepinfraCompletion(...args),
+    createStreamingCompletion: (...args: unknown[]) => mockDeepinfraStream(...args),
+  },
+}));
 
-describe('Inference Service neutral mapping', () => {
+describe('Inference Service provider dispatch', () => {
   beforeEach(() => {
-    mockCreate.mockReset();
+    mockGroqCompletion.mockReset();
+    mockGroqStream.mockReset();
+    mockDeepinfraCompletion.mockReset();
+    mockDeepinfraStream.mockReset();
   });
 
-  describe('createCompletion (blocking mapping)', () => {
-    it('maps a full Groq response to the neutral shape', async () => {
-      mockCreate.mockResolvedValueOnce({
-        choices: [{ message: { role: 'assistant', content: 'hello' } }],
-      });
-      const completion = await inferenceService.createCompletion({ model: 'x', messages: [] });
-      expect(completion).toEqual({ choices: [{ message: { content: 'hello' } }] });
-    });
-
-    it('is defensive when the response has no choices', async () => {
-      mockCreate.mockResolvedValueOnce({ id: 'oops' });
-      const completion = await inferenceService.createCompletion({ model: 'x', messages: [] });
-      expect(completion).toEqual({ choices: [] });
-      expect(completion.choices[0]?.message?.content).toBeUndefined();
-    });
-
-    it('preserves null content and skips undefined messages', async () => {
-      mockCreate.mockResolvedValueOnce({
-        choices: [{ message: { content: null } }, {}, { message: { content: 'keep' } }],
-      });
-      const completion = await inferenceService.createCompletion({ model: 'x', messages: [] });
-      expect(completion.choices[0]?.message?.content).toBeNull();
-      expect(completion.choices[1]?.message?.content).toBeNull();
-      expect(completion.choices[2]?.message?.content).toBe('keep');
-    });
-
-    it('tolerates a null response by returning empty choices', async () => {
-      mockCreate.mockResolvedValueOnce(null);
-      const completion = await inferenceService.createCompletion({ model: 'x', messages: [] });
-      expect(completion).toEqual({ choices: [] });
-    });
-
-    it('propagates transport errors to callers', async () => {
-      mockCreate.mockRejectedValueOnce(new Error('boom'));
-      await expect(inferenceService.createCompletion({ model: 'x', messages: [] })).rejects.toThrow(
-        'boom',
-      );
-    });
+  it('defaults un-tagged calls to the groq connector', async () => {
+    mockGroqCompletion.mockResolvedValueOnce({ choices: [] });
+    await inferenceService.createCompletion({ model: 'x', messages: [] });
+    expect(mockGroqCompletion).toHaveBeenCalledWith({ model: 'x', messages: [] });
+    expect(mockDeepinfraCompletion).not.toHaveBeenCalled();
   });
 
-  describe('createStreamingCompletion (delta mapping)', () => {
-    const streamFrom = (chunks: unknown[]) =>
-      (async function* () {
-        for (const chunk of chunks) yield chunk;
-      })();
-
-    it('maps a normal content chunk to { delta: <text> }', async () => {
-      mockCreate.mockResolvedValueOnce(streamFrom([{ choices: [{ delta: { content: 'hi' } }] }]));
-      const stream = await inferenceService.createStreamingCompletion({ model: 'x', messages: [] });
-      const chunks: Array<{ delta?: string | null }> = [];
-      for await (const chunk of stream) chunks.push(chunk);
-      expect(chunks).toEqual([{ delta: 'hi' }]);
-    });
-
-    it('maps malformed chunks (missing choices/delta) to { delta: null } instead of throwing', async () => {
-      mockCreate.mockResolvedValueOnce(
-        streamFrom([{ empty: true }, { choices: [] }, { choices: [{}] }]),
-      );
-      const stream = await inferenceService.createStreamingCompletion({ model: 'x', messages: [] });
-      const chunks: Array<{ delta?: string | null }> = [];
-      for await (const chunk of stream) chunks.push(chunk);
-      expect(chunks).toEqual([{ delta: null }, { delta: null }, { delta: null }]);
-    });
-
-    it('maps an empty-string final delta through unchanged (consumer skips falsy deltas)', async () => {
-      mockCreate.mockResolvedValueOnce(streamFrom([{ choices: [{ delta: { content: '' } }] }]));
-      const stream = await inferenceService.createStreamingCompletion({ model: 'x', messages: [] });
-      const chunks: Array<{ delta?: string | null }> = [];
-      for await (const chunk of stream) chunks.push(chunk);
-      expect(chunks).toEqual([{ delta: '' }]);
-    });
-
-    it('propagates mid-stream transport errors via the async iterator', async () => {
-      mockCreate.mockResolvedValueOnce(
-        (async function* () {
-          yield { choices: [{ delta: { content: 'a' } }] };
-          throw new Error('stream died');
-        })(),
-      );
-      const stream = await inferenceService.createStreamingCompletion({ model: 'x', messages: [] });
-      const chunks: Array<{ delta?: string | null }> = [];
-      await expect(async () => {
-        for await (const chunk of stream) chunks.push(chunk);
-      }).rejects.toThrow('stream died');
-      expect(chunks).toEqual([{ delta: 'a' }]);
-    });
+  it('dispatches streaming defaults to groq as well', async () => {
+    mockGroqStream.mockResolvedValueOnce((async function* () {})());
+    await inferenceService.createStreamingCompletion({ model: 'x', messages: [] });
+    expect(mockGroqStream).toHaveBeenCalledWith({ model: 'x', messages: [] });
+    expect(mockDeepinfraStream).not.toHaveBeenCalled();
   });
 
-  describe('options passthrough', () => {
-    it('forwards model, temperature and max_tokens, stream flag owned by the call', async () => {
-      mockCreate.mockResolvedValueOnce({ choices: [] });
-      await inferenceService.createCompletion({
-        model: 'm',
-        messages: [{ role: 'user', content: 'q' }],
-        temperature: 0,
-        max_tokens: 10,
-      });
-      expect(mockCreate).toHaveBeenCalledWith(
-        expect.objectContaining({
-          model: 'm',
-          temperature: 0,
-          max_tokens: 10,
-          stream: false,
-        }),
-      );
+  it('dispatches provider deepinfra to the deepinfra connector', async () => {
+    mockDeepinfraCompletion.mockResolvedValueOnce({ choices: [] });
+    await inferenceService.createCompletion({
+      provider: 'deepinfra',
+      model: 'x',
+      messages: [],
     });
+    expect(mockDeepinfraCompletion).toHaveBeenCalledWith({
+      provider: 'deepinfra',
+      model: 'x',
+      messages: [],
+    });
+    expect(mockGroqCompletion).not.toHaveBeenCalled();
+  });
+
+  it('dispatches streaming provider deepinfra to the deepinfra connector', async () => {
+    mockDeepinfraStream.mockResolvedValueOnce((async function* () {})());
+    await inferenceService.createStreamingCompletion({
+      provider: 'deepinfra',
+      model: 'x',
+      messages: [],
+    });
+    expect(mockDeepinfraStream).toHaveBeenCalledWith({
+      provider: 'deepinfra',
+      model: 'x',
+      messages: [],
+    });
+    expect(mockGroqStream).not.toHaveBeenCalled();
+  });
+
+  it('returns the connector result unchanged (no re-shaping of neutral types)', async () => {
+    const neutral = {
+      choices: [{ message: { content: 'ok' } }],
+    };
+    mockGroqCompletion.mockResolvedValueOnce(neutral);
+    await expect(inferenceService.createCompletion({ model: 'x', messages: [] })).resolves.toBe(
+      neutral,
+    );
   });
 });

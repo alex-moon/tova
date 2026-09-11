@@ -8,17 +8,15 @@ const TEST_CONFIG = {
 
 const routeQueryWithCfg = (query: string) => routeQuery(query, TEST_CONFIG);
 
-const mockCreate = jest.fn();
+const mockGenerate = jest.fn();
 
-jest.mock('groq-sdk', () => {
-  return jest.fn().mockImplementation(() => ({
-    chat: {
-      completions: {
-        create: (...args: unknown[]) => mockCreate(...args),
-      },
-    },
-  }));
-});
+jest.mock('@mastra/core/agent', () => ({
+  Agent: jest.fn().mockImplementation(() => ({
+    generate: (...args: unknown[]) => mockGenerate(...args),
+  })),
+}));
+
+const mockAgentCtor = jest.requireMock('@mastra/core/agent').Agent as jest.Mock;
 
 type Routing = Awaited<ReturnType<typeof routeQuery>>;
 
@@ -27,13 +25,11 @@ type Routing = Awaited<ReturnType<typeof routeQuery>>;
 const consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
 
 const classifyAs = (content: string, error = false) => {
-  mockCreate.mockReset();
+  mockGenerate.mockReset();
   if (error) {
-    mockCreate.mockRejectedValueOnce(new Error('classifier down'));
+    mockGenerate.mockRejectedValueOnce(new Error('classifier down'));
   } else {
-    mockCreate.mockResolvedValueOnce({
-      choices: [{ message: { content } }],
-    });
+    mockGenerate.mockResolvedValueOnce({ text: content });
   }
 };
 
@@ -88,7 +84,7 @@ describe('Router Service', () => {
       const result = await routeQueryWithCfg(
         'Explain the tradeoffs of event sourcing in distributed systems',
       );
-      expect(mockCreate).toHaveBeenCalledTimes(1);
+      expect(mockGenerate).toHaveBeenCalledTimes(1);
       expect(result).toEqual({ model: 'test-large-model', reason: 'classifier-complex' });
     });
 
@@ -123,13 +119,16 @@ describe('Router Service', () => {
     it('sends the query to the guard classifier', async () => {
       classifyAs('simple');
       await routeQueryWithCfg('Give me investment advice');
-      const [call] = mockCreate.mock.calls[0] as unknown as [
-        { model: string; temperature: number; messages: { role: string; content: string }[] },
+      const [messages, options] = mockGenerate.mock.calls[0] as unknown as [
+        { role: string; content: string }[],
+        { modelSettings: { temperature: number } },
       ];
-      expect(call.model).toBe('test-guard-model');
-      expect(call.temperature).toBe(0);
-      expect(call.messages[0].role).toBe('user');
-      expect(call.messages[0].content).toMatch(/simple|complex/i);
+      const ctorArgs = mockAgentCtor.mock.calls[mockAgentCtor.mock.calls.length - 1] as unknown[];
+      const ctorCall = (ctorArgs?.[0] ?? {}) as { model: string };
+      expect(ctorCall.model).toBe('groq/test-guard-model');
+      expect(options.modelSettings.temperature).toBe(0);
+      expect(messages[0].role).toBe('user');
+      expect(messages[0].content).toMatch(/simple|complex/i);
     });
   });
 
