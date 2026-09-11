@@ -90,13 +90,11 @@ model)` cell, weight is neutral (1.0), no flip, no reason suffix. Any
 deletedAt: null }` in `Session` (403 foreign session, 404 unknown
    message id). `req.user.id` shape verified against `chat.ts:74/249`, so
    no confirmation needed at implementation time.
-8. **Buttons are overwrite-only** — clicking the active thumb again does
-   nothing (no vote clearing, no DELETE), and a pending/hover style lifts
-   inactive thumbs. Rationale: overwrite-only is exactly what the issue
-   specifies (`{ value: 'up'|'down' }`, revote-overwrite) and a clearing
-   protocol would need an explicit "cleared" state on the subdocument —
-   invented behavior. Clearing could come later as a tiny follow-up; not a
-   blocker.
+8. **Buttons support unvote** — clicking the active thumb again clears the
+   vote (`DELETE /api/messages/:messageId/feedback`, per the issue-comment
+   answer to Q1), clicking the other thumb overwrites; while a request is
+   in flight both are disabled. Initially built overwrite-only; revised
+   after the issue comment confirmed clearing is required.
 
 ## Critiqued assumptions (each with the honest risk attached)
 
@@ -153,7 +151,7 @@ deletedAt: null }` in `Session` (403 foreign session, 404 unknown
 Each item is a self-contained commit; none _starts_ on an open question.
 
 - [x] 1. **Schema** — add to `Message`: `feedback: { value: {
-   type: String, enum: ['up','down'] }, updatedAt: { type: Date } }`
+ type: String, enum: ['up','down'] }, updatedAt: { type: Date } }`
       and `routingBand: { type: String }` (both sparse-optional; no
       migration needed for existing documents). In `chat.ts` (both
       endpoints), compute `routingBand` at route time from the user
@@ -169,7 +167,7 @@ Each item is a self-contained commit; none _starts_ on an open question.
       `(band, modelName)` doc, `$inc` counters adjusted by the
       correction delta (decision 2). `getFitWeight` must be total: on
       read error or below MIN_SAMPLE (5) returns `{ weight: 1.0, ups: 0,
-   downs: 0 }`; weight = `(ups + 1) / (ups + downs + 2)` — a
+ downs: 0 }`; weight = `(ups + 1) / (ups + downs + 2)` — a
       Laplace-smoothed ratio so a brand-new band with 1↑/0↓ cannot
       immediately max out the weight.
 - [x] 3. **Feedback route** — `POST /api/messages/:messageId/feedback`
@@ -182,33 +180,34 @@ Each item is a self-contained commit; none _starts_ on an open question.
       `feedback.test.ts`: authed round trip, re-vote overwrite ups/
       downs corrected, 401 unauthenticated (from the
       `chat.permissions.test.ts` patterns), 400 bad value, 403 foreign
-      session, 404 unknown message.
-- [ ] 4. **Router weighting** — extend `routeQuery` signature to
-      `routeQuery(query, config?, deps?)` where `deps.stats` reads
-      `{ weight, ups, downs }` and `deps.now()`. On the classifier
-      tiebreak path, fetch weights for `(band, smallModel)` and `(band,
-   largeModel)`; flip the choice when the winner-vs-runner-up weight
-      ratio exceeds `FEEDBACK_FLIP_RATIO = 1.25` (a constant, not a
-      tunable, in v1); append `;feedback-weight:<w>:<ups>/<downs>` to
-      `reason`. Unit tests in `routerService.test.ts` (stubbed deps,
-      no Mongo): empty stats → identical to today's behavior (a
-      golden assertion exists before the feature);
-      seed 12↑/3↓ against small on a band commonly routed by the
-      large candidate (e.g. `classifier-complex` tiebreak, small
-      band weight high → flips to small) and vice versa; the issue's
-      acceptance criterion "different model choice" is this one;
-      MIN_SAMPLE below. Chat integration tests carry `routingBand` for
-      both models' bands and stubs the stats service.
-- [ ] 5. **Client** — thumbs pair under assistant messages in
-      `ChatWindow.tsx`: an `onThumbFeedback(messageId, 'up' | 'down')`
-      path calling the feedback endpoint, mid-face POST body `{ value }`. Buttons render from the message's
-      persisted `feedback` field; while the POST is in-flight both are
-      disabled; error surfaces as a
-      toast (existing pattern if app has one, otherwise inline).
-      Client vitest: click sends correct POST, pending disables buttons,
-      reload state renders from message. Note that the type augment for
-      `feedback` belongs in the shared `Message` interface — where #17
-      added `metrics` already.
+      session, 404 unknown message. Revised during critique: 400 for a
+      vote on a user-role message, and a parallel
+      `DELETE /:messageId/feedback` endpoint (clearing, per the issue
+      comment on Q1).
+- [x] 4. **Router weighting** — extend `routeQuery` signature to
+      `routeQuery(query, config?, deps?)` where `deps.getFitWeight` reads
+      `{ weight, ups, downs }` and `deps.band` is the deterministic band
+      of the user turn. On the classifier tiebreak path, fetch weights
+      for `(band, smallModel)` and `(band, largeModel)`; flip the choice
+      when the rival-vs-chosen weight ratio exceeds the constant
+      `FEEDBACK_FLIP_RATIO` (1.25 in v1, not a tunable); append
+      `;feedback-weight:<w>:<ups>/<downs>` to `reason` only when the band
+      has any tallies (cold start keeps a bare reason; decision 6).
+      Unit tests in `routerService.test.ts` (stubbed deps, no Mongo):
+      empty stats → identical to today's behavior; seeded tallies flip
+      simple→large and complex→small both ways; sub-threshold ratio does
+      not flip; deterministic rules and `classifier-error` stay
+      untouched.
+- [x] 5. **Client** — thumbs pair under assistant messages in
+      `ChatWindow.tsx`: `onFeedback(messageId, value | null)` calls
+      `POST /api/messages/:messageId/feedback` with `{ value }`, or
+      `DELETE .../feedback` when the active thumb is clicked again
+      (unvote). Buttons render from the message's persisted `feedback`
+      field; while in flight both are disabled; type augment lives in
+      the shared `App.tsx` `Message` interface. Client vitest in
+      `ChatWindow.feedback.test.tsx`: click sends correct value,
+      re-clicking the active thumb unvotes, pending request disables
+      both buttons.
 - [ ] 6. **Docs** — `docs/progress.md` entry on merge; one
       `scripts/mongo.ts` snippet for inspecting `modelMetricsStats`.
 
@@ -234,22 +233,40 @@ default (decisions 4 and 8). They are questions _because the interaction
 semantics of an opaque notion ("weights the model's fit") should be
 confirmed on PR review_, not because the build is blocked.
 
-- **Q1: Opt-out (clearing) semantics** — should clicking the active thumb
-  again clear the vote to a null state, or is feedback
-  once-given/switchable-only? _Currently built:_ overwrite-only, per the
-  issue's literal wording; the API path for clearing would need a
-  slightly different shape (`{ value: null }` or DELETE) if wanted.
-- **Q2: Band key on LLM flags** — the issue's example band
-  ("high-technical + long prompt") implies LLM-classified `technical`,
-  but `metrics.llm.technical` is populated asynchronously _after_
-  routing, so it is null at route time in the current save flow
-  (`chat.ts:54-67`). _Currently built:_ deterministic-only band
-  (lengthBucket × code/prose). If callers later await classification or
-  the router reads post-hoc analysis, the band needs widening plus a
-  reconciliation of the routing-time vs. learned-time key (possible
-  future ticket).
-- **Q3: Stored voter identity / history** — not needed by the single-slot
-  overwrite shape; if per-user data ever wants to be honored (audit,
-  per-user weighting), either the message subdocument gains a
-  `valueByUser` array or votes get their own collection. Out of scope
-  here; raised only so the choice is on the record.
+- **Q1: Opt-out (clearing) semantics** — answered in issue comments
+  2026-09-11: clearing **is** required, via `DELETE /path/to/message/vote`.
+  _Built:_ `DELETE /api/messages/:messageId/feedback` sets
+  `feedback.value` to null and decrements the previous value's counter;
+  the UI clears on re-click of the active thumb.
+- **Q2: Band key on LLM flags** — answered in issue comments: v2 will
+  widen the band to include LLM-classified flags when the router can
+  consume them (dependent on #4); v1 collects on the deterministic band
+  only. _Built_: deterministic-only band (lengthBucket × code/prose),
+  confirmed correct.
+- **Q3: Single overwrite slot / no voter identity** — answered in issue
+  comments: confirmed ("impossible for a user to vote twice", unvote must
+  work after re-login / other devices — both true of the session-
+  ownership check without stored voter identity). _Built_: as decided.
+
+New questions raised during the critique (unanswered in the issue so far):
+
+- **Q4: Retry-equivalence of cleared votes in the aggregate** — a cleared
+  vote is deleted from the tally; the cell loses the sample entirely (a
+  flip-down then unvote returns the model's row to its pre-vote state).
+  Confirm there is no requirement to remember "this message received a
+  vote and was retracted" for weighting purposes.
+- **Q5: Legacy messages without `routingBand`** — assistant messages
+  created before this feature carry no band; their votes persist on the
+  message but are silently skipped by the aggregate (empty-band guard in
+  the stats service). Fine for bootstrapping; confirm no backfill is
+  wanted.
+- **Q6: Concurrent revote/clear counter skew** — the counter correction
+  reads `feedback.value` before the write; two requests on the same
+  message crossing in that window can leave a counter off by one. The
+  plan accepted a one-tally worst case for revotes; DELETE adds the same
+  exposure to clears. A transactional read-back would fix it; currently
+  accepted as within the plan's stated tolerance.
+- **Q7: Threshold constant `FEEDBACK_FLIP_RATIO = 1.25`** — chosen so a
+  genuine split of community opinion (e.g. 8↑/5↓) cannot flip routing
+  alone; only strongly lopsided cells can. Confirm 1.25 is the intended
+  aggressiveness before LangSmith makes it visible.

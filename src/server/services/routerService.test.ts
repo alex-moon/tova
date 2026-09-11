@@ -1,4 +1,5 @@
 import { routeQuery } from './routerService';
+import { FitWeight } from './modelMetricsStatsService';
 
 const TEST_CONFIG = {
   smallModel: 'test-small-model',
@@ -130,6 +131,89 @@ describe('Router Service', () => {
       expect(call.temperature).toBe(0);
       expect(call.messages[0].role).toBe('user');
       expect(call.messages[0].content).toMatch(/simple|complex/i);
+    });
+  });
+
+  describe('Feedback weighting', () => {
+    const emptyStat = (): FitWeight => ({ weight: 1, ups: 0, downs: 0 });
+    const stat = (ups: number, downs: number): FitWeight => ({
+      weight: (ups + 1) / (ups + downs + 2),
+      ups,
+      downs,
+    });
+
+    it('is a pure perturbation: empty stats keep the classifier decision intact', async () => {
+      classifyAs('simple');
+      const result = await routeQuery('Explain gravity briefly', TEST_CONFIG, {
+        band: 'short|prose',
+        getFitWeight: async () => emptyStat(),
+      });
+      expect(result).toEqual({ model: 'test-small-model', reason: 'classifier-simple' });
+    });
+
+    it('kills the weight suffix when the band has no tallies', async () => {
+      classifyAs('complex');
+      const result = await routeQuery('Design a caching strategy', TEST_CONFIG, {
+        band: 'medium|code',
+        getFitWeight: async () => emptyStat(),
+      });
+      expect(result.reason).toBe('classifier-complex');
+    });
+
+    it('flips simple→large when feedback favors the large model on the band', async () => {
+      classifyAs('simple');
+      const result = await routeQuery('Give me a one-line haiku about rain', TEST_CONFIG, {
+        band: 'medium|prose',
+        getFitWeight: async (band, model) =>
+          band === 'medium|prose' && model === 'test-large-model' ? stat(12, 2) : stat(0, 12),
+      });
+      expect(result.model).toBe('test-large-model');
+      expect(result.reason).toContain('classifier-simple');
+      expect(result.reason).toContain(';feedback-weight:');
+    });
+
+    it('flips complex→small when feedback strongly favors the small model on the band', async () => {
+      classifyAs('complex');
+      const result = await routeQuery('Explain event sourcing tradeoffs', TEST_CONFIG, {
+        band: 'long|prose',
+        getFitWeight: async (band, model) =>
+          band === 'long|prose' && model === 'test-small-model' ? stat(12, 2) : stat(0, 12),
+      });
+      expect(result.model).toBe('test-small-model');
+      expect(result.reason).toContain('classifier-complex');
+      expect(result.reason).toContain(';feedback-weight:');
+    });
+
+    it('does not flip on lopsided votes under the ratio', async () => {
+      classifyAs('simple');
+      const result = await routeQuery('What is the capital of France?', TEST_CONFIG, {
+        band: 'medium|prose',
+        getFitWeight: async (band, model) =>
+          band === 'medium|prose' && model === 'test-large-model' ? stat(3, 0) : emptyStat(),
+      });
+      expect(result.model).toBe('test-small-model');
+      expect(result.reason).toContain('classifier-simple');
+    });
+
+    it('leaves deterministic rules and classifier-error untouched by feedback', async () => {
+      const greet = await routeQueryWithCfg('Hello');
+      expect(greet.reason).toBe('deterministic-short');
+      const code = await routeQueryWithCfg('write code');
+      expect(code.reason).toBe('deterministic-code');
+      classifyAs('', true);
+      const errored = await routeQuery('Should I buy this or that car?', TEST_CONFIG, {
+        band: 'medium|prose',
+        getFitWeight: async () => stat(20, 0),
+      });
+      expect(errored.reason).toBe('classifier-error');
+    });
+
+    it('still works when no band is supplied', async () => {
+      classifyAs('simple');
+      const result = await routeQuery('Give me investment advice now', TEST_CONFIG, {
+        getFitWeight: async () => emptyStat(),
+      });
+      expect(result).toEqual({ model: 'test-small-model', reason: 'classifier-simple' });
     });
   });
 

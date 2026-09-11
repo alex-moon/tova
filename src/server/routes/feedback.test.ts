@@ -154,4 +154,77 @@ describe('POST /api/messages/:messageId/feedback', () => {
 
     expect(res.status).toBe(404);
   });
+
+  it('rejects feedback on user-role messages with 400', async () => {
+    const app = createApp();
+    const cookie = await registerUser(app, 'sender@example.com');
+    const messageId = await seedMessage({
+      ownerId: String((await User.findOne({ email: 'sender@example.com' }))!._id),
+      role: 'user',
+    });
+
+    const res = await feedbackRequest(app, cookie, messageId, { value: 'up' });
+
+    expect(res.status).toBe(400);
+    expect(await ModelMetricStat.findOne({})).toBeNull();
+  });
+});
+
+describe('DELETE /api/messages/:messageId/feedback', () => {
+  it('clears a vote and decrements the counter (issue #18 comment on Q1)', async () => {
+    const app = createApp();
+    const email = `clearer-${crypto.randomUUID()}@example.com`;
+    const cookie = await registerUser(app, email);
+    const messageId = await seedMessage({ ownerId: String((await User.findOne({ email }))!._id) });
+
+    await feedbackRequest(app, cookie, messageId, { value: 'down' });
+    let stat = await ModelMetricStat.findOne({ band: 'medium|code' });
+    expect(stat?.down).toBe(1);
+
+    const res = await request(app)
+      .delete(`/api/messages/${messageId}/feedback`)
+      .set('Cookie', cookie ? [cookie] : []);
+    expect(res.status).toBe(200);
+    expect(res.body.feedback.value).toBeNull();
+
+    stat = await ModelMetricStat.findOne({ band: 'medium|code' });
+    expect(stat?.down).toBe(0);
+    expect(stat?.up).toBe(0);
+
+    const cleared = await Message.findById(messageId);
+    expect(cleared?.feedback?.value).toBeNull();
+  });
+
+  it('is idempotent: clearing when nothing is set changes no counters', async () => {
+    const app = createApp();
+    const email = `clearer-${crypto.randomUUID()}@example.com`;
+    const cookie = await registerUser(app, email);
+    const messageId = await seedMessage({ ownerId: String((await User.findOne({ email }))!._id) });
+
+    const res = await request(app)
+      .delete(`/api/messages/${messageId}/feedback`)
+      .set('Cookie', cookie ? [cookie] : []);
+
+    expect(res.status).toBe(200);
+    expect(res.body.feedback.value).toBeNull();
+    expect(await ModelMetricStat.findOne({})).toBeNull();
+  });
+
+  it('returns 403 on a foreign session and 401 unauthenticated', async () => {
+    const app = createApp();
+    const cookie = await registerUser(app, 'intruder@example.com');
+    const receiver = await User.create({
+      email: `receiver-${crypto.randomUUID()}@example.com`,
+      passwordHash: 'x',
+    });
+    const messageId = await seedMessage({ ownerId: String(receiver._id) });
+
+    const foreign = await request(app)
+      .delete(`/api/messages/${messageId}/feedback`)
+      .set('Cookie', cookie ? [cookie] : []);
+    expect(foreign.status).toBe(403);
+
+    const anon = await request(app).delete(`/api/messages/${messageId}/feedback`);
+    expect(anon.status).toBe(401);
+  });
 });

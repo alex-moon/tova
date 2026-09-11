@@ -37,6 +37,22 @@ export const recordFeedback = async (
   await ModelMetricStat.findOneAndUpdate({ band, modelName }, { $inc: inc }, { upsert: true });
 };
 
+// Remove a vote that was later cleared (DELETE feedback, issue #18 comment
+// on Q1): decrement the previous value's counter. Idempotent and a no-op for
+// legacy messages without a band.
+export const clearFeedback = async (
+  band: string,
+  modelName: string,
+  prevValue: FeedbackValue,
+): Promise<void> => {
+  if (!band || !modelName || !prevValue) return;
+  await ModelMetricStat.findOneAndUpdate(
+    { band, modelName },
+    { $inc: { [prevValue === 'up' ? 'up' : 'down']: -1 } },
+    { upsert: true },
+  );
+};
+
 // Total: any read error or cold-start cell yields a neutral weight so feedback
 // stats can never break routing.
 export const getFitWeight = async (band: string, modelName: string): Promise<FitWeight> => {

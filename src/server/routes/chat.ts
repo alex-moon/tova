@@ -107,8 +107,12 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
     // Save user message
     const userMessage = await saveUserMessageWithMetrics(String(session._id), content);
 
+    // Feedback aggregation happens under the band captured at route time, so
+    // it must be computed before the router sees the turn (decision 4).
+    const routingBand = buildRoutingBand(userMessage.metrics);
+
     // Determine model
-    const routingResult = await routeQuery(content);
+    const routingResult = await routeQuery(content, undefined, { band: routingBand });
 
     // Get chat history for context
     const history = await Message.find({ sessionId: session._id })
@@ -135,7 +139,7 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
       role: 'assistant',
       content: assistantContent,
       modelName: routingResult.model,
-      routingBand: buildRoutingBand(userMessage.metrics),
+      routingBand,
       metrics: await buildMessageMetrics(String(session._id), assistantContent),
     });
     await assistantMessage.save();
@@ -178,8 +182,12 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
     // Save user message
     const userMessage = await saveUserMessageWithMetrics(String(session._id), content);
 
+    // Feedback aggregation happens under the band captured at route time, so
+    // it must be computed before the router sees the turn (decision 4).
+    const routingBand = buildRoutingBand(userMessage.metrics);
+
     // Determine model
-    const routingResult = await routeQuery(content);
+    const routingResult = await routeQuery(content, undefined, { band: routingBand });
 
     // Get chat history for context
     const history = await Message.find({ sessionId: session._id })
@@ -238,7 +246,7 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
       role: 'assistant',
       content: assistantContent,
       modelName: routingResult.model,
-      routingBand: buildRoutingBand(userMessage.metrics),
+      routingBand,
       metrics: await buildMessageMetrics(String(session._id), assistantContent),
     });
     await assistantMessage.save();

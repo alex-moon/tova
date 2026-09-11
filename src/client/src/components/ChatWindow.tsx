@@ -3,7 +3,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeRaw from 'rehype-raw';
 import rehypeSanitize from 'rehype-sanitize';
-import { Menu, Send } from 'lucide-react';
+import { Menu, Send, ThumbsDown, ThumbsUp } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import type { Message } from '../App';
 
@@ -12,6 +12,7 @@ interface ChatWindowProps {
   onSendMessage: (content: string) => void;
   isLoading: boolean;
   onOpenSidebar: () => void;
+  onFeedback?: (messageId: string, value: 'up' | 'down' | null) => void;
 }
 
 const PLACEHOLDERS = [
@@ -56,10 +57,21 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
   onSendMessage,
   isLoading,
   onOpenSidebar,
+  onFeedback,
 }) => {
   const [input, setInput] = useState('');
   const [placeholder] = useState(pickPlaceholder);
   const textareaRef = React.useRef<HTMLTextAreaElement>(null);
+  const [pendingFeedbackId, setPendingFeedbackId] = useState<string | null>(null);
+
+  const handleThumbClick = (msg: Message, value: 'up' | 'down') => {
+    if (!onFeedback || pendingFeedbackId) return;
+    // Clicking the active thumb clears the vote (unvote); the other one
+    // overwrites it. Re-enabled only after the round trip resolves.
+    const next: 'up' | 'down' | null = msg.feedback?.value === value ? null : value;
+    setPendingFeedbackId(msg._id);
+    Promise.resolve(onFeedback(msg._id, next)).finally(() => setPendingFeedbackId(null));
+  };
 
   const autoGrow = (el: HTMLTextAreaElement) => {
     el.style.height = 'auto';
@@ -136,8 +148,38 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
                     <MessageContent content={msg.content} markdown />
                   </div>
                   {msg.modelName && (
-                    <div className="mt-1 px-4 text-xs text-muted-foreground md:px-5">
-                      Model: {msg.modelName}
+                    <div className="mt-1 flex items-center gap-3 px-4 text-xs text-muted-foreground md:px-5">
+                      <span>{msg.modelName}</span>
+                      {onFeedback && (
+                        <span className="flex items-center gap-1">
+                          <button
+                            type="button"
+                            aria-label="Good response"
+                            disabled={pendingFeedbackId !== null}
+                            onClick={() => handleThumbClick(msg, 'up')}
+                            className="rounded p-1 transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-2 focus-visible:outline-primary disabled:opacity-50"
+                          >
+                            <ThumbsUp
+                              size={13}
+                              className={msg.feedback?.value === 'up' ? 'text-primary' : undefined}
+                            />
+                          </button>
+                          <button
+                            type="button"
+                            aria-label="Poor response"
+                            disabled={pendingFeedbackId !== null}
+                            onClick={() => handleThumbClick(msg, 'down')}
+                            className="rounded p-1 transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-2 focus-visible:outline-primary disabled:opacity-50"
+                          >
+                            <ThumbsDown
+                              size={13}
+                              className={
+                                msg.feedback?.value === 'down' ? 'text-primary' : undefined
+                              }
+                            />
+                          </button>
+                        </span>
+                      )}
                     </div>
                   )}
                 </div>
