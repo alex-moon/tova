@@ -3,6 +3,7 @@ import crypto from 'crypto';
 import jwt from 'jsonwebtoken';
 import { User, UserDocument } from '../models/User';
 import { resolveOrCreateUser } from '../services/userService';
+import { AuthUser, LoginRequest, LoginUserPayload, RegisterRequest } from '../../shared/contracts';
 
 const router = express.Router();
 const JWT_SECRET = process.env.JWT_SECRET || 'fallback_secret';
@@ -38,7 +39,7 @@ const issueSessionCookie = (user: UserDocument, res: express.Response) => {
 
 router.post('/register', async (req, res) => {
   try {
-    const { email, password } = req.body;
+    const { email, password } = req.body as Partial<RegisterRequest>;
 
     if (!email || !password) {
       return res.status(400).json({ message: 'Email and password are required' });
@@ -52,9 +53,14 @@ router.post('/register', async (req, res) => {
     const user = new User({ email, passwordHash: password });
     await user.save();
 
+    const userPayload: LoginUserPayload = {
+      id: user._id.toString(),
+      email: user.email,
+      role: user.role,
+    };
     issueSessionCookie(user, res);
 
-    res.status(201).json({ user: { id: user._id, email: user.email, role: user.role } });
+    res.status(201).json({ user: userPayload });
   } catch (_err) {
     res.status(500).json({ message: 'Error creating user' });
   }
@@ -62,16 +68,21 @@ router.post('/register', async (req, res) => {
 
 router.post('/login', async (req, res) => {
   try {
-    const { email, password } = req.body;
+    const { email, password } = req.body as Partial<LoginRequest>;
 
     const user = await User.findOne({ email });
-    if (!user || !(await user.comparePassword(password))) {
+    if (!user || !(await user.comparePassword(password ?? ''))) {
       return res.status(401).json({ message: 'Invalid credentials' });
     }
 
     issueSessionCookie(user, res);
 
-    res.json({ user: { id: user._id, email: user.email, role: user.role } });
+    const userPayload: LoginUserPayload = {
+      id: user._id.toString(),
+      email: user.email,
+      role: user.role,
+    };
+    res.json({ user: userPayload });
   } catch (_err) {
     res.status(500).json({ message: 'Error logging in' });
   }
@@ -182,9 +193,13 @@ router.get('/me', async (req, res) => {
       res.clearCookie('token');
       return res.status(401).json({ message: 'User no longer exists' });
     }
-    res.json({
-      user: { id: user._id, email: user.email, role: user.role, permissions: user.permissions },
-    });
+    const userPayload: AuthUser = {
+      id: user._id.toString(),
+      email: user.email,
+      role: user.role,
+      permissions: user.permissions,
+    };
+    res.json({ user: userPayload });
   } catch (_err) {
     res.status(401).json({ message: 'Invalid token' });
   }

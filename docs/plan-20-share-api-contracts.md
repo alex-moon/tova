@@ -27,20 +27,20 @@ Goal: a single source of truth for API contract types (start with **auth, admin 
 
 Each item is one small, reviewable commit.
 
-- [ ] 1. Create `src/shared/contracts.ts`, dependency-free, containing:
+- [x] 1. Create `src/shared/contracts.ts`, dependency-free, containing:
   - `AdminUser` — moved verbatim from `src/client/src/types/admin.ts:6-14` (same fields, same comment intent pointing at `toPublicUser`).
   - `AuthUser` — `{ id: string; email: string; role: 'user' | 'admin'; permissions: string[] }` matching `/api/auth/me` (`auth.ts:185-187`). Note: server code currently does not call `user._id.toString()` here (unlike `toPublicUser`) — it still serialises to a string over JSON; if typing the handler requires it, switch to `user._id.toString()` — behavior on the wire is unchanged.
   - `LoginUserPayload` — `{ id: string; email: string; role: 'user' | 'admin' }` matching `/login` and `/register` responses (no `permissions`). Document on the interface that the client currently types a wider `User` than these routes return (open question below).
   - Request bodies `LoginRequest { email: string; password: string }`, `RegisterRequest` (same shape).
   - `src/client/src/types/admin.ts` untouched in this commit.
-- [ ] 2. Server adoption. `tsconfig.json` `include` at line 14 already covers `src/index.ts` + `src/server/**`; add `src/shared/**/*.ts` to it. `rootDir: "src"` already spans `src/shared`, so `tsc --noEmit` typecheck needs no other change (verified config). Apply:
+- [x] 2. Server adoption. `tsconfig.json` `include` at line 14 already covers `src/index.ts` + `src/server/**`; add `src/shared/**/*.ts` to it. `rootDir: "src"` already spans `src/shared`, so `tsc --noEmit` typecheck needs no other change (verified config). Apply:
   - `toPublicUser` in `src/server/routes/admin.ts` gets return type `AdminUser`; if `createdAt`/`updatedAt` (mongoose Date) do not satisfy `string`, serialize explicitly (`user.createdAt.toISOString()`) — wire behavior identical, removed doubt.
   - `/register`, `/login`, `/me` handlers get their response literals typed as the contract shapes above.
   - No Jest config change: `src/server` tests import `../shared/contracts` relatively or via the same package resolution; `roots` need not change (verify by running `npm run test:server`).
-- [ ] 3. Client tooling wiring. In `src/client/tsconfig.app.json`: add `"@shared/*": ["../shared/*"]` to `paths` (or `"@shared/*": ["../../src/shared/*"]` — relative to tsconfig; verify with `npm run typecheck` from root and client build). In `src/client/vite.config.ts`: add alias `@shared` → `../../src/shared` (mirroring the existing `@` alias at line ~20 — both `vite` and `vitest` resolve aliases from this config, so client tests importing `@shared` work; files outside the client `include` are still compiled because they are imported). Re-point `src/client/src/types/admin.ts` to `export type { AdminUser } from '@shared/contracts';` (re-export shim). Run `npm run test:client` and `npm --prefix src/client run build` to confirm.
-- [ ] 4. Wire auth types into both sides: client `AuthContext.tsx` imports the contract types for its `User`/setters (client `User` remains as-is or narrows to contract — do whichever produces zero runtime change; if the client keeps its own wider `User`, convert it to a re-export of `AuthUser` + a comment about the login-payload gap). Server auth routes consume the same types (done in commit 2 can be split here if the diff gets large).
-- [ ] 5. Drift test in `src/server/routes/admin.test.ts` (or a new small test file): assert `toPublicUser` output keys and value types match `AdminUser` field-for-field (already-proven fixture pattern in `admin.test.ts`). If step 3 allowed limited extraction, keep it role-slice small.
-- [ ] 6. Final verify: `npm run ci` (server lint, format, typecheck, server tests, client lint/format/tests/build). `npm run lint` covers `src/` so `src/shared` is included automatically (ESLint flat config over `src migrations`). Update this doc, note any follow-ups, leave the PR to the orchestrator.
+- [x] 3. Client tooling wiring. In `src/client/tsconfig.app.json`: add `"@shared/*": ["../shared/*"]` to `paths` (or `"@shared/*": ["../../src/shared/*"]` — relative to tsconfig; verify with `npm run typecheck` from root and client build). In `src/client/vite.config.ts`: add alias `@shared` → `../../src/shared` (mirroring the existing `@` alias at line ~20 — both `vite` and `vitest` resolve aliases from this config, so client tests importing `@shared` work; files outside the client `include` are still compiled because they are imported). Re-point `src/client/src/types/admin.ts` to `export type { AdminUser } from '@shared/contracts';` (re-export shim). Run `npm run test:client` and `npm --prefix src/client run build` to confirm.
+- [x] 4. Wire auth types into both sides: client `AuthContext.tsx` imports the contract types for its `User`/setters (client `User` remains as-is or narrows to contract — do whichever produces zero runtime change; if the client keeps its own wider `User`, convert it to a re-export of `AuthUser` + a comment about the login-payload gap). Server auth routes consume the same types (done in commit 2 can be split here if the diff gets large).
+- [x] 5. Drift test in `src/server/routes/admin.test.ts` (or a new small test file): assert `toPublicUser` output keys and value types match `AdminUser` field-for-field (already-proven fixture pattern in `admin.test.ts`). If step 3 allowed limited extraction, keep it role-slice small.
+- [x] 6. Final verify: `npm run ci` (server lint, format, typecheck, server tests, client lint/format/tests/build). `npm run lint` covers `src/` so `src/shared` is included automatically (ESLint flat config over `src migrations`). Update this doc, note any follow-ups, leave the PR to the orchestrator.
 
 ## Assumptions audited (honesty pass)
 
@@ -65,4 +65,21 @@ Resolved (moved out of open questions):
 
 ## Done
 
-- [ ] All checklist items complete, `npm run ci` green.
+- [x] All checklist items complete, `npm run ci` green.
+
+## Implementation notes (2026-09-11)
+
+- Open questions stayed open: implemented under the stated defaults — two auth payload types
+  (`AuthUser` for `/me`, `LoginUserPayload` for `/login`//`register`), `permissions: string[]`,
+  no chat/SSE contracts.
+- `tsconfig.app.json` uses `"@shared/*": ["../shared/*"]` (relative to `src/client`); Vite alias
+  `@shared` → `../shared`. Import must be `import type ... from '@shared/contracts'` on the
+  client (`verbatimModuleSyntax`).
+- Server: `toPublicUser` now serialises `createdAt`/`updatedAt` explicitly with `toISOString()`
+  (wire behavior unchanged, now type-checked against `AdminUser`); auth handlers build typed
+  payload consts and use `user._id.toString()` (wire behavior unchanged — ObjectId already
+  serialized to a string over JSON).
+- Client drift finding stays unfixed by design (open question 1): `AuthContext.User` is a
+  re-export of `AuthUser`, still wider than login/register payloads; documented in code and on #20.
+- Drift test added to `admin.test.ts`: asserts the wire payload of `GET /api/admin/users`
+  matches the `AdminUser` field set and value types exactly.
