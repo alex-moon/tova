@@ -11,9 +11,9 @@ export interface SearchResult {
 // an empty list as "tool unavailable" and the chat turn must never fail
 // because of the search provider.
 export const webSearch = async (query: string): Promise<SearchResult[]> => {
-  // The canonical name is BRAVE_API_KEY (.env.example), but this environment
-  // exposes the key as BRAVE_SEARCH_API_KEY; accept both so the tool is not
-  // silently disabled by a naming mismatch (issue #16, open question 2).
+  // Canonical name per owner decision on issue #16 is BRAVE_SEARCH_API_KEY;
+  // BRAVE_API_KEY is still accepted (read first) for forward compatibility
+  // with pre-rename environments, pinned by a unit test.
   const apiKey = process.env.BRAVE_API_KEY || process.env.BRAVE_SEARCH_API_KEY;
   if (!apiKey) return [];
   // An empty query (malformed tool arguments fall back to '') would hit the
