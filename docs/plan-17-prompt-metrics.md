@@ -271,36 +271,58 @@ Each item is a small, self-contained commit.
       classified nulls (they never hit the Groq client). 5 unit tests added
       in `metricsService.test.ts` (both directions per alex-moon's
       examples); suite at 75 passing; lint, typecheck, full Jest green.
-- [ ] 10. **Validate and switch the classification model** (revised
-      2026-09-11 into concrete steps; **not started**). alex-moon's final
+- [x] 10. **Validate and switch the classification model** (revised
+      2026-09-11 into concrete steps; executed 2026-09-11 — see 10a–10d
+      below). alex-moon's final
       bar for this is deliberately modest: _"just pick a model and log
       failures in the metrics object in the DB so we get an idea of how
       many times it fails — we don't need to eval 'accuracy' at this early
       stage."_ No accuracy harness, no per-flag bias analysis:
       `metrics.llmSkipReason` ('parse'/'error' vs null) is already the
       failure log.
-- [ ] 10a. **Fetch the key.** Get `DEEPINFRA_API_KEY` from
-      `/opt/tova/.env` on 142.93.42.191 via SSH (access verified this
-      pass: the file exists and contains the key) and write it to the
-      local **untracked** `.env` (gitignored; never commit it). If a
-      human gate ever re-blocks this, comment on #17 and stop.
-- [ ] 10b. **Eval script.** Write a throwaway
+- [x] 10a. **Fetch the key.** Get `DEEPINFRA_API_KEY` from
+      `/opt/tova/.env` on 142.93.42.191 via SSH and write it to the
+      local **untracked** `.env` (gitignored; never commit it). Done:
+      key fetched and appended to the local `.env` on 2026-09-11.
+- [x] 10b. **Eval script.** Write a throwaway
       `scripts/eval-classify-models.ts` running a fixed list of ~20
       representative prompts through each candidate small model from the
       DeepInfra catalog (DeepInfra serves an OpenAI-compatible chat API —
       the eval script calls it directly over HTTP; only the throwaway
       script does this, so no production-client decision is needed here;
       the DeepInfra connector itself is ticket #4's scoped work against
-      `inferenceService.ts`).
-- [ ] 10c. **Score candidates** on parse rate under the actual
-      production parser `parseLlmFlags` (`metricsService.ts`): what
-      fraction of calls produce ≥1 non-null flag, plus latency and output
-      truncation observed at the current `max_tokens: 100`.
-- [ ] 10d. **Switch if justified.** Pick the smallest/fastest candidate
-      with a high parse rate and set it as the model default in
-      `metricsService.ts:5` (`ROUTER_GUARD_MODEL`-overridable, as it is
-      today). Record the choice and scores in this plan; never ship a
-      switch without scores. Rerun `npm run ci` (10e).
+      `inferenceService.ts`). Done: script in place, calls DeepInfra's
+      `/v1/openai/chat/completions` directly with the production
+      `LLM_PROMPT`, `temperature: 0` and `max_tokens: 100`, and scores
+      outputs with the production `parseLlmFlags`.
+- [x] 10c. **Score candidates.** Run on 2026-09-11, 20 prompts per
+      candidate, production parser, `max_tokens: 100`:
+
+      | model | parsed | fully parsed | truncations | mean latency |
+
+|---|---|---|---|---|
+| google/gemma-3-4b-it | 20/20 | 20/20 | 0 | 1267 ms |
+| meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo | 20/20 | 20/20 | 0 | 2196 ms |
+| Qwen/Qwen3.5-9B | 0/20 | 0/20 | 20 (100%) | 2387 ms |
+| google/gemma-3-12b-it | 20/20 | 20/20 | 0 | 1734 ms |
+| mistralai/Mistral-Nemo-Instruct-2407 | 20/20 | 20/20 | 0 | 1603 ms |
+
+      Scores also posted as a comment on #17 (per alex-moon's request).
+
+- [x] 10d. **Switch if justified.** **Pick: `google/gemma-3-4b-it`** —
+      the smallest and fastest candidate with a perfect parse rate
+      (20/20 ≥1-flag parses, 20/20 fully parsed, zero truncation,
+      lowest mean latency). Per the modest bar, flag _correctness_ was
+      not evalled; failures will show up as `metrics.llmSkipReason` in
+      the DB. **The default in `metricsService.ts:5` is intentionally
+      NOT switched yet:** production classification goes through the
+      Groq SDK, which cannot serve DeepInfra/Gemma models — flipping
+      `LLM_MODEL` now would make every classification call fail
+      (`llmSkipReason: 'error'` for all messages) until the DeepInfra
+      connector lands. The switch rides on #4 wiring DeepInfra into
+      `inferenceService.ts`; `metricsService.ts:5` is a one-line change
+      at that point. Scores recorded here; never ship a switch without
+      scores. Rerun `npm run ci` (10e).
 
 ## Decisions since the second pass (all answered by alex-moon on #17 / PR #22)
 
@@ -329,13 +351,9 @@ Each item is a small, self-contained commit.
 
 No planned task depends on an open question. After this revision pass,
 every previously listed open item is either answered in the issue thread
-(moved into the plan above) or closed as moot. The questions _below_ are
-the ones with remaining genuine doubt; each ships with a default.
+(moved into the plan above) or closed as moot. The question _below_ is
+the one with remaining genuine doubt; it ships with a default.
 
-- **Model choice record format**: when task 10 lands, should the eval
-  scores live in this plan doc (current default: yes, plus a
-  `docs/progress.md` line on merge), or also as a #17 comment?
-  Trivial either way; the plan is not the system of record for results.
 - **Backfill of existing messages**: out of scope — the issue only
   requires forward-going fills for new turns, and alex-moon has never
   asked for backfill. Recorded here as a decision (in "Decisions"),
