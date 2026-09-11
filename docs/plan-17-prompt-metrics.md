@@ -194,7 +194,7 @@ Each item is a small, self-contained commit.
 ## Decisions since the first pass (verified from the issue thread)
 
 - **Assistant messages: user-only classification, confirmed by alex-moon**
-  (issue comment, 2026-09-11). Assistant turns will get *feedback* which
+  (issue comment, 2026-09-11). Assistant turns will get _feedback_ which
   rates them against the user messages (#18) — so no LLM classification for
   assistant messages, ever, per this ticket. The shipped behavior is already
   correct.
@@ -205,7 +205,7 @@ Each item is a small, self-contained commit.
   the past but wants something more robust. See task 9.
 - **Classification model: `allam-2-7b` is not trusted to emit structured
   JSON reliably.** alex-moon wants the smallest/fastest model that is
-  *reliable*, and has confirmed an experimentation path: DeepInfra offers
+  _reliable_, and has confirmed an experimentation path: DeepInfra offers
   a much larger model catalog than Groq, and a `DEEPINFRA_API_KEY` is
   available on the deploy host (142.93.42.191 — note: **not** in the local
   `/opt/tova/.env`, which only has `GROQ_API_KEY`). See task 10.
@@ -218,31 +218,42 @@ Each item is a small, self-contained commit.
 
 Each item is a small, self-contained commit.
 
-- [ ] 9. **Trivial-prompt skip gate** in `metricsService.ts`: a
-       deterministic `isTriviallyNeutral(content)` predicate that skips
-       the LLM classification call for prompts meaningfully neutral on
-       every LLM dimension (short greetings, confirmations, "please
-       continue"-style continuations). Robustness requirement from
-       alex-moon: not just a regex — combine (a) a small curated phrase
-       list (lower-cased, punctuation-stripped match), (b) word-count and
-       stopword-ratio bounds from the already-computed deterministic
-       metrics, (c) fail-closed (classify) when the heuristic is unsure.
-       Unit tests assert both directions: skipping "yes", "ok thanks",
-       "tell me more"; NOT skipping "please continue writing the debate
-       section". Wire the gate in `chat.ts:85` and `chat.ts:166` (both
-       `classifyAndPersistPromptDimensions` call sites) so the skip is a
-       `return` before the model call.
+- [x] 9. **Trivial-prompt skip gate** in `metricsService.ts`: a
+      deterministic `isTriviallyNeutral(content)` predicate that skips
+      the LLM classification call for prompts meaningfully neutral on
+      every LLM dimension (short greetings, confirmations, "please
+      continue"-style continuations). Robustness requirement from
+      alex-moon: not just a regex — combine (a) a small curated phrase
+      list (lower-cased, punctuation-stripped match), (b) word-count and
+      stopword-ratio bounds from the already-computed deterministic
+      metrics, (c) fail-closed (classify) when the heuristic is unsure.
+      Unit tests assert both directions: skipping "yes", "ok thanks",
+      "tell me more"; NOT skipping "please continue writing the debate
+      section". Wire the gate in `chat.ts:85` and `chat.ts:166` (both
+      `classifyAndPersistPromptDimensions` call sites) so the skip is a
+      `return` before the model call. **Done (2026-09-11):** implemented as
+      `isTriviallyNeutral` in `metricsService.ts` — curated phrase list
+      (lower-cased, punctuation-stripped) plus a generic ≤3-word
+      all-neutral-tokens rule (covers "yeah sure" beyond the list), both
+      bounded by deterministic metrics: word count ≤ 6 (≤ 3 for the token
+      rule), no question mark, no code indicators, fail closed otherwise.
+      Wired as an `if (!isTriviallyNeutral(content))` guard at both
+      fire-and-forget call sites in `chat.ts`; skipped messages keep
+      `metrics.llm` all-null and are analytically distinguishable from
+      classified nulls (they never hit the Groq client). 5 unit tests added
+      in `metricsService.test.ts` (both directions per alex-moon's
+      examples); suite at 75 passing; lint, typecheck, full Jest green.
 - [ ] 10. **Validate and switch the classification model.** alex-moon
-       distrusts `allam-2-7b` for structured flags (it "may well not be"
-       a model we can trust to return JSON). Use the `DEEPINFRA_API_KEY`
-       on 142.93.42.191 (SSH access confirmed by alex-moon) to build a
-       small eval script (`scripts/`, throwaway is fine) that runs a
-       handful of representative prompts through candidate small models
-       (DeepInfra catalog; web search each candidate's structured-output
-       reputation first) and score parse rate against `parseLlmFlags`.
-       Pick the smallest/fastest model with a high parse rate, set it as
-       the default in `metricsService.ts:10`, and record the choice +
-       scores in this plan. Do not ship a switch without scores.
+      distrusts `allam-2-7b` for structured flags (it "may well not be"
+      a model we can trust to return JSON). Use the `DEEPINFRA_API_KEY`
+      on 142.93.42.191 (SSH access confirmed by alex-moon) to build a
+      small eval script (`scripts/`, throwaway is fine) that runs a
+      handful of representative prompts through candidate small models
+      (DeepInfra catalog; web search each candidate's structured-output
+      reputation first) and score parse rate against `parseLlmFlags`.
+      Pick the smallest/fastest model with a high parse rate, set it as
+      the default in `metricsService.ts:10`, and record the choice +
+      scores in this plan. Do not ship a switch without scores.
 
 ## Open questions
 

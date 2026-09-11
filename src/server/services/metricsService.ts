@@ -1,5 +1,6 @@
 import Groq from 'groq-sdk';
 import { Message } from '../models/Message';
+import { computeDeterministicMetrics } from './promptMetrics';
 
 const getGroqClient = () => {
   return new Groq({
@@ -95,4 +96,142 @@ export const classifyAndPersistPromptDimensions = async (
 ): Promise<void> => {
   const llm = await classifyPromptDimensions(content);
   await Message.findByIdAndUpdate(messageId, { $set: { 'metrics.llm': llm } });
+};
+
+/*
+ * Trivial-prompt skip gate (plan task 9): prompts that are, with confidence,
+ * meaningfully neutral on every LLM dimension — short greetings,
+ * confirmations, "please continue"-style continuations — skip the
+ * classification call entirely. Not a bare regex/allowlist: a phrase list
+ * alone misses "yeah sure" — a neutral-token rule covers those — and both
+ * paths are bounded (word count, no question mark, no code) and fail
+ * closed: anything the heuristic is unsure about still gets classified.
+ */
+const TRIVIAL_MAX_WORDS = 6;
+const TRIVIAL_TOKEN_ONLY_MAX_WORDS = 3;
+
+// Full-message phrases (after lower-casing and punctuation stripping) that
+// are neutral on all five flags with essentially no information content.
+const TRIVIAL_PHRASES = new Set([
+  'yes',
+  'no',
+  'ok',
+  'okay',
+  'ok thanks',
+  'ok thank you',
+  'thank you',
+  'thanks',
+  'thank you so much',
+  'thanks so much',
+  'yeah',
+  'yep',
+  'nope',
+  'sure',
+  'sure thing',
+  'sounds good',
+  'sounds great',
+  'great',
+  'nice',
+  'perfect',
+  'awesome',
+  'cool',
+  'got it',
+  'gotcha',
+  'understood',
+  'continue',
+  'please continue',
+  'go on',
+  'go ahead',
+  'keep going',
+  'tell me more',
+  'do it',
+  'do that',
+  'do so',
+  'that works',
+  'that sounds good',
+  'sounds great to me',
+]);
+
+// Tokens that can only appear in a bare confirmation/continuation. Any word
+// outside this set makes the prompt fail closed (i.e. get classified).
+const TRIVIAL_TOKENS = new Set([
+  'yes',
+  'yeah',
+  'yep',
+  'yup',
+  'no',
+  'nope',
+  'ok',
+  'okay',
+  'sure',
+  'fine',
+  'cool',
+  'great',
+  'good',
+  'nice',
+  'perfect',
+  'awesome',
+  'thanks',
+  'thank',
+  'you',
+  'please',
+  'continue',
+  'go',
+  'on',
+  'ahead',
+  'keep',
+  'tell',
+  'me',
+  'more',
+  'got',
+  'it',
+  'i',
+  'see',
+  'sounds',
+  'that',
+  'so',
+  'do',
+  'and',
+  'the',
+  'my',
+  'a',
+  'is',
+  'right',
+  'roger',
+  'will',
+  'works',
+  'understood',
+]);
+
+const normalizeForTrivialMatch = (text: string): string =>
+  (text || '')
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s]/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+// True only when the heuristic is confident; unconfident input returns false
+// (fail closed) so it still gets classified.
+export const isTriviallyNeutral = (content: string): boolean => {
+  const metrics = computeDeterministicMetrics(content);
+  if (metrics.hasQuestionMark) return false;
+  const { codeIndicators } = metrics;
+  if (
+    codeIndicators.fences > 0 ||
+    codeIndicators.backticks > 0 ||
+    codeIndicators.codeTokenCount > 0
+  )
+    return false;
+  if (metrics.wordCount === 0 || metrics.wordCount > TRIVIAL_MAX_WORDS) return false;
+
+  const normalized = normalizeForTrivialMatch(content);
+  if (TRIVIAL_PHRASES.has(normalized)) return true;
+
+  // Generic short-confirmation rule: a very short prompt made entirely of
+  // neutral tokens ("yeah sure", "ok thanks", "tell me more").
+  if (metrics.wordCount <= TRIVIAL_TOKEN_ONLY_MAX_WORDS) {
+    const words = normalized.split(' ');
+    if (words.length > 0 && words.every((w) => TRIVIAL_TOKENS.has(w))) return true;
+  }
+  return false;
 };

@@ -6,7 +6,7 @@ import { routeQuery } from '../services/routerService';
 import { generateChatTitle } from '../services/titleService';
 import { hasPermission, ROUTING_PERMISSION } from '../services/userService';
 import Groq from 'groq-sdk';
-import { classifyAndPersistPromptDimensions } from '../services/metricsService';
+import { classifyAndPersistPromptDimensions, isTriviallyNeutral } from '../services/metricsService';
 import { computeDeterministicMetrics } from '../services/promptMetrics';
 
 const router = express.Router();
@@ -82,9 +82,13 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
     await userMessage.save();
 
     // LLM classification runs post-save, fire-and-forget; never awaited.
-    classifyAndPersistPromptDimensions(String(userMessage._id), content).catch((err) =>
-      console.error('Prompt classification error:', err),
-    );
+    // Trivially neutral prompts (short confirmations/continuations) skip it —
+    // docs/plan-17-prompt-metrics.md task 9. Skipped messages keep null flags.
+    if (!isTriviallyNeutral(content)) {
+      classifyAndPersistPromptDimensions(String(userMessage._id), content).catch((err) =>
+        console.error('Prompt classification error:', err),
+      );
+    }
 
     // Determine model
     const routingResult = await routeQuery(content);
@@ -163,9 +167,13 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
     await userMessage.save();
 
     // LLM classification runs post-save, fire-and-forget; never awaited.
-    classifyAndPersistPromptDimensions(String(userMessage._id), content).catch((err) =>
-      console.error('Prompt classification error:', err),
-    );
+    // Trivially neutral prompts (short confirmations/continuations) skip it —
+    // docs/plan-17-prompt-metrics.md task 9. Skipped messages keep null flags.
+    if (!isTriviallyNeutral(content)) {
+      classifyAndPersistPromptDimensions(String(userMessage._id), content).catch((err) =>
+        console.error('Prompt classification error:', err),
+      );
+    }
 
     // Determine model
     const routingResult = await routeQuery(content);

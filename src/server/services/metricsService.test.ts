@@ -1,4 +1,4 @@
-import { classifyPromptDimensions, parseLlmFlags } from './metricsService';
+import { classifyPromptDimensions, isTriviallyNeutral, parseLlmFlags } from './metricsService';
 
 const mockCreate = jest.fn();
 
@@ -99,6 +99,42 @@ describe('metricsService', () => {
     it('returns all nulls when the response shape is unexpected', async () => {
       mockCreate.mockResolvedValueOnce({});
       expect(await classifyPromptDimensions('hello')).toEqual(parseLlmFlags(null));
+    });
+  });
+
+  describe('isTriviallyNeutral', () => {
+    it('skips short confirmations and continuations', () => {
+      expect(isTriviallyNeutral('yes')).toBe(true);
+      expect(isTriviallyNeutral('ok thanks')).toBe(true);
+      expect(isTriviallyNeutral('Thank you!')).toBe(true);
+      expect(isTriviallyNeutral('tell me more')).toBe(true);
+      expect(isTriviallyNeutral('Please continue.')).toBe(true);
+      expect(isTriviallyNeutral('Go on')).toBe(true);
+      expect(isTriviallyNeutral('Yeah, sure')).toBe(true);
+      expect(isTriviallyNeutral('Perfect, thanks')).toBe(true);
+    });
+
+    it('does not skip a continuation that carries real content', () => {
+      expect(isTriviallyNeutral('please continue writing the debate section')).toBe(false);
+    });
+
+    it('does not skip questions, code, or substantive prompts (fail closed)', () => {
+      expect(isTriviallyNeutral('ok?')).toBe(false);
+      expect(isTriviallyNeutral('thanks — can you show `await db.count()`?')).toBe(false);
+      expect(isTriviallyNeutral('write a function that sorts users')).toBe(false);
+      expect(isTriviallyNeutral('explain how the router picks a model for this prompt')).toBe(
+        false,
+      );
+    });
+
+    it('handles empty and unicode-only content', () => {
+      expect(isTriviallyNeutral('')).toBe(false);
+      expect(isTriviallyNeutral('   ')).toBe(false);
+      expect(isTriviallyNeutral('はい')).toBe(false);
+    });
+
+    it('does not skip prompts over the word-count bound', () => {
+      expect(isTriviallyNeutral('yes yes yes yes yes yes yes yes')).toBe(false);
     });
   });
 });
