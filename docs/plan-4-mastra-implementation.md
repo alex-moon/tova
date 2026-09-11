@@ -241,6 +241,12 @@ items have already been posted to issue #4:
   re-emit deltas into the same `fullStream` (duplicated text in the SSE
   stream and inside one persisted `Message`)? If yes, we need the default
   retry policy and a disable switch inside `mastraService`.
+- **J. Empty-response place-holder wording** _(posted; sixth critic pass)_:
+  a provider stream/response with no content now persists
+  `'(no content returned)'` so the turn still completes (`Message.content`
+  is required and `''` throws). That literal was chosen arbitrarily — is
+  there preferred wording, or should empty responses be dropped/surfaced
+  differently?
 
 No unresolved open question has a live task depending on it: task 6 is
 explicitly structured (6a/6b/6c) so it needs none of D/E/F/G, and tasks 9–10
@@ -499,3 +505,40 @@ What this pass changed and why:
   item surfaced (slash-id parsing) was resolvable from shipped dependency
   source and is recorded as a fact above, and D/E/F/G remain unfairly
   answerable only by the user.
+
+### Sixth critic pass (this branch, after 6a/6c; `npm run ci` fully green before the pass, 120 server tests after)
+
+State on the branch: tasks 2–6a/6c shipped; 6b needs real keys; 7/8 gated on D/E. Branch
+history verified directly (`git log origin/main..HEAD`; the client-file diffs vs `origin/main`
+are main-side changes made after this branch forked — this branch itself touches no client
+code, so no drift to fix there).
+
+**Real shipped bug found and fixed — all-empty stream crashed the turn:**
+`routes/chat.ts` persisted the streamed assistant message with
+`content: assistantContent`, which can be `''` when the provider stream yields no
+(or only empty-string) deltas. `Message.content` is required, so the save threw a
+ValidationError; because headers were already sent, the catch-all only did `res.end()` —
+the SSE client received `meta` and then a silent hang: no `error`, no `done`, nothing
+persisted. Fixed by persisting a `'(no content returned)'` place-holder (streaming
+route), and the same guard added to the blocking route (whose `|| ''` fallback hit the
+identical save-throw path → 500). Pinned by an all-empty-deltas route test (no `delta`
+event, `done` with `complete: true`, place-holder persisted). Consequence worth noting:
+a stream that produces no content at all still completes cleanly, consistent with the
+"keep one assistant message per turn" contract — but the place-holder wording is an
+arbitrary UX choice; see Open questions J.
+
+Hardening and tests added this pass:
+
+- **Blocking-route abort wiring** (symmetric with 6c): `POST /api/chat` now creates an
+  `AbortController`, aborts on `req 'close'` when `!res.writableEnded`, and passes
+  `abortSignal` into `createCompletion` — previously a disconnecting client left the
+  blocking provider call running server-side.
+- **mastraService streaming abort test** — the abort-forwarding pin existed only on the
+  `generate` side; `stream` forwarding now pinned too.
+- **Route-level DeepInfra dispatch test** (plan task-9 bullet): a `POST /api/chat` turn
+  routed with `provider: 'deepinfra'` dispatches end-to-end — asserted via the mocked
+  Agent being constructed with `deepinfra/Qwen/Qwen2.5-72B-Instruct` and
+  `Message.modelName` set from the routed model.
+- jest config comment typo fixed.
+
+One new open question, posted to issue #4: **J (empty-response place-holder wording)**.

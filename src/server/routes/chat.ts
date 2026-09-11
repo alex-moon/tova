@@ -93,6 +93,13 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
     // Save user message
     await saveUserMessageWithMetrics(String(session._id), content);
 
+    // Abort the provider call when the client disconnects before the JSON
+    // response lands. Symmetric with the streaming route's 6c wiring.
+    const abortController = new AbortController();
+    req.on('close', () => {
+      if (!res.writableEnded) abortController.abort();
+    });
+
     // Determine model
     const routingResult = await routeQuery(content);
 
@@ -112,9 +119,12 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
       messages,
       model: routingResult.model,
       provider: routingResult.provider,
+      abortSignal: abortController.signal,
     });
 
-    const assistantContent = chatCompletion.choices[0]?.message?.content || '';
+    // Same required-content guard as the streaming route: an empty provider
+    // response must still persist and return a turn, not a 500.
+    const assistantContent = chatCompletion.choices[0]?.message?.content || '(no content returned)';
 
     // Save assistant message
     const assistantMessage = new Message({
@@ -228,11 +238,14 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
       return;
     }
 
-    // Save assistant message (persist shipped prompt history semantics)
+    // Save assistant message (persist shipped prompt history semantics). A
+    // provider stream that yields no (or only empty) deltas still persists a
+    // turn: `Message.content` is required, so fall back to a place-holder
+    // rather than letting the save throw and silently drop the `done` event.
     const assistantMessage = new Message({
       sessionId: session._id,
       role: 'assistant',
-      content: assistantContent,
+      content: assistantContent || '(no content returned)',
       modelName: routingResult.model,
       metrics: await buildMessageMetrics(String(session._id), assistantContent),
     });

@@ -177,5 +177,16 @@ describe('Mastra service neutral mapping', () => {
         model: 'deepinfra/m',
       });
     });
+
+    it('forwards an abort signal into the streaming call options when supplied', async () => {
+      mockStream.mockResolvedValueOnce({ fullStream: fullStreamFrom([]) });
+      const controller = new AbortController();
+      await deepinfraConnector.createStreamingCompletion({
+        model: 'm',
+        messages: [],
+        abortSignal: controller.signal,
+      });
+      expect(mockStream.mock.calls[0][1]).toMatchObject({ abortSignal: controller.signal });
+    });
   });
 });

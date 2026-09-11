@@ -57,6 +57,32 @@ describe('Chat route routing metadata', () => {
     const saved = await Message.exists({ role: 'assistant', modelName: 'mock-small-model' });
     expect(saved).toBeTruthy();
   });
+
+  it('dispatches a DeepInfra-routed turn to the DeepInfra provider end-to-end', async () => {
+    // Plan task-9 bullet: the DeepInfra path must be exercised at the route
+    // level, not only in the connector unit tests. The mocked Agent ctor
+    // model string is the observable dispatch boundary.
+    mockRouteQuery.mockResolvedValueOnce({
+      model: 'Qwen/Qwen2.5-72B-Instruct',
+      reason: 'classifier-complex',
+      provider: 'deepinfra',
+    });
+    const app = createApp();
+    const cookies = await registerUser(app, 'routing-deepinfra@example.com');
+    const agentCtor = jest.requireMock('@mastra/core/agent').Agent as jest.Mock;
+
+    const response = await request(app)
+      .post('/api/chat')
+      .set('Cookie', cookies)
+      .send({ content: 'Explain something complex' });
+
+    expect(response.status).toBe(200);
+    expect(response.body.message.modelName).toBe('Qwen/Qwen2.5-72B-Instruct');
+    const ctorCall = agentCtor.mock.calls[agentCtor.mock.calls.length - 1] as unknown as [
+      { model: string },
+    ];
+    expect(ctorCall[0].model).toBe('deepinfra/Qwen/Qwen2.5-72B-Instruct');
+  });
 });
 
 const CLASSIFIER_REPLY =

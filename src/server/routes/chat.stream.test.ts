@@ -145,6 +145,36 @@ describe('Chat streaming route', () => {
     expect(options.abortSignal).toBeInstanceOf(AbortSignal);
     expect(options.abortSignal.aborted).toBe(false);
   });
+
+  it('emits no delta event and persists a place-holder turn for empty-string deltas', async () => {
+    // The stream consumer skips falsy deltas (`if (delta)`): an
+    // empty-string text-delta must not surface as an SSE `delta` event, and
+    // an all-empty stream must still send `done` and persist an assistant
+    // message (content is a required field — regression: this used to throw
+    // at save time and silently end the stream after `meta`).
+    const cookies = await registerUser('stream-empty-delta@example.com');
+    mockAgentStream.mockImplementation(async () => ({
+      fullStream: (async function* () {
+        yield { type: 'text-delta', delta: '' };
+      })(),
+    }));
+
+    const app = createApp();
+    const response = await request(app)
+      .post('/api/chat/stream')
+      .set('Cookie', cookies)
+      .send({ content: 'hello there' });
+
+    expect(response.status).toBe(200);
+    expect(response.text).not.toContain('event: delta');
+    const doneLine = response.text.split('\n\n').find((part) => part.includes('event: done'));
+    expect(doneLine).toContain('"complete":true');
+    const persisted = await Message.findOne({
+      role: 'assistant',
+      modelName: 'mock-small-model',
+    });
+    expect(persisted?.content).toBe('(no content returned)');
+  });
 });
 
 const CLASSIFIER_REPLY =
