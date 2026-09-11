@@ -27,8 +27,8 @@ services:
 
   frontend:
     build:
-      context: ./src/client
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: src/client/Dockerfile
     ports:
       - '15173:4173'
     depends_on:
