@@ -170,8 +170,29 @@ deletedAt: null })` (403); unknown/invalid id → 404; non-assistant
       deterministic/error paths untouched.
 - [x] 5. **Client** — `ChatWindow.tsx` thumbs with unvote-on-reclick and
       in-flight disable; vitest `ChatWindow.feedback.test.tsx`.
-- [ ] 6. **Docs** — `docs/progress.md` entry on merge; one
-      `scripts/mongo.ts` snippet for inspecting `modelMetricStats`.
+- [x] 6. **Docs** — `docs/progress.md` entry on merge (deferred to merge, as
+      specified); one `scripts/mongo.ts` snippet for inspecting
+      `modelMetricStats`. Mongoose's default collection name for
+      `ModelMetricStat` is `modelmetricstats` (lowercase plural). Verified
+      against the live local DB with a seeded row, matching the unit-test
+      expectation (up=2, down=1 → weight 0.6). Rows with fewer than
+      `MIN_SAMPLE = 5` votes are ignored by the router, not by this query.
+
+### `scripts/mongo.ts` inspection snippet for `modelMetricStats`
+
+```text
+# Per-(band, model) tallies with totals and the Laplace-smoothed fit weight
+# that getFitWeight() computes: (up + 1) / (up + down + 2).
+npx tsx scripts/mongo.ts 'db.collection("modelmetricstats").find({}, { _id: 0, sort: { up: -1 } }).toArray()'
+
+# Aggregated view: total votes and smoothed weight per row.
+npx tsx scripts/mongo.ts 'db.collection("modelmetricstats").aggregate([
+  { $project: { _id: 0, band: 1, modelName: 1, up: 1, down: 1,
+    total: { $add: ["$up", "$down"] },
+    weight: { $round: [ { $divide: [ { $add: ["$up", 1] }, { $add: ["$up", "$down", 2] } ] }, 3 ] } } },
+  { $sort: { total: -1 } }
+]).toArray()'
+```
 
 No task depends on an open question.
 
