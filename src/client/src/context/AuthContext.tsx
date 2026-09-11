@@ -1,12 +1,12 @@
 import React, { createContext, useState, useEffect } from 'react';
 import axios from 'axios';
+import type { AuthUser } from '@shared/contracts';
 
-interface User {
-  id: string;
-  email: string;
-  role: string;
-  permissions: string[];
-}
+// Re-export of the shared /api/auth/me contract. NOTE (drift, issue #20):
+// POST /api/auth/login and /register return a narrower payload without
+// `permissions` (LoginUserPayload), while this type claims it — the field
+// is undefined right after login until /me refreshes it.
+export type User = AuthUser;
 
 interface AuthContextType {
   user: User | null;
