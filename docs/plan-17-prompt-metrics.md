@@ -8,7 +8,7 @@ We want to understand **why** the router picks the model it picks, and later,
 **whether that choice was right** (the upcoming feedback ticket will consume
 these). Today, the router (`src/server/services/routerService.ts`) decides with
 deterministic rules plus a guard-model pass, but nothing is recorded about the
-*prompt itself*. The router only persists the outcome (`modelName`) on the
+_prompt itself_. The router only persists the outcome (`modelName`) on the
 assistant message; the message documents carry no features.
 
 This ticket collects a set of per-message metrics and persists them alongside
@@ -33,7 +33,7 @@ can correlate routing decisions with prompt characteristics.
   endpoints `await` message saves. Insertion point for fire-and-forget work:
   right after each user-message `save()`.
 - The chat-history fetch is `.limit(10)` (`chat.ts:69, 143`) — see the note
-  in *Critiqued assumptions*: it cannot be used to derive a session-wide
+  in _Critiqued assumptions_: it cannot be used to derive a session-wide
   message index.
 - Tests: Jest + ts-jest with `MongoMemoryServer` setup
   (`src/server/test/setup.ts`); closest patterns are
@@ -49,7 +49,7 @@ can correlate routing decisions with prompt characteristics.
    collection) — matches the issue's suggestion and keeps a message + its
    features in one document.
 2. **Deterministic metrics** are computed synchronously in a pure TS module
-   (no deps, no I/O) and attached *before* `.save()` — zero added latency and
+   (no deps, no I/O) and attached _before_ `.save()` — zero added latency and
    no post-hoc update needed for them. Applied to both user and assistant
    messages (assistant content is final at save time).
 3. **LLM-classified dimensions** run post-save, fire-and-forget, as a second
@@ -65,9 +65,9 @@ can correlate routing decisions with prompt characteristics.
 6. Prompt-shaping helpers (stopword list, syllable heuristic) live inline in
    the pure module — no dependency added.
 7. **Two counters stored instead of one** to de-risk the indexing-semantics
-   question: `sessionMessageIndex` (count of *all* prior messages in the
+   question: `sessionMessageIndex` (count of _all_ prior messages in the
    session at write time) and `sessionUserMessageIndex` (count of prior
-   *user* messages). Both are cheap and preserve either interpretation
+   _user_ messages). Both are cheap and preserve either interpretation
    permanently — the Open question only decides which one the future router
    work should read, not the schema.
 
@@ -96,7 +96,7 @@ can correlate routing decisions with prompt characteristics.
   returns the promise; `chat.ts` ignores it, tests `await` it (via a flush
   after the response, e.g. by driving the mocked classify promise).
 - **Dot-notation update must match the schema.** `updateById(_id,
-  { $set: { 'metrics.llm': x } })` only works if the nested paths exist in
+{ $set: { 'metrics.llm': x } })` only works if the nested paths exist in
   the schema (they will, after task 1). Use `$set` explicitly.
 - **Stopword/imperative/syllable heuristics are English-only.** Fine for a
   first pass; explicitly not claimed to work for other scripts (syllable
@@ -108,60 +108,60 @@ can correlate routing decisions with prompt characteristics.
 
 Each item is a small, self-contained commit.
 
-- [ ] 1. **Model field**: add optional `metrics` subdocument to
-       `Message.ts`. Deterministic part: `wordCount`, `charCount`,
-       `lengthBucket` short|medium|long, `avgWordLength`,
-       `syllableEstimateAvg`, `codeIndicators` `{ fences, backticks,
-       codeTokenCount }`, `stopwordRatio`, `sessionMessageIndex`,
-       `sessionUserMessageIndex`, `hasQuestionMark`, `hasImperative`.
-       Nullable LLM part: `emotional`, `technical`, `abstract`, `sentiment`
-       (positive|negative|neutral|null), `openEnded`. All LLM fields
-       nullable with explicit `default: null` so queries filter predictably.
-- [ ] 2. **Deterministic metrics module**
-       `src/server/services/promptMetrics.ts`: pure functions, no deps, no
-       I/O; computes everything in item 1's deterministic section *except*
-       the two session indices (need DB context). Vowel-cluster syllable
-       heuristic; imperative check = first word is in a small known-verb
-       list, case-insensitive; `codeIndicators` counts markdown fences,
-       inline backtick pairs, and code-ish tokens (`{}`, `=>`, keywords);
-       `lengthBucket` derived from `wordCount` threshold constants. Every
-       function total (handles empty string, whitespace-only, unicode).
-- [ ] 3. **Unit tests** `promptMetrics.test.ts` following
-       `routerService.test.ts` style: counts, buckets, code detection,
-       stopword ratio, question/imperative detection; edges: empty string,
-       whitespace-only, unicode text, long code block, all-zero guards
-       (no division-by-zero).
+- [x] 1. **Model field**: add optional `metrics` subdocument to
+      `Message.ts`. Deterministic part: `wordCount`, `charCount`,
+      `lengthBucket` short|medium|long, `avgWordLength`,
+      `syllableEstimateAvg`, `codeIndicators` `{ fences, backticks,
+ codeTokenCount }`, `stopwordRatio`, `sessionMessageIndex`,
+      `sessionUserMessageIndex`, `hasQuestionMark`, `hasImperative`.
+      Nullable LLM part: `emotional`, `technical`, `abstract`, `sentiment`
+      (positive|negative|neutral|null), `openEnded`. All LLM fields
+      nullable with explicit `default: null` so queries filter predictably.
+- [x] 2. **Deterministic metrics module**
+      `src/server/services/promptMetrics.ts`: pure functions, no deps, no
+      I/O; computes everything in item 1's deterministic section _except_
+      the two session indices (need DB context). Vowel-cluster syllable
+      heuristic; imperative check = first word is in a small known-verb
+      list, case-insensitive; `codeIndicators` counts markdown fences,
+      inline backtick pairs, and code-ish tokens (`{}`, `=>`, keywords);
+      `lengthBucket` derived from `wordCount` threshold constants. Every
+      function total (handles empty string, whitespace-only, unicode).
+- [x] 3. **Unit tests** `promptMetrics.test.ts` following
+      `routerService.test.ts` style: counts, buckets, code detection,
+      stopword ratio, question/imperative detection; edges: empty string,
+      whitespace-only, unicode text, long code block, all-zero guards
+      (no division-by-zero).
 - [ ] 4. **Wire deterministic metrics into persistence** in `chat.ts`:
-       compute `computeDeterministic(content)` and build the indices with
-       two `countDocuments({ sessionId, role })`-style queries (added
-       *before* the first `.save()` so they count priors only), attach to
-       both user and assistant messages in both streaming and
-       non-streaming paths. Keep the two count queries parallel
-       (`Promise.all`) to avoid serializing them. Update
-       `chat.test.ts` / `chat.stream.test.ts` expectations.
+      compute `computeDeterministic(content)` and build the indices with
+      two `countDocuments({ sessionId, role })`-style queries (added
+      _before_ the first `.save()` so they count priors only), attach to
+      both user and assistant messages in both streaming and
+      non-streaming paths. Keep the two count queries parallel
+      (`Promise.all`) to avoid serializing them. Update
+      `chat.test.ts` / `chat.stream.test.ts` expectations.
 - [ ] 5. **LLM classification service** `classifyPromptDimensions(content)`
-       in `src/server/services/metricsService.ts`: single call to the
-       guard/small model via a prompt that returns five binary/simple
-       flags, parsed defensively (extract first JSON-looking object;
-       tolerate fences; unknown value = null per flag); on any throw
-       return all-nulls (mirroring `titleService` error handling); returns
-       the update object **and the promise** so tests can await.
+      in `src/server/services/metricsService.ts`: single call to the
+      guard/small model via a prompt that returns five binary/simple
+      flags, parsed defensively (extract first JSON-looking object;
+      tolerate fences; unknown value = null per flag); on any throw
+      return all-nulls (mirroring `titleService` error handling); returns
+      the update object **and the promise** so tests can await.
 - [ ] 6. **Wire classification post-save, fire-and-forget**: after each
-       user-message save (both endpoints), call the service and persist via
-       `findByIdAndUpdate` with `$set` on `metrics.llm`; `.catch` logs;
-       never awaited, never throws into the request path. Assistant
-       messages are *not* classified (see Open questions).
+      user-message save (both endpoints), call the service and persist via
+      `findByIdAndUpdate` with `$set` on `metrics.llm`; `.catch` logs;
+      never awaited, never throws into the request path. Assistant
+      messages are _not_ classified (see Open questions).
 - [ ] 7. **Integration tests** in `chat.test.ts` / `chat.stream.test.ts`
-       with the existing mocked Groq client: a) every new user and
-       assistant turn gets deterministic metrics filled with a
-       session-correct index; b) LLM update lands on success (await the
-       captured classify promise, then re-fetch the message); c) LLM
-       failure leaves `metrics.llm` nulls and the chat response
-       unaffected; d) indices increase across 12 turns in one session
-       (asserts the >10-message history cap is not leaked into indices).
+      with the existing mocked Groq client: a) every new user and
+      assistant turn gets deterministic metrics filled with a
+      session-correct index; b) LLM update lands on success (await the
+      captured classify promise, then re-fetch the message); c) LLM
+      failure leaves `metrics.llm` nulls and the chat response
+      unaffected; d) indices increase across 12 turns in one session
+      (asserts the >10-message history cap is not leaked into indices).
 - [ ] 8. **Document**: short section in `docs/overview.md` + a
-       `docs/progress.md` log entry on merge, with a `scripts/mongo.ts`
-       snippet to inspect metrics.
+      `docs/progress.md` log entry on merge, with a `scripts/mongo.ts`
+      snippet to inspect metrics.
 
 ## Verification
 
