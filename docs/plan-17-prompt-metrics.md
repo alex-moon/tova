@@ -341,6 +341,19 @@ the ones with remaining genuine doubt; each ships with a default.
   asked for backfill. Recorded here as a decision (in "Decisions"),
   flagged once so a later "why are old messages null" question doesn't
   read as a bug.
+- **Decoy-with-nested-flags edge in `parseLlmFlags` (found in the third
+  critic pass, not fixed here)**: when the parser meets a decoy object
+  that is all-null _at top level_ (e.g. `{"meta": {"emotional": true}}`),
+  it restarts scanning at the next `{` — which can be the decoy's own
+  nested object — so a decoy carrying nested valid flag values ahead of
+  the real flags can yield the decoy's value instead of the final one
+  (contrived output like `Note: {"meta": {"emotional": true}} Final:
+{"emotional": false}`). Hardening this means tracking brace depth across
+  the restart, which complicates a parser that today handles the realistic
+  failure modes (fenced output, prose wrapping, flag-keyed decoys) and
+  over-classifying-decoy risk is a model-quality problem that task 10's
+  parse-rate logging is designed to surface. Default: leave as is; revisit
+  only if task 10 shows the chosen model actually emits this shape.
 
 ## Implementation notes (from the critique pass)
 
@@ -363,3 +376,17 @@ the ones with remaining genuine doubt; each ships with a default.
   test flake source: `chat.stream.test.ts` fetched its messages _before_
   `flush()` and asserted LLM flags on the stale pre-classification snapshot;
   it now re-fetches after the flush. `npm run ci` green; suite at 77 tests.
+- Third critic pass (2026-09-11): hardening landed —
+  (a) `parseLlmFlags` now tolerates casing/whitespace in `sentiment`
+  (`"Negative "`, `"POSITIVE"` parse; unknown values still null) with a unit
+  test, plus a trailing-decoy-after-real-flags unit test;
+  (b) `chat.ts` computed `isTriviallyNeutral(content)` twice per user
+  message in each endpoint; the user-turn save (metrics + skip audit +
+  fire-and-forget call) is now one helper, `saveUserMessageWithMetrics`,
+  shared by both endpoints, so the gate is evaluated once;
+  (c) a coverage gap closed: the streaming endpoint's trivial-skip call
+  site had no integration test — added one asserting no classifier call
+  fires, `llmSkipReason: 'trivial'` is recorded, and deterministic metrics
+  still attach. Suite at 82 tests; `npm run ci` green (verified this pass).
+  One unfixed parser edge (decoy with nested valid flags) is documented in
+  _Open questions_.

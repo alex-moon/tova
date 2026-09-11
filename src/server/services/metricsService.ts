@@ -52,8 +52,9 @@ export const parseLlmFlags = (raw: string | null | undefined): LlmMetrics => {
             technical: asBoolean(obj.technical),
             abstract: asBoolean(obj.abstract),
             sentiment:
-              typeof obj.sentiment === 'string' && SENTIMENTS.has(obj.sentiment)
-                ? (obj.sentiment as LlmMetrics['sentiment'])
+              typeof obj.sentiment === 'string' &&
+              SENTIMENTS.has(obj.sentiment.trim().toLowerCase())
+                ? (obj.sentiment.trim().toLowerCase() as LlmMetrics['sentiment'])
                 : null,
             openEnded: asBoolean(obj.openEnded),
           };

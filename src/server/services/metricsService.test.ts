@@ -84,6 +84,25 @@ describe('metricsService', () => {
       });
     });
 
+    it('normalizes sentiment casing and surrounding whitespace', () => {
+      expect(parseLlmFlags('{"emotional": false, "sentiment": "Negative "}')).toMatchObject({
+        sentiment: 'negative',
+      });
+      expect(parseLlmFlags('{"sentiment": "POSITIVE"}')).toMatchObject({
+        sentiment: 'positive',
+      });
+      // Unknown sentiment values still degrade to null
+      expect(parseLlmFlags('{"sentiment": "angry"}')).toMatchObject({ sentiment: null });
+    });
+
+    it('returns the real flags even when a decoy object follows them', () => {
+      expect(
+        parseLlmFlags(
+          'Answer: {"emotional": true, "technical": false, "abstract": false, "sentiment": "neutral", "openEnded": false} (format: {"example": 1})',
+        ),
+      ).toMatchObject({ emotional: true, technical: false });
+    });
+
     it('returns nulls for non-JSON output', () => {
       expect(parseLlmFlags('definitely emotional, very technical')).toEqual(parseLlmFlags(null));
       expect(parseLlmFlags('no braces at all')).toEqual(parseLlmFlags(''));

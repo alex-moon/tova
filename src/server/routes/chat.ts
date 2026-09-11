@@ -33,6 +33,32 @@ const createSessionWithUser = async (userId: string, content: string) => {
   return Session.create({ userId, title });
 };
 
+// Persist the user turn with its metrics. Trivially neutral prompts record
+// llmSkipReason 'trivial' so the skip gate is distinguishable in the DB from
+// failed ('parse'/'error') classification; non-trivial prompts get a
+// fire-and-forget classification call back (docs/plan-17-prompt-metrics.md
+// tasks 6 and 9). The gate is computed once and reused for both purposes.
+const saveUserMessageWithMetrics = async (sessionId: string, content: string) => {
+  const triviallyNeutral = isTriviallyNeutral(content);
+  const userMessage = new Message({
+    sessionId,
+    role: 'user',
+    content,
+    metrics: {
+      ...(await buildMessageMetrics(sessionId, content)),
+      ...(triviallyNeutral ? { llmSkipReason: 'trivial' as const } : {}),
+    },
+  });
+  await userMessage.save();
+
+  if (!triviallyNeutral) {
+    classifyAndPersistPromptDimensions(String(userMessage._id), content).catch((err) =>
+      console.error('Prompt classification error:', err),
+    );
+  }
+  return userMessage;
+};
+
 const SYSTEM_PROMPT = `You are Tova, a helpful, warm, and direct personal chat assistant — think of yourself as the thing people reach for instead of Googling or texting a friend at 11pm. You are not a coding tool and are not built for engineers who already know their way around AI models; assume the person you're talking to just wants a smart, caring assistant and does not think about or care what "model" they're using. If asked what model or AI you're built on, answer simply: you're Tova. Do not name underlying providers or models.
 
 Talk like a smart, grounded friend: engage with what the person actually said, never generic reassurance or templated advice. Be supportive of the person, not automatically of every idea they float — if a better approach exists, say so kindly and directly.
@@ -65,29 +91,7 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
       session = await createSessionWithUser(userId as string, content);
     }
     // Save user message
-    const userMessage = new Message({
-      sessionId: session._id,
-      role: 'user',
-      content,
-      metrics: {
-        ...(await buildMessageMetrics(String(session._id), content)),
-        // Auditable skip: llmSkipReason 'trivial' distinguishes the skip gate
-        // from failed ('parse'/'error') classification in the DB.
-        ...(isTriviallyNeutral(content) ? { llmSkipReason: 'trivial' as const } : {}),
-      },
-    });
-    await userMessage.save();
-
-    // LLM classification runs post-save, fire-and-forget; never awaited.
-    // Trivially neutral prompts (short confirmations/continuations) skip it —
-    // docs/plan-17-prompt-metrics.md task 9. Skipped messages keep null flags
-    // but record 'trivial' in metrics.llmSkipReason so skips are distinguishable
-    // in the DB from failed/unparsed classification.
-    if (!isTriviallyNeutral(content)) {
-      classifyAndPersistPromptDimensions(String(userMessage._id), content).catch((err) =>
-        console.error('Prompt classification error:', err),
-      );
-    }
+    await saveUserMessageWithMetrics(String(session._id), content);
 
     // Determine model
     const routingResult = await routeQuery(content);
@@ -157,29 +161,7 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
     }
 
     // Save user message
-    const userMessage = new Message({
-      sessionId: session._id,
-      role: 'user',
-      content,
-      metrics: {
-        ...(await buildMessageMetrics(String(session._id), content)),
-        // Auditable skip: llmSkipReason 'trivial' distinguishes the skip gate
-        // from failed ('parse'/'error') classification in the DB.
-        ...(isTriviallyNeutral(content) ? { llmSkipReason: 'trivial' as const } : {}),
-      },
-    });
-    await userMessage.save();
-
-    // LLM classification runs post-save, fire-and-forget; never awaited.
-    // Trivially neutral prompts (short confirmations/continuations) skip it —
-    // docs/plan-17-prompt-metrics.md task 9. Skipped messages keep null flags
-    // but record 'trivial' in metrics.llmSkipReason so skips are distinguishable
-    // in the DB from failed/unparsed classification.
-    if (!isTriviallyNeutral(content)) {
-      classifyAndPersistPromptDimensions(String(userMessage._id), content).catch((err) =>
-        console.error('Prompt classification error:', err),
-      );
-    }
+    await saveUserMessageWithMetrics(String(session._id), content);
 
     // Determine model
     const routingResult = await routeQuery(content);

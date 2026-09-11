@@ -209,4 +209,48 @@ describe('Chat streaming prompt metrics', () => {
       openEnded: null,
     });
   });
+
+  it('skips classification for trivially neutral prompts on the streaming endpoint', async () => {
+    // Any classifier call here would find a mock client that leaves an
+    // 'error'/'parse' reason behind; the skip must avoid the call entirely.
+    mockCreate.mockImplementation(async (args?: { stream?: boolean }) =>
+      args?.stream
+        ? {
+            [Symbol.asyncIterator]: async function* () {
+              yield { choices: [{ delta: { content: 'done.' } }] };
+            },
+          }
+        : Promise.reject(new Error('classifier should not be called')),
+    );
+
+    const cookies = await registerUser('stream-trivial@example.com');
+    const app = createApp();
+    const response = await request(app)
+      .post('/api/chat/stream')
+      .set('Cookie', cookies)
+      .send({ content: 'please continue' });
+
+    expect(response.status).toBe(200);
+    await flush();
+    // The only completion call is the streamed chat itself — no classifier.
+    for (const call of mockCreate.mock.calls) {
+      expect(
+        (
+          call[0] as { messages?: { content: string }[] } | undefined
+        )?.messages?.[0]?.content.startsWith('Classify the user prompt'),
+      ).toBe(false);
+    }
+
+    const userMessage = await Message.findOne({ role: 'user' });
+    expect(userMessage?.metrics?.llm).toMatchObject({
+      emotional: null,
+      technical: null,
+      abstract: null,
+      sentiment: null,
+      openEnded: null,
+    });
+    expect(userMessage?.metrics?.llmSkipReason).toBe('trivial');
+    // Deterministic metrics are still attached to the trivial skip
+    expect(userMessage?.metrics?.sessionMessageIndex).toBe(0);
+  });
 });
