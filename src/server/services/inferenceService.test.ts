@@ -84,4 +84,23 @@ describe('Inference Service provider dispatch', () => {
       neutral,
     );
   });
+
+  describe('unknown provider (corrupt/unsupported config data)', () => {
+    const corruptCall = () =>
+      inferenceService.createCompletion({
+        provider: 'ollama' as never,
+        model: 'x',
+        messages: [],
+      });
+
+    it('throws a named error instead of a bare TypeError', async () => {
+      await expect(corruptCall()).rejects.toThrow('Unknown LLM provider: ollama');
+    });
+
+    it('throws before any connector is invoked', async () => {
+      await corruptCall().catch(() => {});
+      expect(mockGroqCompletion).not.toHaveBeenCalled();
+      expect(mockDeepinfraCompletion).not.toHaveBeenCalled();
+    });
+  });
 });

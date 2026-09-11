@@ -18,13 +18,25 @@ const connectors: Record<LlmProvider, LlmConnector> = {
   deepinfra: deepinfraConnector,
 };
 
+/*
+ * Providers are typed on `CompletionOptions`, but model refs sourced from
+ * MongoDB (`modelConfigService`) are untyped at the boundary — a corrupted
+ * or unsupported provider string must not surface as a bare
+ * `TypeError: undefined is not a function` mid-request.
+ */
+const connectorFor = (provider: LlmProvider | undefined): LlmConnector => {
+  const connector = connectors[provider ?? 'groq'];
+  if (!connector) throw new Error(`Unknown LLM provider: ${String(provider)}`);
+  return connector;
+};
+
 export const inferenceService = {
   createCompletion: async (options: CompletionOptions) => {
-    const connector = connectors[options.provider ?? 'groq'];
+    const connector = connectorFor(options.provider);
     return connector.createCompletion(options);
   },
   createStreamingCompletion: async (options: CompletionOptions) => {
-    const connector = connectors[options.provider ?? 'groq'];
+    const connector = connectorFor(options.provider);
     return connector.createStreamingCompletion(options);
   },
 };

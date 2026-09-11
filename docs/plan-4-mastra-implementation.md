@@ -392,3 +392,48 @@ carry no content).
 
 New open questions raised by this pass: F and G (canonical wording kept in
 the Open questions section above; not restated here).
+
+### Fourth critic pass (this branch, after task-5 shipping)
+
+State on the branch: tasks 2–5 shipped (commits dc2be16…56444da); tasks 6–10
+remain. `npm run ci` fully green before this pass started (114 server
+tests + client suite/build).
+
+No new shipped bug found. Two hardening gaps fixed this pass:
+
+- **Unknown-provider dispatch** (`inferenceService.ts`): the connector map
+  was indexed directly on `options.provider` (`connectors[provider ??
+'groq']`). Because provider refs ultimately come from MongoDB documents
+  (validated only as strings at the `listByTier` boundary), a corrupted or
+  unsupported provider value produced `undefined` and a bare
+  `TypeError: connector is undefined` mid-request, with no indication of
+  which config value caused it. The dispatch now throws
+  `Unknown LLM provider: <value>` before any connector is touched; pinned
+  by new tests in `inferenceService.test.ts` (error message + no-connector
+  call). Note the choice here: fail loudly rather than silently fall back
+  to Groq, consistent with the loud-failure reading preferred under
+  open question G — if G is instead answered "silently fall back", this
+  guard should change shape with it.
+- **`undefined` keys in `modelSettings`** (`mastraService.ts`): both
+  `temperature` and `maxOutputTokens` were forwarded even when unset
+  (`{ temperature: undefined, maxOutputTokens: undefined }`), feeding
+  `undefined` values into a settings object consumed by the real AI SDK —
+  a shape the mocked tests could not falsify. Settings are now built by
+  omitting unset fields; pinned by a new test asserting
+  `modelSettings: {}` for a bare call and unchanged behaviour when both
+  are set.
+
+One behavioural note (not a bug, pre-existing parity kept): the SSE route
+(`routes/chat.ts`) has never passed an abort/disconnect signal into the
+completion layer. With groq-sdk this dropped silently; with Mastra the
+`Agent.stream` call supports `abortSignal`, so a client mid-stream
+disconnect still lets the provider call run to completion server-side
+(tokens consumed, no deltas delivered). Pre-existing on the old path too,
+so no regression — but wiring `req.on('close')` → `abortSignal` through
+`CompletionOptions` is a cheap hardening candidate for task 6 (which
+already touches the streaming call site). Recorded as a task-6 note, not
+an open question: nothing user-decision shaped in it.
+
+Remaining open questions unchanged: D, E, F, G (all already posted to the
+issue; tasks 6, 9, 10 do not depend on them). No new user-side questions
+were raised by this pass.

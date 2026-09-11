@@ -36,6 +36,16 @@ const toNeutralStream = async (
     }
   })();
 
+/*
+ * Omit unset call settings rather than forwarding `temperature: undefined`
+ * / `maxOutputTokens: undefined` into Mastra's model settings (undefined
+ * keys can trip SDK-level validation; absent keys cannot).
+ */
+const modelSettingsFrom = (options: CompletionOptions) => ({
+  ...(options.temperature !== undefined ? { temperature: options.temperature } : {}),
+  ...(options.max_tokens !== undefined ? { maxOutputTokens: options.max_tokens } : {}),
+});
+
 const buildConnector = (provider: LlmProvider): LlmConnector => {
   // Our neutral message shape is structurally Core-compatible; the cast is
   // needed only because the union `role` in the neutral type does not narrow
@@ -55,20 +65,14 @@ const buildConnector = (provider: LlmProvider): LlmConnector => {
     createCompletion: async (options: CompletionOptions): Promise<NeutralCompletion> => {
       const result = await agentFor(options.model).generate(asMessageList(options.messages), {
         maxSteps: 1,
-        modelSettings: {
-          temperature: options.temperature,
-          maxOutputTokens: options.max_tokens,
-        },
+        modelSettings: modelSettingsFrom(options),
       });
       return { choices: [{ message: { content: result.text ?? null } }] };
     },
     createStreamingCompletion: async (options: CompletionOptions): Promise<NeutralChunkStream> => {
       const result = await agentFor(options.model).stream(asMessageList(options.messages), {
         maxSteps: 1,
-        modelSettings: {
-          temperature: options.temperature,
-          maxOutputTokens: options.max_tokens,
-        },
+        modelSettings: modelSettingsFrom(options),
       });
       return toNeutralStream(result.fullStream);
     },

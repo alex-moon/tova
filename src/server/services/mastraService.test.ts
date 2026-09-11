@@ -70,6 +70,15 @@ describe('Mastra service neutral mapping', () => {
       );
     });
 
+    it('omits unset settings from modelSettings instead of forwarding undefined', async () => {
+      mockGenerate.mockResolvedValueOnce({ text: 'x' });
+      await groqConnector.createCompletion({ model: 'm', messages: [] });
+      expect(mockGenerate.mock.calls[0][1]).toEqual({
+        maxSteps: 1,
+        modelSettings: {},
+      });
+    });
+
     it('propagates transport errors to callers', async () => {
       mockGenerate.mockRejectedValueOnce(new Error('boom'));
       await expect(groqConnector.createCompletion({ model: 'x', messages: [] })).rejects.toThrow(
