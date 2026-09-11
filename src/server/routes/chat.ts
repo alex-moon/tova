@@ -203,7 +203,7 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
       });
 
       for await (const chunk of stream) {
-        const delta = chunk.choices[0]?.delta?.content;
+        const delta = chunk.delta;
         if (delta) {
           assistantContent += delta;
           sendEvent('delta', { content: delta });

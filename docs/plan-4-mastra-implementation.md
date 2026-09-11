@@ -115,7 +115,7 @@ Concrete, individually commit-safe steps:
    note the guard tier currently has only a Groq seed entry — whether a
    DeepInfra guard model should exist is part of D.*
 3. **Define neutral result/chunk types (prerequisite, no Mastra import
-   yet).**
+   yet).** — *shipped (see critic note below).*
    - Add `NeutralCompletion` (fields actually consumed:
      `message.content`) and `NeutralChunkStream` =
      `AsyncIterable<{ delta?: string | null }>` as exported types from
@@ -306,13 +306,72 @@ which is what makes it a spike rather than an implementation task.
 
 ### Critic-pass revision (after first deliverable on this branch)
 
-Only task 2 has shipped so far (`providerRouting` model +
-`modelConfigService`; tasks 1 and 3–8 unstarted). Added two hardening tests
-and fixed an uncaught-failure bug: a failing `ProviderRouting.find` (dead
-Mongo) propagated out of `listByTier` instead of falling back to the
-env-configured model. Defaults table (`DEFAULT_MODEL_ENV`) is now the single
-source of truth shared by seeding and the env fallback, and concurrent first
-reads are covered.
+Only task 2 had shipped at this point (`providerRouting` model +
+`modelConfigService`), with two hardening tests and a fixed uncaught-failure
+bug: a failing `ProviderRouting.find` (dead Mongo) propagated out of
+`listByTier` instead of falling back to the env-configured model. Defaults
+table (`DEFAULT_MODEL_ENV`) is the single source of truth shared by seeding
+and the env fallback, and concurrent first reads are covered.
+
+Task 3 shipped on top of task 2: `src/server/services/llmTypes.ts` defines
+provider-neutral types (`NeutralCompletion`, `NeutralStreamChunk` =
+`{ delta?: string | null }`, `NeutralChunkStream`, provider-agnostic
+`LlmConnector`). `inferenceService` normalises Groq shapes into the neutral
+types (mapping lives inside the service only); the streaming consumer in
+`routes/chat.ts` now reads `chunk.delta`. The protected narrowing held:
+existing call sites (`titleService`, `metricsService`, `routerService`)
+use `choices[0]?.message?.content` and keep working unchanged. One guard
+lesson captured: the Groq→neutral mapping must be defensive (missing
+`choices`) because the "unexpected response shape" test asserts exactly
+that path skips with `skipReason: 'parse'` — a strict mapper silently
+changed the failure mode. Tests, lint, typecheck all green.
+
+### Task-4 spike results (research, no app code; verified in `/tmp` on Node v22 with `@mastra/core@1.66.0`)
+
+- **A resolved — provider surface:** No `@mastra/groq`/`@mastra/deepinfra`
+  packages exist. Mastra v1 ships both providers *inside the model router*
+  bundled in `@mastra/core` (verified: `case "groq": createGroq(...)` and
+  `case "deepinfra": createDeepInfra(...)` in `models-dev-*.js`). Model
+  ids take the `groq/<model>` / `deepinfra/<model>` router form, or the
+  explicit OpenAI-compatible object form
+  `{ providerId, modelId, url?, apiKey? }` (verified working against a
+  local mock server). No extra provider dependencies needed.
+- **B resolved — server-side usage:** `@mastra/core/agent` imports and
+  constructs an `Agent` with no dev server, registry, or storage; a bare
+  `Mastra` instance only *warns* about falling back to in-memory storage
+  (a warning, not a requirement — our own Mongo persistence is untouched).
+  Streaming (`agent.stream` → `fullStream` yields `text-delta` chunks with
+  a `.delta` text field) and blocking (`agent.generate` → `.text`) both
+  round-tripped cleanly; mapping to `NeutralChunkStream` /
+  `NeutralCompletion` is trivial `text-delta → delta`. One observed shim:
+  an SSE mock with no finish chunk yields `finishReason: 'other'` and
+  retried the whole call (≈5 requests); a faithful mock must return a
+  proper `finish_reason` chunk. Real-provider behaviour still to be smoke
+  checked locally with keys in task 5.
+- **C resolved — streaming:** `agent.stream(...).fullStream` chunks are
+  AI-SDK-style (`text-delta` with `.delta`, plus lifecycle chunks
+  `start`/`step-start`/`text-start`/`text-end`/`step-finish`/`finish`).
+  Mapping to the neutral `{ delta }` surface is a one-line filter inside
+  the central service; the SSE contract needs no change.
+- **H resolved — env naming:** `DEEPINFRA_API_KEY` is not invented — it is
+  the real `environmentVariableName` Mastra's bundled
+  `createDeepInfra` uses (and `GROQ_API_KEY` for Groq) when no explicit
+  `apiKey` is passed. The plan's name matches the library.
+- **I resolved — jest/ESM:** `@mastra/core@1.66.0` ships dual builds
+  (`dist/index.js` ESM + `dist/index.cjs` with `require` export paths for
+  every subpath); `node -e "require('@mastra/core/agent')"` succeeds, so
+  ts-jest in CJS mode should load the central service without transform
+  changes. Verify once in a jest worker during task 5 as planned.
+- Transitive weight (direct deps of `@mastra/core` 1.66.0): ajv, chat
+  (~UI-ish chat package, not a provider), croner, dotenv, execa, fastq,
+  p-map/p-retry/lru-cache, ws, posthog-node, tokenx, plus vendored AI-SDK
+  provider packages. Import side effects are none observed (constructing
+  `Mastra` prints its storage warning; `Agent` alone prints nothing).
+
+Remaining open questions after the spike: D, E, F, G (unchanged, user
+input still pending; none of tasks 5–6 depend on them).
+
+
 
 New open questions raised by this pass:
 
