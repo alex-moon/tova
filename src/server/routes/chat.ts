@@ -5,7 +5,7 @@ import { Message } from '../models/Message';
 import { routeQuery } from '../services/routerService';
 import { generateChatTitle } from '../services/titleService';
 import { hasPermission, ROUTING_PERMISSION } from '../services/userService';
-import Groq from 'groq-sdk';
+import { inferenceService } from '../services/inferenceService';
 import { classifyAndPersistPromptDimensions, isTriviallyNeutral } from '../services/metricsService';
 import { computeDeterministicMetrics } from '../services/promptMetrics';
 
@@ -14,21 +14,17 @@ const router = express.Router();
 const NO_ROUTING_PERMISSION = "You don't have permission to use the model router.";
 
 // Session indices count only prior messages (computed before .save()), so a
-// session's first message gets index 0. The two counts run in parallel.
-// Count-based indices are racy under concurrent turns in one session; accepted
-// in the plan (docs/plan-17-prompt-metrics.md) since metrics are analytical.
+// session's first message gets index 0. Count-based indices are racy under
+// concurrent turns in one session; accepted in the plan
+// (docs/plan-17-prompt-metrics.md) since metrics are analytical.
 const buildMessageMetrics = async (
   sessionId: string,
   content: string,
 ): Promise<Record<string, unknown>> => {
-  const [priorCount, priorUserCount] = await Promise.all([
-    Message.countDocuments({ sessionId }),
-    Message.countDocuments({ sessionId, role: 'user' }),
-  ]);
+  const priorCount = await Message.countDocuments({ sessionId });
   return {
     ...computeDeterministicMetrics(content),
     sessionMessageIndex: priorCount,
-    sessionUserMessageIndex: priorUserCount,
   };
 };
 
@@ -44,10 +40,6 @@ Talk like a smart, grounded friend: engage with what the person actually said, n
 For anything emotionally heavy — relationships, mental health, grief, major life decisions — be honestly helpful within what a conversation like this can safely offer, and be upfront that you're not a substitute for a therapist or professional when the topic calls for one. Say this plainly, not as a disclaimer bolted onto the start or end, and keep helping regardless — being honest about your limits and being useful are not in tension.
 
 Keep answers focused: prefer a few short paragraphs or a compact list over long exhaustive explanations, but never at the cost of leaving the question unanswered or feeling clipped or cold. Do not pad answers with introductions, summaries, or filler.`;
-
-const groq = new Groq({
-  apiKey: process.env.GROQ_API_KEY || 'dummy_key',
-});
 
 // Chat endpoint (non-streaming, preserved for compatibility)
 router.post('/', authenticate, async (req: AuthRequest, res) => {
@@ -105,7 +97,7 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
       }));
     messages.unshift({ role: 'system', content: SYSTEM_PROMPT });
 
-    const chatCompletion = await groq.chat.completions.create({
+    const chatCompletion = await inferenceService.createCompletion({
       messages,
       model: routingResult.model,
     });
@@ -209,10 +201,9 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
     let assistantContent = '';
 
     try {
-      const stream = await groq.chat.completions.create({
+      const stream = await inferenceService.createStreamingCompletion({
         messages,
         model: routingResult.model,
-        stream: true,
       });
 
       for await (const chunk of stream) {

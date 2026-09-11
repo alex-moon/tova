@@ -110,11 +110,9 @@ describe('Chat route prompt metrics', () => {
       hasImperative: true,
       codeIndicators: { fences: 0, backticks: 0, codeTokenCount: 0 },
       sessionMessageIndex: 0,
-      sessionUserMessageIndex: 0,
     });
     expect(assistantMessage?.metrics).toMatchObject({
       sessionMessageIndex: 1,
-      sessionUserMessageIndex: 1,
     });
 
     await flush();
@@ -182,7 +180,6 @@ describe('Chat route prompt metrics', () => {
       expect(response.status).toBe(200);
       sessionId = response.body.sessionId;
       expect(response.body.message.metrics.sessionMessageIndex).toBe(turn * 2 + 1);
-      expect(response.body.message.metrics.sessionUserMessageIndex).toBe(turn + 1);
 
       const userMessage = await Message.findOne({
         sessionId,
@@ -190,7 +187,6 @@ describe('Chat route prompt metrics', () => {
         content: `Write turn ${turn}`,
       });
       expect(userMessage?.metrics?.sessionMessageIndex).toBe(turn * 2);
-      expect(userMessage?.metrics?.sessionUserMessageIndex).toBe(turn);
     }
   });
 });

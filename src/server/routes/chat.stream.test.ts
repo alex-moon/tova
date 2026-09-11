@@ -179,11 +179,9 @@ describe('Chat streaming prompt metrics', () => {
       hasImperative: true,
       hasQuestionMark: false,
       sessionMessageIndex: 0,
-      sessionUserMessageIndex: 0,
     });
     expect(persisted[1]?.metrics).toMatchObject({
       sessionMessageIndex: 1,
-      sessionUserMessageIndex: 1,
       codeIndicators: { fences: 0, backticks: 0, codeTokenCount: 0 },
     });
     expect((await Session.findById(sessionId)) ?? null).not.toBeNull();

@@ -1,12 +1,6 @@
-import Groq from 'groq-sdk';
 import { Message } from '../models/Message';
+import { inferenceService } from './inferenceService';
 import { computeDeterministicMetrics } from './promptMetrics';
-
-const getGroqClient = () => {
-  return new Groq({
-    apiKey: process.env.GROQ_API_KEY || 'dummy_key',
-  });
-};
 
 const LLM_MODEL = process.env.ROUTER_GUARD_MODEL || 'allam-2-7b';
 
@@ -89,8 +83,7 @@ export const parseLlmFlags = (raw: string | null | undefined): LlmMetrics => {
 
 export const classifyPromptDimensions = async (content: string): Promise<LlmMetrics> => {
   try {
-    const groq = getGroqClient();
-    const completion = await groq.chat.completions.create({
+    const completion = await inferenceService.createCompletion({
       model: LLM_MODEL,
       messages: [{ role: 'user', content: `${LLM_PROMPT}\n\nPrompt: ${content.trim()}` }],
       temperature: 0,

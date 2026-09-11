@@ -35,7 +35,6 @@ const messageSchema = new mongoose.Schema({
     },
     stopwordRatio: { type: Number },
     sessionMessageIndex: { type: Number },
-    sessionUserMessageIndex: { type: Number },
     hasQuestionMark: { type: Boolean },
     hasImperative: { type: Boolean },
     llm: {

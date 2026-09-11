@@ -1,10 +1,4 @@
-import Groq from 'groq-sdk';
-
-const getGroqClient = () => {
-  return new Groq({
-    apiKey: process.env.GROQ_API_KEY || 'dummy_key',
-  });
-};
+import { inferenceService } from './inferenceService';
 
 export interface RouterConfig {
   smallModel: string;
@@ -47,8 +41,7 @@ export const routeQuery = async (
 
   // Tier 2: Guard model classification
   try {
-    const groq = getGroqClient();
-    const response = await groq.chat.completions.create({
+    const response = await inferenceService.createCompletion({
       model: guardModel,
       messages: [
         {

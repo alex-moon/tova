@@ -1,8 +1,4 @@
-import Groq from 'groq-sdk';
-
-const groq = new Groq({
-  apiKey: process.env.GROQ_API_KEY || 'dummy_key',
-});
+import { inferenceService } from './inferenceService';
 
 const TITLE_MODEL = process.env.ROUTER_SMALL_MODEL || 'openai/gpt-oss-20b';
 
@@ -14,7 +10,7 @@ export const generateChatTitle = async (content: string): Promise<string> => {
   const trimmed = content.replace(/\s+/g, ' ').trim();
   const fallback = `${trimmed.substring(0, 30)}${trimmed.length > 30 ? '…' : ''}`;
   try {
-    const completion = await groq.chat.completions.create({
+    const completion = await inferenceService.createCompletion({
       model: TITLE_MODEL,
       messages: [
         { role: 'system', content: TITLE_PROMPT },

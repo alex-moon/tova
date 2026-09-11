@@ -65,12 +65,10 @@ can correlate routing decisions with prompt characteristics.
    exists; building one is out of scope for this ticket).
 6. Prompt-shaping helpers (stopword list, syllable heuristic) live inline in
    the pure module — no dependency added.
-7. **Two counters stored instead of one** to de-risk the indexing-semantics
-   question: `sessionMessageIndex` (count of _all_ prior messages in the
-   session at write time) and `sessionUserMessageIndex` (count of prior
-   _user_ messages). Both are cheap and preserve either interpretation
-   permanently — the Open question only decides which one the future router
-   work should read, not the schema.
+7. **One counter stored** (`sessionMessageIndex`, count of _all_ prior
+   messages in the session at write time). PR review feedback: the two
+   candidate indices are analytically equivalent in the ballpark, so one is
+   sufficient; `sessionUserMessageIndex` was dropped from the schema.
 
 ## Critiqued assumptions (every current assumption, challenged)
 
@@ -127,7 +125,7 @@ Each item is a small, self-contained commit.
       `lengthBucket` short|medium|long, `avgWordLength`,
       `syllableEstimateAvg`, `codeIndicators` `{ fences, backticks,
  codeTokenCount }`, `stopwordRatio`, `sessionMessageIndex`,
-      `sessionUserMessageIndex`, `hasQuestionMark`, `hasImperative`.
+      `hasQuestionMark`, `hasImperative`.
       Nullable LLM part: `emotional`, `technical`, `abstract`, `sentiment`
       (positive|negative|neutral|null), `openEnded`. All LLM fields
       nullable with explicit `default: null` so queries filter predictably.
@@ -260,10 +258,8 @@ Each item is a small, self-contained commit.
 Nothing depends on an open question; each has a chosen default that ships.
 
 - **Which index the future router reads**: `sessionMessageIndex` (all
-  roles) vs `sessionUserMessageIndex`. Both are stored; the consumer
-  decides later — no data is lost under either interpretation.
-  alex-moon deferred, asking for filepaths/line numbers; those have been
-  posted on the issue. No planned task depends on the answer.
+  roles) is stored; the resolution of the "pick one" PR review comment.
+  No other index is persisted, so the router work reads this one.
 - **Backfill of existing messages**: out of scope; issue only requires
   forward-going fills for new turns.
 - **NEW — Should the schema record _why_ `metrics.llm` is null?** A skipped
@@ -299,13 +295,8 @@ Nothing depends on an open question; each has a chosen default that ships.
   trailing text after the JSON all parse; per-flag unknown values degrade
   to `null` independently; a throw (or response without `choices`) returns
   all nulls.
-- `chat.ts` appends deterministic metrics plus the two session indices in
-  `buildMessageMetrics` (two parallel `countDocuments` counts of _priors_
-  only). Symptom to watch: the assistant message's
-  `sessionUserMessageIndex` is the current turn's number (the user message
-  is already saved when the assistant's indices are computed), i.e. one
-  higher than the same-turn user message's. That is intentional: both
-  indices are strict counts of priors at write time.
+- `chat.ts` appends deterministic metrics plus `sessionMessageIndex` in
+  `buildMessageMetrics` (a single `countDocuments` count of _priors_ only).
 - The fire-and-forget classification made the existing stream test mocks
   fragile (the classify call consumed queued `mockResolvedValueOnce` stream
   mocks), so `chat.stream.test.ts` mocks are now arg-aware (`stream`, or
