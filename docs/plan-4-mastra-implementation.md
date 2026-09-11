@@ -104,9 +104,7 @@ Beyond the caller list above, these facts now anchor the detailed steps:
 
 Concrete, individually commit-safe steps:
 
-1. **Feasibility spike** — _still open, grown into task 4 below (this
-   supersedes the original stub; do not start task 5 before it resolves
-   A–C)._
+1. ~~**Feasibility spike** — superseded by task 4 below (done).~~
 2. **`providerRouting` collection + `modelConfigService`** — _shipped
    (see the critic-pass revision note below). Remaining detail from the
    original stub: DeepInfra large-tier seed identity
@@ -120,47 +118,45 @@ Concrete, individually commit-safe steps:
      `message.content`) and `NeutralChunkStream` =
      `AsyncIterable<{ delta?: string | null }>` as exported types from
      `inferenceService` (or a sibling `llmTypes.ts` to avoid a cycle).
-   - Validate that narrowing the streaming type to delta-only does not hide
-     behaviour `routes/chat.ts` needs. Verified above: it only touches
-     `choices[0]?.delta?.content`. If the spike (task 4) reveals Mastra
-     emits "thinking" or annotation deltas that would now be flattened into
-     text, stop and record how they are represented — this is exactly the
-     surface where a silent behaviour change would happen.
+   - Validate that narrowing the streaming type to delta-only does not
+     hide behaviour `routes/chat.ts` needs. Verified above: it only
+     touches `choices[0]?.delta?.content`. The spike has since answered
+     the adjacent worry: Mastra emits lifecycle chunks
+     (`start`/`step-start`/`finish`) and plain `text-delta` chunks, with
+     no "thinking"/annotation delta type observed against the mock
+     provider — task 5's real-provider smoke should watch for reasoning
+     deltas from reasoning-capable models before assuming that holds
+     universally.
    - Move `LlmConnector` to the neutral types. `groq-sdk` types are dropped
      from the public interface in this step even before Mastra lands, so
      callers cannot accidentally depend on provider shapes. This step is
      _not_ gated by any open question.
-4. **Feasibility spike: pin Mastra packages (research, no app code).**
-   - `npm view @mastra/core <known-candidates>` and a throwaway install in
-     `/tmp` (not the repo, keep the lockfile clean until we commit to
-     taking the dependency): verify it installs and imports cleanly in
-     this Node v22 + tsx + ts-jest setup.
-   - Identify the provider path: official `@mastra/*` Groq/DeepInfra
-     integration packages if the released major ships them, else Mastra's
-     generic OpenAI-compatible provider fed each provider's `baseURL`.
-     Record the answer here and in the issue; unblocks tasks 5–6.
-   - Verify B empirically in the spike: import the library pieces
-     (`Agent` / model wrapper) in a bare script _without_ any dev server,
-     registry, or storage config, and confirm construction + one mocked
-     call works. Record what storage/registry machinery, if any, activates
-     on import or on first call.
-   - Measure transitive dependency weight; record what we deliberately do
-     not use (dev server, playground, registries) and confirm none of it
-     runs at import time.
-   - Streaming check for C: run one real streamed completion per provider
-     (keys only available locally), dump chunks, map onto
-     `NeutralChunkStream`. If mapping requires converting shapes, the
-     conversion lives entirely inside the central service — SSE events are
-     not touched. If it _cannot_ map, stop and escalate C before writing
-     any adapter code.
+4. ~~**Feasibility spike: pin Mastra packages (research, no app code).** —
+   _shipped; results recorded in "Resolved questions (from the task-4
+   spike)" below and posted to issue #4. Tasks 5–6 are unblocked._~~
 5. **Centralised Mastra service + two provider classes.**
+   - Spike-informed details (no longer assumptions): no
+     `@mastra/groq`/`@mastra/deepinfra` packages exist — the model router
+     bundled in `@mastra/core` v1 ships both (`groq/<model>`,
+     `deepinfra/<model>` ids, or the explicit OpenAI-compatible object
+     `{ providerId, modelId, url?, apiKey? }`). @mastra/core@1.66.0 ships
+     dual ESM/CJS builds, so the jest/ts-jest CJS pipeline is expected to
+     load the package untouched (still verify once in an actual jest
+     worker — see open question I-residual). `DEEPINFRA_API_KEY` is the
+     env name the bundled `createDeepInfra` reads, matching the plan.
    - New `src/server/services/mastraService.ts` owning all `@mastra/*`
      imports and all provider construction (`GROQ_API_KEY`,
-     `DEEPINFRA_API_KEY` — note: this env name does not exist anywhere in
-     the repo yet; naming is new here).
+     `DEEPINFRA_API_KEY`).
+   - Real-provider smoke (queued here by the spike, only possible with
+     local keys): one streamed + one blocking call per provider with real
+     Groq/DeepInfra endpoints. This answers the retry-behaviour concern
+     (open question J) empirically before the suite leans on it.
    - `GroqProvider` / `DeepInfraProvider` as thin adapters exposing
      `createCompletion` / `createStreamingCompletion` over the neutral
-     types; deepinfra via OpenAI-compatible `baseURL` per the spike.
+     types; Mastra `fullStream` `text-delta` chunks (`.delta`) onto
+     `{ delta }` inside the central service only; filter out
+     lifecycle chunks (`start`/`step-start`/`text-start`/`text-end`/
+     `step-finish`/`finish`) — the SSE contract is untouched.
    - Wire `inferenceService` to dispatch on `options.provider` (the
      `CompletionOptions` grows an optional `provider` field, defaulting to
      `groq`, so un-tagged callers stay on Groq until task 8 flips them).
@@ -209,6 +205,9 @@ Concrete, individually commit-safe steps:
    (they already do exactly that in `chat.test.ts` / `chat.stream.test.ts`)
    — but see above: the transport mocks must move to the new module
    boundary in task 5, not stay pointed at the old import path.
+   Also: verify `require('@mastra/core/agent')` actually loads inside a
+   jest worker in this repo (spike proved it in Node directly —
+   open question I-residual).
    Add: neutral-type mapping round-trips, DB-config selection,
    ε-random determinism with a seeded PRNG, DeepInfra path exercised at
    least in a mocked unit test, and a test that `Message.modelName`
@@ -239,28 +238,13 @@ Concrete, individually commit-safe steps:
 
 ## Open questions
 
-All of A–G have been posted to issue #4 already (see the two comments).
-None are answered anywhere in the issue comments (there are exactly two,
-one quoting the superseded description and the earlier plan-revision
-notes). Every item below is genuinely unknown to the implementation at
-this revision, and no in-flight task above assumes an answer to any of
-them — except that task 4 _produces_ the answers to A–C by construction,
-which is what makes it a spike rather than an implementation task.
+A, B, C, H and I were resolved empirically by the task-4 spike (results
+recorded in the "Task-4 spike results" section below and posted to issue
+#4); they are removed from this section — the detailed steps in tasks 5
+and 9 now carry them as facts plus the residual verifications. Of the
+remaining items, D, E, F and G have been posted to issue #4 already.
+No in-flight task assumes an answer to any unresolved item:
 
-- **A. Mastra provider surface:** Officially supported `@mastra/*` packages
-  for Groq/DeepInfra in the currently-released major, or generic
-  OpenAI-compatible wiring? Determines provider-class size and task 4's
-  outcome; gates tasks 5–6. Nothing proceeds on an assumed answer.
-- **B. Mastra server-side usage:** Mastra ships agent/workflow machinery
-  with assumptions about its dev server/registry/tooling. Our app is plain
-  Express; must confirm we can use library pieces without starting Mastra's
-  dev server, and whether Mastra's runtime imposes a storage layer of its
-  own. Verified empirically as part of the task-4 spike, not assumed.
-- **C. Streaming through Mastra:** Does Mastra's streaming output map
-  cleanly onto our chunk shape consumed in `routes/chat.ts` without
-  converting the SSE event contract? The SSE path is the highest-risk
-  piece. Task 4's streaming check resolves this before any adapter code is
-  written.
 - **D. ε-randomness semantics:** default ε value; randomness within a tier
   only, vs across tiers when the classifier is uncertain; and whether the
   guard classifier model moves into the DB pool too (its env default
@@ -268,41 +252,44 @@ which is what makes it a spike rather than an implementation task.
   model). Task 7 waits for this.
 - **E. Scope of "reimplement in Mastra":** does non-chat LLM work
   (`titleService` categories, `metricsService` classifier) become Mastra
-  agents/workflows, or only route through the centralised service? "Where it
-  makes sense to" is subjective; conservative reading is orchestration-only
-  and that is what task 8 implements unless the user pins a broader
-  reading.
+  agents/workflows, or only route through the centralised service? "Where
+  it makes sense to" is subjective; conservative reading is
+  orchestration-only and that is what task 8 implements unless the user
+  pins a broader reading.
 - **F. Stale env-seeded rows** _(posted; task 2 already shipped, so this
   affects a follow-up, not a live task)_: seed rows copy the env-model
   values at first-read time. If an operator later changes
   `ROUTER_SMALL_MODEL`/`LARGE`, the DB keeps the old identity and routing
-  never sees the new value (only brand-new empty DBs re-seed). Intended, or
-  should env overrides always apply until a row is explicitly edited
+  never sees the new value (only brand-new empty DBs re-seed). Intended,
+  or should env overrides always apply until a row is explicitly edited
   (e.g. compare/refresh or a `seededFromEnv` flag)?
 - **G. Ineligible-tier fallback semantics** _(posted; same note as F)_:
   when every DB entry for a tier is `eligible: false`, we currently fall
   back to the env model for that tier. Confirm that is the desired
   behaviour vs. returning an empty list (which would force routing to fail
   loudly instead of silently using an exit-path model).
-- **H. DeepInfra key/env naming** _(new, second critic pass)_:
-  `DEEPINFRA_API_KEY` is a name invented here — the repo has no DeepInfra
-  credential wiring today, and no documented convention for
-  provider-specific API keys outside `GROQ_API_KEY`. If the actual client
-  library names it differently (e.g. one shared `OPENAI_API_KEY`-style
-  pattern with `baseURL`), the provider class should follow the library,
-  not this plan. Trivial to resolve during task 5 but worth one line of
-  confirmation so we do not invent a convention the user's deployment
-  does not match.
-- **I. jest transform for ESM-only `@mastra/*` deps** _(new, second critic
-  pass)_: our tests run under ts-jest in CJS mode and mock at the
-  `groq-sdk` module boundary. If `@mastra/core` or its transitive
-  dependencies are ESM-only, importing the central service inside a jest
-  worker may need either `transformEachIfNotDefault`-style config or a
-  dependency-injection seam so test files can mock the service without
-  loading the real package. Not verified; if the answer turns out to be
-  "jest cannot load it", the fallback is testing the neutral layer with a
-  fake provider instead of via Mastra itself — a decision worth making
-  consciously in task 4's spike, not by accident in task 10.
+- **H-residual. Real-provider smoke** _(posted; new in this pass)_: the
+  spike verified A–C only against a local mock server. One observed
+  behaviour: a stream with no proper finish chunk produced
+  `finishReason: 'other'` and Mastra retried the whole call (≈5 requests).
+  With real Groq/DeepInfra endpoints this raises a question the mock could
+  not answer: does Mastra retry transparently on a mid-stream transport
+  failure, and if so does the retried attempt re-emit text deltas into the
+  same `fullStream` (which would duplicate text in our `/api/chat/stream`
+  SSE stream and, worse, stream duplicate deltas into a single persisted
+  `Message`)? If so, we need to know the default retry policy and how to
+  disable it for unbounded streaming before `mastraService` lands. This
+  is empirical (needs real endpoints/keys) and is folded into task 5's
+  real-provider smoke step rather than blocked on beforehand — but it is
+  recorded as genuinely unknown, not assumed away.
+- **I-residual. jest transform for `@mastra/*` inside a worker** _(partially
+  resolved; kept open for honesty)_: the spike proved CJS `require`
+  works in bare Node, but that is not the same as ts-jest's transform
+  pipeline loading it inside a jest worker. Verification is scheduled as
+  the first act of task 5's commit (and rechecked in task 9); the
+  fallback — a DI seam so tests mock the central service without loading
+  `@mastra/core` — is a decision task 5 makes deliberately if the
+  require-path check fails there, not by accident in task 10.
 
 ### Critic-pass revision (after first deliverable on this branch)
 
@@ -369,7 +356,9 @@ changed the failure mode. Tests, lint, typecheck all green.
   `Mastra` prints its storage warning; `Agent` alone prints nothing).
 
 Remaining open questions after the spike: D, E, F, G (unchanged, user
-input still pending; none of tasks 5–6 depend on them).
+input still pending; none of tasks 5–6 depend on them). This revision adds
+H-residual (retry/duplicate-delta behaviour on real endpoints) and I-residual
+(ts-jest worker check) — see the Open questions section.
 
 ### Third critic pass (this branch, after task-4 spike)
 
@@ -398,16 +387,5 @@ postponed under open question G), empty-string delta semantics in
 `routes/chat.ts` (`if (delta)` drops empty deltas — harmless since they
 carry no content).
 
-New open questions raised by this pass:
-
-- **F. Stale env-seeded rows:** seed rows copy the env-model values at
-  first-read time. If an operator later changes
-  `ROUTER_SMALL_MODEL`/`LARGE`, the DB keeps the old identity and routing
-  never sees the new value (only brand-new empty DBs re-seed). Intended, or
-  should env overrides always apply until a row is explicitly edited
-  (e.g. compare/refresh or a `seededFromEnv` flag)?
-- **G. Ineligible-tier fallback semantics:** when every DB entry for a tier
-  is `eligible: false`, we currently fall back to the env model for that
-  tier. Confirm that is the desired behaviour vs. returning an empty list
-  (which would force routing to fail loudly instead of silently using an
-  exit-path model).
+New open questions raised by this pass: F and G (canonical wording kept in
+the Open questions section above; not restated here).
