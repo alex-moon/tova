@@ -1,0 +1,357 @@
+[0m
+> build · zai-org/GLM-5.3-Flash
+[0m
+[0m$ [0mgh issue list --repo alex-moon/tova --state open --limit 50 --json number,title,updatedAt
+[{"number":18,"title":"Thumbs up/down feedback that weights model-vs-metrics fit","updatedAt":"2026-09-10T21:27:30Z"},{"number":17,"title":"Collect per-message prompt metrics (classifier features)","updatedAt":"2026-09-11T08:39:06Z"},{"number":16,"title":"Web search tool for the agent loop","updatedAt":"2026-09-11T08:37:07Z"},{"number":15,"title":"Admin view","updatedAt":"2026-09-11T08:40:26Z"},{"number":5,"title":"Add LangSmith for tracing and evals","updatedAt":"2026-09-11T08:00:49Z"},{"number":4,"title":"More models + query enhancement/splitting/agentic behaviour","updatedAt":"2026-09-10T21:22:24Z"}]
+[0m
+[0m$ [0mgh pr list --repo alex-moon/tova --state open --json headRefName,title,number
+[{"headRefName":"feat/tv/15-admin-view","number":19,"title":"feat: admin view and admin-guarded user management API (#15)"}]
+[0m
+[0m$ [0mgh issue view 17 --repo alex-moon/tova --comments; echo ====; gh issue view 16 --repo alex-moon/tova --comments; echo ====; gh issue view 5 --repo alex-moon/tova --comments
+author:	alex-moon
+association:	owner
+edited:	false
+status:	none
+--
+No comment yet
+--
+====
+author:	alex-moon
+association:	owner
+edited:	false
+status:	none
+--
+Triage: BLOCKED until a `SEARCH_API_KEY` for a search provider (Brave/Tavily/Exa) is provided via env — the tool is designed to disable cleanly when unset, but the acceptance criteria (grounded answers with sources) can't be demoed or verified without it. Also note the tool wiring targets the agentic loop from #4, so picking a provider is the explicit unblock; the loop dependency can be handled by building the tool standalone if #4 isn't started first.
+--
+====
+author:	alex-moon
+association:	owner
+edited:	false
+status:	none
+--
+Triage: implementation can be done env-gated, but the acceptance criteria (a dev session appearing in LangSmith, evals demonstrably failing/passing there) cannot be verified without a `LANGCHAIN_API_KEY` (and a project name). BLOCKED until these are provided. Once the key exists this is unblocked and ready to implement.
+--
+[0m
+[0m$ [0mgh issue view 18 --repo alex-moon/tova --comments; echo ====; gh issue view 15 --repo alex-moon/tova --comments; echo ====; gh issue view 4 --repo alex-moon/tova --comments
+====
+author:	alex-moon
+association:	owner
+edited:	false
+status:	none
+--
+Plan for the admin view is at docs/plan-15-admin-view.md. A few questions (none answered in the issue yet; each has a default in the plan, so none blocks starting):
+
+1. **Role semantics**: the codebase already encodes admin as `role: 'admin'` on the user, while the issue says "a new permission: admin". Plan: keep it as `role` (guarded by the existing `requireRole` middleware) rather than adding an `'admin'` entry to `permissions[]`. OK, or do you want admin as a feature permission like `routing`?
+2. **Admin view navigation**: in-app toggle/section for admin users vs. a URL route (react-router/`#admin`). Plan defaults to a toggle since the client has no router; a route can be added later without rework. Preference?
+3. **Token staleness**: admin API authorization reads the role from a 7-day JWT cookie, so a demoted admin keeps working access up to token expiry, and a newly promoted admin must re-login before the app shows admin UI. Is that an acceptable window, or should tokens be re-issued/shortened on role change?
+4. **Self-demotion**: with today's "don't demote the last admin" count check, you can't demote yourself until a second admin exists. Intended?
+--
+author:	alex-moon
+association:	owner
+edited:	false
+status:	none
+--
+Implementation is now on the branch (the earlier "deliverable" commit contained no code; it has been written in this pass and `npm run ci` is green). Two open questions from the plan that were not yet visible in this issue — each has a default that does not block merging:
+
+5. **Self-demotion**: with the "don't demote the last admin" count check, you can't demote yourself (the only seeded admin) until a second admin exists. Intended? Default: allow self-demotion only when another admin remains.
+
+6. **Permission names beyond `routing`**: should the permissions endpoint accept arbitrary permission strings (paying forward for future grants like `models`), or validate against the known set? Default: reject unknown strings with 400 (implemented), raise the default if you want the API to accept future permissions without a deploy.
+
+Also re-flagging open question 4 (token staleness), now confirmed by tests: a promoted admin must re-login before the admin API accepts them, and a demoted admin keeps ~up-to-7-day working access. Default: accepted; the admin view reflects the live role via `/api/auth/me`.
+--
+author:	alex-moon
+association:	owner
+edited:	false
+status:	none
+--
+1. Role semantics: good point! You are right this should key on role, not permissions.
+2. In-app router: I'd prefer not to have this, rather adding panels around the chat view for non-admins. For admins, the admin view should be almost like a whole separate app - I'd incline toward native HTTP routes but I could be convinced otherwise. Maybe start there and we can migrate later. Bear in mind this may affect deployment - check how we handle routes on the frontend already and add anything needed to live docker compose and vite configs.
+3. Inability to kick off demoted admins: this is fine for now, let's come back to it on a different ticket.
+4. Self-demotion: fairly straightforward fix here: formsatz@gmail.com simply cannot be demoted at all. We can make this more sophisticated on another ticket.
+5. Ditto
+6. Invalid permissions strings: validate against a known set in the app and draw a drop-down or similar (check boxes?). Do not enforce at the database level.
+--
+====
+author:	alex-moon
+association:	owner
+edited:	false
+status:	none
+--
+Some implementation details:
+- we will want to add DeepInfra and potentially others to broaden the model pool
+- we will want to store these in the database tracked on strengths on various metrics (metrics we will also need to calculate or "infer" per message for routing).
+--
+[0m
+[0m$ [0mgh pr view 19 --repo alex-moon/tova --json state,mergeable,statusCheckRollup,reviews,headRefName,commits -q '{state,mergeable,checks:[.statusCheckRollup[]?|{name,conclusion}],commits:[.commits[].messageHeadline]}'
+{"checks":[{"conclusion":"SUCCESS","name":"ci"},{"conclusion":"SUCCESS","name":"ci-gate"}],"commits":["docs: plan updates for #15","docs: plan updates for #15","feat: implement a deliverable for #15","test/hardening: critic pass for #15"],"mergeable":"MERGEABLE","state":"OPEN"}
+[0m
+Triage result:
+
+| Issue | Status | Evidence |
+|---|---|---|
+| #15 Admin view | READY (in review) | Open PR #19 is green (ci, ci-gate, MERGEABLE), but the owner just answered all 6 open questions in the issue with concrete directives (native HTTP routes, in-app panels for non-admins, formsatz@gmail.com undemotable, permission dropdown against a known set) — the PR needs revision accordingly |
+| #17 Classifier metrics | READY | No comments, no branch/PR |
+| #18 Thumbs feedback | READY | No comments, no branch/PR |
+| #4 Models/agentic | READY | No comments, no branch/PR; sprawling scope |
+| #16 Web search tool | BLOCKED | Needs `SEARCH_API_KEY` from user; triage comment already posted |
+| #5 LangSmith | BLOCKED | Needs `LANGCHAIN_API_KEY` + project name; triage comment already posted |
+
+Both BLOCKED issues already carry their unblock comments, so no new comments needed. #15 is the strongest pick: the user's answers to previously raised open questions are in the issue, and the green PR exists to receive the revisions.
+
+ISSUE:15
+[09:44:32] Selected issue #15
+[0m
+> build · zai-org/GLM-5.3-Flash
+[0m
+[0m→ [0mRead docs/plan-15-admin-view.md
+[0m
+[0m$ [0mgh issue view 15 --repo alex-moon/tova --comments
+author:	alex-moon
+association:	owner
+edited:	false
+status:	none
+--
+Plan for the admin view is at docs/plan-15-admin-view.md. A few questions (none answered in the issue yet; each has a default in the plan, so none blocks starting):
+
+1. **Role semantics**: the codebase already encodes admin as `role: 'admin'` on the user, while the issue says "a new permission: admin". Plan: keep it as `role` (guarded by the existing `requireRole` middleware) rather than adding an `'admin'` entry to `permissions[]`. OK, or do you want admin as a feature permission like `routing`?
+2. **Admin view navigation**: in-app toggle/section for admin users vs. a URL route (react-router/`#admin`). Plan defaults to a toggle since the client has no router; a route can be added later without rework. Preference?
+3. **Token staleness**: admin API authorization reads the role from a 7-day JWT cookie, so a demoted admin keeps working access up to token expiry, and a newly promoted admin must re-login before the app shows admin UI. Is that an acceptable window, or should tokens be re-issued/shortened on role change?
+4. **Self-demotion**: with today's "don't demote the last admin" count check, you can't demote yourself until a second admin exists. Intended?
+--
+author:	alex-moon
+association:	owner
+edited:	false
+status:	none
+--
+Implementation is now on the branch (the earlier "deliverable" commit contained no code; it has been written in this pass and `npm run ci` is green). Two open questions from the plan that were not yet visible in this issue — each has a default that does not block merging:
+
+5. **Self-demotion**: with the "don't demote the last admin" count check, you can't demote yourself (the only seeded admin) until a second admin exists. Intended? Default: allow self-demotion only when another admin remains.
+
+6. **Permission names beyond `routing`**: should the permissions endpoint accept arbitrary permission strings (paying forward for future grants like `models`), or validate against the known set? Default: reject unknown strings with 400 (implemented), raise the default if you want the API to accept future permissions without a deploy.
+
+Also re-flagging open question 4 (token staleness), now confirmed by tests: a promoted admin must re-login before the admin API accepts them, and a demoted admin keeps ~up-to-7-day working access. Default: accepted; the admin view reflects the live role via `/api/auth/me`.
+--
+author:	alex-moon
+association:	owner
+edited:	false
+status:	none
+--
+1. Role semantics: good point! You are right this should key on role, not permissions.
+2. In-app router: I'd prefer not to have this, rather adding panels around the chat view for non-admins. For admins, the admin view should be almost like a whole separate app - I'd incline toward native HTTP routes but I could be convinced otherwise. Maybe start there and we can migrate later. Bear in mind this may affect deployment - check how we handle routes on the frontend already and add anything needed to live docker compose and vite configs.
+3. Inability to kick off demoted admins: this is fine for now, let's come back to it on a different ticket.
+4. Self-demotion: fairly straightforward fix here: formsatz@gmail.com simply cannot be demoted at all. We can make this more sophisticated on another ticket.
+5. Ditto
+6. Invalid permissions strings: validate against a known set in the app and draw a drop-down or similar (check boxes?). Do not enforce at the database level.
+--
+[0m
+[0m$ [0mgit log --oneline -5 && git status --short && git diff --stat main...HEAD 2>/dev/null | tail -5
+72c3d5c test/hardening: critic pass for #15
+26fd763 feat: implement a deliverable for #15
+776ddbf docs: plan updates for #15
+8c10ed3 docs: plan updates for #15
+bfc49d3 TV-2 - iteration script
+ M logs/iteration-20260911-085900.log
+?? logs/iteration-20260911-092413.log
+?? logs/iteration-20260911-092627.log
+?? logs/iteration-20260911-092943.log
+?? logs/iteration-20260911-093157.log
+?? logs/iteration-20260911-093436.log
+?? logs/iteration-20260911-093830.log
+?? logs/iteration-20260911-094028.log
+?? logs/iteration-20260911-094348.log
+ src/server/models/User.ts                    |    2 +
+ src/server/routes/admin.test.ts              |  158 +++
+ src/server/routes/admin.ts                   |   90 ++
+ src/server/routes/auth.ts                    |   11 +-
+ 12 files changed, 2441 insertions(+), 24 deletions(-)
+[0m
+[0m→ [0mRead src/server/routes/admin.ts
+[0m→ [0mRead src/client/src/App.tsx
+[0m→ [0mRead src/client/src/components/AdminView.tsx
+[0m
+[0m$ [0mls docker-compose* 2>/dev/null; ls *.yml docker/ deploy/ 2>/dev/null; cat vite.config.* 2>/dev/null; ls src/client
+docker-compose.live.yml
+docker-compose.local.yml
+docker-compose.live.yml
+docker-compose.local.yml
+components.json
+dist
+Dockerfile
+index.html
+node_modules
+package.json
+package-lock.json
+public
+README.md
+src
+tsconfig.app.json
+tsconfig.json
+tsconfig.node.json
+vite.config.ts
+[0m
+[0m$ [0mcat docker-compose.live.yml docker-compose.local.yml src/client/vite.config.ts | head -120; grep -rn "dist\|static" src/server/index.ts | head
+services:
+  mongodb:
+    image: mongo:latest
+    environment:
+      - MONGO_INITDB_ROOT_USERNAME=tova
+      - MONGO_INITDB_ROOT_PASSWORD=${MONGODB_PASSWORD}
+    ports:
+      - '27017:27017'
+    volumes:
+      - mongodb_data:/data/db
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: npm start
+    ports:
+      - '15000:5000'
+    environment:
+      - MONGODB_URI=mongodb://tova:${MONGODB_PASSWORD}@mongodb:27017/tova?authSource=admin
+      - PORT=5000
+      - NODE_ENV=production
+    env_file:
+      - .env
+    depends_on:
+      - mongodb
+
+  frontend:
+    build:
+      context: ./src/client
+      dockerfile: Dockerfile
+    ports:
+      - '15173:4173'
+    depends_on:
+      - backend
+
+volumes:
+  mongodb_data:
+services:
+  mongodb:
+    image: mongo:latest
+    ports:
+      - '27017:27017'
+    volumes:
+      - mongodb_data:/data/db
+    healthcheck:
+      test: ['CMD', 'mongosh', '--quiet', '--eval', "db.adminCommand('ping')"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  mongodb_data:
+import { defineConfig } from 'vitest/config';
+import { loadEnv } from 'vite';
+import react from '@vitejs/plugin-react';
+import tailwindcss from '@tailwindcss/vite';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+// https://vite.dev/config/
+export default defineConfig(({ mode }) => {
+  const env = loadEnv(mode, path.resolve(__dirname, '../../'), '');
+  return {
+    plugins: [react(), tailwindcss()],
+    resolve: {
+      alias: {
+        '@': path.resolve(__dirname, './src'),
+      },
+    },
+    server: {
+      proxy: {
+        '/api': {
+          target: env.VITE_API_URL || 'http://localhost:5000',
+          changeOrigin: true,
+        },
+      },
+    },
+    preview: {
+      // The live stack serves the built app through `vite preview`
+      // (see src/client/Dockerfile); allow the production host.
+      allowedHosts: ['tova.ajmoon.com'],
+    },
+    test: {
+      environment: 'jsdom',
+      globals: false,
+      setupFiles: ['src/test/setup.ts'],
+    },
+  };
+});
+41:    const clientBuildPath = path.join(__dirname, '../../src/client/dist');
+42:    app.use(express.static(clientBuildPath));
+[0m
+Repo state check confirms: implementation exists on the branch (admin routes, tests, AdminView), `npm run ci` was reported green — but the owner's answers on #15 (unanswered when the plan was written) now conflict with two implemented choices (in-app toggle navigation; last-admin-count self-demotion behavior instead of "formsatz@gmail.com can never be demoted"). So the ticket is neither done nor blocked — there is rework to plan. Now revising the plan file.
+[0m← [0mWrite docs/plan-15-admin-view.md
+Wrote file successfully.
+[0m
+Now posting the two new open questions as an issue comment:
+[0m$ [0mgh issue comment 15 --repo alex-moon/tova --body "$(cat <<'EOF'
+Two new questions surfaced while revising docs/plan-15-admin-view.md against your answers to Q1–Q6 above. Neither blocks the remaining work; each has a default the plan proceeds with.
+
+7. **"Native HTTP routes" — concrete mechanism?** The client is a Vite SPA served as a single `index.html` (express serves `src/client/dist` at `src/server/index.ts`; the live stack serves the build via `vite preview`). Three credible readings: (a) a second Vite HTML entry (`/admin.html` → `/admin`), (b) real URL handling inside the SPA (`/admin` path with hand-rolled routing, no react-router), or (c) an express-served server-rendered page. The plan defaults to (b) — real URL, refreshable, deep-linkable, no build-stack or deployment change. If you meant a separate HTML entry (a), that's additive and cheap; if you meant server-side rendering (c), that's a bigger ticket. I'll also verify SPA-fallback for `/admin` under `vite preview` regardless.
+
+8. **"Panels around the chat view for non-admins"** — what belongs in those panels? Nothing in the issue body or this ticket's admin-guarded surface defines them. Default: out of scope for this ticket; likely a separate ticket if they're shared UI chrome.
+EOF
+)"
+https://github.com/alex-moon/tova/issues/15#issuecomment-5631888755
+[0m
+[0m$ [0mnpx prettier --check docs/plan-15-admin-view.md 2>&1 | tail -3
+Checking formatting...
+[warn] docs/plan-15-admin-view.md
+[warn] Code style issues found in the above file. Run Prettier with --write to fix.
+[0m
+[0m$ [0mnpx prettier --write docs/plan-15-admin-view.md && npx prettier --check docs/plan-15-admin-view.md
+docs/plan-15-admin-view.md 140ms
+Checking formatting...
+[warn] docs/plan-15-admin-view.md
+[warn] Code style issues found in the above file. Run Prettier with --write to fix.
+[0m
+[0m$ [0mgit diff --stat -- docs/plan-15-admin-view.md; npx prettier --write docs/plan-15-admin-view.md; npx prettier --check docs/plan-15-admin-view.md
+docs/plan-15-admin-view.md | 362 +++++++++++++++++++++++++++------------------
+ 1 file changed, 216 insertions(+), 146 deletions(-)
+docs/plan-15-admin-view.md 172ms
+Checking formatting...
+[warn] docs/plan-15-admin-view.md
+[warn] Code style issues found in the above file. Run Prettier with --write to fix.
+[0m
+[0m$ [0mnpx prettier --check docs/plan-15-admin-view.md; git status --short docs/plan-15-admin-view.md; npx prettier --debug-check docs/plan-15-admin-view.md 2>&1 | head -5
+Checking formatting...
+[warn] docs/plan-15-admin-view.md
+[warn] Code style issues found in the above file. Run Prettier with --write to fix.
+ M docs/plan-15-admin-view.md
+[error] docs/plan-15-admin-view.md: prettier(input) !== prettier(prettier(input))
+[error] Index: 
+[error] ===================================================================
+[error] --- 
+[error] +++
+[0m
+[0m$ [0mnpx prettier docs/plan-15-admin-view.md > /tmp/opencode/p1.md; npx prettier /tmp/opencode/p1.md > /tmp/opencode/p2.md; diff /tmp/opencode/p1.md /tmp/opencode/p2.md | head -20
+194c194
+<   typecheck`, `npm test`,
+---
+> typecheck`, `npm test`,
+[0m
+[0m$ [0mcp /tmp/opencode/p2.md docs/plan-15-admin-view.md && npx prettier --check docs/plan-15-admin-view.md
+Checking formatting...
+All matched files use Prettier code style!
+[0m
+Done. Summary of what I did:
+
+**Status check (from repo state, not just comments):** Implementation exists on this branch — `src/server/routes/admin.ts` (list/permissions/role endpoints, `requireRole('admin')` guard), live-role `/api/auth/me`, `AdminView.tsx`, server+client tests, `npm run ci` green as of `72c3d5c`. Not blocked: the owner answered all six original questions on #15, but two answers landed *after* the implementation and require rework — so it's neither done nor blocked, and I proceeded with the plan revision.
+
+**Plan revisions (`docs/plan-15-admin-view.md`):**
+- Moved all six owner answers out of "Open questions" into a new **Resolved owner decisions** section with their rework implications.
+- Flagged the divergences honestly: the in-app toggle (Q2 — owner wants a real URL / "almost a separate app"), the missing blanket demotion ban for `formsatz@gmail.com` (Q4), and the plain toggle buttons where the owner asked for checkboxes dropdowns (Q6).
+- Broke the rework into concrete steps (4–7), including the deployment/vite-preview SPA-fallback verification the owner asked for and a fix for the duplicated `<ChatWindow />` render found at `src/client/src/App.tsx:257-262`.
+- Critiqued remaining assumptions (email-literal guard brittleness, non-atomic demotion race, "native HTTP routes" ambiguity) and moved anything with residual doubt into **Open questions** only where nothing depends on it.
+
+**New issue comment** posted to #15 with two genuinely new open questions (7: concrete mechanism for "native HTTP routes"; 8: what the non-admin "panels" should be), each with the plan's default: https://github.com/alex-moon/tova/issues/15#issuecomment-5631888755
+
+**First-worked-in-comment note:** Prettier's canonical output for the plan file is non-idempotent on that final "Verify, ship, archive" bullet; I ran `prettier` twice and committed the stable second pass, so `prettier --check` is clean. Nothing has been committed or pushed by me.
+[09:50:22] Committed and pushed plan updates
+[09:50:22] Dirty worktree; skipping implement phase

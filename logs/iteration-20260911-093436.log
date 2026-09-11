@@ -1,0 +1,201 @@
+[0m
+> build · zai-org/GLM-5.3-Flash
+[0m
+[0m$ [0mgh issue list --repo alex-moon/tova --state open --limit 50 --json number,title,updatedAt
+[{"number":18,"title":"Thumbs up/down feedback that weights model-vs-metrics fit","updatedAt":"2026-09-10T21:27:30Z"},{"number":17,"title":"Collect per-message prompt metrics (classifier features)","updatedAt":"2026-09-10T21:26:32Z"},{"number":16,"title":"Web search tool for the agent loop","updatedAt":"2026-09-10T21:26:04Z"},{"number":15,"title":"Admin view","updatedAt":"2026-09-11T08:21:32Z"},{"number":5,"title":"Add LangSmith for tracing and evals","updatedAt":"2026-09-11T08:00:49Z"},{"number":4,"title":"More models + query enhancement/splitting/agentic behaviour","updatedAt":"2026-09-10T21:22:24Z"}]
+[0m
+[0m$ [0mgh pr list --repo alex-moon/tova --state open --json headRefName,title; git branch -r | grep -i 'tv/'
+[{"headRefName":"feat/tv/15-admin-view","title":"feat: admin view and admin-guarded user management API (#15)"}]
+  origin/feat/tv/15-admin-view
+  origin/feat/tv/3-user-permissions
+[0m
+[0m$ [0mgh issue view 18 --repo alex-moon/tova --comments; echo ====; gh issue view 17 --repo alex-moon/tova --comments; echo ====; gh issue view 16 --repo alex-moon/tova --comments; echo ====; gh issue view 15 --repo alex-moon/tova --comments; echo ====; gh issue view 5 --repo alex-moon/tova --comments; echo ====; gh issue view 4 --repo alex-moon/tova --comments
+====
+====
+====
+author:	alex-moon
+association:	owner
+edited:	false
+status:	none
+--
+Plan for the admin view is at docs/plan-15-admin-view.md. A few questions (none answered in the issue yet; each has a default in the plan, so none blocks starting):
+
+1. **Role semantics**: the codebase already encodes admin as `role: 'admin'` on the user, while the issue says "a new permission: admin". Plan: keep it as `role` (guarded by the existing `requireRole` middleware) rather than adding an `'admin'` entry to `permissions[]`. OK, or do you want admin as a feature permission like `routing`?
+2. **Admin view navigation**: in-app toggle/section for admin users vs. a URL route (react-router/`#admin`). Plan defaults to a toggle since the client has no router; a route can be added later without rework. Preference?
+3. **Token staleness**: admin API authorization reads the role from a 7-day JWT cookie, so a demoted admin keeps working access up to token expiry, and a newly promoted admin must re-login before the app shows admin UI. Is that an acceptable window, or should tokens be re-issued/shortened on role change?
+4. **Self-demotion**: with today's "don't demote the last admin" count check, you can't demote yourself until a second admin exists. Intended?
+--
+author:	alex-moon
+association:	owner
+edited:	false
+status:	none
+--
+Implementation is now on the branch (the earlier "deliverable" commit contained no code; it has been written in this pass and `npm run ci` is green). Two open questions from the plan that were not yet visible in this issue — each has a default that does not block merging:
+
+5. **Self-demotion**: with the "don't demote the last admin" count check, you can't demote yourself (the only seeded admin) until a second admin exists. Intended? Default: allow self-demotion only when another admin remains.
+
+6. **Permission names beyond `routing`**: should the permissions endpoint accept arbitrary permission strings (paying forward for future grants like `models`), or validate against the known set? Default: reject unknown strings with 400 (implemented), raise the default if you want the API to accept future permissions without a deploy.
+
+Also re-flagging open question 4 (token staleness), now confirmed by tests: a promoted admin must re-login before the admin API accepts them, and a demoted admin keeps ~up-to-7-day working access. Default: accepted; the admin view reflects the live role via `/api/auth/me`.
+--
+====
+author:	alex-moon
+association:	owner
+edited:	false
+status:	none
+--
+Triage: implementation can be done env-gated, but the acceptance criteria (a dev session appearing in LangSmith, evals demonstrably failing/passing there) cannot be verified without a `LANGCHAIN_API_KEY` (and a project name). BLOCKED until these are provided. Once the key exists this is unblocked and ready to implement.
+--
+====
+author:	alex-moon
+association:	owner
+edited:	false
+status:	none
+--
+Some implementation details:
+- we will want to add DeepInfra and potentially others to broaden the model pool
+- we will want to store these in the database tracked on strengths on various metrics (metrics we will also need to calculate or "infer" per message for routing).
+--
+[0m
+[0m$ [0mgh pr view feat/tv/15-admin-view --repo alex-moon/tova --json state,statusCheckRollup,reviewDecision,mergeable 2>/dev/null; ls docs/plan-* 2>/dev/null; ls docs
+{"mergeable":"MERGEABLE","reviewDecision":"","state":"OPEN","statusCheckRollup":[{"__typename":"CheckRun","completedAt":"2026-09-11T08:23:55Z","conclusion":"SUCCESS","detailsUrl":"https://github.com/alex-moon/tova/actions/runs/34578903315/job/103197648868","name":"ci","startedAt":"2026-09-11T08:23:03Z","status":"COMPLETED","workflowName":"CI"},{"__typename":"CheckRun","completedAt":"2026-09-11T08:24:03Z","conclusion":"SUCCESS","detailsUrl":"https://github.com/alex-moon/tova/actions/runs/34578903315/job/103197888270","name":"ci-gate","startedAt":"2026-09-11T08:23:59Z","status":"COMPLETED","workflowName":"CI"}]}
+docs/plan-11-deploy-workflow.md
+docs/plan-15-admin-view.md
+docs/plan-3-user-permissions.md
+done
+overview.md
+plan-11-deploy-workflow.md
+plan-15-admin-view.md
+plan-3-user-permissions.md
+progress.md
+workflow.md
+[0m
+[0m$ [0mfor n in 18 17 16; do echo "== $n =="; gh issue view $n --repo alex-moon/tova --json author,body | head -c 800; done
+== 18 ==
+{"author":{"id":"MDQ6VXNlcjc5OTQ3Mw==","is_bot":false,"login":"alex-moon","name":"Alex Moon"},"body":"Users currently have no way to say whether a reply was good. This ticket: thumbs up/down on assistant messages, which \"weights\" (adjusts confidence in) the selected model's fit for the metrics collected per message (issue #17 — dependency).\n\nSuggested approach:\n- API: `POST /api/messages/:messageId/feedback` with `{ value: 'up' | 'down' }`, authenticated, idempotent (revote just overwrites); persists on the message document alongside its `metrics` from #17.\n- Frontend: thumbs up/down pair under each assistant message, subtle pending/opt-out lift, already-visible messages get the controls too.\n- Weighting model: keep a `modelMetricsStats` store (Mongo collection) of per-(modelName,== 17 ==
+{"author":{"id":"MDQ6VXNlcjc5OTQ3Mw==","is_bot":false,"login":"alex-moon","name":"Alex Moon"},"body":"We want to understand *why* the router picks the model it picks, and later whether that choice was right (feedback ticket reads these). This ticket: collect a set of metrics per chat message and persist them alongside the message document in MongoDB.\n\nMetrics to collect — a mix of cheap/deterministic (computed synchronously, no LLM):\n- word count / char count / short-vs-long bucket\n- average word length and syllable-ish estimate (vowel-cluster heuristic is fine) → \"complexity of vocabulary\" proxy\n- code-y indicator (fences, backticks, code-ish tokens)\n- share of technical jargon vs plain words (stopword ratio as cheap proxy)\n- message index within the session (how many message== 16 ==
+{"author":{"id":"MDQ6VXNlcjc5OTQ3Mw==","is_bot":false,"login":"alex-moon","name":"Alex Moon"},"body":"Today the chat pipeline (`/api/chat/stream` → `routerService.routeQuery` → one Groq completion) has no tool access, and issue #4 proposes the agentic loop that would host one. This ticket: the first tool — web search — implemented in Mastra.\n\nSuggested approach:\n- Add Mastra as the tool layer for the server pipeline; define a `webSearch` tool with a typed schema (query string, optional freshness/recency filter).\n- Wire the tool into the agentic loop from #4 (stop budget / max iterations carried over the existing SSE `event:` channel so the UI can show ` Searching the web...` status).\n- Provider choice: use a search API with a simple REST client (e.g. Brave/Tavily/Exa), keyed b
+[0m
+[0m$ [0mfor n in 18 17 16 4; do echo "== $n comments =="; gh issue view $n --repo alex-moon/tova --json comments -q '.comments[].body' 2>/dev/null | head -c 600; echo; done
+== 18 comments ==
+
+== 17 comments ==
+
+== 16 comments ==
+
+== 4 comments ==
+Some implementation details:
+- we will want to add DeepInfra and potentially others to broaden the model pool
+- we will want to store these in the database tracked on strengths on various metrics (metrics we will also need to calculate or "infer" per message for routing).
+[0m
+[0m$ [0mgit fetch -q origin feat/tv/15-admin-view 2>/dev/null; git log --oneline -5 origin/feat/tv/15-admin-view; git log --oneline -5 main; read } /dev/null
+72c3d5c test/hardening: critic pass for #15
+26fd763 feat: implement a deliverable for #15
+776ddbf docs: plan updates for #15
+8c10ed3 docs: plan updates for #15
+bfc49d3 TV-2 - iteration script
+bfc49d3 TV-2 - iteration script
+02e72f0 Test different system prompt
+a5223bd TV-2 - fix MongoDB connection
+3509737 TV-2 - fix deploy harder
+7b790e8 TV-2 - fix deploy
+/bin/bash: line 1: read: `}': not a valid identifier
+[0m
+[0m$ [0mfor n in 16 17 18; do echo "== $n full =="; gh issue view $n --repo alex-moon/tova --json body -q .body | tail -c 1200; echo; done
+== 16 full ==
+�� one Groq completion) has no tool access, and issue #4 proposes the agentic loop that would host one. This ticket: the first tool — web search — implemented in Mastra.
+
+Suggested approach:
+- Add Mastra as the tool layer for the server pipeline; define a `webSearch` tool with a typed schema (query string, optional freshness/recency filter).
+- Wire the tool into the agentic loop from #4 (stop budget / max iterations carried over the existing SSE `event:` channel so the UI can show ` Searching the web...` status).
+- Provider choice: use a search API with a simple REST client (e.g. Brave/Tavily/Exa), keyed by env (`SEARCH_API_KEY`), disabled cleanly when unset so local dev keeps working.
+- Synthesis: pipe results (title/snippet/url) back into the main model as context for the final answer, keep citations in the assistant message payload so the frontend can render sources later.
+- Persistence: one assistant message per turn stays true; tool internals are trace artifacts, not separate messages.
+- Acceptance: a question requiring fresh info gets grounded answers with sources attached; tool runs emit SSE status events; tests mock the search provider without breaking existing suites.
+
+== 17 full ==
+vowel-cluster heuristic is fine) → "complexity of vocabulary" proxy
+- code-y indicator (fences, backticks, code-ish tokens)
+- share of technical jargon vs plain words (stopword ratio as cheap proxy)
+- message index within the session (how many messages into the chat we are)
+- presence of question mark / imperative verbs (question vs instruction)
+
+And LLM-classified dimensions (one cheap small-model classification pass per message, cached, run in parallel with routing):
+- emotional vs neutral
+- technical vs lay
+- high-level/strategic vs low-level/detailed
+- positive vs negative sentiment
+- open-ended vs closed/one-shot task
+
+Suggested approach:
+- Deterministic metrics: pure TS module, no deps, unit-tested.
+- LLM dimensions: reuse the small/guard model path from the router; single structured-output call producing the flags, degraded gracefully (nulls) on failure.
+- Persist as a `metrics` subdocument on each message record so routing decisions and future feedback can be correlated.
+- Acceptance: every new assistant/user turn gets metrics filled; deterministic metrics pass unit tests; no visible latency added to first token (classification is fire-and-forget or batched post-stream).
+
+== 18 full ==
+— dependency).
+
+Suggested approach:
+- API: `POST /api/messages/:messageId/feedback` with `{ value: 'up' | 'down' }`, authenticated, idempotent (revote just overwrites); persists on the message document alongside its `metrics` from #17.
+- Frontend: thumbs up/down pair under each assistant message, subtle pending/opt-out lift, already-visible messages get the controls too.
+- Weighting model: keep a `modelMetricsStats` store (Mongo collection) of per-(modelName, metric-band) counts → up/down tallies, e.g. `llama-3.3-70b + high-technical + long prompt → 12↑/3↓`. When the router scores candidate models for a message, factor these empirical fit scores in alongside the existing complexity heuristics.
+- Cold start: fall back to neutral weight until a minimum sample count per band.
+- Feeding the router: this complements the online router, not replaces it; log the applied weight in the routing reason so LangSmith (#5) can surface it.
+- Acceptance: feedback round-trips for authed users (401 for others); thumbs show their current state after reload; router decisions demonstrably shift with accumulated feedback (covered by a test seeding stats and asserting a different model choice).
+[0m
+Evidence gathered. Classification:
+
+- **#15 Admin view** — DONE: open PR `feat/tv/15-admin-view` with real implementation commits, CI green (`ci` + `ci-gate` SUCCESS), plan doc in docs/.
+- **#5 LangSmith** — BLOCKED: comment explicitly states it's BLOCKED until `LANGCHAIN_API_KEY`/project name are provided.
+- **#16 Web search tool** — BLOCKED: requires a `SEARCH_API_KEY` (Brave/Tavily/Exa) that only the user can supply; also depends on the #4 agentic loop. No comment states this yet.
+- **#17 Per-message metrics** — READY: deterministic metrics are pure TS + unit-testable; LLM dims reuse the existing router small model (no new external keys).
+- **#18 Thumbs feedback** — READY but depends on #17's `metrics` subdocument; better done after #17.
+- **#4 More models + agentic** — READY but sprawling (model pool expansion + query splitting + agentic loop in one ticket).
+
+Posting the blocked note on #16 (once):
+[0m$ [0mgh issue comment 16 --repo alex-moon/tova --body "Triage: BLOCKED until a \`SEARCH_API_KEY\` for a search provider (Brave/Tavily/Exa) is provided via env — the tool is designed to disable cleanly when unset, but the acceptance criteria (grounded answers with sources) can't be demoed or verified without it. Also note the tool wiring targets the agentic loop from #4, so picking a provider is the explicit unblock; the loop dependency can be handled by building the tool standalone if #4 isn't started first."
+https://github.com/alex-moon/tova/issues/16#issuecomment-5631740671
+[0m
+Not every issue is DONE/BLOCKED, so picking one. #17 is smaller and well-scoped, unblocks #18, and requires no user-provided resources.
+
+ISSUE:17
+[09:37:10] Selected issue #17
+[0m
+> build · zai-org/GLM-5.3-Flash
+[0m
+[0m$ [0mgh issue view 17 --repo alex-moon/tova
+title:	Collect per-message prompt metrics (classifier features)
+state:	OPEN
+author:	alex-moon
+labels:	enhancement
+comments:	0
+assignees:	
+projects:	
+milestone:	
+number:	17
+--
+We want to understand *why* the router picks the model it picks, and later whether that choice was right (feedback ticket reads these). This ticket: collect a set of metrics per chat message and persist them alongside the message document in MongoDB.
+
+Metrics to collect — a mix of cheap/deterministic (computed synchronously, no LLM):
+- word count / char count / short-vs-long bucket
+- average word length and syllable-ish estimate (vowel-cluster heuristic is fine) → "complexity of vocabulary" proxy
+- code-y indicator (fences, backticks, code-ish tokens)
+- share of technical jargon vs plain words (stopword ratio as cheap proxy)
+- message index within the session (how many messages into the chat we are)
+- presence of question mark / imperative verbs (question vs instruction)
+
+And LLM-classified dimensions (one cheap small-model classification pass per message, cached, run in parallel with routing):
+- emotional vs neutral
+- technical vs lay
+- high-level/strategic vs low-level/detailed
+- positive vs negative sentiment
+- open-ended vs closed/one-shot task
+
+Suggested approach:
+- Deterministic metrics: pure TS module, no deps, unit-tested.
+- LLM dimensions: reuse the small/guard model path from the router; single structured-output call producing the flags, degraded gracefully (nulls) on failure.
+- Persist as a `metrics` subdocument on each message record so routing decisions and future feedback can be correlated.
+- Acceptance: every new assistant/user turn gets metrics filled; deterministic metrics pass unit tests; no visible latency added to first token (classification is fire-and-forget or batched post-stream).
+[0m
+feat-prompt-metrics
