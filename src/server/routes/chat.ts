@@ -5,15 +5,58 @@ import { Message } from '../models/Message';
 import { routeQuery } from '../services/routerService';
 import { generateChatTitle } from '../services/titleService';
 import { hasPermission, ROUTING_PERMISSION } from '../services/userService';
-import Groq from 'groq-sdk';
+import { inferenceService } from '../services/inferenceService';
+import { classifyAndPersistPromptDimensions, isTriviallyNeutral } from '../services/metricsService';
+import { computeDeterministicMetrics } from '../services/promptMetrics';
 
 const router = express.Router();
 
 const NO_ROUTING_PERMISSION = "You don't have permission to use the model router.";
 
+// Session indices count only prior messages (computed before .save()), so a
+// session's first message gets index 0. Count-based indices are racy under
+// concurrent turns in one session; accepted in the plan
+// (docs/plan-17-prompt-metrics.md) since metrics are analytical.
+const buildMessageMetrics = async (
+  sessionId: string,
+  content: string,
+): Promise<Record<string, unknown>> => {
+  const priorCount = await Message.countDocuments({ sessionId });
+  return {
+    ...computeDeterministicMetrics(content),
+    sessionMessageIndex: priorCount,
+  };
+};
+
 const createSessionWithUser = async (userId: string, content: string) => {
   const title = await generateChatTitle(content);
   return Session.create({ userId, title });
+};
+
+// Persist the user turn with its metrics. Trivially neutral prompts record
+// llmSkipReason 'trivial' so the skip gate is distinguishable in the DB from
+// failed ('parse'/'error') classification; non-trivial prompts get a
+// fire-and-forget classification call back (docs/plan-17-prompt-metrics.md
+// tasks 6 and 9). The gate is computed once and reused for both purposes.
+const saveUserMessageWithMetrics = async (sessionId: string, content: string) => {
+  const triviallyNeutral = isTriviallyNeutral(content);
+  const userMessage = new Message({
+    sessionId,
+    role: 'user',
+    content,
+    metrics: {
+      ...(await buildMessageMetrics(sessionId, content)),
+      ...(triviallyNeutral ? { llmSkipReason: 'trivial' as const } : {}),
+    },
+  });
+  await userMessage.save();
+
+  if (!triviallyNeutral) {
+    classifyAndPersistPromptDimensions(String(userMessage._id), content).catch((err) =>
+      console.error('Prompt classification error:', err),
+    );
+  }
+  return userMessage;
 };
 
 const SYSTEM_PROMPT = `You are Tova, a helpful, warm, and direct personal chat assistant — think of yourself as the thing people reach for instead of Googling or texting a friend at 11pm. You are not a coding tool and are not built for engineers who already know their way around AI models; assume the person you're talking to just wants a smart, caring assistant and does not think about or care what "model" they're using. If asked what model or AI you're built on, answer simply: you're Tova. Do not name underlying providers or models.
@@ -23,10 +66,6 @@ Talk like a smart, grounded friend: engage with what the person actually said, n
 For anything emotionally heavy — relationships, mental health, grief, major life decisions — be honestly helpful within what a conversation like this can safely offer, and be upfront that you're not a substitute for a therapist or professional when the topic calls for one. Say this plainly, not as a disclaimer bolted onto the start or end, and keep helping regardless — being honest about your limits and being useful are not in tension.
 
 Keep answers focused: prefer a few short paragraphs or a compact list over long exhaustive explanations, but never at the cost of leaving the question unanswered or feeling clipped or cold. Do not pad answers with introductions, summaries, or filler.`;
-
-const groq = new Groq({
-  apiKey: process.env.GROQ_API_KEY || 'dummy_key',
-});
 
 // Chat endpoint (non-streaming, preserved for compatibility)
 router.post('/', authenticate, async (req: AuthRequest, res) => {
@@ -51,14 +90,8 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
     } else {
       session = await createSessionWithUser(userId as string, content);
     }
-
     // Save user message
-    const userMessage = new Message({
-      sessionId: session._id,
-      role: 'user',
-      content,
-    });
-    await userMessage.save();
+    await saveUserMessageWithMetrics(String(session._id), content);
 
     // Determine model
     const routingResult = await routeQuery(content);
@@ -75,7 +108,7 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
       }));
     messages.unshift({ role: 'system', content: SYSTEM_PROMPT });
 
-    const chatCompletion = await groq.chat.completions.create({
+    const chatCompletion = await inferenceService.createCompletion({
       messages,
       model: routingResult.model,
     });
@@ -88,6 +121,7 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
       role: 'assistant',
       content: assistantContent,
       modelName: routingResult.model,
+      metrics: await buildMessageMetrics(String(session._id), assistantContent),
     });
     await assistantMessage.save();
 
@@ -127,12 +161,7 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
     }
 
     // Save user message
-    const userMessage = new Message({
-      sessionId: session._id,
-      role: 'user',
-      content,
-    });
-    await userMessage.save();
+    await saveUserMessageWithMetrics(String(session._id), content);
 
     // Determine model
     const routingResult = await routeQuery(content);
@@ -168,10 +197,9 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
     let assistantContent = '';
 
     try {
-      const stream = await groq.chat.completions.create({
+      const stream = await inferenceService.createStreamingCompletion({
         messages,
         model: routingResult.model,
-        stream: true,
       });
 
       for await (const chunk of stream) {
@@ -195,6 +223,7 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
       role: 'assistant',
       content: assistantContent,
       modelName: routingResult.model,
+      metrics: await buildMessageMetrics(String(session._id), assistantContent),
     });
     await assistantMessage.save();
 
