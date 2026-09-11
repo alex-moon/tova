@@ -16,6 +16,9 @@ export const webSearch = async (query: string): Promise<SearchResult[]> => {
   // silently disabled by a naming mismatch (issue #16, open question 2).
   const apiKey = process.env.BRAVE_API_KEY || process.env.BRAVE_SEARCH_API_KEY;
   if (!apiKey) return [];
+  // An empty query (malformed tool arguments fall back to '') would hit the
+  // API pointlessly; treat it as "no results" without spending quota.
+  if (!query.trim()) return [];
   try {
     const response = await fetch(`${BRAVE_ENDPOINT}?q=${encodeURIComponent(query)}`, {
       headers: {

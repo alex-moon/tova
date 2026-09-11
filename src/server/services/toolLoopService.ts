@@ -40,6 +40,12 @@ export interface SearchStageToolRound {
 
 export type SearchStageResult = SearchStageAnswer | SearchStageToolRound;
 
+export interface SearchStageOptions {
+  // Called just before the search executes so callers (e.g. the streaming
+  // route) can surface progress to the user at the right moment.
+  onSearchStart?: () => void;
+}
+
 // Runs the first completion with the web_search tool attached. If the model
 // requests a search, executes it (never throwing — webSearch degrades to [])
 // and returns the augmented message list for the caller's final completion.
@@ -47,6 +53,7 @@ export type SearchStageResult = SearchStageAnswer | SearchStageToolRound;
 export const runSearchStage = async (
   messages: { role: 'system' | 'user' | 'assistant'; content: string }[],
   model: string,
+  options: SearchStageOptions = {},
 ): Promise<SearchStageResult> => {
   const first = await inferenceService.createCompletion({
     messages,
@@ -54,7 +61,10 @@ export const runSearchStage = async (
     tools: [WEB_SEARCH_TOOL],
   });
   const message = first.choices?.[0]?.message;
-  const toolCalls = message?.tool_calls ?? [];
+  const toolCalls = (message?.tool_calls ?? []).filter(
+    (call): call is NonNullable<(typeof message)['tool_calls']>[number] =>
+      Boolean(call && typeof call.id === 'string' && call.id && call.function?.name),
+  );
   if (toolCalls.length === 0) {
     return {
       kind: 'answer',
@@ -68,8 +78,13 @@ export const runSearchStage = async (
     { role: 'assistant', content: message?.content || '', tool_calls: toolCalls },
   ];
   const sources: string[] = [];
+  let searching = false;
   for (const call of toolCalls) {
     if (call.type === 'function' && call.function.name === 'web_search') {
+      if (!searching) {
+        searching = true;
+        options.onSearchStart?.();
+      }
       let query = '';
       try {
         query = String(JSON.parse(call.function.arguments).query ?? '');
@@ -77,7 +92,11 @@ export const runSearchStage = async (
         query = call.function.arguments ?? '';
       }
       const results = await webSearch(query);
-      sources.push(...results.map((r) => r.url));
+      // A search can return the same URL more than once; the assistant
+      // message's `sources` is a provenance list, so keep it duplicate-free.
+      for (const r of results.map((r) => r.url)) {
+        if (!sources.includes(r)) sources.push(r);
+      }
       const body =
         results.length > 0
           ? 'Search results — cite the sources you use inline as markdown links:\n' +

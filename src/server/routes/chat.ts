@@ -122,7 +122,7 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
         messages: stage.messages,
         model: routingResult.model,
       });
-      assistantContent = completion.choices[0]?.message?.content || '';
+      assistantContent = completion.choices?.[0]?.message?.content || '';
     } else {
       assistantContent = stage.content;
     }
@@ -228,10 +228,13 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
       // Bounded web-search loop (issue #16): the first round runs
       // non-streaming with the tool attached so tool calls are detectable
       // before the user-visible answer streams.
-      const stage = await runSearchStage(messages, routingResult.model);
+      const stage = await runSearchStage(messages, routingResult.model, {
+        // Emitted before the search actually runs so the UI hint covers the
+        // whole search (not, as before, firing after it already completed).
+        onSearchStart: () => sendEvent('status', { message: 'Searching the web…' }),
+      });
       if (stage.kind === 'tool-results') {
         sources = stage.sources;
-        sendEvent('status', { message: 'Searching the web…' });
         await streamOut(stage.messages);
       } else {
         await streamOut(messages);

@@ -79,7 +79,7 @@ provider + key were chosen. Both are resolved by the owner's comments (see
 
 - **Fresh key per owner's instruction**: owner asked that the local `.env`
   value be overwritten with the key on ajmoon.com. The key currently in
-  local `.env` verifies live against the real Brave API, so it is *a* valid
+  local `.env` verifies live against the real Brave API, so it is _a_ valid
   key; whether it is byte-identical to the production one cannot be checked
   from this environment (no access to ajmoon.com's filesystem beyond the
   owner's word). Not pursuing: any valid Brave key satisfies the tool.
@@ -175,7 +175,7 @@ Each item was one self-contained commit:
   my judgment or a new ticket. Current implementation: `webSearch` degrades
   failed/timed-out calls to a normal empty result set (indistinguishable
   from "no results") and the client parser ignores `status` frames, so
-  *neither* a DB audit record nor in-UI surfacing of the failure exists
+  _neither_ a DB audit record nor in-UI surfacing of the failure exists
   today. The plan (and code) will punt this to a follow-up ticket unless the
   owner objects — no task above depends on this answer.
 - **Unconfirmed acceptance of the sources contract** (carried over; owner
@@ -217,3 +217,45 @@ point:
    is safe. Rendering "Searching the web…" in the UI, and rendering
    `sources` on the assistant message at all, remain future frontend work
    (ties to the failure-visibility open question).
+
+## Second hardening pass (critic-of-the-critic, 2026-09-11)
+
+Re-ran the toolchain and re-read the whole diff. Findings, all fixed
+in-tree:
+
+1. **`npm run ci` was red on the branch**: `format:check` failed on
+   `docs/plan-16-web-search-tool.md` itself. Fixed with `npm run format`.
+   Lesson: the plan doc is in the repo-wide Prettier scope, so every plan
+   edit must be followed by a format pass or CI dies.
+2. **Blank-query API spend (fixed)**: the malformed-arguments fallback fed
+   `''` into `webSearch`, which made a real Brave call with an empty `q` —
+   wasted quota for a guaranteed-empty page. `webSearch` now short-circuits
+   blank queries to `[]` without touching the API; unit test added.
+3. **Tool calls without an `id` (fixed)**: `runSearchStage` echoed every
+   `message.tool_calls` entry back to Groq and built `role: 'tool'`
+   messages with `tool_call_id: call.id` — an entry lacking an `id` (or
+   `function`) produced a malformed tool message, which Groq rejects with
+   a 400, taking the whole chat turn down with a 500. Calls without a
+   usable `id`/`function.name` are now dropped before anything echoes
+   back; a new `toolLoopService.test.ts` locks this in (dropped-only
+   round degrades to the plain-answer path).
+4. **Unguarded `completion.choices[0]` (fixed)**: the non-streaming
+   tool-results path indexed `choices[0]` directly; an empty `choices`
+   array crashed the route into a 500. Now `choices?.[0]?.message?.content`.
+5. **Duplicate `sources` (fixed)**: one search can return the same URL
+   twice (and two `web_search` calls in one round can overlap). The
+   `sources` provenance list is now deduplicated incrementally; test added.
+6. **SSE `status` timing bug (fixed)**: the streaming route emitted
+   `status: 'Searching the web…'` only _after_ `runSearchStage` returned,
+   i.e. after the search (and its up-to-10s of latency) had already
+   completed — the hint never covered the work it described. The route now
+   passes an `onSearchStart` callback that fires immediately before the
+   first `web_search` executes.
+7. **New direct coverage for the loop**: `toolLoopService.test.ts` locks
+   `runSearchStage` behaviour that previously only ran indirectly through
+   route tests: no-choices model shape, missing-id tool calls, malformed
+   JSON arguments (raw-string fallback), blank query degradation, unknown
+   tool synthesis, and source dedupe.
+8. **Final state**: `npm run ci` green end to end (105 server tests, client
+   lint/format/tests, build). Remaining pre-PR work unchanged: rebase onto
+   current `origin/main` (`src/shared/contracts.ts` etc.) and re-run CI.

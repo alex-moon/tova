@@ -146,6 +146,13 @@ describe('Web Search Service', () => {
       expect(consoleErrorSpy).toHaveBeenCalled();
     });
 
+    it('does not hit the API for a blank query even with a key', async () => {
+      process.env.BRAVE_API_KEY = 'test-key';
+      global.fetch = jest.fn();
+      await expect(webSearch('   ')).resolves.toEqual([]);
+      expect(global.fetch).not.toHaveBeenCalled();
+    });
+
     it('sends the auth header', async () => {
       let capturedHeaders: Record<string, string> | undefined;
       global.fetch = jest.fn().mockImplementation((_url, init) => {
