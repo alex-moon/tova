@@ -65,6 +65,23 @@ describe('Model Config Service', () => {
         }
       },
     );
+
+    it('falls back to the env-configured model when reads fail', async () => {
+      process.env.ROUTER_SMALL_MODEL = 'env-fallback-model';
+      const findSpy = jest.spyOn(ProviderRouting, 'find').mockImplementation(() => {
+        throw new Error('db down');
+      });
+      const consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+      try {
+        expect(await listByTier('small')).toEqual([
+          { provider: 'groq', model: 'env-fallback-model' },
+        ]);
+      } finally {
+        findSpy.mockRestore();
+        consoleErrorSpy.mockRestore();
+        delete process.env.ROUTER_SMALL_MODEL;
+      }
+    });
   });
 
   describe('eligible filtering', () => {
@@ -84,6 +101,13 @@ describe('Model Config Service', () => {
       } finally {
         delete process.env.ROUTER_GUARD_MODEL;
       }
+    });
+  });
+
+  describe('concurrent first reads', () => {
+    it('survives concurrent seeding without duplicates or errors', async () => {
+      await Promise.all([listByTier('small'), listByTier('small'), listByTier('small')]);
+      expect(await ProviderRouting.countDocuments()).toBe(5);
     });
   });
 });

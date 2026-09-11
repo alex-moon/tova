@@ -15,34 +15,28 @@ export interface ModelRef {
  * `google/gemma-3-4b-it` was verified in the plan-17 model-eval pass; other
  * DeepInfra identities are provisional seed data, editable in the DB.
  */
-const envModel = (envVar: string, fallback: string): string => process.env[envVar] || fallback;
-
 interface SeedEntry extends ModelRef {
   tier: ModelTier;
   eligible: boolean;
 }
 
+// Single source of truth for the env var and its default per tier, shared by
+// seeding and the env fallback so the two can never drift apart.
+const DEFAULT_MODEL_ENV: Record<ModelTier, [envVar: string, fallback: string]> = {
+  small: ['ROUTER_SMALL_MODEL', 'openai/gpt-oss-20b'],
+  large: ['ROUTER_LARGE_MODEL', 'openai/gpt-oss-120b'],
+  guard: ['ROUTER_GUARD_MODEL', 'allam-2-7b'],
+};
+
+const envModel = ([envVar, fallback]: readonly [string, string]): string =>
+  process.env[envVar] || fallback;
+
 // Read at seed time (not module load) so env overrides set per-process are
 // honoured when the collection is first populated.
 const SEED_ENTRIES = (): SeedEntry[] => [
-  {
-    provider: 'groq',
-    model: envModel('ROUTER_SMALL_MODEL', 'openai/gpt-oss-20b'),
-    tier: 'small',
-    eligible: true,
-  },
-  {
-    provider: 'groq',
-    model: envModel('ROUTER_LARGE_MODEL', 'openai/gpt-oss-120b'),
-    tier: 'large',
-    eligible: true,
-  },
-  {
-    provider: 'groq',
-    model: envModel('ROUTER_GUARD_MODEL', 'allam-2-7b'),
-    tier: 'guard',
-    eligible: true,
-  },
+  { provider: 'groq', model: envModel(DEFAULT_MODEL_ENV.small), tier: 'small', eligible: true },
+  { provider: 'groq', model: envModel(DEFAULT_MODEL_ENV.large), tier: 'large', eligible: true },
+  { provider: 'groq', model: envModel(DEFAULT_MODEL_ENV.guard), tier: 'guard', eligible: true },
   { provider: 'deepinfra', model: 'google/gemma-3-4b-it', tier: 'small', eligible: true },
   { provider: 'deepinfra', model: 'Qwen/Qwen2.5-72B-Instruct', tier: 'large', eligible: true },
 ];
@@ -61,17 +55,9 @@ const ensureSeed = async (): Promise<void> => {
   );
 };
 
-const fromEnv = (tier: ModelTier): ModelRef[] => {
-  const modelName = envModel(
-    `ROUTER_${tier.toUpperCase()}_MODEL`,
-    tier === 'small'
-      ? 'openai/gpt-oss-20b'
-      : tier === 'large'
-        ? 'openai/gpt-oss-120b'
-        : 'allam-2-7b',
-  );
-  return [{ provider: 'groq', model: modelName }];
-};
+const fromEnv = (tier: ModelTier): ModelRef[] => [
+  { provider: 'groq', model: envModel(DEFAULT_MODEL_ENV[tier]) },
+];
 
 /*
  * Seed on first read; idempotent upserts keep concurrent/multi-call seeding
@@ -85,15 +71,16 @@ export const listByTier = async (tier: ModelTier): Promise<ModelRef[]> => {
       model: string;
     }>;
 
-  let entries = await read();
-  if (entries.length === 0) {
-    try {
+  let entries: Awaited<ReturnType<typeof read>>;
+  try {
+    entries = await read();
+    if (entries.length === 0) {
       await ensureSeed();
       entries = await read();
-    } catch (err) {
-      console.error('ProviderRouting seed error:', err);
-      return fromEnv(tier);
     }
+  } catch (err) {
+    console.error('ProviderRouting config read/seed error:', err);
+    return fromEnv(tier);
   }
   if (entries.length === 0) return fromEnv(tier);
   return entries.map(({ provider, model }) => ({ provider, model }));

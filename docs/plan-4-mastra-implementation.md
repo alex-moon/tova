@@ -81,7 +81,7 @@ Concrete, individually commit-safe steps:
      not use. **Depends on Open question B.**
 2. **`providerRouting` collection + `modelConfigService`.**
    - Schema: `{ provider: 'groq'|'deepinfra', model: string, tier:
-     'small'|'large'|'guard', eligible: boolean }` (exact shape finalised at
+'small'|'large'|'guard', eligible: boolean }` (exact shape finalised at
      implementation).
    - Seed on first read: current env defaults as Groq entries, one DeepInfra
      small/large model per pinned research.
@@ -109,7 +109,7 @@ Concrete, individually commit-safe steps:
    - Extend `RouterConfig` with a list of eligible models per tier; when ≥2
      qualify, ε-randomly pick; otherwise deterministic as today.
    - Persist the actually-chosen model name (routes/chat.ts already does;
-     verify `Message.modelName` records the *chosen*, not the default).
+     verify `Message.modelName` records the _chosen_, not the default).
    - **Depends on Open question D (ε semantics + guard-model handling).**
      Blocked until D is resolved; deterministic-path work in tasks 3–4 may
      proceed meanwhile.
@@ -175,3 +175,27 @@ unknown to the implementation as of this revision.
   makes sense to" is subjective; conservative reading is orchestration-only.
   Needs user confirmation before task 6 converts anything beyond a
   call-site swap.
+
+### Critic-pass revision (after first deliverable on this branch)
+
+Only task 2 has shipped so far (`providerRouting` model +
+`modelConfigService`; tasks 1 and 3–8 unstarted). Added two hardening tests
+and fixed an uncaught-failure bug: a failing `ProviderRouting.find` (dead
+Mongo) propagated out of `listByTier` instead of falling back to the
+env-configured model. Defaults table (`DEFAULT_MODEL_ENV`) is now the single
+source of truth shared by seeding and the env fallback, and concurrent first
+reads are covered.
+
+New open questions raised by this pass:
+
+- **F. Stale env-seeded rows:** seed rows copy the env-model values at
+  first-read time. If an operator later changes
+  `ROUTER_SMALL_MODEL`/`LARGE`, the DB keeps the old identity and routing
+  never sees the new value (only brand-new empty DBs re-seed). Intended, or
+  should env overrides always apply until a row is explicitly edited
+  (e.g. compare/refresh or a `seededFromEnv` flag)?
+- **G. Ineligible-tier fallback semantics:** when every DB entry for a tier
+  is `eligible: false`, we currently fall back to the env model for that
+  tier. Confirm that is the desired behaviour vs. returning an empty list
+  (which would force routing to fail loudly instead of silently using an
+  exit-path model).
