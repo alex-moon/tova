@@ -131,7 +131,7 @@ Each item is a small, self-contained commit.
       stopword ratio, question/imperative detection; edges: empty string,
       whitespace-only, unicode text, long code block, all-zero guards
       (no division-by-zero).
-- [ ] 4. **Wire deterministic metrics into persistence** in `chat.ts`:
+- [x] 4. **Wire deterministic metrics into persistence** in `chat.ts`:
       compute `computeDeterministic(content)` and build the indices with
       two `countDocuments({ sessionId, role })`-style queries (added
       _before_ the first `.save()` so they count priors only), attach to
@@ -139,19 +139,19 @@ Each item is a small, self-contained commit.
       non-streaming paths. Keep the two count queries parallel
       (`Promise.all`) to avoid serializing them. Update
       `chat.test.ts` / `chat.stream.test.ts` expectations.
-- [ ] 5. **LLM classification service** `classifyPromptDimensions(content)`
+- [x] 5. **LLM classification service** `classifyPromptDimensions(content)`
       in `src/server/services/metricsService.ts`: single call to the
       guard/small model via a prompt that returns five binary/simple
       flags, parsed defensively (extract first JSON-looking object;
       tolerate fences; unknown value = null per flag); on any throw
       return all-nulls (mirroring `titleService` error handling); returns
       the update object **and the promise** so tests can await.
-- [ ] 6. **Wire classification post-save, fire-and-forget**: after each
+- [x] 6. **Wire classification post-save, fire-and-forget**: after each
       user-message save (both endpoints), call the service and persist via
       `findByIdAndUpdate` with `$set` on `metrics.llm`; `.catch` logs;
       never awaited, never throws into the request path. Assistant
       messages are _not_ classified (see Open questions).
-- [ ] 7. **Integration tests** in `chat.test.ts` / `chat.stream.test.ts`
+- [x] 7. **Integration tests** in `chat.test.ts` / `chat.stream.test.ts`
       with the existing mocked Groq client: a) every new user and
       assistant turn gets deterministic metrics filled with a
       session-correct index; b) LLM update lands on success (await the
@@ -181,11 +181,17 @@ Each item is a small, self-contained commit.
 
 Nothing depends on an open question; each has a chosen default that ships.
 
+- **Which model does the classification call use?** Implemented as
+  `ROUTER_GUARD_MODEL` (default `allam-2-7b`), mirroring `routerService`'s
+  guard path. Switching to `ROUTER_SMALL_MODEL` is a one-line env change; see
+  the guard-vs-small question below.
 - **Does the small/guard model reliably emit parseable flags?** We have no
   structured-output precedent. Plan 5 assumes a plain completion parsed
-  defensively. If quality proves poor, options: switch
-  `metricsService` to `ROUTER_SMALL_MODEL` (one-line env change), or add
-  Groq `response_format` JSON mode (in-ticket scope, but untested).
+  defensively (`parseLlmFlags` in `metricsService.ts`, branch-extending from
+  the first `{`, independent per-flag degradation). If quality proves poor,
+  options: switch `metricsService` to `ROUTER_SMALL_MODEL` (one-line env
+  change), or add Groq `response_format` JSON mode (in-ticket scope, but
+  untested).
 - **Should assistant messages get LLM-classified?** Cost: one extra call
   per assistant turn; benefit unclear (the router routes on user prompts).
   Default: user-only, unless reviewers object.
@@ -196,3 +202,31 @@ Nothing depends on an open question; each has a chosen default that ships.
   decides later — no data is lost under either interpretation.
 - **Backfill of existing messages**: out of scope; issue only requires
   forward-going fills for new turns.
+
+## Open questions (from review pass on this branch)
+
+- **Skip classification for obviously short/simple prompts?** Routing's
+  tier-1 deterministic rules already identify short greetings/confirmations
+  cheaply; classifying them costs one extra Groq call per turn we get no
+  routing insight from. Default as shipped: always classify every user
+  message (metrics are analytical, so completeness wins). Could be gated on
+  `routingResult.reason` later if cost matters.
+
+## Implementation notes (from the critique pass)
+
+- `metricsService.parseLlmFlags` extends from the first `{` to successive
+  `}` until a chunk parses, so fenced output, prose-wrapped JSON, and
+  trailing text after the JSON all parse; per-flag unknown values degrade
+  to `null` independently; a throw (or response without `choices`) returns
+  all nulls.
+- `chat.ts` appends deterministic metrics plus the two session indices in
+  `buildMessageMetrics` (two parallel `countDocuments` counts of _priors_
+  only). Symptom to watch: the assistant message's
+  `sessionUserMessageIndex` is the current turn's number (the user message
+  is already saved when the assistant's indices are computed), i.e. one
+  higher than the same-turn user message's. That is intentional: both
+  indices are strict counts of priors at write time.
+- The fire-and-forget classification made the existing stream test mocks
+  fragile (the classify call consumed queued `mockResolvedValueOnce` stream
+  mocks), so `chat.stream.test.ts` mocks are now arg-aware (`stream`, or
+  the classifier prompt) instead of queue-based.

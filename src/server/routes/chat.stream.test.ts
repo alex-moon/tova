@@ -28,13 +28,17 @@ jest.mock('../services/titleService', () => ({
 
 const MOCK_ROUTING = { model: 'mock-small-model', reason: 'deterministic-short' };
 
-const mockStream = async (chunks: string[]) => {
-  mockCreate.mockResolvedValueOnce({
-    [Symbol.asyncIterator]: async function* () {
-      for (const chunk of chunks) {
-        yield { choices: [{ delta: { content: chunk } }] };
-      }
-    },
+const mockStream = (chunks: string[]) => {
+  const streamIterator = async function* () {
+    for (const chunk of chunks) {
+      yield { choices: [{ delta: { content: chunk } }] };
+    }
+  };
+  mockCreate.mockImplementation(async (args?: { stream?: boolean }) => {
+    if (args?.stream) {
+      return { [Symbol.asyncIterator]: streamIterator };
+    }
+    return { choices: [{ message: { content: 'plain' } }] };
   });
 };
 
@@ -50,6 +54,15 @@ const registerUser = async (email: string): Promise<string[]> => {
 
 describe('Chat streaming route', () => {
   beforeEach(() => {
+    mockCreate.mockReset().mockImplementation(async (args?: { stream?: boolean }) =>
+      args?.stream
+        ? {
+            [Symbol.asyncIterator]: async function* () {
+              yield { choices: [{ delta: { content: 'chunk' } }] };
+            },
+          }
+        : { choices: [{ message: { content: 'plain' } }] },
+    );
     mockRouteQuery.mockReset().mockResolvedValue(MOCK_ROUTING);
   });
 
@@ -116,5 +129,81 @@ describe('Chat streaming route', () => {
     });
     const session = await Session.findById(sessionId);
     expect(session).not.toBeNull();
+  });
+});
+
+const CLASSIFIER_REPLY =
+  '{"emotional": true, "technical": false, "abstract": false, "sentiment": "neutral", "openEnded": false}';
+
+const flush = async () => {
+  for (let i = 0; i < 20; i++) {
+    await new Promise((r) => setImmediate(r));
+  }
+};
+
+describe('Chat streaming prompt metrics', () => {
+  beforeEach(() => {
+    mockCreate.mockReset();
+    mockRouteQuery.mockReset().mockResolvedValue(MOCK_ROUTING);
+  });
+
+  it('attaches metrics to streamed turns and classifies the user message', async () => {
+    const streamIterator = async function* () {
+      yield { choices: [{ delta: { content: 'Hi.' } }] };
+    };
+    mockCreate.mockImplementation(
+      async (args?: { stream?: boolean; messages?: { role: string; content: string }[] }) => {
+        if (args?.stream) {
+          return { [Symbol.asyncIterator]: streamIterator };
+        }
+        if (args?.messages?.[0]?.content.startsWith('Classify the user prompt')) {
+          return { choices: [{ message: { content: `\`\`\`json\n${CLASSIFIER_REPLY}\n\`\`\`` } }] };
+        }
+        return { choices: [{ message: { content: 'plain' } }] };
+      },
+    );
+
+    const cookies = await registerUser('stream-metrics@example.com');
+    const app = createApp();
+    const response = await request(app)
+      .post('/api/chat/stream')
+      .set('Cookie', cookies)
+      .send({ content: 'Fix this for me please' });
+
+    expect(response.status).toBe(200);
+
+    const persisted = await Message.find().sort({ timestamp: 1 });
+    const sessionId = persisted[0]?.sessionId;
+    expect(persisted).toHaveLength(2);
+    expect(persisted[0]?.metrics).toMatchObject({
+      hasImperative: true,
+      hasQuestionMark: false,
+      sessionMessageIndex: 0,
+      sessionUserMessageIndex: 0,
+    });
+    expect(persisted[1]?.metrics).toMatchObject({
+      sessionMessageIndex: 1,
+      sessionUserMessageIndex: 1,
+      codeIndicators: { fences: 0, backticks: 0, codeTokenCount: 0 },
+    });
+    expect((await Session.findById(sessionId)) ?? null).not.toBeNull();
+
+    // User turn (not assistant) gets an LLM classification
+    await flush();
+    const [userMessage, assistantMessage] = persisted;
+    expect(userMessage.metrics?.llm).toEqual({
+      emotional: true,
+      technical: false,
+      abstract: false,
+      sentiment: 'neutral',
+      openEnded: false,
+    });
+    expect(assistantMessage.metrics?.llm).toMatchObject({
+      emotional: null,
+      technical: null,
+      abstract: null,
+      sentiment: null,
+      openEnded: null,
+    });
   });
 });

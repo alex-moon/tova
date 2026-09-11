@@ -6,10 +6,31 @@ import { routeQuery } from '../services/routerService';
 import { generateChatTitle } from '../services/titleService';
 import { hasPermission, ROUTING_PERMISSION } from '../services/userService';
 import Groq from 'groq-sdk';
+import { classifyAndPersistPromptDimensions } from '../services/metricsService';
+import { computeDeterministicMetrics } from '../services/promptMetrics';
 
 const router = express.Router();
 
 const NO_ROUTING_PERMISSION = "You don't have permission to use the model router.";
+
+// Session indices count only prior messages (computed before .save()), so a
+// session's first message gets index 0. The two counts run in parallel.
+// Count-based indices are racy under concurrent turns in one session; accepted
+// in the plan (docs/plan-17-prompt-metrics.md) since metrics are analytical.
+const buildMessageMetrics = async (
+  sessionId: string,
+  content: string,
+): Promise<Record<string, unknown>> => {
+  const [priorCount, priorUserCount] = await Promise.all([
+    Message.countDocuments({ sessionId }),
+    Message.countDocuments({ sessionId, role: 'user' }),
+  ]);
+  return {
+    ...computeDeterministicMetrics(content),
+    sessionMessageIndex: priorCount,
+    sessionUserMessageIndex: priorUserCount,
+  };
+};
 
 const createSessionWithUser = async (userId: string, content: string) => {
   const title = await generateChatTitle(content);
@@ -51,14 +72,19 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
     } else {
       session = await createSessionWithUser(userId as string, content);
     }
-
     // Save user message
     const userMessage = new Message({
       sessionId: session._id,
       role: 'user',
       content,
+      metrics: await buildMessageMetrics(String(session._id), content),
     });
     await userMessage.save();
+
+    // LLM classification runs post-save, fire-and-forget; never awaited.
+    classifyAndPersistPromptDimensions(String(userMessage._id), content).catch((err) =>
+      console.error('Prompt classification error:', err),
+    );
 
     // Determine model
     const routingResult = await routeQuery(content);
@@ -88,6 +114,7 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
       role: 'assistant',
       content: assistantContent,
       modelName: routingResult.model,
+      metrics: await buildMessageMetrics(String(session._id), assistantContent),
     });
     await assistantMessage.save();
 
@@ -131,8 +158,14 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
       sessionId: session._id,
       role: 'user',
       content,
+      metrics: await buildMessageMetrics(String(session._id), content),
     });
     await userMessage.save();
+
+    // LLM classification runs post-save, fire-and-forget; never awaited.
+    classifyAndPersistPromptDimensions(String(userMessage._id), content).catch((err) =>
+      console.error('Prompt classification error:', err),
+    );
 
     // Determine model
     const routingResult = await routeQuery(content);
@@ -195,6 +228,7 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
       role: 'assistant',
       content: assistantContent,
       modelName: routingResult.model,
+      metrics: await buildMessageMetrics(String(session._id), assistantContent),
     });
     await assistantMessage.save();
 
