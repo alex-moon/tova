@@ -1,0 +1,416 @@
+[0m
+> build · zai-org/GLM-5.3-Flash
+[0m
+[0m$ [0mgh issue list --repo alex-moon/tova --state open --limit 50 --json number,title,updatedAt
+[{"number":18,"title":"Thumbs up/down feedback that weights model-vs-metrics fit","updatedAt":"2026-09-10T21:27:30Z"},{"number":17,"title":"Collect per-message prompt metrics (classifier features)","updatedAt":"2026-09-10T21:26:32Z"},{"number":16,"title":"Web search tool for the agent loop","updatedAt":"2026-09-10T21:26:04Z"},{"number":15,"title":"Admin view","updatedAt":"2026-09-09T22:17:48Z"},{"number":5,"title":"Add LangSmith for tracing and evals","updatedAt":"2026-09-06T22:37:10Z"},{"number":4,"title":"More models + query enhancement/splitting/agentic behaviour","updatedAt":"2026-09-10T21:22:24Z"}]
+[0m
+[0m$ [0mgh pr list --repo alex-moon/tova --state open --json headRefName,title,number
+[]
+[0m
+[0m$ [0mfor n in 18 17 16 15 5 4; do echo "===== ISSUE $n ====="; gh issue view $n --repo alex-moon/tova --comments; done
+===== ISSUE 18 =====
+===== ISSUE 17 =====
+===== ISSUE 16 =====
+===== ISSUE 15 =====
+===== ISSUE 5 =====
+===== ISSUE 4 =====
+author:	alex-moon
+association:	owner
+edited:	false
+status:	none
+--
+Some implementation details:
+- we will want to add DeepInfra and potentially others to broaden the model pool
+- we will want to store these in the database tracked on strengths on various metrics (metrics we will also need to calculate or "infer" per message for routing).
+--
+[0m
+[0m$ [0mgit branch -a
+feat/tv/3-user-permissions
+* main
+  remotes/origin/HEAD -> origin/main
+  remotes/origin/feat/tv/3-user-permissions
+  remotes/origin/main
+[0m
+[0m$ [0mfor n in 18 17 16 15 5 4; do echo "===== ISSUE $n ====="; gh issue view $n --repo alex-moon/tova; done
+===== ISSUE 18 =====
+title:	Thumbs up/down feedback that weights model-vs-metrics fit
+state:	OPEN
+author:	alex-moon
+labels:	enhancement
+comments:	0
+assignees:	
+projects:	
+milestone:	
+number:	18
+--
+Users currently have no way to say whether a reply was good. This ticket: thumbs up/down on assistant messages, which "weights" (adjusts confidence in) the selected model's fit for the metrics collected per message (issue #17 — dependency).
+
+Suggested approach:
+- API: `POST /api/messages/:messageId/feedback` with `{ value: 'up' | 'down' }`, authenticated, idempotent (revote just overwrites); persists on the message document alongside its `metrics` from #17.
+- Frontend: thumbs up/down pair under each assistant message, subtle pending/opt-out lift, already-visible messages get the controls too.
+- Weighting model: keep a `modelMetricsStats` store (Mongo collection) of per-(modelName, metric-band) counts → up/down tallies, e.g. `llama-3.3-70b + high-technical + long prompt → 12↑/3↓`. When the router scores candidate models for a message, factor these empirical fit scores in alongside the existing complexity heuristics.
+- Cold start: fall back to neutral weight until a minimum sample count per band.
+- Feeding the router: this complements the online router, not replaces it; log the applied weight in the routing reason so LangSmith (#5) can surface it.
+- Acceptance: feedback round-trips for authed users (401 for others); thumbs show their current state after reload; router decisions demonstrably shift with accumulated feedback (covered by a test seeding stats and asserting a different model choice).
+===== ISSUE 17 =====
+title:	Collect per-message prompt metrics (classifier features)
+state:	OPEN
+author:	alex-moon
+labels:	enhancement
+comments:	0
+assignees:	
+projects:	
+milestone:	
+number:	17
+--
+We want to understand *why* the router picks the model it picks, and later whether that choice was right (feedback ticket reads these). This ticket: collect a set of metrics per chat message and persist them alongside the message document in MongoDB.
+
+Metrics to collect — a mix of cheap/deterministic (computed synchronously, no LLM):
+- word count / char count / short-vs-long bucket
+- average word length and syllable-ish estimate (vowel-cluster heuristic is fine) → "complexity of vocabulary" proxy
+- code-y indicator (fences, backticks, code-ish tokens)
+- share of technical jargon vs plain words (stopword ratio as cheap proxy)
+- message index within the session (how many messages into the chat we are)
+- presence of question mark / imperative verbs (question vs instruction)
+
+And LLM-classified dimensions (one cheap small-model classification pass per message, cached, run in parallel with routing):
+- emotional vs neutral
+- technical vs lay
+- high-level/strategic vs low-level/detailed
+- positive vs negative sentiment
+- open-ended vs closed/one-shot task
+
+Suggested approach:
+- Deterministic metrics: pure TS module, no deps, unit-tested.
+- LLM dimensions: reuse the small/guard model path from the router; single structured-output call producing the flags, degraded gracefully (nulls) on failure.
+- Persist as a `metrics` subdocument on each message record so routing decisions and future feedback can be correlated.
+- Acceptance: every new assistant/user turn gets metrics filled; deterministic metrics pass unit tests; no visible latency added to first token (classification is fire-and-forget or batched post-stream).
+===== ISSUE 16 =====
+title:	Web search tool for the agent loop
+state:	OPEN
+author:	alex-moon
+labels:	enhancement
+comments:	0
+assignees:	
+projects:	
+milestone:	
+number:	16
+--
+Today the chat pipeline (`/api/chat/stream` → `routerService.routeQuery` → one Groq completion) has no tool access, and issue #4 proposes the agentic loop that would host one. This ticket: the first tool — web search — implemented in Mastra.
+
+Suggested approach:
+- Add Mastra as the tool layer for the server pipeline; define a `webSearch` tool with a typed schema (query string, optional freshness/recency filter).
+- Wire the tool into the agentic loop from #4 (stop budget / max iterations carried over the existing SSE `event:` channel so the UI can show ` Searching the web...` status).
+- Provider choice: use a search API with a simple REST client (e.g. Brave/Tavily/Exa), keyed by env (`SEARCH_API_KEY`), disabled cleanly when unset so local dev keeps working.
+- Synthesis: pipe results (title/snippet/url) back into the main model as context for the final answer, keep citations in the assistant message payload so the frontend can render sources later.
+- Persistence: one assistant message per turn stays true; tool internals are trace artifacts, not separate messages.
+- Acceptance: a question requiring fresh info gets grounded answers with sources attached; tool runs emit SSE status events; tests mock the search provider without breaking existing suites.
+===== ISSUE 15 =====
+title:	Admin view
+state:	OPEN
+author:	alex-moon
+labels:	enhancement
+comments:	0
+assignees:	
+projects:	
+milestone:	
+number:	15
+--
+Add a new permission: admin - this grants access to an admin view where I can manage users and other things (e.g. models when we have them later).
+===== ISSUE 5 =====
+title:	Add LangSmith for tracing and evals
+state:	OPEN
+author:	alex-moon
+labels:	enhancement
+comments:	0
+assignees:	
+projects:	
+milestone:	
+number:	5
+--
+No observability today: model calls, routing decisions and prompt assembly are one-off console.error breadcrumbs. Wire LangSmith tracing/evals around the Groq pipeline.
+
+Suggested approach:
+- Add `langsmith` npm module; env-gated (`LANGCHAIN_API_KEY`, `LANGCHAIN_PROJECT`, disable locally when unset).
+- Wrap the pipeline spans: router/classifier decision (`routeQuery` in `routerService.ts`), final chat completion, and the title-generation call in `titleService.ts` — one root run per request with sessionId/userId metadata (careful: no PII/user content in run metadata; content stays in trace payloads consistent with retention settings).
+- Capture token usage + latency per span from Groq usage fields, and surface `model`/`reason` from RoutingResult in run tags to correlate routing regressions.
+- Evals: seed a small golden prompt set (simple vs code vs complex) and run through the router offline; assert expected model tier and answer-quality rubric via LangSmith evals, wire into CI as an optional job.
+- Streaming: log aggregate output once on `done` rather than per-delta noise; record error finish on the SSE `error` path.
+- Acceptance: dev session appears in LangSmith with sane spans; failing eval set demonstrates the failure before merging router changes.
+===== ISSUE 4 =====
+title:	More models + query enhancement/splitting/agentic behaviour
+state:	OPEN
+author:	alex-moon
+labels:	enhancement
+comments:	1
+assignees:	
+projects:	
+milestone:	
+number:	4
+--
+Today every turn goes through `routerService.routeQuery` → exactly one Groq model (small/large/guard), single completion, single turn.
+
+Suggestions to evolve beyond one-prompt-one-response:
+- Configurable model catalog: move model definitions out of `ROUTER_SMALL/LARGE/GUARD_MODEL` envs into a selectable catalog (e.g. llama/gpt-oss/kimi variants) so users can pick a model per chat or the router picks from a wider pool.
+- Query enhancement: pre-analysis pass that expands vague prompts with clarified intent/requirements before the main model answers (cheap small-model pass, cached).
+- Query decomposition/splitting: detect multi-part prompts ("...and also..."), split into sub-queries, run each with the right model, then synthesise a final answer.
+- Tool/agentic loop: allow the model to call tools (web search, eval-run JS, saved-context retrieval) over multiple turns with a clean stop/max-iteration budget.
+- Reasoning budget: route harder prompts to larger models with higher token budgets; stream ' Planning...' status via the existing SSE `event:` channel.
+- Guardrails: keep the guard model as a pre-flight classifier, extend to input/output moderation decisions.
+- intefacing: keep `/api/chat/stream` SSE contract stable (new event types are additive), persistence keeps one assistant message per turn.
+- Acceptance: multi-part queries answered in full, model choice visible in `Message.modelName`, tests mock the new passes without breaking existing suites.
+[0m
+[0m$ [0mgit log main --oneline -15; echo ---; git log origin/main --oneline -15; echo ---; ls docs docs/done 2>/dev/null
+bfc49d3 TV-2 - iteration script
+02e72f0 Test different system prompt
+a5223bd TV-2 - fix MongoDB connection
+3509737 TV-2 - fix deploy harder
+7b790e8 TV-2 - fix deploy
+3f523e5 TV-2 - fail CI unless it succeeds
+1a1b4d3 TV-2 - another .dockerignore
+cb9c012 TV-2 - fix .dockerignore
+e7c2acf Update deploy.yml
+804149b TV-2 - fix deploy
+75a48f1 TV-2 - fix deploy
+c34ffe5 Merge pull request #13 from alex-moon/feat/tv/3-user-permissions
+3fa9ab9 TV-3 Google OAuth sign-in, user permissions, routing guard
+08665ad TV-3 - update deploy workflow
+f0d2417 fix deploy ssh conf
+---
+bfc49d3 TV-2 - iteration script
+02e72f0 Test different system prompt
+a5223bd TV-2 - fix MongoDB connection
+3509737 TV-2 - fix deploy harder
+7b790e8 TV-2 - fix deploy
+3f523e5 TV-2 - fail CI unless it succeeds
+1a1b4d3 TV-2 - another .dockerignore
+cb9c012 TV-2 - fix .dockerignore
+e7c2acf Update deploy.yml
+804149b TV-2 - fix deploy
+75a48f1 TV-2 - fix deploy
+c34ffe5 Merge pull request #13 from alex-moon/feat/tv/3-user-permissions
+3fa9ab9 TV-3 Google OAuth sign-in, user permissions, routing guard
+08665ad TV-3 - update deploy workflow
+f0d2417 fix deploy ssh conf
+---
+docs:
+done
+overview.md
+plan-11-deploy-workflow.md
+plan-3-user-permissions.md
+progress.md
+workflow.md
+
+docs/done:
+plan-8-ci-deploy.md
+[0m
+[0m$ [0mls src; rg -l -i "metrics|feedback|langsmith|mastra|admin" src --iglob '!node_modules' 2>/dev/null | head; rg -n "role|permission" src/server -l 2>/dev/null | head
+client
+index.ts
+server
+src/server/models/User.ts
+src/server/index.ts
+src/server/services/titleService.ts
+src/server/services/userService.ts
+src/server/services/routerService.test.ts
+src/server/services/routerService.ts
+src/server/routes/chat.ts
+src/server/routes/chat.stream.test.ts
+src/server/routes/chat.test.ts
+src/server/routes/chat.permissions.test.ts
+src/server/routes/auth.google.test.ts
+src/server/routes/auth.ts
+[0m
+[0m$ [0mrg -in "role|admin" src/server/models/User.ts src/server/services/userService.ts | head -20
+src/server/models/User.ts:17:    role: {
+src/server/models/User.ts:19:      enum: ['user', 'admin'],
+src/server/models/User.ts:56:  role: 'user' | 'admin';
+src/server/services/userService.ts:31:    role: 'user',
+[0m
+**Triage summary** (open PRs: none; branches: no `feat/tv/<n>-*` branches for any open issue; no plan docs for open tickets):
+
+- **#18** (feedback) — explicitly depends on #17 metrics; not started → READY (sequenced later)
+- **#17** (per-message metrics) — no code, no plan doc → READY, but sprawling (deterministic + LLM dimensions + persistence)
+- **#16** (web search tool) — depends on the agentic loop from #4; no Mastra/search code exists → READY (later)
+- **#15** (admin view) — `User.role` enum already has `'admin'` (src/server/models/User.ts:19), no admin routes/UI; totally self-contained, no deps, no keys → READY and smallest
+- **#5** (LangSmith) — implementation is env-gated but acceptance ("appears in LangSmith", failing evals) can't be verified without a `LANGCHAIN_API_KEY`, which only the user can provide → BLOCKED (no comment on ticket yet, so I'll post one)
+- **#4** (more models/agentic) — sprawling multi-item ticket, and #16 hosts inside it → READY, but large
+
+#5 has no blocking-state comment, so posting one as instructed:
+[0m$ [0mgh issue comment 5 --repo alex-moon/tova --body "Triage: implementation can be done env-gated, but the acceptance criteria (a dev session appearing in LangSmith, evals demonstrably failing/passing there) cannot be verified without a \`LANGCHAIN_API_KEY\` (and a project name). BLOCKED until these are provided. Once the key exists this is unblocked and ready to implement."
+https://github.com/alex-moon/tova/issues/5#issuecomment-5631329325
+[0m
+**Selection: #15 (Admin view)** — smallest, well-scoped, fully READY, and groundwork (`role: 'user' | 'admin'` on the User model) already exists; all others are either sprawling or blocked/ordered later.
+
+The plan doc for it should note the scope: admin permission is already modeled; missing pieces are admin routes (user list, role updates) and the admin UI view.
+
+ISSUE:15
+[09:00:54] Selected issue #15
+[0m
+> build · zai-org/GLM-5.3-Flash
+[0m
+[0m$ [0mgh issue view 15 --repo alex-moon/tova
+title:	Admin view
+state:	OPEN
+author:	alex-moon
+labels:	enhancement
+comments:	0
+assignees:	
+projects:	
+milestone:	
+number:	15
+--
+Add a new permission: admin - this grants access to an admin view where I can manage users and other things (e.g. models when we have them later).
+[0m
+feat-admin-view
+[09:01:09] Created branch feat/tv/15-admin-view
+[0m
+> build · zai-org/GLM-5.3-Flash
+[0m
+[0m$ [0mgh issue view 15 --repo alex-moon/tova --comments && git log --oneline -5 && git status --short
+bfc49d3 TV-2 - iteration script
+02e72f0 Test different system prompt
+a5223bd TV-2 - fix MongoDB connection
+3509737 TV-2 - fix deploy harder
+7b790e8 TV-2 - fix deploy
+?? logs/
+[0m
+[0m$ [0mgh issue view 15 --repo alex-moon/tova --comments 2>&1; echo "exit: $?"
+exit: 0
+[0m
+[0m$ [0mgh issue view 15 --repo alex-moon/tova --comments | head -100
+(no output)
+[0m
+[0m$ [0mgh api repos/alex-moon/tova/issues/15 2>&1 | head -30; gh issue list --repo alex-moon/tova 2>&1 | head
+{"url":"https://api.github.com/repos/alex-moon/tova/issues/15","repository_url":"https://api.github.com/repos/alex-moon/tova","labels_url":"https://api.github.com/repos/alex-moon/tova/issues/15/labels{/name}","comments_url":"https://api.github.com/repos/alex-moon/tova/issues/15/comments","events_url":"https://api.github.com/repos/alex-moon/tova/issues/15/events","html_url":"https://github.com/alex-moon/tova/issues/15","id":5405323123,"node_id":"I_kwDOSsMvP88AAAABQi6vcw","number":15,"title":"Admin view","user":{"login":"alex-moon","id":799473,"node_id":"MDQ6VXNlcjc5OTQ3Mw==","avatar_url":"https://avatars.githubusercontent.com/u/799473?v=4","gravatar_id":"","url":"https://api.github.com/users/alex-moon","html_url":"https://github.com/alex-moon","followers_url":"https://api.github.com/users/alex-moon/followers","following_url":"https://api.github.com/users/alex-moon/following{/other_user}","gists_url":"https://api.github.com/users/alex-moon/gists{/gist_id}","starred_url":"https://api.github.com/users/alex-moon/starred{/owner}{/repo}","subscriptions_url":"https://api.github.com/users/alex-moon/subscriptions","organizations_url":"https://api.github.com/users/alex-moon/orgs","repos_url":"https://api.github.com/users/alex-moon/repos","events_url":"https://api.github.com/users/alex-moon/events{/privacy}","received_events_url":"https://api.github.com/users/alex-moon/received_events","type":"User","user_view_type":"public","site_admin":false},"labels":[{"id":11095092944,"node_id":"LA_kwDOSsMvP88AAAAClVGu0A","url":"https://api.github.com/repos/alex-moon/tova/labels/enhancement","name":"enhancement","color":"a2eeef","default":true,"description":"New feature or request"}],"state":"open","locked":false,"assignees":[],"milestone":null,"comments":0,"created_at":"2026-09-09T22:17:48Z","updated_at":"2026-09-09T22:17:48Z","closed_at":null,"assignee":null,"author_association":"OWNER","active_lock_reason":null,"sub_issues_summary":{"total":0,"completed":0,"percent_completed":0},"issue_dependencies_summary":{"blocked_by":0,"total_blocked_by":0,"blocking":0,"total_blocking":0},"body":"Add a new permission: admin - this grants access to an admin view where I can manage users and other things (e.g. models when we have them later).","closed_by":null,"reactions":{"url":"https://api.github.com/repos/alex-moon/tova/issues/15/reactions","total_count":0,"+1":0,"-1":0,"laugh":0,"hooray":0,"confused":0,"heart":0,"rocket":0,"eyes":0},"timeline_url":"https://api.github.com/repos/alex-moon/tova/issues/15/timeline","performed_via_github_app":null,"state_reason":null,"pinned_comment":null}18	OPEN	Thumbs up/down feedback that weights model-vs-metrics fit	enhancement	2026-09-10T21:27:30Z
+17	OPEN	Collect per-message prompt metrics (classifier features)	enhancement	2026-09-10T21:26:32Z
+16	OPEN	Web search tool for the agent loop	enhancement	2026-09-10T21:26:04Z
+15	OPEN	Admin view	enhancement	2026-09-09T22:17:48Z
+5	OPEN	Add LangSmith for tracing and evals	enhancement	2026-09-11T08:00:49Z
+4	OPEN	More models + query enhancement/splitting/agentic behaviour	enhancement	2026-09-10T21:22:24Z
+[0m
+[0m$ [0mgit branch --show-current; git log --oneline --all --grep='tv/15' --grep='TV-15' -i | head; git log --oneline -3 feat/tv/15-admin-view 2>/dev/null
+feat/tv/15-admin-view
+bfc49d3 TV-2 - iteration script
+02e72f0 Test different system prompt
+a5223bd TV-2 - fix MongoDB connection
+[0m
+[0m• [0mSearch repo for admin/permissions[90m Explore Agent[0m
+[0m✓ [0mSearch repo for admin/permissions[90m Explore Agent[0m
+[0m→ [0mRead docs/plan-3-user-permissions.md
+Confirmed from repo state: ticket #15 is open, unassigned, no comments, and no admin view exists yet (`role: 'admin'` enum and `requireRole` middleware exist at `src/server/middleware/auth.ts:31` but are unused; no admin API routes, no admin UI). Not blocked by anything local. Writing the plan doc now.
+[0m
+[0m← [0mWrite docs/plan-15-admin-view.md
+Wrote file successfully.
+[0m
+Plan written at `docs/plan-15-admin-view.md`.
+
+- **Verified from repo state:** #15 not done (no admin API routes, `requireRole` unused, no admin UI) and not blocked (open issue, no comments/dependencies).
+- **Plan:** admin-guarded backend (`GET /api/admin/users`, permission/role mutation, last-admin guard) using the existing `role: 'admin'` + `requireRole` middleware, then a conditional admin view in `App.tsx` (no new router dependency), plus tests and `npm run ci` gate.
+- **Open questions** flagged: admin as URL route vs toggle, user delete/disable scope, and the vague "other things" in the issue. No work planned on those. Nothing committed.
+[09:04:15] Committed and pushed plan updates
+[0m
+> build · zai-org/GLM-5.3-Flash
+[0m
+[0m$ [0mgh issue view 15 --repo alex-moon/tova --comments
+(no output)
+[0m
+[0m→ [0mRead docs/plan-15-admin-view.md
+[0m
+[0m$ [0mgit status && git log --oneline -5 && git diff --stat
+On branch feat/tv/15-admin-view
+Your branch is up to date with 'origin/feat/tv/15-admin-view'.
+
+Untracked files:
+  (use "git add <file>..." to include in what will be committed)
+	logs/
+
+nothing added to commit but untracked files present (use "git add" to track)
+8c10ed3 docs: plan updates for #15
+bfc49d3 TV-2 - iteration script
+02e72f0 Test different system prompt
+a5223bd TV-2 - fix MongoDB connection
+3509737 TV-2 - fix deploy harder
+[0m
+The issue command returned no output. Let me retry.
+[0m$ [0mgh issue view 15 --repo alex-moon/tova --comments 2>&1; echo "EXIT:$?"
+EXIT:0
+[0m
+[0m$ [0mgh issue view 15 --repo alex-moon/tova --json title,body,comments,state,labels --jq '{title,state,labels:[.labels[].name],body,comments:[.comments[]|{author:.author.login,body}]}' 2>&1 | head -200
+{"body":"Add a new permission: admin - this grants access to an admin view where I can manage users and other things (e.g. models when we have them later).","comments":[],"labels":["enhancement"],"state":"OPEN","title":"Admin view"}
+[0m
+[0m$ [0mgrep -rn "admin" src/server/routes src/server/middleware src/client/src --include="*.ts*" -il; ls src/server/routes
+auth.google.test.ts
+auth.ts
+chat.permissions.test.ts
+chat.stream.test.ts
+chat.test.ts
+chat.ts
+[0m
+[0m→ [0mRead src/server/middleware/auth.ts
+[0m→ [0mRead src/server/models/User.ts
+Ticket is neither done nor blocked (no admin code exists, issue open with no comments, nothing pending on the owner that blocks starting work — the plan's open questions only affect later UI polish). Now I'll read the relevant code to make the plan concrete.
+[0m→ [0mRead src/server/routes/auth.ts
+[0m→ [0mRead src/client/src/App.tsx
+[0m
+[0m$ [0mgrep -n "app.use" src/server/index.ts; ls src/client/src; ls src/client/src/components 2>/dev/null; grep -rn "node:\|\bmock\b\|mongodb-memory\|sinon\|jest.mock" src/server/routes/chat.permissions.test.ts | head
+28:  app.use(express.json());
+29:  app.use(cookieParser());
+31:  app.use('/api/auth', authRoutes);
+32:  app.use('/api/chat', chatRoutes);
+40:    app.use(express.static(clientBuildPath));
+46:    app.use(
+App.test.tsx
+App.tsx
+assets
+components
+context
+hooks
+index.css
+lib
+main.tsx
+test
+ChatWindow.tsx
+Login.tsx
+Sidebar.tsx
+ThemeToggle.tsx
+ui
+7:jest.mock('groq-sdk', () => {
+17:jest.mock('../services/titleService', () => ({
+[0m
+I have full context. The issue has no comments and no answer blocking work; nothing in the plan is blocked on the user to *start*. Now I'll revise the plan: verify claims against code, add concrete detail, and move doubtful assumptions to open questions. One genuinely new open question surfaced: admin authz reads the role from a 7-day JWT, so role changes don't take effect until token expiry.
+[0m← [0mWrite docs/plan-15-admin-view.md
+Wrote file successfully.
+[0m
+[0m$ [0mgh issue comment 15 --repo alex-moon/tova --body "Plan for the admin view is at docs/plan-15-admin-view.md. A few questions (none answered in the issue yet; each has a default in the plan, so none blocks starting):
+
+1. **Role semantics**: the codebase already encodes admin as \`role: 'admin'\` on the user, while the issue says \"a new permission: admin\". Plan: keep it as \`role\` (guarded by the existing \`requireRole\` middleware) rather than adding an \`'admin'\` entry to \`permissions[]\`. OK, or do you want admin as a feature permission like \`routing\`?
+2. **Admin view navigation**: in-app toggle/section for admin users vs. a URL route (react-router/\`#admin\`). Plan defaults to a toggle since the client has no router; a route can be added later without rework. Preference?
+3. **Token staleness**: admin API authorization reads the role from a 7-day JWT cookie, so a demoted admin keeps working access up to token expiry, and a newly promoted admin must re-login before the app shows admin UI. Is that an acceptable window, or should tokens be re-issued/shortened on role change?
+4. **Self-demotion**: with today's \"don't demote the last admin\" count check, you can't demote yourself until a second admin exists. Intended?" 2>&1
+https://github.com/alex-moon/tova/issues/15#issuecomment-5631408547
+[0m
+[0m$ [0mnpm run format:check --silent 2>&1 | tail -3
+Checking formatting...
+[warn] docs/plan-15-admin-view.md
+[warn] Code style issues found in the above file. Run Prettier with --write to fix.
+[0m
+[0m$ [0mnpx prettier --write docs/plan-15-admin-view.md && npm run format:check --silent 2>&1 | tail -2
+docs/plan-15-admin-view.md 125ms
+Checking formatting...
+All matched files use Prettier code style!
+[0m
+Done. Summary:
+
+**Pre-work check** — verified from repo state, not just issue comments: no admin routes/UI exist (`grep` found nothing; only `/api/auth` and `/api/chat` are mounted), issue #15 is open with **zero comments and no answers**, so the ticket is neither done nor blocked, and no blocking comment was needed.
+
+**Plan revised** (`docs/plan-15-admin-view.md`):
+- **More detailed**: steps now name exact file paths (`src/server/routes/admin.ts`, `AdminView.tsx`), mount point, response projections (`hasGoogle`, no `passwordHash`), validation rules, error codes (401/403/400/404 incl. ObjectId/CastError handling), the `/me` rewrite, self-demotion edge, and concrete test cases per endpoint.
+- **More honest**: every interpretation of the one-sentence issue is critiqued inline ("Critique:" blocks), the issue's lack of answers is stated explicitly, and six assumptions moved to "Open questions" — each with a stated default so no step 1–6 depends on an unresolved question.
+- Since the issue has no comments, the "move answered stuff out of Open questions" rule was vacuous — that was acknowledged in the doc.
+
+**New open questions posted** as a gh comment on #15: https://github.com/alex-moon/tova/issues/15#issuecomment-5631408547 (role-vs-permission, toggle vs URL route, JWT staleness window for demoted admins, self-demotion semantics).
+
+Committed nothing; prettier check passes.
+[09:08:46] Committed and pushed plan updates
+[09:08:46] Dirty worktree; skipping implement phase
