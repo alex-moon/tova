@@ -4,7 +4,7 @@ GitHub issue: https://github.com/alex-moon/tova/issues/4
 
 ## Motivation
 
-The issue asks for two things:
+The current issue body (authoritative) asks for two things:
 
 1. **DeepInfra integration + DB-based provider/model routing.** Today every
    turn goes through `routerService.routeQuery` → one Groq model
@@ -12,105 +12,166 @@ The issue asks for two things:
    model pool stored in MongoDB, with routing based on the existing
    small/large classifier plus some randomness, so real feedback data starts
    accumulating.
-2. **Mastra.** Re-implement the LLM-touching parts of the app on
+2. **Mastra.** Re-implement the LLM-touching paths on
    [Mastra](https://mastra.ai) where it earns its place, centralising all
    Mastra imports in a single service, with Groq and DeepInfra relegated to
-   small provider classes behind it.
+   thin provider classes behind it.
 
-The later, edited version of the issue body references a different (broader)
-set of suggestions (catalog, query enhancement, tool loops). The **current**
-body shown at the top is the authoritative one; everything else is delegated /
-followed up outside this ticket.
+The issue's only comment quotes the earlier, broader description (catalog,
+query enhancement, decomposition, tool loops). That text moves nothing into
+scope here, and answers none of the questions below — it is history, not a
+spec for this ticket. Those broader suggestions are delegated/follow-ups.
 
-## Current state (verified from the repo, as of branch start)
+## Current state (verified from the repo, as of revision)
 
-- `src/server/services/inferenceService.ts` — a hand-rolled `LlmConnector`
-  interface wrapping `groq-sdk`, with a single hard-wired Groq connector and
-  a comment explicitly pointing at #4 as the place to add DeepInfra.
-- Callers of `inferenceService`: to be confirmed at implementation time via
-  grep (`routerService`, `titleService`, `chat` route streaming expected).
-- `src/server/services/routerService.ts` — deterministic small/large routing
-  plus an env-configured guard model; persists `modelName` on the assistant
-  message.
-- No `mastra` package anywhere in `package.json` or `node_modules`.
-- No DeepInfra client code, no MongoDB-backed model/provider config.
-- SSE contract on `/api/chat/stream` and `Message.modelName` persistence are
-  in place and must stay stable.
+- `src/server/services/inferenceService.ts` — hand-rolled `LlmConnector`
+  interface wrapping `groq-sdk`, one hard-wired `groqConnector`, a comment
+  pointing at #4. Its types are Groq types
+  (`Groq.Chat.ChatCompletion` / `ChatCompletionChunk`).
+- **Every consumer of `inferenceService` (verified by grep):**
+  - `routerService.ts:44` — guard classifier call (small completion,
+    `max_tokens: 10`). Note `ROUTER_GUARD_MODEL` default is `allam-2-7b`,
+    with no provider prefix and no guarantee it is even a Groq-hosted model.
+  - `titleService.ts:13` — title generation (blocking).
+  - `metricsService.ts:99` — prompt-metrics classification.
+  - `routes/chat.ts:111` (blocking turn) and `routes/chat.ts:200`
+    (SSE streaming turn). The streaming consumer iterates chunks of the
+    Groq `ChatCompletionChunk` shape directly.
+- `routes/chat.ts` also calls `routeQuery` per turn and persists the chosen
+  model name on the assistant message (must keep working).
+- No `mastra` package in the lockfile, no `@mastra/*` in `node_modules`.
+- No DeepInfra client code; no MongoDB-backed model/provider config today.
+- Existing structure: config lives in a `providerRouting`-like shape only in
+  this plan; collections are created lazily by services elsewhere.
 
-## Decisions so far
+## Principles / decisions
 
-- **Mastra as the orchestration layer, not a rewrite of the framework:** the
-  routes, auth, MongoDB models, and SSE contract stay as they are; only the
-  LLM-call paths move behind Mastra.
-- **Single point of Mastra imports:** one service module (evolving the
-  existing `inferenceService` or a sibling `mastraService.ts`) that
-  re-exports/encapsulates all `@mastra/*` imports. Provider classes (groq,
-  deepinfra) must not import mastra directly.
-- **Providers get smaller:** both provider classes should end up as thin
-  adapters (base URL + API key + model listing) — Mastra's provider
-  integration handles the completion/streaming mechanics.
-- **Routing config in MongoDB:** a small collection (e.g. `providers` /
-  `models` docs) seeded with Groq and DeepInfra entries; env-vars remain as
-  fallback for the guard model until further notice.
-- **Randomness for feedback:** when several models qualify for a classified
-  tier (small/large), pick one with a modest ε-random spread instead of
-  always the first, so per-model feedback becomes meaningful. ε configurable
-  via env with a sane default.
+- **Mastra behind one service:** routes, auth, MongoDB models, SSE contract
+  stay as-is; only LLM-call paths move behind a single service module
+  (evolving `inferenceService`). Provider classes must not import `@mastra/*`
+  directly.
+- **Providers get thin:** Groq and DeepInfra classes reduce to adapter
+  surface (base URL, API key, model identity) once Mastra owns
+  completion/streaming mechanics.
+- **Routing config in MongoDB:** a small `providerRouting` collection seeded
+  with Groq + DeepInfra entries; envs remain as fallback.
+- **ε-random tier routing:** when several models qualify for a classified
+  tier, pick ε-randomly so per-model feedback accrues. ε via env with a
+  default; semantics (within-tier vs cross-tier) currently uncertain — see
+  Open questions. Task 5 must not be implemented until that is resolved.
 - **Contract stability:** `/api/chat/stream` SSE event set unchanged;
   `Message.modelName` records the model that actually ran.
 
 ## Checklist
 
-Small, individually commit-safe tasks:
+Concrete, individually commit-safe steps:
 
-- [ ] 1. Research & pin Mastra packages: confirm current `@mastra/core`
-  major, the supported DeepInfra provider path (official package vs
-  OpenAI-compatible base URL), and record in this doc's Open questions are
-  resolved or moved to follow-ups.
-- [ ] 2. Add a `providerRouting` MongoDB collection + a tiny
-  `modelConfigService` (list eligible models by tier; seed Groq/DeepInfra
-  docs on first run). Unit tests with mocked DB.
-- [ ] 3. Build the two thin provider classes (`GroqProvider`,
-  `DeepInfraProvider`) behind a shared interface, backed by Mastra model
-  providers; keep all `@mastra/*` imports inside the centralised service.
-- [ ] 4. Replace the hard-wired `groqConnector` in `inferenceService` with
-  provider instantiation through Mastra, selected via
-  `routerService` + `modelConfigService`.
-- [ ] 5. Add ε-random tier routing in `routerService` (respect the guard
-  classifier input) and persist the actually-chosen `modelName`.
-- [ ] 6. Migrate `titleService` and any other direct completion callers onto
-  the new central service; delete dead connector code.
-- [ ] 7. Update/extend tests: existing suites keep passing with mocked
-  providers; add coverage for DB-config routing, ε-random behaviour, and
-  DeepInfra fallback.
-- [ ] 8. Run `npm run ci`, fix fallout, update `docs/progress.md`.
+1. **Feasibility spike: pin Mastra packages (research, no app code).**
+   - `npm view @mastra/core version` and installability check against this
+     repo's Node/ESM setup (`src/server` is TS compiled via tsx/jest —
+     verify module resolution, no ESM-only breakage).
+   - Identify the provider path used: official `@mastra/*` integration
+     packages (if any) for Groq and DeepInfra, vs Mastra's generic
+     OpenAI-compatible provider fed with each provider's `baseURL`.
+   - Decide and record here whether DeepInfra uses an official package or
+     OpenAI-compatible mode; unblock tasks 3–4. **Depends on Open
+     question A.**
+   - Measure transitive dependency size/behaviour (Mastra may pull a dev
+     server or registry machinery we do not need); sketch what we can safely
+     not use. **Depends on Open question B.**
+2. **`providerRouting` collection + `modelConfigService`.**
+   - Schema: `{ provider: 'groq'|'deepinfra', model: string, tier:
+     'small'|'large'|'guard', eligible: boolean }` (exact shape finalised at
+     implementation).
+   - Seed on first read: current env defaults as Groq entries, one DeepInfra
+     small/large model per pinned research.
+   - API: `listByTier(tier) -> ModelRef[]`; falls back to env-based single
+     model if the collection is empty (keeps existing tests honest).
+   - Unit tests against an in-memory/mocked Mongo per existing test style in
+     `routerService.test.ts`.
+3. **Centralised Mastra service + two provider classes.**
+   - New `src/server/services/` module (e.g. `mastraService.ts`) owning all
+     `@mastra/*` imports; `GroqProvider` / `DeepInfraProvider` as thin
+     adapters exposing `createCompletion` / streaming, behind
+     provider-neutral types (not `Groq.Chat.*` types).
+   - Define the neutral result/chunk shapes first so callers can be migrated
+     piece by piece without behaviour change.
+   - **Streaming mapping is a live risk: depends on Open question C.** Do
+     not attempt SSE wiring before C is resolved.
+4. **Reroute `inferenceService` through the central service + DB config.**
+   - `inferenceService` delegates to provider selected via
+     `routerService` + `modelConfigService`; delete the hard-wired
+     `groqConnector` once all callers are green.
+   - Keep `CompletionOptions` shape stable so `titleService` /
+     `metricsService` callers still typecheck; they move to the neutral
+     types here or in task 6.
+5. **ε-random tier routing in `routerService`.**
+   - Extend `RouterConfig` with a list of eligible models per tier; when ≥2
+     qualify, ε-randomly pick; otherwise deterministic as today.
+   - Persist the actually-chosen model name (routes/chat.ts already does;
+     verify `Message.modelName` records the *chosen*, not the default).
+   - **Depends on Open question D (ε semantics + guard-model handling).**
+     Blocked until D is resolved; deterministic-path work in tasks 3–4 may
+     proceed meanwhile.
+6. **Migrate remaining callers (`titleService`, `metricsService`, guard
+   call inside `routerService`) to the central service; delete dead
+   connector code.**
+   - Guard classifier call stays functionally identical (same prompt,
+     temperature 0, `max_tokens: 10`), only routed through the new surface.
+7. **Tests.** Existing suites keep passing with mocked `inferenceService`
+   (they already do exactly that in `chat.test.ts` / `chat.stream.test.ts`).
+   Add: DB-config selection, ε-random determinism-with-seeding, DeepInfra
+   path exercised at least in a mocked unit test.
+8. **`npm run ci`, fix fallout, update `docs/progress.md`.**
 
 ## Verification
 
-Per repo convention: `npm run lint`, `npm run typecheck`, `npm test`,
-`npm run ci` at the end. No end-to-end provider keys are assumed in CI;
-provider calls are behind mocked interfaces in tests.
+- `npm run lint`, `npm run typecheck`, `npm test`, `npm run ci` at the end,
+  per repo convention.
+- All provider calls mocked in tests; no provider API keys assumed in CI.
+- Manual smoke (local only, if keys present in the user's env): one non-code
+  query and one code query, confirming different `reason`s still surface and
+  SSE stream shape is unchanged.
 
-## Follow-ups
+## Follow-ups (out of scope for this ticket)
 
-- Wiring per-message feedback collection to actually consume the ε-random
-  multi-model data (the issue's stated goal) — likely its own ticket once
-  data starts flowing.
-- Possibly retiring `ROUTER_SMALL/LARGE/GUARD_MODEL` envs once the DB config
-  is proven, with a migration for existing deployments.
+- Consuming the ε-random multi-model data in per-message feedback — likely
+  its own ticket once data flows.
+- Retiring `ROUTER_SMALL/LARGE/GUARD_MODEL` envs once DB config is proven,
+  with a migration note for existing deployments.
+- The earlier (superseded) issue text's suggestions — model catalog
+  selectable per chat, query enhancement/decomposition, agentic tool loops —
+  tracked separately, not here.
 
 ## Open questions
 
-- **Mastra + DeepInfra support surface:** does the current Mastra release
-  ship a first-class DeepInfra provider, or should we go through its
-  OpenAI-compatible endpoint? (Affects task 1 and the size of
-  `DeepInfraProvider`.) Not yet verified.
-- **Server-run Mastra vs client-side agents:** the app is a plain Express +
-  React app; Mastra's agent runtime runs server-side here — confirm
-  no assumptions about Mastra's dev server / registries are needed for our
-  use case.
-- **Streaming through Mastra:** confirm Mastra's streaming output maps
-  cleanly onto the existing SSE envelope without changing the event
-  contract; if not, adaptation stays in the centralised service only.
-- **How much ε-randomness:** default value and whether randomness applies
-  only within a tier vs across tiers when the classifier is uncertain.
+None of these are answered anywhere in the issue comments (there is exactly
+one, quoting the superseded description). Every item below is genuinely
+unknown to the implementation as of this revision.
+
+- **A. Mastra provider surface:** Officially supported `@mastra/*` packages
+  for Groq/DeepInfra in the currently-released major, or generic
+  OpenAI-compatible wiring? Not yet verified against the actual Mastra
+  release; determines provider-class size and task 1's outcome. Nothing in
+  tasks 3–4 proceeds on an assumed answer.
+- **B. Mastra server-side usage:** Mastra ships agent/workflow machinery
+  with assumptions about its dev server/registry/tooling. Our app is plain
+  Express; must confirm we can use library pieces without starting Mastra's
+  dev server, and whether Mastra's runtime imposes a storage layer of its
+  own. Unverified.
+- **C. Streaming through Mastra:** Does Mastra's streaming output map
+  cleanly onto our chunk shape consumed in `routes/chat.ts` without
+  converting the SSE event contract? The current code is typed against Groq
+  chunk shapes; adaptation, if needed, must live entirely in the central
+  service. Unverified — and the SSE path is the highest-risk piece.
+- **D. ε-randomness semantics:** default ε value; randomness within a tier
+  only, vs across tiers when the classifier is uncertain; and whether the
+  guard classifier model moves into the DB pool too (its env default
+  `allam-2-7b` has no provider prefix — no confirmation it is even a Groq
+  model). Task 5 waits for this.
+- **E. Scope of "reimplement in Mastra":** does non-chat LLM work
+  (`titleService` categories, `metricsService` classifier) become Mastra
+  agents/workflows, or only route through the centralised service? "Where it
+  makes sense to" is subjective; conservative reading is orchestration-only.
+  Needs user confirmation before task 6 converts anything beyond a
+  call-site swap.
