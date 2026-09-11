@@ -17,6 +17,11 @@ can correlate routing decisions with prompt characteristics.
 
 ## Current state (verified from the repo)
 
+Note: this section was written at the start of the branch, before
+implementing tasks 1–9; it is kept as the audit trail of what the branch
+found. Tasks 1–9 are now implemented and verified (79 tests pass; `npm
+run ci` green); task 10 is the only open item.
+
 - `src/server/models/Message.ts` — schema has `sessionId`, `role`, `content`,
   `modelName`, `timestamp`. No `metrics` field.
 - Messages are created inline in `src/server/routes/chat.ts`:
@@ -115,6 +120,28 @@ can correlate routing decisions with prompt characteristics.
   count is nonsense for CJK). Documented in the module's doc comment.
 - **`avgWordLength` and `syllableEstimateAvg` on empty/null content.** All
   modules must return 0/defaults, never NaN or throw (tested in task 3).
+- **"DEEPINFRA_API_KEY is obtainable" — VERIFIED this pass, not assumed.**
+  SSH to 142.93.42.191 succeeded and `/opt/tova/.env` on that host contains
+  a `DEEPINFRA_API_KEY` entry. Previous plan revisions described the key as
+  effectively unreachable ("not in local `.env`"); that doubt is now
+  retired by direct verification, so task 10 has no blocked dependency.
+- **DeepInfra's API is not the Groq SDK.** DeepInfra exposes an
+  OpenAI-compatible `/v1/chat/completions` endpoint; the throwaway eval
+  script must call it over plain HTTP (or an OpenAI-style client) rather
+  than reusing the `groq-sdk` client — the production DeepInfra connector
+  for `inferenceService` is #4's decision, untouched here. Low risk since
+  the eval script is throwaway.
+- **`max_tokens: 100` may truncate the classification JSON** on
+  long-winded models, masquerading as low "quality". Task 10 step 3
+  measures truncation explicitly so a candidate isn't wrongly rejected by
+  the parse-failure rate alone.
+- **Failure visibility ("audit as much as possible in the DB") is already
+  shipped as part of the answer to alex-moon's accuracy question —**
+  `'parse'` / `'error'` / `'trivial'` land in `metrics.llmSkipReason` on
+  every user message, so a misbehaving production model becomes a
+  countable query (`countDocuments({ 'metrics.llmSkipReason': 'parse' })`
+  or `'error'`) without any extra code. That is the "accuracy" proxy the
+  user settled for in this ticket.
 
 ## Task checklist
 
@@ -207,10 +234,13 @@ Each item is a small, self-contained commit.
   a much larger model catalog than Groq, and a `DEEPINFRA_API_KEY` is
   available on the deploy host (142.93.42.191 — note: **not** in the local
   `/opt/tova/.env`, which only has `GROQ_API_KEY`). See task 10.
-- **Session-index semantics: alex-moon deferred;** he asked for
-  filepaths/line numbers to understand the code first. This stays an open
-  question (below); no planned task depends on the answer because both
-  counters are persisted already.
+- **Session-index semantics: alex-moon deferred** ("I don't understand the
+  code well enough to answer"); the agent posted the requested
+  filepaths/line numbers on #17 and the PR-review "pick one" comment was
+  resolved by persisting only `sessionMessageIndex` (all roles, count of
+  priors at write time). This ticket now has nothing left to decide: the
+  router/feedback work must read `sessionMessageIndex`
+  (`src/server/models/Message.ts:33`) or its own counter.
 
 ## Task checklist (new work on this branch)
 
@@ -241,52 +271,76 @@ Each item is a small, self-contained commit.
       classified nulls (they never hit the Groq client). 5 unit tests added
       in `metricsService.test.ts` (both directions per alex-moon's
       examples); suite at 75 passing; lint, typecheck, full Jest green.
-- [ ] 10. **Validate and switch the classification model.** alex-moon
-      distrusts `allam-2-7b` for structured flags (it "may well not be"
-      a model we can trust to return JSON). Use the `DEEPINFRA_API_KEY`
-      on 142.93.42.191 (SSH access confirmed by alex-moon) to build a
-      small eval script (`scripts/`, throwaway is fine) that runs a
-      handful of representative prompts through candidate small models
-      (DeepInfra catalog; web search each candidate's structured-output
-      reputation first) and score parse rate against `parseLlmFlags`.
-      Pick the smallest/fastest model with a high parse rate, set it as
-      the default in `metricsService.ts:10`, and record the choice +
-      scores in this plan. Do not ship a switch without scores.
+- [ ] 10. **Validate and switch the classification model** (revised
+      2026-09-11 into concrete steps; **not started**). alex-moon's final
+      bar for this is deliberately modest: _"just pick a model and log
+      failures in the metrics object in the DB so we get an idea of how
+      many times it fails — we don't need to eval 'accuracy' at this early
+      stage."_ No accuracy harness, no per-flag bias analysis:
+      `metrics.llmSkipReason` ('parse'/'error' vs null) is already the
+      failure log.
+- [ ] 10a. **Fetch the key.** Get `DEEPINFRA_API_KEY` from
+      `/opt/tova/.env` on 142.93.42.191 via SSH (access verified this
+      pass: the file exists and contains the key) and write it to the
+      local **untracked** `.env` (gitignored; never commit it). If a
+      human gate ever re-blocks this, comment on #17 and stop.
+- [ ] 10b. **Eval script.** Write a throwaway
+      `scripts/eval-classify-models.ts` running a fixed list of ~20
+      representative prompts through each candidate small model from the
+      DeepInfra catalog (DeepInfra serves an OpenAI-compatible chat API —
+      the eval script calls it directly over HTTP; only the throwaway
+      script does this, so no production-client decision is needed here;
+      the DeepInfra connector itself is ticket #4's scoped work against
+      `inferenceService.ts`).
+- [ ] 10c. **Score candidates** on parse rate under the actual
+      production parser `parseLlmFlags` (`metricsService.ts`): what
+      fraction of calls produce ≥1 non-null flag, plus latency and output
+      truncation observed at the current `max_tokens: 100`.
+- [ ] 10d. **Switch if justified.** Pick the smallest/fastest candidate
+      with a high parse rate and set it as the model default in
+      `metricsService.ts:5` (`ROUTER_GUARD_MODEL`-overridable, as it is
+      today). Record the choice and scores in this plan; never ship a
+      switch without scores. Rerun `npm run ci` (10e).
+
+## Decisions since the second pass (all answered by alex-moon on #17 / PR #22)
+
+- **`metrics.llmSkipReason` — yes, record why flags are null** ("Yes
+  please! Audit as much as possible in the DB."), and it is implemented in
+  the working tree: `'trivial'` (skip gate, set at save time in `chat.ts`),
+  `'parse'` (call succeeded, output unusable) or `'error'` (inference call
+  failed) in `metricsService.ts`, cleared to null on a successful
+  classification. Schema at `src/server/models/Message.ts:47`; tested for
+  all three paths; 79 tests pass; `npm run ci` green (verified this pass).
+- **DeepInfra enters the codebase as a connector** ("alongside a
+  GroqConnector, delegated to by an InferenceService"), and the service is
+  written **in this ticket** — but the DeepInfra connector itself is #4's
+  work. Shipped: `src/server/services/inferenceService.ts` with a single
+  `groq` connector; all four completion call sites (`chat.ts`,
+  `routerService.ts`, `titleService.ts`, `metricsService.ts`) now route
+  through it.
+- **No accuracy eval needed at this stage** ("just pick a model and log
+  failures in the metrics object... we don't need to eval 'accuracy'").
+  Task 10's bar is parse rate + speed only; failure visibility in the DB
+  is the accuracy proxy.
+- **Assistant messages never classified in this ticket** (`#18` rates
+  them via feedback against user messages instead). Shipped as such.
 
 ## Open questions
 
-Nothing depends on an open question; each has a chosen default that ships.
+No planned task depends on an open question. After this revision pass,
+every previously listed open item is either answered in the issue thread
+(moved into the plan above) or closed as moot. The questions _below_ are
+the ones with remaining genuine doubt; each ships with a default.
 
-- **Which index the future router reads**: `sessionMessageIndex` (all
-  roles) is stored; the resolution of the "pick one" PR review comment.
-  No other index is persisted, so the router work reads this one.
-- **Backfill of existing messages**: out of scope; issue only requires
-  forward-going fills for new turns.
-- **NEW — Should the schema record _why_ `metrics.llm` is null?** A skipped
-  (trivially neutral) message and a failed/sentiment-less classification are
-  analytically indistinguishable in the persisted data — both keep
-  `metrics.llm` all-null. The plan previously claimed they are
-  "analytically distinguishable"; in the DB they are not (they are only
-  distinguishable by observing the Groq client, which no query can do).
-  Default shipped: no marker (smallest schema change for this ticket);
-  analysis can approximate by joining on the deterministic gate inputs
-  (word count ≤ 6, no question mark, no code). If exactacity matters for
-  #18 (feedback), add `metrics.llmSkipReason: 'trivial'` (or `llmSkipped`
-  boolean) at the skip call sites in `chat.ts` — a two-line schema change.
-- **NEW — How should DeepInfra enter the codebase, if at all?** Task 10
-  may select a DeepInfra model, which implies a second LLM client or a
-  base-url switch in `metricsService.ts`, plus a `DEEPINFRA_API_KEY` env
-  var in local/dev setup (the key exists only on the deploy host today).
-  Default for now: keep invoking through Groq unless the eval shows a
-  materially better DeepInfra model; if we switch, wire DeepInfra behind
-  the same env-var pattern Groq uses and stop — no shared-client
-  refactor. Influence of `DEEPINFRA_API_KEY` availability outside the
-  deploy host: classification falls back to nulls (current behavior).
-- **NEW — What counts as "reliable" for the model eval?** No precedent in
-  the repo for evaluating model output quality. Default: an informal
-  threshold (≥80% parse rate, no systematic flag bias) over ~20 prompts;
-  a stricter harness can replace it later if the router starts acting on
-  these flags (it does not yet — they are analytical data only).
+- **Model choice record format**: when task 10 lands, should the eval
+  scores live in this plan doc (current default: yes, plus a
+  `docs/progress.md` line on merge), or also as a #17 comment?
+  Trivial either way; the plan is not the system of record for results.
+- **Backfill of existing messages**: out of scope — the issue only
+  requires forward-going fills for new turns, and alex-moon has never
+  asked for backfill. Recorded here as a decision (in "Decisions"),
+  flagged once so a later "why are old messages null" question doesn't
+  read as a bug.
 
 ## Implementation notes (from the critique pass)
 
