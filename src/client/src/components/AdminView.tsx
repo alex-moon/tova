@@ -1,25 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
-import axios from 'axios';
-
-export interface AdminUser {
-  id: string;
-  email: string;
-  role: 'user' | 'admin';
-  permissions: string[];
-  hasGoogle: boolean;
-  createdAt: string;
-  updatedAt: string;
-}
+import AdminService, { getErrorMessage } from '../services/admin';
+import type { AdminUser } from '../types/admin';
 
 const KNOWN_PERMISSIONS = ['routing'];
-
-const getErrorMessage = (err: unknown, fallback: string) => {
-  if (axios.isAxiosError(err)) {
-    const message = (err.response?.data as { message?: string } | undefined)?.message;
-    if (message) return message;
-  }
-  return fallback;
-};
 
 const AdminView = () => {
   const [users, setUsers] = useState<AdminUser[] | null>(null);
@@ -27,8 +10,8 @@ const AdminView = () => {
 
   const loadUsers = useCallback(async () => {
     try {
-      const res = await axios.get<AdminUser[]>('/api/admin/users');
-      setUsers(res.data);
+      const res = await AdminService.listUsers();
+      setUsers(res);
       setError(null);
     } catch (err) {
       setError(getErrorMessage(err, 'Failed to load users.'));
@@ -45,21 +28,18 @@ const AdminView = () => {
       ? user.permissions.filter((p) => p !== permission)
       : [...user.permissions, permission];
     try {
-      const res = await axios.put<AdminUser>(`/api/admin/users/${user.id}/permissions`, {
-        permissions: next,
-      });
-      updateUser(res.data);
+      const res = await AdminService.updatePermissions(user.id, next);
+      updateUser(res);
     } catch (err) {
       setError(getErrorMessage(err, 'Failed to update permissions.'));
     }
   };
 
   const toggleRole = async (user: AdminUser) => {
+    const role = user.role === 'admin' ? 'user' : 'admin';
     try {
-      const res = await axios.put<AdminUser>(`/api/admin/users/${user.id}/role`, {
-        role: user.role === 'admin' ? 'user' : 'admin',
-      });
-      updateUser(res.data);
+      const res = await AdminService.updateRole(user.id, role);
+      updateUser(res);
     } catch (err) {
       setError(getErrorMessage(err, 'Failed to update role.'));
     }

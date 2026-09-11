@@ -82,13 +82,14 @@ does **not** yet satisfy:
   owner explicitly chose it; a config/env value instead of a literal
   would be the cheap future escape hatch — but do not build that
   without a request (only one admin exists).
-- **Count-based last-admin check stays alongside the email guard** —
-  the email guard is the owner's chosen blanket rule; the count check
-  still protects every other admin from demoting the last one. Keep
-  both. _Critique (accepted previously, still true):_ the check is
-  count-then-write, not atomic — two concurrent demotions could race;
-  with a single human owner this is a practical non-issue. A Mongo
-  partial-index scheme was considered and rejected.
+- **Count-based last-admin check REMOVED (see PR #19 rectifications)** —
+  originally kept alongside the email guard; the owner's pending review on
+  PR #19 explicitly replaced it ("this should just be formsatz@gmail.com").
+  _Critique (accepted, still true then):_ the check was count-then-write,
+  not atomic; with a single human owner this was a practical non-issue.
+  Removal makes the race moot.
+- **Count check was count-then-write, non-atomic** — historical note kept
+  for context: a Mongo partial-index scheme was considered and rejected.
 - **Admin view as "almost a separate app" at a real URL** —
   owner-confirmed direction (resolved 2). _Critique:_ "native HTTP
   routes" is ambiguous for this stack: the client is a Vite SPA whose
@@ -122,6 +123,29 @@ does **not** yet satisfy:
   live DB role) is the end state for this ticket. Only follow-up is the
   separate-ticket note in step 6.
 
+## Rectifications from the pending review on PR #19 (2026-09-11)
+
+The owner's pending review on PR #19 adds four directive comments (see
+the "rectify please" note in the #15 comments). All four implemented in
+this pass:
+
+1. **`.gitignore` the `logs/` directory** — added; tracked log files
+   must be untracked once (`git rm -r --cached logs`) by whoever commits.
+2. **Shared client/server interfaces** — the `AdminUser` contract now
+   lives in `src/client/src/types/admin.ts`; a real shared server↔client
+   contract package is filed as a follow-up GitHub ticket (the owner
+   explicitly allowed the ticket option as non-trivial).
+3. **API calls split into a connector service** — new
+   `src/client/src/services/admin.ts` (`AdminService` +
+   `getErrorMessage`); `AdminView` no longer imports axios; client tests
+   mock the service.
+4. **Demotion protection = protected owner only** — the count-based
+   "last admin" check was removed (owner: "this should just be
+   formsatz@gmail.com"); `PROTECTED_OWNER_EMAIL` is the only demotion
+   guard. A superadmin tier is the alternative design if the owner
+   revisits. Server tests updated: demoting a sole non-owner admin is
+   now allowed (200), owner demotion stays 400.
+
 ## Steps
 
 Status is honest per step. All steps are implemented and consistent
@@ -137,9 +161,11 @@ implementation.
 - [x] 2. Backend mutation endpoints in the same file:
       `PUT /users/:id/permissions` (validated against
       `KNOWN_PERMISSIONS = ['routing']`, unknown strings → 400; whole
-      array replaces) and `PUT /users/:id/role` with the
-      count-based "cannot demote the last admin" 400. ObjectId-shaped
-      bad ids map to 404 rather than CastError 500s. Implemented.
+      array replaces) and `PUT /users/:id/role`. Originally also a
+      count-based "cannot demote the last admin" 400; that check was
+      REMOVED on 2026-09-11 per the owner's PR #19 review (see
+      "Rectifications" — the email guard is the only demotion block).
+      ObjectId-shaped bad ids map to 404 rather than CastError 500s.
 - [x] 3. `GET /api/auth/me` rewritten to look the user up in the DB and
       return live `{ id, email, role, permissions }`; 401 if deleted.
       Implemented. (Note: this makes newly granted `role`/permissions
@@ -157,27 +183,27 @@ implementation.
 - [x] 5. ⚠ Rework: **admin view mounting + permission control (resolved
       2 and 6)**. DONE 2026-09-11 (approach (b), open question 1 default):
       a. `App.tsx`: `showAdmin` state removed; exports
-         `isAdminRoute()` (`window.location.pathname.startsWith('/admin')`)
-         and renders `<AdminView />` plus a `Back to chat` link to `/`
-         when an admin is at `/admin`. The admin entry point is a
-         `<a href="/admin">Admin</a>` link (full page navigation, so no
-         popstate/router code is needed). A non-admin deep-linking
-         `/admin` falls back to the chat view (client-side only; the
-         API is already `requireRole('admin')`-guarded).
+      `isAdminRoute()` (`window.location.pathname.startsWith('/admin')`)
+      and renders `<AdminView />` plus a `Back to chat` link to `/`
+      when an admin is at `/admin`. The admin entry point is a
+      `<a href="/admin">Admin</a>` link (full page navigation, so no
+      popstate/router code is needed). A non-admin deep-linking
+      `/admin` falls back to the chat view (client-side only; the
+      API is already `requireRole('admin')`-guarded).
       b. Deployment check the owner explicitly asked for: verified
-         empirically — `vite preview` serves `/admin` with HTTP 200 and
-         the app HTML (SPA fallback is default). No compose or vite
-         config change needed; noted in the PR.
+      empirically — `vite preview` serves `/admin` with HTTP 200 and
+      the app HTML (SPA fallback is default). No compose or vite
+      config change needed; noted in the PR.
       c. Permission control in `AdminView.tsx`: per-user checkbox
-         (`data-testid="perm-routing-<email>"`) writing the full
-         permissions array via the existing PUT endpoint. Server-side
-         validation already rejects unknown strings (resolved 6); no
-         database-level enforcement (per owner).
+      (`data-testid="perm-routing-<email>"`) writing the full
+      permissions array via the existing PUT endpoint. Server-side
+      validation already rejects unknown strings (resolved 6); no
+      database-level enforcement (per owner).
       d. Client tests updated: App tests now exercise `/admin` URL
-         mounting (admin sees AdminView + back link; non-admin falls
-         back to chat; non-admins/`/` hide the Admin link);
-         `AdminView.test.tsx` covers checkbox on→off and off→on array
-         replaces.
+      mounting (admin sees AdminView + back link; non-admin falls
+      back to chat; non-admins/`/` hide the Admin link);
+      `AdminView.test.tsx` covers checkbox on→off and off→on array
+      replaces.
 - [x] 6. Tests for step 4's email-protection behavior (see step 4).
 - [x] 7. Verify — `npm run lint`, `typecheck`, `test`,
       `npm --prefix src/client run lint`/format/`test`, and

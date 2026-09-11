@@ -77,14 +77,8 @@ router.put('/users/:id/role', ...adminGuard, async (req: AuthRequest, res) => {
     const user = await findUserOr404(String(req.params.id), res);
     if (!user) return;
 
-    if (user.role === 'admin' && role === 'user') {
-      if (user.email === PROTECTED_OWNER_EMAIL) {
-        return res.status(400).json({ message: 'This account cannot be demoted' });
-      }
-      const adminCount = await User.countDocuments({ role: 'admin' });
-      if (adminCount <= 1) {
-        return res.status(400).json({ message: 'Cannot demote the last admin' });
-      }
+    if (user.role === 'admin' && role === 'user' && user.email === PROTECTED_OWNER_EMAIL) {
+      return res.status(400).json({ message: 'This account cannot be demoted' });
     }
 
     user.role = role;

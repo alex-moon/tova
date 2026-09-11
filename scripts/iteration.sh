@@ -175,6 +175,32 @@ look for bugs, edge cases, missed requirements, and plan drift. Then:
 Commit nothing."
 commit_and_push "test/hardening: critic pass for #$ISSUE"
 
+# ---- Phase 4.5: address PR review comments ----------------------------------
+
+# Per owner request (issue #15, 2026-09-11): when a ticket already has an open
+# PR, review comments on that PR are part of the ticket's remaining work and
+# must be rectified before shipping. Note review comments left PENDING are not
+# visible to the REST issue/pr comment endpoints; read them via GraphQL
+# (pullRequest.reviews(states: PENDING) { comments { body path line } }).
+
+PRNUM=$(gh pr list --repo alex-moon/tova --head "$BRANCH" --state open \
+  --json number -q '.[0].number' 2>/dev/null || true)
+
+if [ -n "$PRNUM" ]; then
+  agent "pr-review-rectify" "$CONTEXT
+An open PR (#$PRNUM) targets main for this branch. Read its review comments and
+rectify them in the working tree:
+- gh pr view $PRNUM --repo alex-moon/tova --comments
+- gh api repos/alex-moon/tova/pulls/$PRNUM/comments
+- PENDING reviews are not visible to the above; read them via GraphQL:
+  gh api graphql -f query='... pullRequest(number: $PRNUM) { reviews(states: PENDING)
+  { comments(first: 50) { body path line } } }'
+Address every actionable comment (make the requested change, or reply/post on
+the issue why it is handled elsewhere, e.g. split into its own ticket). Verify
+with the relevant tests/npm run ci. Commit nothing."
+  commit_and_push "fix: address PR review comments for #$ISSUE"
+fi
+
 # ---- PR decision ------------------------------------------------------------
 
 agent "pr-decision" "$CONTEXT

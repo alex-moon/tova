@@ -80,7 +80,7 @@ describe('admin routes', () => {
     expect(targetAfter?.permissions).toEqual(['routing']);
   });
 
-  it('toggles role both ways and protects the last admin', async () => {
+  it('toggles role both ways and still demotes a sole non-owner admin', async () => {
     const app = createApp();
     const cookie = await registerAdmin(app, 'admin3@example.com');
     const target = await User.create({ email: 'toggle@example.com', passwordHash: 'secret123' });
@@ -100,13 +100,13 @@ describe('admin routes', () => {
       .send({ role: 'user' });
     expect(demoteRes.status).toBe(200);
 
-    // now toggle@example.com is sole admin, demotion must fail
+    // only formsatz@gmail.com is protected; a sole non-owner admin can be demoted
     const lastAdminRes = await request(app)
       .put(`/api/admin/users/${target._id}/role`)
       .set('Cookie', cookie)
       .send({ role: 'user' });
-    expect(lastAdminRes.status).toBe(400);
-    expect(lastAdminRes.body.message).toBe('Cannot demote the last admin');
+    expect(lastAdminRes.status).toBe(200);
+    expect(lastAdminRes.body.role).toBe('user');
   });
 
   it('refuses to demote the protected owner account even with other admins', async () => {

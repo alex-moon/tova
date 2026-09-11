@@ -1,16 +1,19 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, waitFor, fireEvent, cleanup } from '@testing-library/react';
-import AdminView, { type AdminUser } from './AdminView';
+import AdminView from './AdminView';
+import type { AdminUser } from '../types/admin';
 
-const axiosGet = vi.fn();
-const axiosPut = vi.fn();
+const listUsers = vi.fn();
+const updatePermissions = vi.fn();
+const updateRole = vi.fn();
 
-vi.mock('axios', () => ({
+vi.mock('../services/admin', () => ({
   default: {
-    get: (...args: unknown[]) => axiosGet(...args),
-    put: (...args: unknown[]) => axiosPut(...args),
-    isAxiosError: vi.fn(() => false),
+    listUsers: (...args: unknown[]) => listUsers(...args),
+    updatePermissions: (...args: unknown[]) => updatePermissions(...args),
+    updateRole: (...args: unknown[]) => updateRole(...args),
   },
+  getErrorMessage: (_err: unknown, fallback: string) => fallback,
 }));
 
 const admin = (): AdminUser => ({
@@ -27,8 +30,9 @@ describe('AdminView', () => {
   afterEach(cleanup);
 
   beforeEach(() => {
-    axiosGet.mockReset().mockResolvedValue({ data: [admin()] });
-    axiosPut.mockReset();
+    listUsers.mockReset().mockResolvedValue([admin()]);
+    updatePermissions.mockReset();
+    updateRole.mockReset();
   });
 
   it('renders user rows from the admin API', async () => {
@@ -38,46 +42,34 @@ describe('AdminView', () => {
   });
 
   it('toggles a permission checkbox off via the API and updates the row', async () => {
-    axiosPut.mockResolvedValue({
-      data: { ...admin(), permissions: [] },
-    });
+    updatePermissions.mockResolvedValue({ ...admin(), permissions: [] });
     render(<AdminView />);
     const checkbox = await screen.findByTestId('perm-routing-someone@example.com');
     expect(checkbox).toBeChecked();
     fireEvent.click(checkbox);
-    await waitFor(() =>
-      expect(axiosPut).toHaveBeenCalledWith('/api/admin/users/u1/permissions', {
-        permissions: [],
-      }),
-    );
+    await waitFor(() => expect(updatePermissions).toHaveBeenCalledWith('u1', []));
   });
 
   it('toggles a permission checkbox on when the user lacks it', async () => {
-    axiosGet.mockResolvedValue({ data: [{ ...admin(), permissions: [] }] });
-    axiosPut.mockResolvedValue({ data: admin() });
+    listUsers.mockResolvedValue([{ ...admin(), permissions: [] }]);
+    updatePermissions.mockResolvedValue(admin());
     render(<AdminView />);
     const checkbox = await screen.findByTestId('perm-routing-someone@example.com');
     expect(checkbox).not.toBeChecked();
     fireEvent.click(checkbox);
-    await waitFor(() =>
-      expect(axiosPut).toHaveBeenCalledWith('/api/admin/users/u1/permissions', {
-        permissions: ['routing'],
-      }),
-    );
+    await waitFor(() => expect(updatePermissions).toHaveBeenCalledWith('u1', ['routing']));
     expect(await screen.findByTestId('perm-routing-someone@example.com')).toBeChecked();
   });
 
   it('toggles role via the API', async () => {
-    axiosPut.mockResolvedValue({ data: { ...admin(), role: 'user' } });
+    updateRole.mockResolvedValue({ ...admin(), role: 'user' });
     render(<AdminView />);
     fireEvent.click(await screen.findByTestId('toggle-role-someone@example.com'));
-    await waitFor(() =>
-      expect(axiosPut).toHaveBeenCalledWith('/api/admin/users/u1/role', { role: 'user' }),
-    );
+    await waitFor(() => expect(updateRole).toHaveBeenCalledWith('u1', 'user'));
   });
 
   it('shows the API error message inline when an update fails', async () => {
-    axiosPut.mockRejectedValue(new Error('boom'));
+    updateRole.mockRejectedValue(new Error('boom'));
     render(<AdminView />);
     fireEvent.click(await screen.findByTestId('toggle-role-someone@example.com'));
     expect(await screen.findByTestId('admin-error')).toHaveTextContent('Failed to update role.');
