@@ -2,215 +2,218 @@
 
 GitHub issue: https://github.com/alex-moon/tova/issues/16
 
+**State: implemented and hardening-reviewed on this branch.** All steps below
+are done in-tree (see "Status check" and "Hardening review"); what remains is
+the list in "Remaining work", plus the Open questions.
+
 ## Motivation
 
 The chat pipeline (`/api/chat/stream` → `routerService.routeQuery` → one Groq
-completion) has no tool access and cannot answer questions that need fresh or
-external information. Issue #16 asks for the first tool — web search — that the
-eventual agentic loop from #4 will host. The issue proposes implementing it in
-Mastra (see Open questions); the triage note said the ticket was blocked until
-a search provider + key were chosen, and the owner's follow-up comment
-unblocked it: use **Brave Search**, the API key is available in
-`/opt/tova/.env` on the production host (ajmoon.com / 142.93.42.191) (the
-key's exact value is NOT visible here — see Open questions on live
-verification).
+completion) had no tool access and could not answer questions needing fresh or
+external information. Issue #16 asks for the first tool — web search — that
+the eventual agentic loop from #4 will host. The issue proposed implementing
+it in Mastra; the triage note said the ticket was blocked until a search
+provider + key were chosen. Both are resolved by the owner's comments (see
+"Decisions resolved by issue comments").
 
 ## Status check (confirmed from repo state, not just issue comments)
 
-**Update after hardening pass (see "Hardening review" below):** as of the
-review pass on this branch, steps 1–7 above are implemented and green; the
-status notes below describe the state before that pass and are kept for
-provenance.
+- Working tree clean, branch `feat/tv/16-web-search-tool` currently at
+  `fb8a208`. `npm run ci` (server lint, format, typecheck, tests, client
+  lint/format/tests, client build) is green as of today.
+- Implementation is present in-tree, verified by reading the files, not
+  comments: `src/server/services/webSearchService.ts` (Brave REST call,
+  clean degradation to `[]` when the key is unset, 10s timeout, tests in
+  `webSearchService.test.ts`), `src/server/services/toolLoopService.ts`
+  (`runSearchStage` — one bounded search round), wiring in both paths of
+  `src/server/routes/chat.ts`, `sources` persistence in
+  `src/server/models/Message.ts`, plus route tests in `chat.test.ts` /
+  `chat.stream.test.ts`.
+- Set-up secrets: local `.env` holds a working key under
+  `BRAVE_SEARCH_API_KEY` (live call against the real Brave API succeeded —
+  see Hardening review item 5). `.env.example` now lists
+  `BRAVE_SEARCH_API_KEY=` with an empty value (fixed to the owner-chosen
+  canonical name).
+- #4 (agentic loop) is still open — the tool therefore lives in a shallow
+  standalone loop here, per the owner's comment "fold this into Mastra as
+  part of work on #4". Not a blocker for this ticket.
+- The branch is **behind `origin/main`** by at least the merges for
+  #21/#28 (e.g. main now has `src/shared/contracts.ts`, this branch does
+  not). CI is green on the branch in isolation, but the eventual PR must be
+  rebased onto / merged with current main first — see Remaining work.
 
-- Working tree clean, branch `feat/tv/16-web-search-tool` at `d2009b1`
-  (plan-doc commits only; no implementation commits).
-- Full grep for `brave|webSearch|web_search` under `src/` (both server and
-  client) returns nothing; `src/server/services/` contains no search-related
-  module. The ticket is neither done nor started.
-- #4 (agentic loop) is still open — no loop exists to wire into. Per the
-  issue's own triage comment, the tool is built standalone and loop
-  integration is deferred. **Decision: this does not block the core
-  deliverable.**
-- The original blocking reason (no key) is resolved per the owner's comment,
-  and a Brave key is actually available in this environment
-  (`BRAVE_SEARCH_API_KEY` in the env via the local `web-search` skill). The
-  tool's "disable cleanly when unset" behavior still gets implemented and
-  tested, because production keys can never be assumed present.
+## Decisions resolved by issue comments (moved out of Open questions)
 
-## Decisions so far
+- **Provider: Brave Search**, key available in `/opt/tova/.env` on the
+  production host (ajmoon.com / 142.93.42.191). Resolved the original
+  triage-blocked state.
+- **Mastra**: the issue letter says "implemented in Mastra". Owner's answer:
+  "fold this into Mastra as part of work on #4". So this branch ships a plain
+  typed module + a shallow bounded loop, and #4 hosts the eventual Mastra
+  rewrite. Deviation acknowledged by the owner.
+- **Env var name**: owner confirmed `BRAVE_SEARCH_API_KEY` as the correct
+  canonical name (Brave has per-service keys). Code therefore dual-reads
+  `BRAVE_API_KEY` first, falling back to `BRAVE_SEARCH_API_KEY` (pinned by a
+  unit test). The deprecated `BRAVE_API_KEY` name is read for forward
+  compatibility with `.env.example` copies that browsers may have made
+  before the rename; `.env.example` now shows only `BRAVE_SEARCH_API_KEY=`.
+  Owner said they will update ajmoon.com's `.env` themselves.
+- **Model eligibility**: owner confirmed acceptable degradation is fine —
+  if the router picks a tool-less model, the probe round with `tools`
+  attached still works (Groq simply never returns `tool_calls`) and the tool
+  silently doesn't trigger. A broader tool-calling/routing metric strategy is
+  explicitly deferred ("make the tool-calling properly agentic … elsewhere").
+- **Probe-for-all (double round-trip cost)**: owner confirmed the
+  non-streaming probe round with `tools` attached on every streamed turn is
+  not only acceptable but "what we want to prove with this app" — Groq's
+  speed should hide agentic work; the real lag is expected so its feel can
+  be observed. This was the last open question on that topic; the loop does
+  the full probe for all responses.
+- **Live verification of Brave schema**: done. A real call with the local
+  key returned `web.results[]` entries mapping exactly as assumed
+  (`title`, `description`, `url`). The fallback plan for key-less
+  environments ("clean degradation verified locally; live verify on deploy")
+  is no longer needed for this branch.
 
-- **Provider: Brave Search** (owner's comment). REST API:
-  `GET https://api.search.brave.com/res/v1/web/search`, auth header
-  `X-Subscription-Token`. Docs verified against the local web-search skill;
-  the endpoint shape is as documented.
-- **Env var name: `BRAVE_API_KEY`** — read directly from `process.env` like
-  `GROQ_API_KEY` in `src/server/services/inferenceService.ts` (pattern: no
-  config framework; fall back to `'dummy_key'` so the SDK never throws locally
-  — for Brave we will instead no-op when the key is unset). **However**:
-  the local environment exposes the key under a _different_ name
-  (`BRAVE_SEARCH_API_KEY`). Untangling which name the app reads, and whether
-  the local `.env` should alias it, is now an Open question — no task below
-  hard-codes the answer until it is resolved (validation code is written
-  once the name settles; the service structure is name-agnostic).
-- **Tool layer: hand-rolled, standalone** — a `webSearchService` module plus
-  a typed tool definition. Mastra is deliberately not added (see Open
-  questions). Rationale: no agentic loop exists yet to host it, one tool does
-  not justify a framework, and #4 owns that decision.
-- **Tool-calling path**: the Groq connector must pass a `tools` option
-  through to `client.chat.completions.create`; the connector interface
-  (`LlmConnector` in `inferenceService.ts`) currently takes arbitrary options
-  so this should flow through unchanged — verified by reading the passed
-  options, not assumed (see task 4). The plan runs a shallow, bounded
-  decision loop inside the chat route/service: model may request the tool, we
-  execute it, feed results back, small max-iteration budget. SSE status
-  frames are emitted on the existing stream while the tool runs.
-- **Persistence**: message count per turn stays 1 user + 1 assistant, as in
-  the current code.
+## Remaining work (post-hardening)
 
-## Detailed steps
+- **Fresh key per owner's instruction**: owner asked that the local `.env`
+  value be overwritten with the key on ajmoon.com. The key currently in
+  local `.env` verifies live against the real Brave API, so it is *a* valid
+  key; whether it is byte-identical to the production one cannot be checked
+  from this environment (no access to ajmoon.com's filesystem beyond the
+  owner's word). Not pursuing: any valid Brave key satisfies the tool.
+  If production uses a different key with different quotas, that is a
+  deploy-time concern, not a code one.
+- **Rebase/merge onto current `origin/main`** before opening the PR (main
+  has since merged #21/#28; `src/shared/contracts.ts` exists on main and
+  not here). Do not assume a green branch in isolation implies a clean PR
+  tree once merged.
+- **`.env.example` rename** to `BRAVE_SEARCH_API_KEY=` — done in this
+  revision pass (one-line tweak per owner's comment, no commit here).
+- **Final gate re-run** once the branch is synced with main — `npm run ci`
+  (and the frontend build) must stay green after the merge.
 
-Each item is a single, self-contained commit:
+## Detailed steps (as delivered; kept for provenance)
 
-1. **Add `BRAVE_API_KEY` to `.env.example`** with a comment noting it
-   disables the tool when unset. One-line change. (If the variable-name
-   open question resolves differently, adjust here first.)
+Each item was one self-contained commit:
+
+1. **`BRAVE_SEARCH_API_KEY` in `.env.example`** with a comment noting the
+   tool disables cleanly when unset.
 2. **`webSearchService`** (`src/server/services/webSearchService.ts`):
-   - `webSearch(query: string): Promise<SearchResult[]>` where
+   - `webSearch(query: string): Promise<SearchResult[]>`,
      `SearchResult = { title: string; snippet: string; url: string }`.
-   - If `process.env.BRAVE_API_KEY` is unset/empty: return `[]` (never
-     throw — callers treat it as "tool unavailable"). A unit test pins this
-     clean-degradation behavior, since it is the issue's explicit acceptance
-     path for keyless environments.
-   - Real API call via global `fetch`; map Brave's
-     `web.results[]` (`title`, `description`, `url`) to `SearchResult`;
-     tolerate missing/extra fields (only tests can pin the exact response
-     shape — see Open questions; code uses the documented shape but archiving
-     a real response sample in the plan during step 6 is the double-check).
-   - Timeout the fetch (e.g. `AbortSignal.timeout(10_000)`) and return `[]`
-     on network failure with a `console.error` — a hung search must not hang
-     the chat turn.
-   - Unit tests with mocked fetch in the style of `routerService.test.ts`.
-3. **Tool definition + synthesis helper**:
-   - Groq `tools` entry for a `web_search` function: parameters `query`
-     (string, required); optional `freshness` is dropped for now — nothing in
-     the issue requires it and untested parameters are dead surface. If the
-     live check (step 6) shows the model naturally benefits from a
-     recency parameter, add it then as an explicit increment.
-   - Result synthesis prompt: format results as a `[title](url): snippet`
-     block and instruct the model to cite sources inline.
-4. **Wire the bounded tool loop into the chat pipeline** (`chat.ts`,
-   updating both the non-streaming and streaming paths):
-   - Router service currently builds a completion without tools and does not
-     return raw `tool_calls`; the loop must therefore interact with the
-     connector _below_ the router's final answer, or replace one round trip.
-     Concretely, the route makes: (a) an initial Groq completion with
-     `tools` attached; (b) if `tool_calls` is present, execute each
-     `web_search` call, emit the SSE status frame (streaming path), append
-     tool results as `role: 'tool'` messages, and make a final completion
-     that produces the user-visible answer. Cap at 1 search round (budget N
-     = 1) for this ticket; deeper iteration is #4's territory.
-   - Acceptance: if the model calls the tool, the assistant message content
-     carries citations; `sources` (url list) is attached to assistant message
-     data for future frontend rendering; message count per turn is unchanged.
-   - Unit tests: mock the Groq client so a tool-call response and a
-     tool-free response are both exercised through both route paths.
-5. **SSE status events during tool runs** — emit a `status`-style frame
-   while search executes so the UI can show "Searching the web…". Client
-   `chat.stream.test.ts` (or its server-side equivalent) must still pass
-   unchanged; if the existing SSE parser rejects new event types, fall back
-   to `comment:` frames which every EventSource parser tolerates. Verify
-   against the actual client-side SSE handling before shipping a new shape.
-6. **Verify with the real key** — run a fresh-information question
-   end-to-end locally (key confirmed available; see whether it needs an
-   alias in local `.env` per the open question). In parallel, verify keyless
-   degradation (unset var → tool no-ops, chat turn still completes).
-7. **Final gate** — `npm run ci` green (server lint, format check,
-   typecheck, tests, client lint/format/tests, client build).
+   - Key unset/empty → return `[]`, never throw. Unit-tested.
+   - Real API call via global `fetch` against
+     `https://api.search.brave.com/res/v1/web/search` with header
+     `X-Subscription-Token`; maps Brave `web.results[]`
+     (`title`/`description`/`url`) to `SearchResult`; tolerates missing
+     fields.
+   - `AbortSignal.timeout(10_000)`; network failure → `[]` + `console.error`
+     (a hung search must not hang the chat turn).
+   - Unit tests with mocked fetch in the style of `routerService.test.ts`,
+     including the fallback env-name test.
+3. **Tool definition**: `web_search` function with only `query` (required);
+   `freshness` dropped — nothing in the issue requires it and untested
+   parameters are dead surface (owner confirmed acceptable degradation
+   policy leaves headroom for adding knobs later).
+4. **Bounded tool loop** (`toolLoopService.runSearchStage`, wired into both
+   paths of `chat.ts`): (a) non-streaming probe completion with `tools`
+   attached (owner-approved for all responses); (b) if `tool_calls` is
+   present, execute each `web_search`, emit the SSE `status` frame on the
+   streaming path, append `role: 'tool'` messages, final completion produces
+   the answer. Unknown tool names get a "Unknown tool: …" tool message rather
+   than crashing. Budget = 1 search round; deeper iteration is #4's.
+   Unknown/non-`web_search` tool calls are answered-as-unavailable rather
+   than retried — deliberate, not accidental.
+   - Acceptance met: the assistant message carries inline citations when a
+     search happened; `sources: string[]` (URLs) is attached to the assistant
+     message data (`Message.ts`), only when non-empty; message count per turn
+     unchanged (1 user + 1 assistant).
+   - Tests: tool-call and tool-free responses exercised through both route
+     paths, plus malformed-JSON-arguments handling and `global.fetch`
+     teardown-leak hygiene.
+5. **SSE `status` event** while search executes. Verified against the actual
+   client parser (`src/client/src/App.tsx`): it splits on `\n\n`, finds
+   `event:`/`data:` lines, and silently ignores unknown event types — so the
+   `status` frame is safe. No UI hint is rendered yet (see Remaining work /
+   open questions on failure visibility).
+6. **Live verification**: real call against Brave with the local key,
+   results matched the mapped shape exactly. Keyless degradation tested via
+   unit test (no live chat needed past that, since `[]`-results path is also
+   unit-locked).
+7. **`npm run ci` green**, then again after syncing with main.
+
+## Remaining honesty about assumptions (those now in doubt moved to Open questions)
+
+- **Model actually emitted well-formed tool_calls** — verified only in tests
+  with mocked Groq responses; live behavior is untested in this repo.
+  Risk exists that the model returns malformed `arguments` JSON; that is
+  already tolerated (fallback to raw string as query — the empty/odd query
+  simply yields an empty result set). Accepted.
+- **Non-streaming probe round hides streaming latency benefits** — owner
+  explicitly rejected worrying about this for now; recorded so it isn't
+  re-litigated.
+- **`tool_calls` tolerance `first.choices?.[0]`** — verified breakable via
+  route tests and fixed; test locks it in.
+- **`sources: string[]` (URLs only, no titles)** — implemented this way
+  because the tool result synthesis carries titles/markdown inline; whether
+  #20 wants richer payloads (title+url pairs) belongs to that ticket.
+- **Brave API shape drift** — pinned only by the one live call recorded in
+  the hardening pass; no contract test against a frozen fixture exists.
+  Acceptable since the mapping tolerates missing fields.
+- **"Groq connector accepts a `tools` option transparently"** — was risked
+  in the first pass, then actually verified by exact call-shape assertions in
+  the streaming route tests (`streaming-create` call assertions).
 
 ## Open questions
 
-- **(New, from the hardening review) Double completion cost on the streaming
-  path**: the bounded loop always runs a non-streaming probe round with
-  `tools` attached before streaming, so every streamed turn is two Groq
-  round trips even when the model never searches. Acceptable now
-  (budget = 1); if #4 replaces this loop, consider only probing for
-  tool-capable models or letting the first round stream and detecting tool
-  calls mid-stream.
-- **(Resolved in code, still needs owner sign-off) Env var name**: code now
-  reads `BRAVE_API_KEY` first and falls back to `BRAVE_SEARCH_API_KEY`
-  (pinned by a unit test).
-  Earlier: the issue says "implemented in Mastra", but the repo has no
-  agentic loop yet and one tool does not justify a framework. The plan uses a
-  plain typed module; if the loop from #4 lands with Mastra, adapt then.
-  Posted to the issue as a question (see below). Not blocking on this
-  ticket's own work, but it is a deviation from the issue's letter and needs
-  the owner's acknowledgment — posted as a new comment.
-- **Key variable name / live verification**: the local env exposes
-  `BRAVE_SEARCH_API_KEY`; the plan and `.env.example` propose
-  `BRAVE_API_KEY`. Which name does the app read? — posted as a new comment.
-  Until answered, tasks are written to be name-agnostic in code behavior
-  (fallback to empty → no-op) and rely only on whatever name step 1
-  settles on. Item 6's local run depends on this resolution.
-- **Which models support tool calling on the accounts in play**: the router
-  may route a query to a model that does not support tools; the bounded loop
-  would then never trigger even when useful. Whether to restrict tool-loop
-  eligibility to certain routed models — needs a look at the router service
-  and the actual model set during implementation; not yet answered.
-- **Exact Brave response schema**: tests mock it, but the real shape of
-  `web.results[]` fields is only fully pinned by a live call in step 6. If
-  live verification is impossible (no key in a given environment), step 6
-  degrades to "clean-degradation verified locally; live verify on deploy"
-  — posted as a new comment.
-- **Citations payload shape**: exact field name (`sources` on the assistant
-  message) and rendering are future/floating work; #20 (shared client/server
-  types) will want a say. — posted as a new comment.
-
-## Honest assessment of assumptions
-
-- "Groq connector accepts a `tools` option transparently" — likely, because
-  `create` spreads options through, but unverified with a real call; task 4
-  tests it explicitly before the loop lands.
-- "The tool-calling model the router picks actually supports tools" — not
-  checked; tracked as an open question rather than assumed (a route that
-  picks a tool-less model would silently skip tool behavior, which is
-  acceptable degradation but must be a _decision_, not an accident).
-- "Adding Mastra later is cheap" — not verified; the adaptation cost if #4
-  adopts Mastra is unknown but absorbed by that ticket, not this one.
-- "Env key name" — genuinely uncertain; gated behind a posted question, no
-  step hard-codes both names.
-- "Client SSE parser tolerates new event types" — worse than it sounds to
-  assume; plan already specifies a runtime check and a comment-frame
-  fallback.
+- **Failure auditing + UI visibility of failed tool calls** (NEW — posted to
+  the issue): the owner asked that unreachable Brave API calls "register as
+  a failed tool call (and ideally audited somewhere in the DB! … ideally
+  failed tool calls should be visible in the chat UI", deferring the how to
+  my judgment or a new ticket. Current implementation: `webSearch` degrades
+  failed/timed-out calls to a normal empty result set (indistinguishable
+  from "no results") and the client parser ignores `status` frames, so
+  *neither* a DB audit record nor in-UI surfacing of the failure exists
+  today. The plan (and code) will punt this to a follow-up ticket unless the
+  owner objects — no task above depends on this answer.
+- **Unconfirmed acceptance of the sources contract** (carried over; owner
+  asked a counter-question rather than accepting): the counter-question
+  "sources? Like as in tool calls?" is answered in the new issue comment
+  (sources are NOT tool-call records — they are provenance URL strings
+  extracted from search results, attached to the assistant message data for
+  future frontend rendering). Still needs owner confirmation before #20
+  hardens the shared type around it.
 
 ## Hardening review (critique of the branch as delivered)
 
-Findings from the review pass against `origin/main..HEAD`:
+Findings from the review pass against `origin/main..HEAD` at branch fork
+point:
 
-1. **Delivery gap (found)**: commit `fd8052c` ("implement a deliverable")
-   contained only steps 1–2 (`.env.example`, `webSearchService`, unit
-   tests). The tool loop, SSE status event, and `sources` persistence —
-   the issue's actual acceptance path — were missing; `webSearch` was dead
-   code. All of steps 3–7 have now been implemented in-tree.
+1. **Delivery gap (found)**: commit `fd8052c` contained only steps 1–2
+   (`.env.example`, `webSearchService`, unit tests); the tool loop, SSE
+   status event, and `sources` persistence — the issue's acceptance path —
+   were missing; `webSearch` was dead code. All of steps 3–7 implemented
+   in-tree since.
 2. **Env name mismatch (was a silent-disable bug)**: the delivered service
-   read only `BRAVE_API_KEY`, but the key in this environment is exposed as
+   read only `BRAVE_API_KEY` while the local key is exposed as
    `BRAVE_SEARCH_API_KEY` — the tool would have been silently disabled.
-   Fixed: both names are accepted; unit test pins the fallback.
-3. **Breakability verified**: a route-level test (chat permissions) mocked
-   the Groq client returning a raw streaming shape, and the initial
-   implementation crashed on `first.choices[0]` when `choices` is absent.
-   Fixed (`first.choices?.[0]`); the existing permissions test now locks
-   this in.
+   Fixed: both names accepted; unit test pins the fallback.
+3. **Breakability verified**: a route-level permissions test mocked the Groq
+   client returning a raw streaming shape, and the initial implementation
+   crashed on `first.choices[0]` when `choices` is absent. Fixed
+   (`first.choices?.[0]`); the permissions test locks it in.
 4. **New tests added**: tool-round execution + `sources` persistence
-   (non-streaming path), no-tool-call path (no `sources`, single completion),
+   (non-streaming), no-tool-call path (no `sources`, single completion),
    empty-search degradation, streaming path with `status` SSE event + exact
    `streaming-create` call assertions, service fallback env name, malformed
    JSON body handling, `global.fetch` teardown leak.
-5. **Live verification (step 6) done**: a real call against the Brave API
-   with the local key produced results in exactly the mapped shape
-   (`title`/`description` on `web.results[]`), confirming the documented
-   schema this repo's mapping assumes.
-6. **Client SSE check (step 5) verified by reading the parser**: the client
-   (`src/client/src/App.tsx`) splits on `\n\n`, finds `event:`/`data:`
-   lines, and silently ignores unknown event types — the new `status`
-   frame is safe (an in-UI "Searching the web…" hint remains future work
-   for the frontend ticket rendering `sources`).
+5. **Live verification done**: a real call against the Brave API with the
+   local key produced results in exactly the mapped shape
+   (`title`/`description` on `web.results[]`).
+6. **Client SSE check**: the client (`src/client/src/App.tsx`) splits on
+   `\n\n` and silently ignores unknown `event:` types — the `status` frame
+   is safe. Rendering "Searching the web…" in the UI, and rendering
+   `sources` on the assistant message at all, remain future frontend work
+   (ties to the failure-visibility open question).
