@@ -19,14 +19,18 @@ interface Session {
   title: string;
 }
 
+export function isAdminRoute() {
+  return typeof window !== 'undefined' && window.location.pathname.startsWith('/admin');
+}
+
 function App() {
   const { user, loading } = useAuth();
+  const showAdminView = isAdminRoute();
   const [sessions, setSessions] = useState<Session[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [isChatLoading, setIsChatLoading] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [showAdmin, setShowAdmin] = useState(false);
   const streamingRef = useRef(false);
 
   const fetchSessions = useCallback(async () => {
@@ -228,14 +232,14 @@ function App() {
 
   return (
     <main className="flex h-dvh w-full overflow-hidden">
-      {showAdmin ? (
+      {showAdminView && user.role === 'admin' ? (
         <>
-          <button onClick={() => setShowAdmin(false)}>Back to chat</button>
+          <a href="/">Back to chat</a>
           <AdminView />
         </>
       ) : (
         <>
-          {user.role === 'admin' && <button onClick={() => setShowAdmin(true)}>Admin</button>}
+          {user.role === 'admin' && <a href="/admin">Admin</a>}
           <Sidebar
             sessions={sessions}
             activeSessionId={activeSessionId}
@@ -247,12 +251,6 @@ function App() {
             onNewChat={handleNewChat}
             onDeleteSession={handleDeleteSession}
             onClose={() => setSidebarOpen(false)}
-          />
-          <ChatWindow
-            messages={messages}
-            onSendMessage={handleSendMessage}
-            isLoading={isChatLoading}
-            onOpenSidebar={() => setSidebarOpen(true)}
           />
           <ChatWindow
             messages={messages}

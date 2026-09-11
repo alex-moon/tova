@@ -91,18 +91,18 @@ const AdminView = () => {
               <td>{user.hasGoogle ? 'yes' : 'no'}</td>
               <td>
                 {KNOWN_PERMISSIONS.map((permission) => (
-                  <span key={permission}>
-                    {user.permissions.includes(permission) ? permission : `no ${permission}`}
-                  </span>
+                  <label key={permission} style={{ marginRight: '0.5rem' }}>
+                    <input
+                      type="checkbox"
+                      data-testid={`perm-${permission}-${user.email}`}
+                      checked={user.permissions.includes(permission)}
+                      onChange={() => togglePermission(user, permission)}
+                    />{' '}
+                    {permission}
+                  </label>
                 ))}
               </td>
               <td>
-                <button
-                  data-testid={`toggle-routing-${user.email}`}
-                  onClick={() => togglePermission(user, 'routing')}
-                >
-                  Routing
-                </button>
                 <button data-testid={`toggle-role-${user.email}`} onClick={() => toggleRole(user)}>
                   {user.role === 'admin' ? 'Demote' : 'Promote'}
                 </button>

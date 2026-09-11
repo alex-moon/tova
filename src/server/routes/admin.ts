@@ -9,6 +9,11 @@ const adminGuard = [authenticate, requireRole('admin')];
 
 const KNOWN_PERMISSIONS = ['routing'] as const;
 
+// Owner-protected account: cannot be demoted at all (issue #15, owner
+// decision 2026-09-11). Module-level constant so a future env/config
+// move is a one-line change.
+export const PROTECTED_OWNER_EMAIL = 'formsatz@gmail.com';
+
 const toPublicUser = (user: UserDocument) => ({
   id: user._id.toString(),
   email: user.email,
@@ -73,6 +78,9 @@ router.put('/users/:id/role', ...adminGuard, async (req: AuthRequest, res) => {
     if (!user) return;
 
     if (user.role === 'admin' && role === 'user') {
+      if (user.email === PROTECTED_OWNER_EMAIL) {
+        return res.status(400).json({ message: 'This account cannot be demoted' });
+      }
       const adminCount = await User.countDocuments({ role: 'admin' });
       if (adminCount <= 1) {
         return res.status(400).json({ message: 'Cannot demote the last admin' });

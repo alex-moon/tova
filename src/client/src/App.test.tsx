@@ -1,5 +1,5 @@
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, cleanup, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, cleanup, waitFor } from '@testing-library/react';
 import App from './App';
 import { AuthProvider } from './context/AuthContext';
 
@@ -50,23 +50,42 @@ describe('App', () => {
     expect(screen.getByLabelText(/password/i)).toBeInTheDocument();
   });
 
-  it('hides the admin toggle for non-admin users', async () => {
+  it('hides the admin link for non-admin users', async () => {
     mockMe('user');
     renderApp();
     await waitFor(() => expect(axiosGet).toHaveBeenCalledWith('/api/chat/sessions'));
-    expect(screen.queryByRole('button', { name: 'Admin' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Admin' })).not.toBeInTheDocument();
   });
 
-  it('shows the admin toggle for admin users', async () => {
+  it('shows the admin link for admin users', async () => {
     mockMe('admin');
     renderApp();
-    expect(await screen.findByRole('button', { name: 'Admin' })).toBeInTheDocument();
+    expect(await screen.findByRole('link', { name: 'Admin' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Admin' }).getAttribute('href')).toBe('/admin');
   });
 
-  it('renders the admin view when the toggle is used', async () => {
+  it('renders exactly one chat window on the chat route', async () => {
     mockMe('admin');
     renderApp();
-    fireEvent.click(await screen.findByRole('button', { name: 'Admin' }));
+    expect(await screen.findByRole('link', { name: 'Admin' })).toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: /new chat/i }).length).toBeGreaterThan(0);
+  });
+
+  it('renders the admin view at the /admin route', async () => {
+    mockMe('admin');
+    window.history.pushState({}, '', '/admin');
+    renderApp();
     expect(await screen.findByTestId('admin-view')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Back to chat' }).getAttribute('href')).toBe('/');
+    window.history.pushState({}, '', '/');
+  });
+
+  it('falls back to the chat view for non-admins at /admin', async () => {
+    mockMe('user');
+    window.history.pushState({}, '', '/admin');
+    renderApp();
+    await waitFor(() => expect(axiosGet).toHaveBeenCalledWith('/api/chat/sessions'));
+    expect(screen.queryByTestId('admin-view')).not.toBeInTheDocument();
+    window.history.pushState({}, '', '/');
   });
 });

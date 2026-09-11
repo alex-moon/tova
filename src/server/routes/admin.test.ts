@@ -109,6 +109,44 @@ describe('admin routes', () => {
     expect(lastAdminRes.body.message).toBe('Cannot demote the last admin');
   });
 
+  it('refuses to demote the protected owner account even with other admins', async () => {
+    const app = createApp();
+    const cookie = await registerAdmin(app, 'admin-protect@example.com');
+    const owner = await User.create({
+      email: 'formsatz@gmail.com',
+      passwordHash: 'secret123',
+      role: 'admin',
+    });
+
+    const res = await request(app)
+      .put(`/api/admin/users/${owner._id}/role`)
+      .set('Cookie', cookie)
+      .send({ role: 'user' });
+    expect(res.status).toBe(400);
+    expect(res.body.message).toBe('This account cannot be demoted');
+
+    const after = await User.findById(owner._id);
+    expect(after?.role).toBe('admin');
+  });
+
+  it('still allows demoting a second admin while the owner account stays admin', async () => {
+    const app = createApp();
+    const cookie = await registerAdmin(app, 'admin-second@example.com');
+    await User.create({
+      email: 'formsatz@gmail.com',
+      passwordHash: 'secret123',
+      role: 'admin',
+    });
+
+    const id = (await User.findOne({ email: 'admin-second@example.com' }))!._id.toString();
+    const res = await request(app)
+      .put(`/api/admin/users/${id}/role`)
+      .set('Cookie', cookie)
+      .send({ role: 'user' });
+    expect(res.status).toBe(200);
+    expect(res.body.role).toBe('user');
+  });
+
   it('rejects invalid role values and unknown ids with 404', async () => {
     const app = createApp();
     const cookie = await registerAdmin(app, 'admin4@example.com');

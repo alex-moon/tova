@@ -37,18 +37,34 @@ describe('AdminView', () => {
     expect(screen.getByTestId('role-someone@example.com')).toHaveTextContent('admin');
   });
 
-  it('toggles a permission via the API and updates the row', async () => {
+  it('toggles a permission checkbox off via the API and updates the row', async () => {
     axiosPut.mockResolvedValue({
       data: { ...admin(), permissions: [] },
     });
     render(<AdminView />);
-    fireEvent.click(await screen.findByTestId('toggle-routing-someone@example.com'));
+    const checkbox = await screen.findByTestId('perm-routing-someone@example.com');
+    expect(checkbox).toBeChecked();
+    fireEvent.click(checkbox);
     await waitFor(() =>
       expect(axiosPut).toHaveBeenCalledWith('/api/admin/users/u1/permissions', {
         permissions: [],
       }),
     );
-    expect(await screen.findByText('no routing')).toBeInTheDocument();
+  });
+
+  it('toggles a permission checkbox on when the user lacks it', async () => {
+    axiosGet.mockResolvedValue({ data: [{ ...admin(), permissions: [] }] });
+    axiosPut.mockResolvedValue({ data: admin() });
+    render(<AdminView />);
+    const checkbox = await screen.findByTestId('perm-routing-someone@example.com');
+    expect(checkbox).not.toBeChecked();
+    fireEvent.click(checkbox);
+    await waitFor(() =>
+      expect(axiosPut).toHaveBeenCalledWith('/api/admin/users/u1/permissions', {
+        permissions: ['routing'],
+      }),
+    );
+    expect(await screen.findByTestId('perm-routing-someone@example.com')).toBeChecked();
   });
 
   it('toggles role via the API', async () => {

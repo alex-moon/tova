@@ -124,10 +124,10 @@ does **not** yet satisfy:
 
 ## Steps
 
-Status is honest per step. Steps 1–3 + 7 (verification) are implemented
-and consistent with owner answers. Steps 4–5 are rework required by
-owner answers 2 and 4/6 that landed **after** the original
-implementation. Step 6-M remains a known bug found during this revison.
+Status is honest per step. All steps are implemented and consistent
+with owner answers as of this pass (2026-09-11), including the rework
+required by owner answers 2, 4, and 6 that landed after the original
+implementation.
 
 - [x] 1. Backend admin list API: `src/server/routes/admin.ts` serving
       `GET /api/admin/users` with the bcrypt-free projection (`id`,
@@ -145,67 +145,54 @@ implementation. Step 6-M remains a known bug found during this revison.
       Implemented. (Note: this makes newly granted `role`/permissions
       visible but does not fix `requireRole` reading the stale token —
       owner-accepted, see resolved 3 / follow-up in step 6.)
-- [ ] 4. ⚠ Rework: **protected owner account (resolved 4)**. In
-      `src/server/routes/admin.ts`, before role demotion of any admin,
-      refuse with 400 when `user.email === 'formsatz@gmail.com'`
-      (blanket rule; the count-based last-admin check stays for all
-      other admins). Update `admin.test.ts`: (a) demoting
-      `formsatz@gmail.com` → 400 even when a second admin exists; (b)
-      demoting a second admin still allowed while formsatz remains
-      admin. Express the email as a module-level constant in
-      `admin.ts` (not inline in the route handler) so the future
-      config-ification is a one-line move.
-- [ ] 5. ⚠ Rework: **admin view mounting + permission control (resolved
-      2 and 6)**. Current state: in-app toggle in `App.tsx` +
-      `AdminView` with a button-based toggle per permission — both
-      diverge from owner answers. Concrete rework:
-      a. Replace the `showAdmin` toggle with URL-based mounting, per
-      open question 1 default (approach (b): no dependency, no
-      server change): in the admin app view, render
-      `<AdminView />` when `window.location.pathname.startsWith('/admin')`,
-      chat otherwise; admin toggle becomes a
-      `window.location.assign('/admin')` link, chat access becomes a
-      link back to `/`. Cleanup: while touching this, delete the
-      duplicated `<ChatWindow/>` render (`App.tsx:257-262`) — a
-      plausible copy-paste bug that also breaks the `main` layout
-      when admin view replaced one of the two panes.
-      b. Deployment check the owner explicitly asked for: the admin
-      view lives behind `/admin` **on the frontend server**, i.e.
-      `src/client/vite.config.ts` `preview` must allow the path to
-      fall back to `index.html` for `/admin` (SPA fallback is
-      default in vite preview; verify, don't assume — add an
-      `npm --prefix src/client run build && vite preview` smoke check
-      that `/admin` serves the app). Both compose files
-      (`docker-compose.live.yml` frontend, `docker-compose.local.yml`)
-      keep their current single frontend container; docker compose
-      only needs changes if verification shows the SPA fallback
-      breaks — note the finding either way in the PR.
-      c. Permission control in `AdminView.tsx`: a per-user checkbox
-      (single permission today → checkbox is the cheapest UI that
-      satisfies "drop-down or checkboxes") writing the full
-      permissions array via the existing PUT endpoint. Server-side
-      validation already rejects unknown strings (resolved 6); no
-      database-level enforcement (per owner).
-      d. Update client tests (`App.test.tsx`, AdminView tests) for the
-      URL mounting and checkbox control.
-- [ ] 6. Tests for step 4's email-protection behavior (in addition to
-      existing suites, which are green as of commit `72c3d5c`).
-- [ ] 7. Verify, ship, archive — run `npm run lint`, `npm run
-typecheck`, `npm test`,
-      `npm --prefix src/client run lint` + format check + tests, then
-      `npm run ci` as the final gate (re-run even though it was green
-      at `72c3d5c`, because steps 4–6 change code). Open/refresh the
-      PR with a note listing the owner-answer rework items; after
-      merge move this plan to `docs/done/`. Before closing, file the
-      follow-up GitHub ticket for token re-issue/staleness (resolved 3) so it does not get lost.
+- [x] 4. ⚠ Rework: **protected owner account (resolved 4)**. DONE 2026-09-11:
+      `src/server/routes/admin.ts` exports
+      `PROTECTED_OWNER_EMAIL = 'formsatz@gmail.com'` as a module-level
+      constant; the role route returns 400
+      "This account cannot be demoted" for that email before the
+      count-based last-admin check, which stays for all other admins.
+      Covered by two new tests: (a) demoting the owner → 400 even with a
+      second admin present, (b) demoting a second admin is still allowed
+      while the owner stays admin.
+- [x] 5. ⚠ Rework: **admin view mounting + permission control (resolved
+      2 and 6)**. DONE 2026-09-11 (approach (b), open question 1 default):
+      a. `App.tsx`: `showAdmin` state removed; exports
+         `isAdminRoute()` (`window.location.pathname.startsWith('/admin')`)
+         and renders `<AdminView />` plus a `Back to chat` link to `/`
+         when an admin is at `/admin`. The admin entry point is a
+         `<a href="/admin">Admin</a>` link (full page navigation, so no
+         popstate/router code is needed). A non-admin deep-linking
+         `/admin` falls back to the chat view (client-side only; the
+         API is already `requireRole('admin')`-guarded).
+      b. Deployment check the owner explicitly asked for: verified
+         empirically — `vite preview` serves `/admin` with HTTP 200 and
+         the app HTML (SPA fallback is default). No compose or vite
+         config change needed; noted in the PR.
+      c. Permission control in `AdminView.tsx`: per-user checkbox
+         (`data-testid="perm-routing-<email>"`) writing the full
+         permissions array via the existing PUT endpoint. Server-side
+         validation already rejects unknown strings (resolved 6); no
+         database-level enforcement (per owner).
+      d. Client tests updated: App tests now exercise `/admin` URL
+         mounting (admin sees AdminView + back link; non-admin falls
+         back to chat; non-admins/`/` hide the Admin link);
+         `AdminView.test.tsx` covers checkbox on→off and off→on array
+         replaces.
+- [x] 6. Tests for step 4's email-protection behavior (see step 4).
+- [x] 7. Verify — `npm run lint`, `typecheck`, `test`,
+      `npm --prefix src/client run lint`/format/`test`, and
+      `npm run ci` all green after this pass; format check clean.
+      Remaining in step 7 (for the orchestrator): open/refresh the PR
+      with a note listing the owner-answer rework items; after merge
+      move this plan to `docs/done/`. Before closing, file the
+      follow-up GitHub ticket for token re-issue/staleness (resolved 3)
+      so it does not get lost.
 
 ## Known bugs in the current branch
 
-- `src/client/src/App.tsx:251-262`: `<ChatWindow />` is rendered twice
-  in the non-admin branch. Unintended (the plan's original step 4
-  rendered it once); fix as part of step 5a. Note: a fix here is expected
-  to keep existing client tests green — they were written against this
-  state and should be re-checked after the fix.
+- Fixed 2026-09-11: the duplicated `<ChatWindow />` render in the
+  non-admin branch of `App.tsx` (a copy-paste bug) is gone; client
+  tests were re-run and stay green.
 
 ## Open questions
 
@@ -231,3 +218,14 @@ plan proceeds with, and each touches only the shape of step 5.
    admin-guarded so nothing ships yet that would need them. The plan
    excludes them. If they are meant to be shared-UI chrome (e.g. an
    account info panel), they likely belong in a separate ticket too.
+3. **Non-admin at `/admin` gets the chat view silently.** With approach
+   (b), deep-linking `/admin` as a non-admin silently renders the chat
+   app (the admin API itself is still `requireRole('admin')`-guarded).
+   Alternative: an explicit "not authorized" page. Default in the
+   shipped code: silent fallback to chat. If a redirect/explicit denial
+   is preferred, it is a few lines in `App.tsx`.
+4. **Admin view styling.** `AdminView.tsx` is functional but bare
+   (table, checkbox, buttons, unstyled) relative to the chat UI's
+   design tokens. The owner called it "almost a whole separate app";
+   whether it deserves a full visual pass is out of scope for this
+   ticket's rework and is tracked here as a styling follow-up.
