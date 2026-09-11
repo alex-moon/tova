@@ -28,7 +28,9 @@ const groqConnector = (): LlmConnector => {
   ): Promise<NeutralChunkStream> =>
     (async function* () {
       for await (const chunk of raw) {
-        yield { delta: chunk.choices[0]?.delta?.content ?? null };
+        yield {
+          delta: chunk?.choices?.[0]?.delta?.content ?? null,
+        };
       }
     })();
 
