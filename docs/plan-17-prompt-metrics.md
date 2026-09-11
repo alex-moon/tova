@@ -56,7 +56,8 @@ can correlate routing decisions with prompt characteristics.
    `Message.findByIdAndUpdate(_id, { $set: { 'metrics.llm': ... } })` —
    a) nothing is added to first-token latency; b) a failed classification
    never breaks the chat request (errors logged, dimensions remain `null`).
-   User messages only (see Open questions).
+   User messages only (confirmed by alex-moon — see
+   _Decisions since the first pass_).
 4. **One cheap classification call per user message** using the guard/small
    model path, asking for structured flags, parsed defensively as JSON with
    fallback to nulls (no reliance on Groq JSON mode — see Open questions).
@@ -72,6 +73,19 @@ can correlate routing decisions with prompt characteristics.
    work should read, not the schema.
 
 ## Critiqued assumptions (every current assumption, challenged)
+
+- **`allam-2-7b` can classify prompts** — DOUBTED (and now by alex-moon
+  too). It was chosen by mirroring `routerService`'s guard path, but
+  neither this service nor anywhere else in the repo has evidence it
+  emits parseable JSON-ish flags. Until task 10 scores a candidate,
+  `metrics.llm` quality should be treated as unproven; the all-null
+  fallback is correct behavior, not a fix for this.
+- **The trivial-skip gate (task 9) will not silently degrade metrics.**
+  Skipped messages have no LLM flags at all — analytical queries must
+  distinguish "skipped" from "classified nulls". Mitigation: the gate
+  fires only on a narrow curated allowlist plus length/stopword bounds;
+  fail-closed otherwise. If this proves undiscernible later, the gate is
+  one call site condition to revert.
 
 - **"Index from history length we already fetch" — WRONG.** History is
   `Message.find(...).limit(10)`; a session with >10 messages would yield a
@@ -159,7 +173,7 @@ Each item is a small, self-contained commit.
       failure leaves `metrics.llm` nulls and the chat response
       unaffected; d) indices increase across 12 turns in one session
       (asserts the >10-message history cap is not leaked into indices).
-- [ ] 8. **Document**: short section in `docs/overview.md` + a
+- [x] 8. **Document**: short section in `docs/overview.md` + a
       `docs/progress.md` log entry on merge, with a `scripts/mongo.ts`
       snippet to inspect metrics.
 
@@ -177,40 +191,84 @@ Each item is a small, self-contained commit.
 - No visible latency added to first token (classification is post-save,
   fire-and-forget).
 
+## Decisions since the first pass (verified from the issue thread)
+
+- **Assistant messages: user-only classification, confirmed by alex-moon**
+  (issue comment, 2026-09-11). Assistant turns will get *feedback* which
+  rates them against the user messages (#18) — so no LLM classification for
+  assistant messages, ever, per this ticket. The shipped behavior is already
+  correct.
+- **Skip-classification for trivially neutral prompts: confirmed as a
+  task.** alex-moon wants deterministic detection of "meaningfully neutral
+  on all classifiers" prompts ("yes", "please continue", "tell me more")
+  to skip the LLM call entirely. He notes regexes were used for this in
+  the past but wants something more robust. See task 9.
+- **Classification model: `allam-2-7b` is not trusted to emit structured
+  JSON reliably.** alex-moon wants the smallest/fastest model that is
+  *reliable*, and has confirmed an experimentation path: DeepInfra offers
+  a much larger model catalog than Groq, and a `DEEPINFRA_API_KEY` is
+  available on the deploy host (142.93.42.191 — note: **not** in the local
+  `/opt/tova/.env`, which only has `GROQ_API_KEY`). See task 10.
+- **Session-index semantics: alex-moon deferred;** he asked for
+  filepaths/line numbers to understand the code first. This stays an open
+  question (below); no planned task depends on the answer because both
+  counters are persisted already.
+
+## Task checklist (new work on this branch)
+
+Each item is a small, self-contained commit.
+
+- [ ] 9. **Trivial-prompt skip gate** in `metricsService.ts`: a
+       deterministic `isTriviallyNeutral(content)` predicate that skips
+       the LLM classification call for prompts meaningfully neutral on
+       every LLM dimension (short greetings, confirmations, "please
+       continue"-style continuations). Robustness requirement from
+       alex-moon: not just a regex — combine (a) a small curated phrase
+       list (lower-cased, punctuation-stripped match), (b) word-count and
+       stopword-ratio bounds from the already-computed deterministic
+       metrics, (c) fail-closed (classify) when the heuristic is unsure.
+       Unit tests assert both directions: skipping "yes", "ok thanks",
+       "tell me more"; NOT skipping "please continue writing the debate
+       section". Wire the gate in `chat.ts:85` and `chat.ts:166` (both
+       `classifyAndPersistPromptDimensions` call sites) so the skip is a
+       `return` before the model call.
+- [ ] 10. **Validate and switch the classification model.** alex-moon
+       distrusts `allam-2-7b` for structured flags (it "may well not be"
+       a model we can trust to return JSON). Use the `DEEPINFRA_API_KEY`
+       on 142.93.42.191 (SSH access confirmed by alex-moon) to build a
+       small eval script (`scripts/`, throwaway is fine) that runs a
+       handful of representative prompts through candidate small models
+       (DeepInfra catalog; web search each candidate's structured-output
+       reputation first) and score parse rate against `parseLlmFlags`.
+       Pick the smallest/fastest model with a high parse rate, set it as
+       the default in `metricsService.ts:10`, and record the choice +
+       scores in this plan. Do not ship a switch without scores.
+
 ## Open questions
 
 Nothing depends on an open question; each has a chosen default that ships.
 
-- **Which model does the classification call use?** Implemented as
-  `ROUTER_GUARD_MODEL` (default `allam-2-7b`), mirroring `routerService`'s
-  guard path. Switching to `ROUTER_SMALL_MODEL` is a one-line env change; see
-  the guard-vs-small question below.
-- **Does the small/guard model reliably emit parseable flags?** We have no
-  structured-output precedent. Plan 5 assumes a plain completion parsed
-  defensively (`parseLlmFlags` in `metricsService.ts`, branch-extending from
-  the first `{`, independent per-flag degradation). If quality proves poor,
-  options: switch `metricsService` to `ROUTER_SMALL_MODEL` (one-line env
-  change), or add Groq `response_format` JSON mode (in-ticket scope, but
-  untested).
-- **Should assistant messages get LLM-classified?** Cost: one extra call
-  per assistant turn; benefit unclear (the router routes on user prompts).
-  Default: user-only, unless reviewers object.
-- **Guard vs small model default**: 5 flags in one call on the guard model
-  is untested. Fallback is nulls either way; switching is env-only.
 - **Which index the future router reads**: `sessionMessageIndex` (all
   roles) vs `sessionUserMessageIndex`. Both are stored; the consumer
   decides later — no data is lost under either interpretation.
+  alex-moon deferred, asking for filepaths/line numbers; those have been
+  posted on the issue. No planned task depends on the answer.
 - **Backfill of existing messages**: out of scope; issue only requires
   forward-going fills for new turns.
-
-## Open questions (from review pass on this branch)
-
-- **Skip classification for obviously short/simple prompts?** Routing's
-  tier-1 deterministic rules already identify short greetings/confirmations
-  cheaply; classifying them costs one extra Groq call per turn we get no
-  routing insight from. Default as shipped: always classify every user
-  message (metrics are analytical, so completeness wins). Could be gated on
-  `routingResult.reason` later if cost matters.
+- **NEW — How should DeepInfra enter the codebase, if at all?** Task 10
+  may select a DeepInfra model, which implies a second LLM client or a
+  base-url switch in `metricsService.ts`, plus a `DEEPINFRA_API_KEY` env
+  var in local/dev setup (the key exists only on the deploy host today).
+  Default for now: keep invoking through Groq unless the eval shows a
+  materially better DeepInfra model; if we switch, wire DeepInfra behind
+  the same env-var pattern Groq uses and stop — no shared-client
+  refactor. Influence of `DEEPINFRA_API_KEY` availability outside the
+  deploy host: classification falls back to nulls (current behavior).
+- **NEW — What counts as "reliable" for the model eval?** No precedent in
+  the repo for evaluating model output quality. Default: an informal
+  threshold (≥80% parse rate, no systematic flag bias) over ~20 prompts;
+  a stricter harness can replace it later if the router starts acting on
+  these flags (it does not yet — they are analytical data only).
 
 ## Implementation notes (from the critique pass)
 
