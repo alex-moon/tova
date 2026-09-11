@@ -60,6 +60,30 @@ describe('metricsService', () => {
       });
     });
 
+    it('skips a decoy JSON object and recovers the real flags after it', () => {
+      expect(
+        parseLlmFlags(
+          'Use the format {"example": {"x": 1}} when replying. Answer: {"emotional": true, "technical": false, "abstract": true, "sentiment": "neutral", "openEnded": false}',
+        ),
+      ).toEqual({
+        emotional: true,
+        technical: false,
+        abstract: true,
+        sentiment: 'neutral',
+        openEnded: false,
+      });
+    });
+
+    it('does not skip a partially decoy object that carries at least one valid flag', () => {
+      expect(parseLlmFlags('{"x": 1, "emotional": false}')).toEqual({
+        emotional: false,
+        technical: null,
+        abstract: null,
+        sentiment: null,
+        openEnded: null,
+      });
+    });
+
     it('returns nulls for non-JSON output', () => {
       expect(parseLlmFlags('definitely emotional, very technical')).toEqual(parseLlmFlags(null));
       expect(parseLlmFlags('no braces at all')).toEqual(parseLlmFlags(''));

@@ -266,6 +266,17 @@ Nothing depends on an open question; each has a chosen default that ships.
   posted on the issue. No planned task depends on the answer.
 - **Backfill of existing messages**: out of scope; issue only requires
   forward-going fills for new turns.
+- **NEW — Should the schema record _why_ `metrics.llm` is null?** A skipped
+  (trivially neutral) message and a failed/sentiment-less classification are
+  analytically indistinguishable in the persisted data — both keep
+  `metrics.llm` all-null. The plan previously claimed they are
+  "analytically distinguishable"; in the DB they are not (they are only
+  distinguishable by observing the Groq client, which no query can do).
+  Default shipped: no marker (smallest schema change for this ticket);
+  analysis can approximate by joining on the deterministic gate inputs
+  (word count ≤ 6, no question mark, no code). If exactacity matters for
+  #18 (feedback), add `metrics.llmSkipReason: 'trivial'` (or `llmSkipped`
+  boolean) at the skip call sites in `chat.ts` — a two-line schema change.
 - **NEW — How should DeepInfra enter the codebase, if at all?** Task 10
   may select a DeepInfra model, which implies a second LLM client or a
   base-url switch in `metricsService.ts`, plus a `DEEPINFRA_API_KEY` env
@@ -299,3 +310,11 @@ Nothing depends on an open question; each has a chosen default that ships.
   fragile (the classify call consumed queued `mockResolvedValueOnce` stream
   mocks), so `chat.stream.test.ts` mocks are now arg-aware (`stream`, or
   the classifier prompt) instead of queue-based.
+- Second critic pass (2026-09-11): `parseLlmFlags` no longer accepts the
+  first JSON object that merely _parses_ — a decoy object (e.g. a format
+  example echoed by the model) with none of the five expected keys is
+  skipped and scanning restarts at the next `{`, so decoy-before-real-flags
+  output no longer degrades to all nulls (unit tests added). Also fixed a
+  test flake source: `chat.stream.test.ts` fetched its messages _before_
+  `flush()` and asserted LLM flags on the stale pre-classification snapshot;
+  it now re-fetches after the flush. `npm run ci` green; suite at 77 tests.

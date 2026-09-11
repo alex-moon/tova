@@ -188,9 +188,13 @@ describe('Chat streaming prompt metrics', () => {
     });
     expect((await Session.findById(sessionId)) ?? null).not.toBeNull();
 
-    // User turn (not assistant) gets an LLM classification
+    // User turn (not assistant) gets an LLM classification. Re-fetch after
+    // the flush so the assertion cannot depend on stale pre-classification
+    // documents.
     await flush();
-    const [userMessage, assistantMessage] = persisted;
+    const [userMessage, assistantMessage] = await Message.find({ sessionId }).sort({
+      timestamp: 1,
+    });
     expect(userMessage.metrics?.llm).toEqual({
       emotional: true,
       technical: false,

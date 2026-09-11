@@ -45,28 +45,44 @@ const asBoolean = (value: unknown): boolean | null => (typeof value === 'boolean
 export const parseLlmFlags = (raw: string | null | undefined): LlmMetrics => {
   if (!raw) return NULL_LLM;
   const text = raw.replace(/```[a-z]*/gi, '');
-  const start = text.indexOf('{');
-  if (start === -1) return NULL_LLM;
-  // Extend from the first '{' to successive '}' until a chunk parses; this
-  // recovers output where the object sits between prose or trailing text.
-  for (let end = text.indexOf('}', start); end !== -1; end = text.indexOf('}', end + 1)) {
-    try {
-      const obj = JSON.parse(text.slice(start, end + 1)) as Record<string, unknown>;
-      if (obj && typeof obj === 'object' && !Array.isArray(obj)) {
-        return {
-          emotional: asBoolean(obj.emotional),
-          technical: asBoolean(obj.technical),
-          abstract: asBoolean(obj.abstract),
-          sentiment:
-            typeof obj.sentiment === 'string' && SENTIMENTS.has(obj.sentiment)
-              ? (obj.sentiment as LlmMetrics['sentiment'])
-              : null,
-          openEnded: asBoolean(obj.openEnded),
-        };
+  let start = text.indexOf('{');
+  while (start !== -1) {
+    // Extend from this '{' to successive '}' until a chunk parses; this
+    // recovers output where the object sits between prose or trailing text.
+    for (let end = text.indexOf('}', start); end !== -1; end = text.indexOf('}', end + 1)) {
+      try {
+        const obj = JSON.parse(text.slice(start, end + 1)) as Record<string, unknown>;
+        if (obj && typeof obj === 'object' && !Array.isArray(obj)) {
+          const parsed = {
+            emotional: asBoolean(obj.emotional),
+            technical: asBoolean(obj.technical),
+            abstract: asBoolean(obj.abstract),
+            sentiment:
+              typeof obj.sentiment === 'string' && SENTIMENTS.has(obj.sentiment)
+                ? (obj.sentiment as LlmMetrics['sentiment'])
+                : null,
+            openEnded: asBoolean(obj.openEnded),
+          };
+          // A *different* JSON object (prose example, deduped content) may
+          // parse before the real flags; a decoy carries none of the
+          // expected keys. Restart scanning after it so a decoy followed by
+          // the real flags is not misread as all-nulls.
+          if (
+            parsed.emotional === null &&
+            parsed.technical === null &&
+            parsed.abstract === null &&
+            parsed.sentiment === null &&
+            parsed.openEnded === null
+          ) {
+            break;
+          }
+          return parsed;
+        }
+      } catch {
+        // keep extending
       }
-    } catch {
-      // keep extending
     }
+    start = text.indexOf('{', start + 1);
   }
   return NULL_LLM;
 };
