@@ -57,6 +57,11 @@ Each question below is non-blocking: every checklist task proceeds under the sta
 - **Auth payload symmetry** (new, posted to issue): `/login` and `/register` return `{ id, email, role }` without `permissions`, while `/me` includes `permissions`. Should the server add `permissions` to login/register responses so one `AuthUser` type covers all three, or keep two payload types as planned? Defaulting to two types (no behavior change); posted on #20.
 - **Permission narrowing** (new, posted to issue): should `permissions` in shared contracts be typed as the known-permission union (e.g. `'routing'`) instead of `string[]`? Server-owned `KNOWN_PERMISSIONS` would need to become the single source (duplicating it in a shared file re-creates a drift site). Defaulting to `string[]` in this pass; posted on #20.
 - **Chat/SSE contract scope** (carried from plan, now posted to issue): whether `/api/chat` SSE/streaming payloads also get contract types in this pass. Defaulting to no — auth + admin only per the issue goal; posted on #20.
+- **Compile-time-only enforcement** (new, from hardening review 2026-09-11): shared contracts are plain TypeScript interfaces — nothing prevents the server from drifting at runtime (e.g. a returned field renamed but typed locally somewhere). Drift tests now pin `/login`, `/register`, `/me` and `/api/admin/users`, but each new endpoint needs a hand-written drift test. Should a runtime validator (e.g. zod schemas generated from / co-located with the contracts) become the follow-up enforcement mechanism instead? Defaulting to compile-time + drift tests for now.
+
+Review hardening (2026-09-11):
+
+- Found the auth payloads were the only contract members **without** a drift test (only `AdminUser` was pinned). Added `src/server/routes/auth.contracts.test.ts`: pins `/register`, `/login` payloads to the exact `LoginUserPayload` field set (`{ id, email, role }`) and `/me` to `AuthUser`, including type assertions. All pass; `npm run ci` green (86 tests).
 
 Resolved (moved out of open questions):
 
