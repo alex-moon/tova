@@ -26,6 +26,12 @@ jest.mock('../services/titleService', () => ({
   generateChatTitle: jest.fn().mockResolvedValue('Hello'),
 }));
 
+const mockWebSearch = jest.fn();
+
+jest.mock('../services/webSearchService', () => ({
+  webSearch: (...args: unknown[]) => mockWebSearch(...args),
+}));
+
 const MOCK_ROUTING = { model: 'mock-small-model', reason: 'deterministic-short' };
 
 const mockStream = (chunks: string[]) => {
@@ -129,6 +135,109 @@ describe('Chat streaming route', () => {
     });
     const session = await Session.findById(sessionId);
     expect(session).not.toBeNull();
+  });
+});
+
+describe('Chat streaming route web search tool loop', () => {
+  beforeEach(() => {
+    mockCreate.mockReset();
+    mockRouteQuery.mockReset().mockResolvedValue(MOCK_ROUTING);
+    mockWebSearch
+      .mockReset()
+      .mockResolvedValue([
+        { title: 'Brave result', snippet: 'fresh', url: 'https://example.com/fresh' },
+      ]);
+  });
+
+  const parseEvents = (text: string) =>
+    text
+      .split('\n\n')
+      .filter((part) => part.trim().length > 0)
+      .map((part) => {
+        const eventLine = part.split('\n').find((l) => l.startsWith('event: '));
+        const dataLine = part.split('\n').find((l) => l.startsWith('data: '));
+        return {
+          event: eventLine?.slice(7),
+          data: dataLine ? JSON.parse(dataLine.slice(6)) : undefined,
+        };
+      });
+
+  it('emits a status event, streams the final answer and persists sources when the tool is called', async () => {
+    const cookies = await registerUser('stream-tool@example.com');
+    mockCreate.mockImplementation(async (args?: { stream?: boolean; tools?: unknown[] }) => {
+      if (args?.stream) {
+        expect(args.tools).toBeUndefined();
+        return {
+          [Symbol.asyncIterator]: async function* () {
+            yield { choices: [{ delta: { content: 'Grounded ' } }] };
+            yield { choices: [{ delta: { content: 'answer.' } }] };
+          },
+        };
+      }
+      expect(args?.tools?.[0]).toMatchObject({ function: { name: 'web_search' } });
+      return {
+        choices: [
+          {
+            message: {
+              content: null,
+              tool_calls: [
+                {
+                  id: 'call-1',
+                  type: 'function',
+                  function: { name: 'web_search', arguments: '{"query":"groq news"}' },
+                },
+              ],
+            },
+          },
+        ],
+      };
+    });
+
+    const app = createApp();
+    const response = await request(app)
+      .post('/api/chat/stream')
+      .set('Cookie', cookies)
+      .send({ content: 'What is the latest Groq news?' });
+
+    expect(response.status).toBe(200);
+    const events = parseEvents(response.text);
+    expect(events.find((e) => e.event === 'status')?.data).toEqual({
+      message: 'Searching the web…',
+    });
+    const deltas = events.filter((e) => e.event === 'delta');
+    expect(deltas.map((e) => e.data.content).join('')).toBe('Grounded answer.');
+    const done = events.find((e) => e.event === 'done');
+    expect(done?.data?.message).toMatchObject({
+      role: 'assistant',
+      content: 'Grounded answer.',
+      sources: ['https://example.com/fresh'],
+    });
+
+    const sessionId = events.find((e) => e.event === 'meta')?.data?.sessionId;
+    const persisted = await Message.find({ sessionId }).sort({ timestamp: 1 });
+    expect(persisted).toHaveLength(2);
+    expect(persisted[1]?.sources).toEqual(['https://example.com/fresh']);
+  });
+
+  it('persists no sources and emits no status event when no tool call happens', async () => {
+    const cookies = await registerUser('stream-notool@example.com');
+    await mockStream(['chunk']);
+
+    const app = createApp();
+    const response = await request(app)
+      .post('/api/chat/stream')
+      .set('Cookie', cookies)
+      .send({ content: 'hello there' });
+
+    expect(response.status).toBe(200);
+    const events = parseEvents(response.text);
+    expect(events.find((e) => e.event === 'status')).toBeUndefined();
+    expect(events.find((e) => e.event === 'done')?.data?.message).toMatchObject({
+      role: 'assistant',
+      content: 'chunk',
+    });
+    const persisted = await Message.find().sort({ timestamp: -1 });
+    expect(persisted[0]?.sources).toBeUndefined();
   });
 });
 

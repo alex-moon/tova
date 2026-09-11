@@ -2,12 +2,17 @@ import { webSearch, type SearchResult } from './webSearchService';
 
 const consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
 
+const realFetch = global.fetch;
+
 afterAll(() => {
   consoleErrorSpy.mockRestore();
+  global.fetch = realFetch;
 });
 
 describe('Web Search Service', () => {
   const originalKey = process.env.BRAVE_API_KEY;
+
+  const originalSearchKey = process.env.BRAVE_SEARCH_API_KEY;
 
   beforeEach(() => {
     consoleErrorSpy.mockClear();
@@ -16,11 +21,13 @@ describe('Web Search Service', () => {
 
   afterAll(() => {
     process.env.BRAVE_API_KEY = originalKey;
+    process.env.BRAVE_SEARCH_API_KEY = originalSearchKey;
   });
 
   describe('cleans degradation when the key is unset', () => {
-    it('returns [] without calling the API when BRAVE_API_KEY is unset', async () => {
+    it('returns [] without calling the API when no key is set', async () => {
       delete process.env.BRAVE_API_KEY;
+      delete process.env.BRAVE_SEARCH_API_KEY;
       const fetchMock = jest.fn();
       global.fetch = fetchMock;
       await expect(webSearch('anything')).resolves.toEqual([]);
@@ -34,11 +41,28 @@ describe('Web Search Service', () => {
       await expect(webSearch('anything')).resolves.toEqual([]);
       expect(fetchMock).not.toHaveBeenCalled();
     });
+
+    it('falls back to BRAVE_SEARCH_API_KEY when BRAVE_API_KEY is unset', async () => {
+      delete process.env.BRAVE_API_KEY;
+      process.env.BRAVE_SEARCH_API_KEY = 'alt-key';
+      global.fetch = jest.fn().mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve({ web: { results: [] } }),
+      });
+      await expect(webSearch('q')).resolves.toEqual([]);
+      expect(global.fetch).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({
+          headers: expect.objectContaining({ 'X-Subscription-Token': 'alt-key' }),
+        }),
+      );
+    });
   });
 
   describe('with a key present', () => {
     beforeEach(() => {
       process.env.BRAVE_API_KEY = 'test-key';
+      delete process.env.BRAVE_SEARCH_API_KEY;
     });
 
     it('maps Brave web results to SearchResults', async () => {
@@ -110,6 +134,14 @@ describe('Web Search Service', () => {
 
     it('returns [] on network failure', async () => {
       global.fetch = jest.fn().mockRejectedValue(new Error('offline'));
+      await expect(webSearch('q')).resolves.toEqual([]);
+      expect(consoleErrorSpy).toHaveBeenCalled();
+    });
+
+    it('returns [] on a malformed JSON body instead of throwing', async () => {
+      global.fetch = jest
+        .fn()
+        .mockResolvedValue({ ok: true, json: () => Promise.reject(new Error('invalid JSON')) });
       await expect(webSearch('q')).resolves.toEqual([]);
       expect(consoleErrorSpy).toHaveBeenCalled();
     });

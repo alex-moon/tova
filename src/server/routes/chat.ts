@@ -1,4 +1,5 @@
 import express from 'express';
+import type Groq from 'groq-sdk';
 import { authenticate, AuthRequest } from '../middleware/auth';
 import { Session } from '../models/Session';
 import { Message } from '../models/Message';
@@ -6,6 +7,7 @@ import { routeQuery } from '../services/routerService';
 import { generateChatTitle } from '../services/titleService';
 import { hasPermission, ROUTING_PERMISSION } from '../services/userService';
 import { inferenceService } from '../services/inferenceService';
+import { runSearchStage } from '../services/toolLoopService';
 import { classifyAndPersistPromptDimensions, isTriviallyNeutral } from '../services/metricsService';
 import { computeDeterministicMetrics } from '../services/promptMetrics';
 
@@ -108,12 +110,22 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
       }));
     messages.unshift({ role: 'system', content: SYSTEM_PROMPT });
 
-    const chatCompletion = await inferenceService.createCompletion({
-      messages,
-      model: routingResult.model,
-    });
-
-    const assistantContent = chatCompletion.choices[0]?.message?.content || '';
+    // Bounded web-search loop (issue #16): one optional search round, then
+    // the answer. Sources are persisted on the assistant message for the
+    // frontend contract proposed in the plan doc.
+    let sources: string[] = [];
+    let assistantContent: string;
+    const stage = await runSearchStage(messages, routingResult.model);
+    if (stage.kind === 'tool-results') {
+      sources = stage.sources;
+      const completion = await inferenceService.createCompletion({
+        messages: stage.messages,
+        model: routingResult.model,
+      });
+      assistantContent = completion.choices[0]?.message?.content || '';
+    } else {
+      assistantContent = stage.content;
+    }
 
     // Save assistant message
     const assistantMessage = new Message({
@@ -121,6 +133,7 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
       role: 'assistant',
       content: assistantContent,
       modelName: routingResult.model,
+      ...(sources.length > 0 ? { sources } : {}),
       metrics: await buildMessageMetrics(String(session._id), assistantContent),
     });
     await assistantMessage.save();
@@ -189,25 +202,39 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
       res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
     };
 
-    sendEvent('meta', {
-      sessionId: session._id,
-      routing: routingResult,
-    });
-
-    let assistantContent = '';
-
-    try {
+    const streamOut = async (loopMessages: Groq.Chat.ChatCompletionMessageParam[]) => {
       const stream = await inferenceService.createStreamingCompletion({
-        messages,
+        messages: loopMessages,
         model: routingResult.model,
       });
-
       for await (const chunk of stream) {
         const delta = chunk.choices[0]?.delta?.content;
         if (delta) {
           assistantContent += delta;
           sendEvent('delta', { content: delta });
         }
+      }
+    };
+
+    sendEvent('meta', {
+      sessionId: session._id,
+      routing: routingResult,
+    });
+
+    let assistantContent = '';
+    let sources: string[] = [];
+
+    try {
+      // Bounded web-search loop (issue #16): the first round runs
+      // non-streaming with the tool attached so tool calls are detectable
+      // before the user-visible answer streams.
+      const stage = await runSearchStage(messages, routingResult.model);
+      if (stage.kind === 'tool-results') {
+        sources = stage.sources;
+        sendEvent('status', { message: 'Searching the web…' });
+        await streamOut(stage.messages);
+      } else {
+        await streamOut(messages);
       }
     } catch (err) {
       console.error('Groq streaming error:', err);
@@ -223,6 +250,7 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
       role: 'assistant',
       content: assistantContent,
       modelName: routingResult.model,
+      ...(sources.length > 0 ? { sources } : {}),
       metrics: await buildMessageMetrics(String(session._id), assistantContent),
     });
     await assistantMessage.save();

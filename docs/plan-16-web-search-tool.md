@@ -17,6 +17,11 @@ verification).
 
 ## Status check (confirmed from repo state, not just issue comments)
 
+**Update after hardening pass (see "Hardening review" below):** as of the
+review pass on this branch, steps 1–7 above are implemented and green; the
+status notes below describe the state before that pass and are kept for
+provenance.
+
 - Working tree clean, branch `feat/tv/16-web-search-tool` at `d2009b1`
   (plan-doc commits only; no implementation commits).
 - Full grep for `brave|webSearch|web_search` under `src/` (both server and
@@ -124,7 +129,17 @@ Each item is a single, self-contained commit:
 
 ## Open questions
 
-- **Mastra**: the issue says "implemented in Mastra", but the repo has no
+- **(New, from the hardening review) Double completion cost on the streaming
+  path**: the bounded loop always runs a non-streaming probe round with
+  `tools` attached before streaming, so every streamed turn is two Groq
+  round trips even when the model never searches. Acceptable now
+  (budget = 1); if #4 replaces this loop, consider only probing for
+  tool-capable models or letting the first round stream and detecting tool
+  calls mid-stream.
+- **(Resolved in code, still needs owner sign-off) Env var name**: code now
+  reads `BRAVE_API_KEY` first and falls back to `BRAVE_SEARCH_API_KEY`
+  (pinned by a unit test).
+  Earlier: the issue says "implemented in Mastra", but the repo has no
   agentic loop yet and one tool does not justify a framework. The plan uses a
   plain typed module; if the loop from #4 lands with Mastra, adapt then.
   Posted to the issue as a question (see below). Not blocking on this
@@ -166,3 +181,36 @@ Each item is a single, self-contained commit:
 - "Client SSE parser tolerates new event types" — worse than it sounds to
   assume; plan already specifies a runtime check and a comment-frame
   fallback.
+
+## Hardening review (critique of the branch as delivered)
+
+Findings from the review pass against `origin/main..HEAD`:
+
+1. **Delivery gap (found)**: commit `fd8052c` ("implement a deliverable")
+   contained only steps 1–2 (`.env.example`, `webSearchService`, unit
+   tests). The tool loop, SSE status event, and `sources` persistence —
+   the issue's actual acceptance path — were missing; `webSearch` was dead
+   code. All of steps 3–7 have now been implemented in-tree.
+2. **Env name mismatch (was a silent-disable bug)**: the delivered service
+   read only `BRAVE_API_KEY`, but the key in this environment is exposed as
+   `BRAVE_SEARCH_API_KEY` — the tool would have been silently disabled.
+   Fixed: both names are accepted; unit test pins the fallback.
+3. **Breakability verified**: a route-level test (chat permissions) mocked
+   the Groq client returning a raw streaming shape, and the initial
+   implementation crashed on `first.choices[0]` when `choices` is absent.
+   Fixed (`first.choices?.[0]`); the existing permissions test now locks
+   this in.
+4. **New tests added**: tool-round execution + `sources` persistence
+   (non-streaming path), no-tool-call path (no `sources`, single completion),
+   empty-search degradation, streaming path with `status` SSE event + exact
+   `streaming-create` call assertions, service fallback env name, malformed
+   JSON body handling, `global.fetch` teardown leak.
+5. **Live verification (step 6) done**: a real call against the Brave API
+   with the local key produced results in exactly the mapped shape
+   (`title`/`description` on `web.results[]`), confirming the documented
+   schema this repo's mapping assumes.
+6. **Client SSE check (step 5) verified by reading the parser**: the client
+   (`src/client/src/App.tsx`) splits on `\n\n`, finds `event:`/`data:`
+   lines, and silently ignores unknown event types — the new `status`
+   frame is safe (an in-UI "Searching the web…" hint remains future work
+   for the frontend ticket rendering `sources`).

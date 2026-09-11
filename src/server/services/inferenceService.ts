@@ -8,9 +8,10 @@ import Groq from 'groq-sdk';
  */
 export interface CompletionOptions {
   model: string;
-  messages: { role: 'system' | 'user' | 'assistant'; content: string }[];
+  messages: Groq.Chat.ChatCompletionMessageParam[];
   temperature?: number;
   max_tokens?: number;
+  tools?: Groq.Chat.ChatCompletionTool[];
 }
 
 export interface LlmConnector {

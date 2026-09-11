@@ -18,6 +18,10 @@ const messageSchema = new mongoose.Schema({
   modelName: {
     type: String,
   },
+  sources: {
+    type: [String],
+    default: undefined,
+  },
   timestamp: {
     type: Date,
     default: Date.now,

@@ -11,7 +11,10 @@ export interface SearchResult {
 // an empty list as "tool unavailable" and the chat turn must never fail
 // because of the search provider.
 export const webSearch = async (query: string): Promise<SearchResult[]> => {
-  const apiKey = process.env.BRAVE_API_KEY;
+  // The canonical name is BRAVE_API_KEY (.env.example), but this environment
+  // exposes the key as BRAVE_SEARCH_API_KEY; accept both so the tool is not
+  // silently disabled by a naming mismatch (issue #16, open question 2).
+  const apiKey = process.env.BRAVE_API_KEY || process.env.BRAVE_SEARCH_API_KEY;
   if (!apiKey) return [];
   try {
     const response = await fetch(`${BRAVE_ENDPOINT}?q=${encodeURIComponent(query)}`, {

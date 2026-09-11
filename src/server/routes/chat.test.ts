@@ -25,6 +25,12 @@ jest.mock('../services/titleService', () => ({
   generateChatTitle: jest.fn().mockResolvedValue('Hello'),
 }));
 
+const mockWebSearch = jest.fn();
+
+jest.mock('../services/webSearchService', () => ({
+  webSearch: (...args: unknown[]) => mockWebSearch(...args),
+}));
+
 const MOCK_ROUTING = { model: 'mock-small-model', reason: 'deterministic-short' };
 
 const registerUser = async (app: ReturnType<typeof createApp>, email: string) => {
@@ -58,6 +64,141 @@ describe('Chat route routing metadata', () => {
 
     const saved = await Message.exists({ role: 'assistant', modelName: 'mock-small-model' });
     expect(saved).toBeTruthy();
+  });
+});
+
+describe('Chat route web search tool loop', () => {
+  beforeEach(() => {
+    mockCreate.mockReset();
+    mockRouteQuery.mockReset().mockResolvedValue(MOCK_ROUTING);
+    mockWebSearch
+      .mockReset()
+      .mockResolvedValue([
+        { title: 'Brave result', snippet: 'fresh info', url: 'https://example.com/fresh' },
+      ]);
+  });
+
+  it('executes the tool round and persists the grounded answer with sources', async () => {
+    mockCreate.mockImplementation(
+      (args?: { tools?: unknown[]; messages?: { role: string; content: string }[] }) => {
+        if (isClassifierCall(args)) {
+          return { choices: [{ message: { content: CLASSIFIER_REPLY } }] };
+        }
+        const chatCallNumber = mockCreate.mock.calls.filter(
+          (c) => !isClassifierCall(c?.[0]),
+        ).length;
+        if (chatCallNumber === 1) {
+          expect(args?.tools?.[0]).toMatchObject({ function: { name: 'web_search' } });
+          return {
+            choices: [
+              {
+                message: {
+                  content: null,
+                  tool_calls: [
+                    {
+                      id: 'call-1',
+                      type: 'function',
+                      function: { name: 'web_search', arguments: '{"query":"groq news"}' },
+                    },
+                  ],
+                },
+              },
+            ],
+          };
+        }
+        return {
+          choices: [
+            {
+              message: {
+                content: 'Grounded answer citing [fresh info](https://example.com/fresh).',
+              },
+            },
+          ],
+        };
+      },
+    );
+
+    const app = createApp();
+    const cookies = await registerUser(app, 'search-nonstream@example.com');
+    const response = await request(app)
+      .post('/api/chat')
+      .set('Cookie', Array.isArray(cookies) ? cookies : [cookies])
+      .send({ content: 'What is the latest Groq news?' });
+
+    expect(response.status).toBe(200);
+    // A call must carry the tool result back to the model
+    const secondCallArgs = mockCreate.mock.calls
+      .map((c) => c[0])
+      .find((a) =>
+        (a as { messages?: { role: string }[] }).messages?.some((m) => m.role === 'tool'),
+      ) as { messages: { role: string }[] } | undefined;
+    expect(secondCallArgs?.messages).toEqual(
+      expect.arrayContaining([expect.objectContaining({ role: 'tool' })]),
+    );
+    expect(mockWebSearch).toHaveBeenCalledWith('groq news');
+
+    expect(response.body.message.sources).toEqual(['https://example.com/fresh']);
+    const saved = await Message.findOne({ role: 'assistant', sessionId: response.body.sessionId });
+    expect(saved?.sources).toEqual(['https://example.com/fresh']);
+    expect(saved?.content).toContain('Grounded answer');
+  });
+
+  it('persists no sources when the model answers without tool calls', async () => {
+    mockCreate.mockImplementation(
+      (args?: { tools?: unknown[]; messages?: { role: string; content: string }[] }) => {
+        if (isClassifierCall(args)) {
+          return { choices: [{ message: { content: CLASSIFIER_REPLY } }] };
+        }
+        expect(args?.tools?.[0]).toMatchObject({ function: { name: 'web_search' } });
+        return { choices: [{ message: { content: 'No search needed' } }] };
+      },
+    );
+
+    const app = createApp();
+    const cookies = await registerUser(app, 'search-noop@example.com');
+    const response = await request(app)
+      .post('/api/chat')
+      .set('Cookie', Array.isArray(cookies) ? cookies : [cookies])
+      .send({ content: 'Hello' });
+
+    expect(response.status).toBe(200);
+    expect(mockWebSearch).not.toHaveBeenCalled();
+    expect(response.body.message.sources).toBeUndefined();
+  });
+
+  it('degrades gracefully when the search returns no results', async () => {
+    mockWebSearch.mockResolvedValue([]);
+    mockCreate
+      .mockImplementationOnce(async () => ({
+        choices: [
+          {
+            message: {
+              content: null,
+              tool_calls: [
+                {
+                  id: 'call-1',
+                  type: 'function',
+                  function: { name: 'web_search', arguments: '{"query":"x"}' },
+                },
+              ],
+            },
+          },
+        ],
+      }))
+      .mockImplementationOnce(async () => ({
+        choices: [{ message: { content: 'Answered without results' } }],
+      }));
+
+    const app = createApp();
+    const cookies = await registerUser(app, 'search-empty@example.com');
+    const response = await request(app)
+      .post('/api/chat')
+      .set('Cookie', Array.isArray(cookies) ? cookies : [cookies])
+      .send({ content: 'Search something' });
+
+    expect(response.status).toBe(200);
+    expect(response.body.message.content).toBe('Answered without results');
+    expect(response.body.message.sources).toBeUndefined();
   });
 });
 
