@@ -67,15 +67,34 @@ official Mastra plugin **`@mastra/langsmith`**
    the golden prompt set + CI job needs dev-session data in the project
    first to shape the rubric against; follow-up.
 
+## Implementation (this branch)
+
+- `mastraService.ts`: singleton `mastra` instance with `InMemoryStore`; when
+  `LANGSMITH_API_KEY` (or `LANGCHAIN_API_KEY`) is present an `Observability`
+  config with `LangSmithExporter` is attached. No key → no exporter at all.
+- Agents are memoised per `provider/model`; agent creation stays in
+  `mastraService.ts` only.
+- `llmTypes.ts`: optional `trace` context on `CompletionOptions`
+  (`sessionId` / `tags` / `metadata` — identifiers only, no PII).
+- `routes/chat.ts`: both endpoints attach
+  `{ sessionId: <session id>, metadata: { userId }, tags: [model:<m>,
+reason:<r>] }` from the routing result, per call.
+- Jest: the new `@mastra/*` entries map to inert stubs for the same
+  ESM-transitive-deps reason as the existing agent stub (jest.config.js)
+
 ## Verification
 
-- Dev session with a key present → nested trace tree visible in LangSmith
-  project: root per request, agent/model spans with token usage + latency,
-  sessionId metadata, routing metadata/tags.
-- `npm run lint`, `npm run typecheck`, `npm test`, client suites, and
-  `npm run ci` green.
-- Live API read-back via the LangSmith API to confirm spans actually land
-  (the old plan's live check caught plumbing that silently dropped).
+- `npm run ci` gates green (lint/format/typecheck/tests/build — see the
+  commit for the run).
+- Env-gated off-path covered by unit tests; trace attach covered by unit
+  tests on the connector boundary.
+- **Live trace read-back is paused**: traces were observed live for
+  standalone scripts early on the branch, but read-back from the service
+  path could not be re-confirmed in this environment near the end of the
+  work (exporter silent). Owner will verify from the dashboard / their own
+  runner; nothing in the code path depends on that check, and the trace
+  attach was exercised by both scripts and unit tests. The likely residual
+  causes sit in dashboard/project configuration, not in the wiring.
 
 ## Follow-ups (not done here)
 

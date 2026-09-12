@@ -13,6 +13,19 @@
  */
 export type LlmProvider = 'groq' | 'deepinfra';
 
+/*
+ * LangSmith tracing context (issue #5): optional, attachable per call.
+ * `sessionId` groups traces per chat session in LangSmith, `tags` surface
+ * routing facts (`model:*` / `reason:*`), `metadata` carries identifiers
+ * only — never user content or PII. Empty/plaintext when the exporter is
+ * not configured: the fields are simply not exported anywhere.
+ */
+export interface TraceContext {
+  sessionId?: string;
+  tags?: string[];
+  metadata?: Record<string, unknown>;
+}
+
 export interface CompletionOptions {
   provider?: LlmProvider;
   model: string;
@@ -24,6 +37,7 @@ export interface CompletionOptions {
    * Optional: only the streaming call site supplies it today.
    */
   abortSignal?: AbortSignal;
+  trace?: TraceContext;
 }
 
 export interface NeutralCompletion {
