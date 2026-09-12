@@ -1,5 +1,9 @@
 module.exports = {
+  // tsconfig without rootDir so suites may import the scripts/ harness directly.
   preset: 'ts-jest',
+  transform: {
+    '^.+\\.tsx?$': ['ts-jest', { tsconfig: 'tsconfig.test.json' }],
+  },
   testEnvironment: 'node',
   roots: ['<rootDir>/src/server'],
   testMatch: ['**/*.test.ts'],
