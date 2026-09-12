@@ -2,6 +2,7 @@ import express from 'express';
 import mongoose from 'mongoose';
 import { User, UserDocument } from '../models/User';
 import { authenticate, requireRole, AuthRequest } from '../middleware/auth';
+import { AdminUser } from '../../shared/contracts';
 
 const router = express.Router();
 
@@ -14,14 +15,14 @@ const KNOWN_PERMISSIONS = ['routing'] as const;
 // move is a one-line change.
 export const PROTECTED_OWNER_EMAIL = 'formsatz@gmail.com';
 
-const toPublicUser = (user: UserDocument) => ({
+const toPublicUser = (user: UserDocument): AdminUser => ({
   id: user._id.toString(),
   email: user.email,
   role: user.role,
   permissions: user.permissions,
   hasGoogle: user.googleId != null,
-  createdAt: user.createdAt,
-  updatedAt: user.updatedAt,
+  createdAt: user.createdAt.toISOString(),
+  updatedAt: user.updatedAt.toISOString(),
 });
 
 const findUserOr404 = async (id: string, res: express.Response) => {

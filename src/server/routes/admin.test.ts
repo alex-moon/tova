@@ -193,4 +193,32 @@ describe('admin routes', () => {
     const res = await request(app).get('/api/auth/me').set('Cookie', cookie);
     expect(res.status).toBe(401);
   });
+
+  // Drift test for the shared contract (issue #20): the wire payload of
+  // GET /api/admin/users must type-match AdminUser field-for-field.
+  it('returns user payloads matching the shared AdminUser contract', async () => {
+    const app = createApp();
+    const cookie = await registerAdmin(app, 'contract-admin@example.com');
+    await registerUser(app, 'contract-member@example.com');
+
+    const res = await request(app).get('/api/admin/users').set('Cookie', cookie);
+    expect(res.status).toBe(200);
+    const listed: Record<string, unknown>[] = res.body;
+    expect(listed.length).toBeGreaterThan(0);
+
+    for (const user of listed) {
+      expect(Object.keys(user).sort()).toEqual(
+        ['id', 'email', 'role', 'permissions', 'hasGoogle', 'createdAt', 'updatedAt'].sort(),
+      );
+      expect(typeof user.id).toBe('string');
+      expect(typeof user.email).toBe('string');
+      expect(['user', 'admin']).toContain(user.role);
+      expect(Array.isArray(user.permissions)).toBe(true);
+      expect(typeof user.hasGoogle).toBe('boolean');
+      expect(typeof user.createdAt).toBe('string');
+      expect(isNaN(Date.parse(user.createdAt as string))).toBe(false);
+      expect(typeof user.updatedAt).toBe('string');
+      expect(isNaN(Date.parse(user.updatedAt as string))).toBe(false);
+    }
+  });
 });

@@ -15,6 +15,7 @@ export default defineConfig(({ mode }) => {
     resolve: {
       alias: {
         '@': path.resolve(__dirname, './src'),
+        '@shared': path.resolve(__dirname, '../shared'),
       },
     },
     server: {
@@ -24,11 +25,6 @@ export default defineConfig(({ mode }) => {
           changeOrigin: true,
         },
       },
-    },
-    preview: {
-      // The live stack serves the built app through `vite preview`
-      // (see src/client/Dockerfile); allow the production host.
-      allowedHosts: ['tova.ajmoon.com'],
     },
     test: {
       environment: 'jsdom',

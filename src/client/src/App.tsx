@@ -250,15 +250,29 @@ function App() {
   }
 
   return (
-    <main className="flex h-dvh w-full overflow-hidden">
+    <main className="relative flex h-dvh w-full overflow-hidden">
       {showAdminView && user.role === 'admin' ? (
         <>
-          <a href="/">Back to chat</a>
+          <div className="absolute right-4 top-4 z-10 flex flex-col items-start gap-2">
+            <a
+              href="/"
+              className="text-sm text-muted-foreground underline-offset-4 transition-colors hover:text-foreground hover:underline"
+            >
+              Back to chat
+            </a>
+          </div>
           <AdminView />
         </>
       ) : (
         <>
-          {user.role === 'admin' && <a href="/admin">Admin</a>}
+          {user.role === 'admin' && (
+            <a
+              href="/admin"
+              className="absolute right-4 top-4 z-10 rounded-lg border border-border bg-background px-3 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
+            >
+              Admin
+            </a>
+          )}
           <Sidebar
             sessions={sessions}
             activeSessionId={activeSessionId}

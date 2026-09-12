@@ -258,3 +258,25 @@ are hardening + documented behavior, and CI was re-run green after them
   bound to the server-confirmed message), and the existence-probe 404/403
   distinction on unknown message ids (auth-gated and consistent with the
   chat permission tests). No open questions raised here.
+
+## Re-implementation note (merge onto main, 2026-09-12)
+
+The Mastra rewrite (#4 merged) replaced the single small/large router with
+MongoDB tier-pool ε-routing, so the cross-tier flip design is superseded:
+
+- **Tiers stay fully rule/classifier-determined** — pools are tier-
+  partitioned; flipping cross-tier would be a layering violation on the new
+  router.
+- **Weighting now operates within the qualifying tier's pool**
+  (`orderPoolByFit` in `routerService.ts`): the pool is re-ordered by
+  empirical fit for the band (stable ties keep DB order).
+- **Strong evidence still overrides randomness**: when the leader's fit
+  ratio vs the pool's worst cell clears `FEEDBACK_FLIP_RATIO` (1.25), the
+  pick is forced to the leader even under the default even distribution;
+  otherwise the ε pick runs against the ordered pool.
+- The `;feedback-weight:<w>:<ups>/<downs>` reason suffix shape is
+  unchanged for LangSmith (#5) compatibility; it now surfaces the pool
+  leader's cell whenever the band has any tallies.
+- Everything else (routes, `feedback` subdoc, `routingBand` capture,
+  aggregation service, client thumbs, revote correction) merged as-is;
+  `npm run ci` fully green (152 server tests + client suites/build).

@@ -13,7 +13,15 @@ const messageSchema = new mongoose.Schema({
   },
   content: {
     type: String,
-    required: true,
+    /*
+     * Empty provider responses are persisted as '' (fail-visibility, #4 J);
+     * only undefined/null is invalid. `required: true` would also reject '',
+     * which forced a place-holder into the DB instead.
+     */
+    validate: {
+      validator: (v: unknown) => v !== null && v !== undefined,
+      message: 'Message content must be a string (empty string allowed)',
+    },
   },
   modelName: {
     type: String,

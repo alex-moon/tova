@@ -10,6 +10,7 @@ yarn-error.log*
 
 .vscode/*
 /.env
+/.env.live
 /.idea
 /dist
 # Playwright CLI output (may contain credentials)

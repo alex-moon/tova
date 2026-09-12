@@ -51,46 +51,66 @@ const AdminView = () => {
   }, [loadUsers]);
 
   return (
-    <div data-testid="admin-view">
-      <div>{error && <div data-testid="admin-error">{error}</div>}</div>
-      <table>
-        <thead>
-          <tr>
-            <th>Email</th>
-            <th>Role</th>
-            <th>Google</th>
-            <th>Permissions</th>
-            <th />
-          </tr>
-        </thead>
-        <tbody>
-          {users?.map((user) => (
-            <tr key={user.id}>
-              <td>{user.email}</td>
-              <td data-testid={`role-${user.email}`}>{user.role}</td>
-              <td>{user.hasGoogle ? 'yes' : 'no'}</td>
-              <td>
-                {KNOWN_PERMISSIONS.map((permission) => (
-                  <label key={permission} style={{ marginRight: '0.5rem' }}>
-                    <input
-                      type="checkbox"
-                      data-testid={`perm-${permission}-${user.email}`}
-                      checked={user.permissions.includes(permission)}
-                      onChange={() => togglePermission(user, permission)}
-                    />{' '}
-                    {permission}
-                  </label>
-                ))}
-              </td>
-              <td>
-                <button data-testid={`toggle-role-${user.email}`} onClick={() => toggleRole(user)}>
-                  {user.role === 'admin' ? 'Demote' : 'Promote'}
-                </button>
-              </td>
+    <div
+      data-testid="admin-view"
+      className="flex h-full w-full flex-col gap-6 overflow-y-auto bg-background p-6 text-foreground"
+    >
+      <h2 className="font-heading text-xl font-semibold">Admin</h2>
+      {!users && !error && <p className="text-sm text-muted-foreground">Loading users...</p>}
+      {error && (
+        <div
+          data-testid="admin-error"
+          className="rounded-lg border border-destructive bg-destructive/10 p-3 text-sm text-destructive"
+        >
+          {error}
+        </div>
+      )}
+      <div className="overflow-x-auto rounded-xl border border-border bg-card">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b border-border text-left text-muted-foreground">
+              <th className="px-4 py-3 font-medium">Email</th>
+              <th className="px-4 py-3 font-medium">Role</th>
+              <th className="px-4 py-3 font-medium">Google</th>
+              <th className="px-4 py-3 font-medium">Permissions</th>
+              <th className="px-4 py-3" />
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {users?.map((user) => (
+              <tr key={user.id} className="border-b border-border last:border-b-0">
+                <td className="px-4 py-3">{user.email}</td>
+                <td className="px-4 py-3" data-testid={`role-${user.email}`}>
+                  {user.role}
+                </td>
+                <td className="px-4 py-3 text-muted-foreground">{user.hasGoogle ? 'yes' : 'no'}</td>
+                <td className="px-4 py-3">
+                  {KNOWN_PERMISSIONS.map((permission) => (
+                    <label key={permission} className="mr-4 inline-flex items-center gap-1.5">
+                      <input
+                        type="checkbox"
+                        data-testid={`perm-${permission}-${user.email}`}
+                        checked={user.permissions.includes(permission)}
+                        onChange={() => togglePermission(user, permission)}
+                      />
+                      {permission}
+                    </label>
+                  ))}
+                </td>
+                <td className="px-4 py-3">
+                  <button
+                    data-testid={`toggle-role-${user.email}`}
+                    onClick={() => toggleRole(user)}
+                    className="rounded-lg border border-border px-3 py-1.5 text-sm transition-colors hover:bg-accent hover:text-accent-foreground"
+                  >
+                    {user.role === 'admin' ? 'Demote' : 'Promote'}
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 };

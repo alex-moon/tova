@@ -12,6 +12,21 @@ per `docs/workflow.md`.
 - Per-message prompt metrics: fixed as of this entry. Every new turn gets a `metrics` subdocument (deterministic for user + assistant; LLM-classified dimensions for user messages, fire-and-forget post-save). Inspect with:
   `npx tsx scripts/mongo.ts "await db.collection('messages').find({ 'metrics': { $exists: true, $ne: null } }).sort({ timestamp: -1 }).limit(3).toArray()"` — or filter for pending LLM classification with `{ 'metrics.llm': null, role: 'user' }`.
 
+7. **Plan 004/#4 — Mastra + DeepInfra + DB-based tier routing (complete).**
+   All LLM calls go through `mastraService` (sole `@mastra/*` importer) with
+   thin Groq/DeepInfra connectors behind `inferenceService`; tier pools live
+   in MongoDB (`providerRouting`, seeded from `ROUTER_*` envs once, DB
+   authoritative after); `routerService` picks ε-uniformly within a tier
+   (`ROUTER_EPSILON` default 1, one eligible model → deterministic, none →
+   throw). Live-provider smoke (keys in `.env`) caught and fixed two real
+   bugs: the stream mapper read a non-existent flat `delta` field (real
+   chunks are `{ payload: { text } }`), and upstream error chunks were
+   silently swallowed (now rethrown → SSE `error` event). Empty provider
+   responses persist `content: ''` (`Message.content` presence-validated);
+   the UI shows `(no content returned)`. Reasoning models on Groq spend
+   hidden reasoning tokens from `max_tokens` — `titleService` budget
+   raised 30 → 512 after live verification. `npm run ci` green.
+
 ## Delivery History (summary)
 
 1. **Plan 001 — Reconcile root tooling and doc status.** Aligned the documented workflow, root tooling, and runnable entry points.

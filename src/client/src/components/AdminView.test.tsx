@@ -37,8 +37,10 @@ describe('AdminView', () => {
 
   it('renders user rows from the admin API', async () => {
     render(<AdminView />);
+    expect(screen.getByText('Loading users...')).toBeInTheDocument();
     expect(await screen.findByText('someone@example.com')).toBeInTheDocument();
     expect(screen.getByTestId('role-someone@example.com')).toHaveTextContent('admin');
+    expect(screen.queryByText('Loading users...')).not.toBeInTheDocument();
   });
 
   it('toggles a permission checkbox off via the API and updates the row', async () => {

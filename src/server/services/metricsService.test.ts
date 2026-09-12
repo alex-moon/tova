@@ -1,20 +1,18 @@
 import { classifyPromptDimensions, isTriviallyNeutral, parseLlmFlags } from './metricsService';
 
-const mockCreate = jest.fn();
+const mockGenerate = jest.fn();
 
-jest.mock('groq-sdk', () => {
-  return jest.fn().mockImplementation(() => ({
-    chat: {
-      completions: {
-        create: (...args: unknown[]) => mockCreate(...args),
-      },
-    },
-  }));
+jest.mock('@mastra/core/agent', () => {
+  return {
+    Agent: jest.fn().mockImplementation(() => ({
+      generate: (...args: unknown[]) => mockGenerate(...args),
+    })),
+  };
 });
 
 describe('metricsService', () => {
   beforeEach(() => {
-    mockCreate.mockReset();
+    mockGenerate.mockReset();
   });
 
   describe('parseLlmFlags', () => {
@@ -114,15 +112,8 @@ describe('metricsService', () => {
 
   describe('classifyPromptDimensions', () => {
     it('parses the model response', async () => {
-      mockCreate.mockResolvedValueOnce({
-        choices: [
-          {
-            message: {
-              content:
-                '{"emotional": true, "technical": false, "abstract": false, "sentiment": "positive", "openEnded": true}',
-            },
-          },
-        ],
+      mockGenerate.mockResolvedValueOnce({
+        text: '{"emotional": true, "technical": false, "abstract": false, "sentiment": "positive", "openEnded": true}',
       });
       expect(await classifyPromptDimensions('hello')).toEqual({
         llm: {
@@ -137,7 +128,7 @@ describe('metricsService', () => {
     });
 
     it('reports skipReason error when the Groq call throws', async () => {
-      mockCreate.mockRejectedValueOnce(new Error('boom'));
+      mockGenerate.mockRejectedValueOnce(new Error('boom'));
       expect(await classifyPromptDimensions('hello')).toEqual({
         llm: parseLlmFlags(null),
         skipReason: 'error',
@@ -145,7 +136,7 @@ describe('metricsService', () => {
     });
 
     it('reports skipReason parse when the response shape is unexpected', async () => {
-      mockCreate.mockResolvedValueOnce({});
+      mockGenerate.mockResolvedValueOnce({});
       expect(await classifyPromptDimensions('hello')).toEqual({
         llm: parseLlmFlags(null),
         skipReason: 'parse',
@@ -153,8 +144,8 @@ describe('metricsService', () => {
     });
 
     it('reports skipReason parse when the output contains no JSON', async () => {
-      mockCreate.mockResolvedValueOnce({
-        choices: [{ message: { content: 'definitely emotional, very technical' } }],
+      mockGenerate.mockResolvedValueOnce({
+        text: 'definitely emotional, very technical',
       });
       expect(await classifyPromptDimensions('hello')).toEqual({
         llm: parseLlmFlags(null),

@@ -1,25 +1,33 @@
-import { routeQuery } from './routerService';
+import { pickModelRef, routeQuery } from './routerService';
+import { ModelRef } from './modelConfigService';
 import { FitWeight } from './modelMetricsStatsService';
 
+const groqSmall: ModelRef = { provider: 'groq', model: 'test-small-model' };
+const groqSmallAlt: ModelRef = { provider: 'groq', model: 'test-small-model-2' };
+const groqLarge: ModelRef = { provider: 'groq', model: 'test-large-model' };
+
 const TEST_CONFIG = {
-  smallModel: 'test-small-model',
-  largeModel: 'test-large-model',
+  small: [groqSmall],
+  large: [groqLarge],
   guardModel: 'test-guard-model',
 };
 
 const routeQueryWithCfg = (query: string) => routeQuery(query, TEST_CONFIG);
 
-const mockCreate = jest.fn();
+const mockGenerate = jest.fn();
 
-jest.mock('groq-sdk', () => {
-  return jest.fn().mockImplementation(() => ({
-    chat: {
-      completions: {
-        create: (...args: unknown[]) => mockCreate(...args),
-      },
-    },
-  }));
-});
+jest.mock('@mastra/core/agent', () => ({
+  Agent: jest.fn().mockImplementation(() => ({
+    generate: (...args: unknown[]) => mockGenerate(...args),
+  })),
+}));
+
+jest.mock('./modelConfigService', () => ({
+  listByTier: jest.fn(),
+}));
+const mockListByTier = jest.requireMock('./modelConfigService').listByTier as jest.Mock;
+
+const mockAgentCtor = jest.requireMock('@mastra/core/agent').Agent as jest.Mock;
 
 type Routing = Awaited<ReturnType<typeof routeQuery>>;
 
@@ -28,13 +36,11 @@ type Routing = Awaited<ReturnType<typeof routeQuery>>;
 const consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
 
 const classifyAs = (content: string, error = false) => {
-  mockCreate.mockReset();
+  mockGenerate.mockReset();
   if (error) {
-    mockCreate.mockRejectedValueOnce(new Error('classifier down'));
+    mockGenerate.mockRejectedValueOnce(new Error('classifier down'));
   } else {
-    mockCreate.mockResolvedValueOnce({
-      choices: [{ message: { content } }],
-    });
+    mockGenerate.mockResolvedValueOnce({ text: content });
   }
 };
 
@@ -89,14 +95,22 @@ describe('Router Service', () => {
       const result = await routeQueryWithCfg(
         'Explain the tradeoffs of event sourcing in distributed systems',
       );
-      expect(mockCreate).toHaveBeenCalledTimes(1);
-      expect(result).toEqual({ model: 'test-large-model', reason: 'classifier-complex' });
+      expect(mockGenerate).toHaveBeenCalledTimes(1);
+      expect(result).toEqual({
+        model: 'test-large-model',
+        reason: 'classifier-complex',
+        provider: 'groq',
+      });
     });
 
     it('should route queries classified as simple to the smaller model', async () => {
       classifyAs('simple');
       const result = await routeQueryWithCfg('Give me a one-line haiku about rain');
-      expect(result).toEqual({ model: 'test-small-model', reason: 'classifier-simple' });
+      expect(result).toEqual({
+        model: 'test-small-model',
+        reason: 'classifier-simple',
+        provider: 'groq',
+      });
     });
 
     it('should normalize classifier output when deciding', async () => {
@@ -108,7 +122,11 @@ describe('Router Service', () => {
     it('should fall back to the larger model when the classifier errors', async () => {
       classifyAs('', true);
       const result = await routeQueryWithCfg('Should I buy this car or that car?');
-      expect(result).toEqual({ model: 'test-large-model', reason: 'classifier-error' });
+      expect(result).toEqual({
+        model: 'test-large-model',
+        reason: 'classifier-error',
+        provider: 'groq',
+      });
       expect(consoleErrorSpy).toHaveBeenCalledWith(
         'Classifier error:',
         expect.objectContaining({ message: 'classifier down' }),
@@ -118,23 +136,110 @@ describe('Router Service', () => {
     it('should fall back to the smaller model on an unrecognized classification', async () => {
       classifyAs('unsure');
       const result = await routeQueryWithCfg('Tell me about classic cars');
-      expect(result).toEqual({ model: 'test-small-model', reason: 'classifier-simple' });
+      expect(result).toEqual({
+        model: 'test-small-model',
+        reason: 'classifier-simple',
+        provider: 'groq',
+      });
     });
 
     it('sends the query to the guard classifier', async () => {
       classifyAs('simple');
       await routeQueryWithCfg('Give me investment advice');
-      const [call] = mockCreate.mock.calls[0] as unknown as [
-        { model: string; temperature: number; messages: { role: string; content: string }[] },
+      const [messages, options] = mockGenerate.mock.calls[0] as unknown as [
+        { role: string; content: string }[],
+        { modelSettings: { temperature: number } },
       ];
-      expect(call.model).toBe('test-guard-model');
-      expect(call.temperature).toBe(0);
-      expect(call.messages[0].role).toBe('user');
-      expect(call.messages[0].content).toMatch(/simple|complex/i);
+      const ctorArgs = mockAgentCtor.mock.calls[mockAgentCtor.mock.calls.length - 1] as unknown[];
+      const ctorCall = (ctorArgs?.[0] ?? {}) as { model: string };
+      expect(ctorCall.model).toBe('groq/test-guard-model');
+      expect(options.modelSettings.temperature).toBe(0);
+      expect(messages[0].role).toBe('user');
+      expect(messages[0].content).toMatch(/simple|complex/i);
     });
   });
 
-  describe('Feedback weighting', () => {
+  describe('ε-random tier pools (#4 task 7)', () => {
+    const pool = (
+      models: ModelRef[],
+    ): { small: ModelRef[]; large: ModelRef[]; guardModel: string } => ({
+      small: models,
+      large: models,
+      guardModel: 'test-guard-model',
+    });
+
+    it('uses the single qualifying model deterministically', () => {
+      expect(pickModelRef([groqSmall], 'small', 1, () => 0)).toBe(groqSmall);
+      expect(pickModelRef([groqSmall], 'small', 1, () => 0.999)).toBe(groqSmall);
+    });
+
+    it('throws loudly when a tier has no eligible models (#4 G)', () => {
+      expect(() => pickModelRef([], 'small', 1, () => 0)).toThrow(
+        'No eligible models configured for tier: small',
+      );
+    });
+
+    it('picks uniformly at random within a multi-model pool (eps default 1)', () => {
+      const models = [groqSmall, groqLarge];
+      const a = pickModelRef(models, 'small', 1, () => 0);
+      const b = pickModelRef(models, 'small', 1, () => 0.49);
+      const c = pickModelRef(models, 'small', 1, () => 0.51);
+      expect(a).toBe(groqSmall);
+      expect(b).toBe(groqSmall);
+      expect(c).toBe(groqLarge);
+    });
+
+    it('exploits the first entry when the draw beats epsilon (eps < 1)', () => {
+      const models = [groqSmall, groqLarge];
+      // draw >= eps → exploit (first entry); draw < eps → explore (uniform,
+      // from an independent draw so the explore/index probabilities decouple).
+      expect(pickModelRef(models, 'small', 0.3, () => 0.31)).toBe(groqSmall);
+      // First draw 0.2 < eps=0.3 explores; second draw selects the second entry.
+      const draws = [0.2, 0.6];
+      let i = 0;
+      expect(pickModelRef(models, 'small', 0.3, () => draws[i++] ?? 0)).toBe(groqLarge);
+    });
+
+    it('is deterministic across eps=0', () => {
+      const models = [groqSmall, groqLarge];
+      expect(pickModelRef(models, 'small', 0, () => 0.99)).toBe(groqSmall);
+    });
+
+    it('routes a multi-model tier through the pool for a deterministic rule', async () => {
+      const result = await routeQuery(
+        'Hello',
+        pool([{ ...groqSmall }, { ...groqLarge }]),
+        () => 0.9,
+      );
+      expect(result).toEqual({
+        model: 'test-large-model',
+        reason: 'deterministic-short',
+        provider: 'groq',
+      });
+    });
+
+    it('records the picked provider from the pool, not a hard-coded groq', async () => {
+      // Non-trivial pool with a DeepInfra entry selected by the injected PRNG.
+      const result = await routeQuery(
+        'Hello',
+        pool([groqSmall, { provider: 'deepinfra', model: 'gemma-test' }]),
+        () => 0.9,
+      );
+      expect(result.model).toBe('gemma-test');
+      expect(result.provider).toBe('deepinfra');
+    });
+  });
+
+  describe('Feedback weighting (#18, re-implemented on tier pools)', () => {
+    const twoPool = (
+      small: ModelRef[] = [groqSmall],
+      large: ModelRef[] = [groqLarge, groqSmallAlt],
+    ): { small: ModelRef[]; large: ModelRef[]; guardModel: string } => ({
+      small,
+      large,
+      guardModel: 'test-guard-model',
+    });
+
     const emptyStat = (): FitWeight => ({ weight: 1, ups: 0, downs: 0 });
     const stat = (ups: number, downs: number): FitWeight => ({
       weight: (ups + 1) / (ups + downs + 2),
@@ -142,71 +247,50 @@ describe('Router Service', () => {
       downs,
     });
 
-    it('is a pure perturbation: empty stats keep the classifier decision intact', async () => {
-      classifyAs('simple');
-      const result = await routeQuery('Explain gravity briefly', TEST_CONFIG, {
-        band: 'short|prose',
-        getFitWeight: async () => emptyStat(),
-      });
-      expect(result).toEqual({ model: 'test-small-model', reason: 'classifier-simple' });
-    });
+    const randomAt = (value: number) => () => value;
 
-    it('kills the weight suffix when the band has no tallies', async () => {
+    it('is a pure perturbation: no tallies anywhere keeps ε behavior and no suffix', async () => {
       classifyAs('complex');
-      const result = await routeQuery('Design a caching strategy', TEST_CONFIG, {
+      const result = await routeQuery('Design a caching strategy', twoPool(), randomAt(0.1), {
         band: 'medium|code',
         getFitWeight: async () => emptyStat(),
       });
+      expect(result.model).toBe('test-large-model');
       expect(result.reason).toBe('classifier-complex');
     });
 
-    it('flips simple→large when feedback favors the large model on the band', async () => {
-      classifyAs('simple');
-      const result = await routeQuery('Give me a one-line haiku about rain', TEST_CONFIG, {
-        band: 'medium|prose',
-        getFitWeight: async (band, model) =>
-          band === 'medium|prose' && model === 'test-large-model' ? stat(12, 2) : stat(0, 12),
-      });
-      expect(result.model).toBe('test-large-model');
-      expect(result.reason).toContain('classifier-simple');
-      expect(result.reason).toContain(';feedback-weight:');
-    });
-
-    it('flips complex→small when feedback strongly favors the small model on the band', async () => {
+    it('forces the best-fit pool entry when the leader ratio clears the flip ratio', async () => {
       classifyAs('complex');
-      const result = await routeQuery('Explain event sourcing tradeoffs', TEST_CONFIG, {
-        band: 'long|prose',
-        getFitWeight: async (band, model) =>
-          band === 'long|prose' && model === 'test-small-model' ? stat(12, 2) : stat(0, 12),
-      });
-      expect(result.model).toBe('test-small-model');
+      // Large pool: classifier-pick candidate has heavily negative data, the
+      // rival cell is strongly positive → forced onto the rival.
+      const result = await routeQuery(
+        'Explain event sourcing tradeoffs',
+        twoPool([groqSmall], [groqLarge, groqSmallAlt]),
+        randomAt(0.9),
+        {
+          band: 'long|prose',
+          getFitWeight: async (_band, model) =>
+            model === 'test-small-model-2' ? stat(12, 2) : stat(0, 12),
+        },
+      );
+      expect(result.model).toBe('test-small-model-2');
       expect(result.reason).toContain('classifier-complex');
       expect(result.reason).toContain(';feedback-weight:');
     });
 
-    it('flips to an empty rival cell when the chosen cell is strongly negative', async () => {
-      // Deliberate edge: the chosen model has ≥ MIN_SAMPLE tallies and a very
-      // lopsided down ratio, the rival has no data (neutral weight 1.0).
-      // "Rival can't be worse" wins — documented so this is not accidental.
-      classifyAs('simple');
-      const result = await routeQuery('Give me a one-line haiku about rain', TEST_CONFIG, {
-        band: 'long|prose',
+    it('does not force a flip when the evidence is under the ratio', async () => {
+      classifyAs('complex');
+      // Leader (neutral empty cell, weight 1) vs 3/0 fit (weight 0.67):
+      // ratio 1.5 ≥ 1.25 would force — set the leader score lower instead.
+      const result = await routeQuery('Design a caching strategy', twoPool(), randomAt(0.9), {
+        band: 'medium|code',
         getFitWeight: async (_band, model) =>
-          model === 'test-small-model' ? stat(0, 5) : emptyStat(),
+          model === 'test-small-model-2' ? stat(3, 0) : emptyStat(),
       });
       expect(result.model).toBe('test-large-model');
+      // No flip, but the leader's tallies still surface in the reason.
+      expect(result.reason).toContain('classifier-complex');
       expect(result.reason).toContain(';feedback-weight:1.00:0/0');
-    });
-
-    it('does not flip on lopsided votes under the ratio', async () => {
-      classifyAs('simple');
-      const result = await routeQuery('What is the capital of France?', TEST_CONFIG, {
-        band: 'medium|prose',
-        getFitWeight: async (band, model) =>
-          band === 'medium|prose' && model === 'test-large-model' ? stat(3, 0) : emptyStat(),
-      });
-      expect(result.model).toBe('test-small-model');
-      expect(result.reason).toContain('classifier-simple');
     });
 
     it('leaves deterministic rules and classifier-error untouched by feedback', async () => {
@@ -215,19 +299,47 @@ describe('Router Service', () => {
       const code = await routeQueryWithCfg('write code');
       expect(code.reason).toBe('deterministic-code');
       classifyAs('', true);
-      const errored = await routeQuery('Should I buy this or that car?', TEST_CONFIG, {
-        band: 'medium|prose',
-        getFitWeight: async () => stat(20, 0),
-      });
+      const errored = await routeQuery(
+        'Should I buy this or that car?',
+        twoPool([groqSmall], [groqLarge, groqSmallAlt]),
+        randomAt(0.9),
+        { band: 'medium|prose', getFitWeight: async () => stat(20, 0) },
+      );
       expect(errored.reason).toBe('classifier-error');
     });
 
     it('still works when no band is supplied', async () => {
       classifyAs('simple');
-      const result = await routeQuery('Give me investment advice now', TEST_CONFIG, {
+      const result = await routeQuery('Give me investment advice now', TEST_CONFIG, randomAt(0.5), {
         getFitWeight: async () => emptyStat(),
       });
-      expect(result).toEqual({ model: 'test-small-model', reason: 'classifier-simple' });
+      expect(result).toEqual({
+        model: 'test-small-model',
+        reason: 'classifier-simple',
+        provider: 'groq',
+      });
+    });
+  });
+
+  describe('DB-config routing (#4 task 7)', () => {
+    it('resolves tier pools from modelConfigService when no config is passed', async () => {
+      mockListByTier.mockImplementation(async (tier: string) =>
+        tier === 'small'
+          ? [groqSmall, { provider: 'deepinfra', model: 'gemma-test' }]
+          : [groqLarge],
+      );
+      classifyAs('simple');
+      const result = await routeQuery('Tell me about classic cars', null, () => 0.9);
+      expect(mockListByTier).toHaveBeenCalledWith('small');
+      expect(mockListByTier).toHaveBeenCalledWith('large');
+      expect(result.model).toBe('gemma-test');
+      expect(result.reason).toBe('classifier-simple');
+      expect(result.provider).toBe('deepinfra');
+    });
+
+    it('fails loudly when the DB-config tier resolves empty (#4 G)', async () => {
+      mockListByTier.mockResolvedValue([]);
+      await expect(routeQuery('Hello')).rejects.toThrow('No eligible models configured for tier');
     });
   });
 
@@ -246,10 +358,11 @@ describe('Router Service', () => {
         })(),
       ];
       const results = await Promise.all(cases);
-      for (const { model, reason } of results) {
-        expect(model).toMatch(/^test-(small|large)-model$/);
+      for (const { model, reason, provider } of results) {
+        expect(model).toMatch(/^test-(small|large)-model(-2)?$/);
         expect(typeof reason).toBe('string');
         expect(reason.length).toBeGreaterThan(0);
+        expect(provider).toBe('groq');
       }
     });
   });
