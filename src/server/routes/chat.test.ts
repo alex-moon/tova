@@ -99,6 +99,62 @@ describe('Chat route routing metadata', () => {
     ];
     expect(ctorCall[0].model).toBe('deepinfra/Qwen/Qwen2.5-72B-Instruct');
   });
+
+  it('persists deduped sources when the agent ran web_search (#16)', async () => {
+    // The fire-and-forget classifier also calls generate; only the chat
+    // completion may carry the tool results.
+    mockGenerate.mockImplementation(async (messages?: { role: string; content: string }[]) => {
+      if (isClassifierCall({ messages })) {
+        return { text: CLASSIFIER_REPLY };
+      }
+      return {
+        text: 'Grounded answer',
+        toolResults: [
+          {
+            name: 'web_search',
+            result: {
+              results: [{ url: 'https://a.example.com' }, { url: 'https://b.example.com' }],
+            },
+          },
+          {
+            name: 'web_search',
+            result: {
+              results: [{ url: 'https://a.example.com' }, { url: 'https://c.example.com' }],
+            },
+          },
+        ],
+      };
+    });
+    const app = createApp();
+    const cookies = await registerUser(app, 'search-sources@example.com');
+
+    const response = await request(app)
+      .post('/api/chat')
+      .set('Cookie', Array.isArray(cookies) ? cookies : [cookies])
+      .send({ content: 'Requires current info' });
+
+    expect(response.status).toBe(200);
+    const saved = await Message.findOne({ role: 'assistant' });
+    expect(saved?.sources).toEqual([
+      'https://a.example.com',
+      'https://b.example.com',
+      'https://c.example.com',
+    ]);
+  });
+
+  it('omits sources on a tool-free turn', async () => {
+    const app = createApp();
+    const cookies = await registerUser(app, 'search-none@example.com');
+
+    const response = await request(app)
+      .post('/api/chat')
+      .set('Cookie', Array.isArray(cookies) ? cookies : [cookies])
+      .send({ content: 'Hello' });
+
+    expect(response.status).toBe(200);
+    const saved = await Message.findOne({ role: 'assistant' });
+    expect(saved?.sources).toBeUndefined();
+  });
 });
 
 const CLASSIFIER_REPLY =

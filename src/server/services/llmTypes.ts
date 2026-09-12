@@ -46,10 +46,20 @@ export interface NeutralCompletion {
       content?: string | null;
     };
   }>;
+  /**
+   * Web search tool (issue #16): every completed tool call on this response,
+   * with the tool's own structured result. `result` is provider-shape-agnostic;
+   * the `web_search` tool returns `{ results: { title, snippet, url }[] }`.
+   */
+  toolResults?: Array<{ name: string; result: unknown }>;
 }
 
 export interface NeutralStreamChunk {
   delta?: string | null;
+  /** Emitted when the agent decides to call a tool (e.g. `web_search`). */
+  toolCall?: { name: string };
+  /** Emitted when a tool finishes executing, carrying its structured result. */
+  toolResult?: { name: string; result: unknown };
 }
 
 export type NeutralChunkStream = AsyncIterable<NeutralStreamChunk>;
