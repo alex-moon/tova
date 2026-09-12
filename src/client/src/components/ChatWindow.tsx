@@ -3,15 +3,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeRaw from 'rehype-raw';
 import rehypeSanitize from 'rehype-sanitize';
-import {
-  Check,
-  ChevronDown,
-  ExternalLink,
-  Menu,
-  Send,
-  ThumbsDown,
-  ThumbsUp,
-} from 'lucide-react';
+import { Check, ChevronDown, ExternalLink, Menu, Send, ThumbsDown, ThumbsUp } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import type { Message, ToolEvent } from '../App';
 
@@ -112,11 +104,7 @@ const SourcesBlock: React.FC<{ message: Message }> = ({ message }) => {
       <div className="mb-1 text-xs font-medium uppercase tracking-wide">Sources</div>
       <ul className="space-y-1">
         {urls.map((url) => (
-          <SourceItem
-            key={url}
-            url={url}
-            title={titles.find((t) => t.url === url)?.title}
-          />
+          <SourceItem key={url} url={url} title={titles.find((t) => t.url === url)?.title} />
         ))}
       </ul>
     </div>
@@ -159,12 +147,17 @@ const ToolChip: React.FC<{ event: ToolEvent }> = ({ event }) => {
         <span className="truncate">
           {event.label}
           {event.query ? ` “${event.query}”` : ''}
-          {event.phase === 'result' && event.resultCount != null ? ` — ${event.resultCount} results` : ''}
+          {event.phase === 'result' && event.resultCount != null
+            ? ` — ${event.resultCount} results`
+            : ''}
         </span>
         {detail && <ChevronDown size={12} aria-hidden />}
       </button>
       {open && detail && (
-        <span data-testid="tool-detail" className="ml-1.5 self-center text-xs text-muted-foreground">
+        <span
+          data-testid="tool-detail"
+          className="ml-1.5 self-center text-xs text-muted-foreground"
+        >
           {detail}
         </span>
       )}
@@ -245,7 +238,8 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
 
   React.useEffect(() => {
     if (pinnedRef.current) {
-      scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
+      const el = scrollRef.current;
+      if (el) el.scrollTop = el.scrollHeight;
     }
   }, [messages, isLoading]);
 
@@ -308,7 +302,11 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
           <h1 className="font-heading text-lg font-semibold">Tova</h1>
         </div>
       </header>
-      <div ref={scrollRef} onScroll={handleScroll} className="flex flex-1 flex-col overflow-y-auto px-3 py-4 md:px-6 md:py-6">
+      <div
+        ref={scrollRef}
+        onScroll={handleScroll}
+        className="flex flex-1 flex-col overflow-y-auto px-3 py-4 md:px-6 md:py-6"
+      >
         {messages.length === 0 && !isLoading && (
           <div className="animate-message-in mx-auto my-auto max-w-full text-center">
             <h1 className="font-heading text-3xl font-semibold text-foreground md:text-4xl">
@@ -429,7 +427,11 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
                 />
               ))}
             </div>
-            {pendingTools.length > 0 && <div className="px-4 pt-2 md:px-5">{<ToolChips message={{ tools: pendingTools } as Message} />}</div>}
+            {pendingTools.length > 0 && (
+              <div className="px-4 pt-2 md:px-5">
+                {<ToolChips message={{ tools: pendingTools } as Message} />}
+              </div>
+            )}
           </div>
         )}
       </div>

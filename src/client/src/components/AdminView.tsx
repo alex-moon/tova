@@ -58,7 +58,7 @@ const AdminView = () => {
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     loadUsers();
-    // eslint-disable-next-line react-hooks/set-state-in-effect
+
     loadModels();
   }, [loadUsers, loadModels]);
 
@@ -124,8 +124,13 @@ const AdminView = () => {
         </table>
       </div>
       <h3 className="font-heading text-lg font-semibold">Models</h3>
-      <p className="-mt-4 text-xs text-muted-foreground">Read-only (issue #33) — routing bands and feedback tallies.</p>
-      <div data-testid="admin-models" className="overflow-x-auto rounded-xl border border-border bg-card">
+      <p className="-mt-4 text-xs text-muted-foreground">
+        Read-only (issue #33) — routing bands and feedback tallies.
+      </p>
+      <div
+        data-testid="admin-models"
+        className="overflow-x-auto rounded-xl border border-border bg-card"
+      >
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-border text-left text-muted-foreground">
@@ -146,9 +151,7 @@ const AdminView = () => {
                 <td className="px-4 py-3 text-muted-foreground">
                   {model.stats.length === 0
                     ? '—'
-                    : model.stats
-                        .map((s) => `${s.band}: ${s.up}↑ ${s.down}↓`)
-                        .join(' · ')}
+                    : model.stats.map((s) => `${s.band}: ${s.up}↑ ${s.down}↓`).join(' · ')}
                 </td>
               </tr>
             ))}

@@ -113,20 +113,17 @@ const toNeutralStream = async (fullStream: AsyncIterable<unknown>): Promise<Neut
       // provenance without knowing Mastra's shapes. Only `web_search` calls
       // flow here, but the mapping stays tool-name-agnostic.
       if (chunk?.type === 'tool-call') {
-        const args =
-          chunk.payload?.input ?? chunk.payload?.args ?? undefined;
+        const rawArgs = chunk.payload?.input ?? chunk.payload?.args ?? undefined;
+        const scalarArgs =
+          rawArgs && typeof rawArgs === 'object' && !Array.isArray(rawArgs)
+            ? Object.entries(rawArgs as Record<string, unknown>).filter(
+                ([, v]) => typeof v === 'string' || typeof v === 'number',
+              )
+            : [];
         yield {
           toolCall: {
             name: chunk.payload?.toolName ?? '',
-            ...(args && typeof args === 'object' && !Array.isArray(args)
-              ? {
-                  args: Object.fromEntries(
-                    Object.entries(args as Record<string, unknown>).filter(
-                      ([, v]) => typeof v === 'string' || typeof v === 'number',
-                    ),
-                  ),
-                }
-              : {}),
+            ...(scalarArgs.length > 0 ? { args: Object.fromEntries(scalarArgs) } : {}),
           },
         };
       }

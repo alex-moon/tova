@@ -7,6 +7,7 @@ import type { AdminUser } from '../types/admin';
 const listUsers = vi.fn();
 const updatePermissions = vi.fn();
 const updateRole = vi.fn();
+const listModels = vi.fn();
 
 vi.mock('../services/admin', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../services/admin')>();
@@ -17,6 +18,7 @@ vi.mock('../services/admin', async (importOriginal) => {
       updatePermissions: (...args: unknown[]) => updatePermissions(...args),
       updateRole: (...args: unknown[]) => updateRole(...args),
     },
+    AdminModelsService: { listModels: (...args: unknown[]) => listModels(...args) },
   };
 });
 
@@ -35,6 +37,7 @@ describe('AdminView', () => {
 
   beforeEach(() => {
     listUsers.mockReset().mockResolvedValue([admin()]);
+    listModels.mockReset().mockResolvedValue([]);
     updatePermissions.mockReset();
     updateRole.mockReset();
   });
@@ -79,5 +82,40 @@ describe('AdminView', () => {
     render(<AdminView />);
     fireEvent.click(await screen.findByTestId('toggle-role-someone@example.com'));
     expect(await screen.findByTestId('admin-error')).toHaveTextContent('Failed to update role.');
+  });
+});
+
+describe('AdminView models table (issue #33)', () => {
+  afterEach(cleanup);
+
+  beforeEach(() => {
+    listUsers.mockReset().mockResolvedValue([admin()]);
+    updatePermissions.mockReset().mockResolvedValue(admin());
+    updateRole.mockReset().mockResolvedValue(admin());
+  });
+
+  it('renders configured models as a read-only table', async () => {
+    listModels.mockResolvedValue([
+      {
+        id: 'groq/test-large',
+        provider: 'groq',
+        model: 'test-large',
+        tiers: ['large', 'guard'],
+        stats: [{ band: 'short|prose', up: 3, down: 1 }],
+      },
+    ]);
+    render(<AdminView />);
+    expect(await screen.findByTestId('admin-view')).toBeInTheDocument();
+    expect(screen.getByTestId('admin-models')).toBeInTheDocument();
+    expect(screen.getByTestId('admin-model-groq/test-large')).toHaveTextContent('test-large');
+    expect(screen.getByTestId('admin-models')).toHaveTextContent('large, guard');
+    expect(screen.getByTestId('admin-models')).toHaveTextContent('short|prose: 3↑ 1↓');
+    expect(screen.queryByText('Loading users...')).not.toBeInTheDocument();
+  });
+
+  it('shows an empty state when no models are configured', async () => {
+    listModels.mockResolvedValue([]);
+    render(<AdminView />);
+    expect(await screen.findByText('No models configured.')).toBeInTheDocument();
   });
 });

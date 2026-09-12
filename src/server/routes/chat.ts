@@ -21,12 +21,12 @@ const NO_ROUTING_PERMISSION = "You don't have permission to use the model router
 // skipped, never fatal — the search enriches the turn but must not fail it.
 // Per-source page titles are captured alongside the URL (issue #33) so the
 // client's sources block can label links with real titles.
-interface SourceTitle {
-  url: string;
-  title: string;
-}
 
-const collectSourcesInto = (sourceList: string[], toolResult: unknown, titles?: Map<string, string>): string[] => {
+const collectSourcesInto = (
+  sourceList: string[],
+  toolResult: unknown,
+  titles?: Map<string, string>,
+): string[] => {
   const items = Array.isArray((toolResult as { results?: unknown })?.results)
     ? (toolResult as { results: unknown[] }).results
     : [];

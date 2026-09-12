@@ -43,6 +43,7 @@ const messageSchema = new mongoose.Schema({
   sourceTitles: {
     type: [
       {
+        _id: false,
         url: String,
         title: String,
       },
