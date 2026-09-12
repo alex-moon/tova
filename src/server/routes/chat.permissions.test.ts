@@ -55,7 +55,7 @@ describe('chat route routing permission guard', () => {
     await User.updateOne({ email: 'has-routing@example.com' }, { permissions: ['routing'] });
     mockAgentStream.mockResolvedValue({
       fullStream: (async function* () {
-        yield { type: 'text-delta', delta: 'hi' };
+        yield { type: 'text-delta', payload: { text: 'hi' } };
       })(),
     });
 

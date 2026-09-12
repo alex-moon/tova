@@ -34,7 +34,7 @@ const isClassifierCall = (args?: { messages?: { role: string; content: string }[
 const fullStreamFrom = (chunks: string[]) =>
   (async function* () {
     for (const chunk of chunks) {
-      yield { type: 'text-delta', delta: chunk };
+      yield { type: 'text-delta', payload: { text: chunk } };
     }
   })();
 
@@ -146,16 +146,15 @@ describe('Chat streaming route', () => {
     expect(options.abortSignal.aborted).toBe(false);
   });
 
-  it('emits no delta event and persists a place-holder turn for empty-string deltas', async () => {
+  it('emits no delta event and persists an empty-content turn for empty-string deltas', async () => {
     // The stream consumer skips falsy deltas (`if (delta)`): an
     // empty-string text-delta must not surface as an SSE `delta` event, and
     // an all-empty stream must still send `done` and persist an assistant
-    // message (content is a required field — regression: this used to throw
-    // at save time and silently end the stream after `meta`).
+    // message with content: '' (#4 J) — the UI shows the placeholder.
     const cookies = await registerUser('stream-empty-delta@example.com');
     mockAgentStream.mockImplementation(async () => ({
       fullStream: (async function* () {
-        yield { type: 'text-delta', delta: '' };
+        yield { type: 'text-delta', payload: { text: '' } };
       })(),
     }));
 
@@ -173,7 +172,7 @@ describe('Chat streaming route', () => {
       role: 'assistant',
       modelName: 'mock-small-model',
     });
-    expect(persisted?.content).toBe('(no content returned)');
+    expect(persisted?.content).toBe('');
   });
 });
 

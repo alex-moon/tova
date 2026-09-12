@@ -111,7 +111,7 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
       .reverse()
       .map((m) => ({
         role: m.role as 'user' | 'assistant',
-        content: m.content,
+        content: m.content as string,
       }));
     messages.unshift({ role: 'system', content: SYSTEM_PROMPT });
 
@@ -122,9 +122,9 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
       abortSignal: abortController.signal,
     });
 
-    // Same required-content guard as the streaming route: an empty provider
-    // response must still persist and return a turn, not a 500.
-    const assistantContent = chatCompletion.choices[0]?.message?.content || '(no content returned)';
+    // Empty provider responses persist as '' (fail-visibility, #4 J); the
+    // UI presents the '(no content returned)' placeholder.
+    const assistantContent = chatCompletion.choices[0]?.message?.content ?? '';
 
     // Save assistant message
     const assistantMessage = new Message({
@@ -185,7 +185,7 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
       .reverse()
       .map((m) => ({
         role: m.role as 'user' | 'assistant',
-        content: m.content,
+        content: m.content as string,
       }));
     messages.unshift({ role: 'system', content: SYSTEM_PROMPT });
 
@@ -238,14 +238,13 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
       return;
     }
 
-    // Save assistant message (persist shipped prompt history semantics). A
-    // provider stream that yields no (or only empty) deltas still persists a
-    // turn: `Message.content` is required, so fall back to a place-holder
-    // rather than letting the save throw and silently drop the `done` event.
+    // Save assistant message. A provider stream that yields no (or only
+    // empty) deltas still persists a turn with content: '' — the empty
+    // response stays visible as '(no content returned)' in the UI (#4 J).
     const assistantMessage = new Message({
       sessionId: session._id,
       role: 'assistant',
-      content: assistantContent || '(no content returned)',
+      content: assistantContent,
       modelName: routingResult.model,
       metrics: await buildMessageMetrics(String(session._id), assistantContent),
     });

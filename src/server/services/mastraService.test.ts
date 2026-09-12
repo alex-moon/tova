@@ -110,18 +110,29 @@ describe('Mastra service neutral mapping', () => {
     });
   });
 
-  describe('createStreamingCompletion (delta mapping)', () => {
-    const fullStreamFrom = (chunks: unknown[]) =>
-      (async function* () {
-        for (const chunk of chunks) yield chunk;
-      })();
+  /*
+   * Chunk shapes mirror what real endpoints produce on `@mastra/core@1.66.0`
+   * (verified live 2026-09-12): content nested in `payload`, errors as chunks.
+   */
 
+  const deltaChunk = (text: string) => ({ type: 'text-delta', payload: { text } });
+  const errorChunk = (message: string) => ({
+    type: 'error',
+    payload: { error: new Error(message) },
+  });
+
+  const fullStreamFrom = (chunks: unknown[]) =>
+    (async function* () {
+      for (const chunk of chunks) yield chunk;
+    })();
+
+  describe('createStreamingCompletion (delta mapping)', () => {
     it('maps text-delta chunks to { delta: <text> } and filters lifecycle chunks', async () => {
       mockStream.mockResolvedValueOnce({
         fullStream: fullStreamFrom([
           { type: 'start' },
           { type: 'step-start' },
-          { type: 'text-delta', delta: 'hi' },
+          deltaChunk('hi'),
           { type: 'text-end' },
           { type: 'step-finish' },
           { type: 'finish' },
@@ -133,8 +144,10 @@ describe('Mastra service neutral mapping', () => {
       expect(chunks).toEqual([{ delta: 'hi' }]);
     });
 
-    it('maps a malformed text-delta (missing delta) to { delta: null } instead of throwing', async () => {
-      mockStream.mockResolvedValueOnce({ fullStream: fullStreamFrom([{ type: 'text-delta' }]) });
+    it('maps a malformed text-delta (missing payload text) to { delta: null } instead of throwing', async () => {
+      mockStream.mockResolvedValueOnce({
+        fullStream: fullStreamFrom([{ type: 'text-delta', payload: {} }]),
+      });
       const stream = await deepinfraConnector.createStreamingCompletion({
         model: 'x',
         messages: [],
@@ -152,10 +165,40 @@ describe('Mastra service neutral mapping', () => {
       expect(chunks).toEqual([]);
     });
 
+    it('throws on an error chunk so upstream provider failures fail loudly', async () => {
+      mockStream.mockResolvedValueOnce({
+        fullStream: fullStreamFrom([
+          { type: 'start' },
+          errorChunk('The model `x` does not exist'),
+          { type: 'finish' },
+        ]),
+      });
+      const stream = await groqConnector.createStreamingCompletion({ model: 'x', messages: [] });
+      await expect(async () => {
+        for await (const _chunk of stream) {
+          /* consume */
+        }
+      }).rejects.toThrow('The model `x` does not exist');
+    });
+
+    it('surfaces an error-chunk message even when payload.error is not an Error', async () => {
+      mockStream.mockResolvedValueOnce({
+        fullStream: fullStreamFrom([
+          { type: 'error', payload: { error: { message: 'plain shape' } } },
+        ]),
+      });
+      const stream = await groqConnector.createStreamingCompletion({ model: 'x', messages: [] });
+      await expect(async () => {
+        for await (const _chunk of stream) {
+          /* consume */
+        }
+      }).rejects.toThrow('plain shape');
+    });
+
     it('propagates mid-stream transport errors via the async iterator', async () => {
       mockStream.mockResolvedValueOnce({
         fullStream: (async function* () {
-          yield { type: 'text-delta', delta: 'a' };
+          yield deltaChunk('a');
           throw new Error('stream died');
         })(),
       });

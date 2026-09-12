@@ -1,8 +1,12 @@
-import { routeQuery } from './routerService';
+import { pickModelRef, routeQuery } from './routerService';
+import { ModelRef } from './modelConfigService';
+
+const groqSmall: ModelRef = { provider: 'groq', model: 'test-small-model' };
+const groqLarge: ModelRef = { provider: 'groq', model: 'test-large-model' };
 
 const TEST_CONFIG = {
-  smallModel: 'test-small-model',
-  largeModel: 'test-large-model',
+  small: [groqSmall],
+  large: [groqLarge],
   guardModel: 'test-guard-model',
 };
 
@@ -15,6 +19,11 @@ jest.mock('@mastra/core/agent', () => ({
     generate: (...args: unknown[]) => mockGenerate(...args),
   })),
 }));
+
+jest.mock('./modelConfigService', () => ({
+  listByTier: jest.fn(),
+}));
+const mockListByTier = jest.requireMock('./modelConfigService').listByTier as jest.Mock;
 
 const mockAgentCtor = jest.requireMock('@mastra/core/agent').Agent as jest.Mock;
 
@@ -148,6 +157,99 @@ describe('Router Service', () => {
     });
   });
 
+  describe('ε-random tier pools (#4 task 7)', () => {
+    const pool = (
+      models: ModelRef[],
+    ): { small: ModelRef[]; large: ModelRef[]; guardModel: string } => ({
+      small: models,
+      large: models,
+      guardModel: 'test-guard-model',
+    });
+
+    it('uses the single qualifying model deterministically', () => {
+      expect(pickModelRef([groqSmall], 'small', 1, () => 0)).toBe(groqSmall);
+      expect(pickModelRef([groqSmall], 'small', 1, () => 0.999)).toBe(groqSmall);
+    });
+
+    it('throws loudly when a tier has no eligible models (#4 G)', () => {
+      expect(() => pickModelRef([], 'small', 1, () => 0)).toThrow(
+        'No eligible models configured for tier: small',
+      );
+    });
+
+    it('picks uniformly at random within a multi-model pool (eps default 1)', () => {
+      const models = [groqSmall, groqLarge];
+      const a = pickModelRef(models, 'small', 1, () => 0);
+      const b = pickModelRef(models, 'small', 1, () => 0.49);
+      const c = pickModelRef(models, 'small', 1, () => 0.51);
+      expect(a).toBe(groqSmall);
+      expect(b).toBe(groqSmall);
+      expect(c).toBe(groqLarge);
+    });
+
+    it('exploits the first entry when the draw beats epsilon (eps < 1)', () => {
+      const models = [groqSmall, groqLarge];
+      // draw >= eps → exploit (first entry); draw < eps → explore (uniform,
+      // from an independent draw so the explore/index probabilities decouple).
+      expect(pickModelRef(models, 'small', 0.3, () => 0.31)).toBe(groqSmall);
+      // First draw 0.2 < eps=0.3 explores; second draw selects the second entry.
+      const draws = [0.2, 0.6];
+      let i = 0;
+      expect(pickModelRef(models, 'small', 0.3, () => draws[i++] ?? 0)).toBe(groqLarge);
+    });
+
+    it('is deterministic across eps=0', () => {
+      const models = [groqSmall, groqLarge];
+      expect(pickModelRef(models, 'small', 0, () => 0.99)).toBe(groqSmall);
+    });
+
+    it('routes a multi-model tier through the pool for a deterministic rule', async () => {
+      const result = await routeQuery(
+        'Hello',
+        pool([{ ...groqSmall }, { ...groqLarge }]),
+        () => 0.9,
+      );
+      expect(result).toEqual({
+        model: 'test-large-model',
+        reason: 'deterministic-short',
+        provider: 'groq',
+      });
+    });
+
+    it('records the picked provider from the pool, not a hard-coded groq', async () => {
+      // Non-trivial pool with a DeepInfra entry selected by the injected PRNG.
+      const result = await routeQuery(
+        'Hello',
+        pool([groqSmall, { provider: 'deepinfra', model: 'gemma-test' }]),
+        () => 0.9,
+      );
+      expect(result.model).toBe('gemma-test');
+      expect(result.provider).toBe('deepinfra');
+    });
+  });
+
+  describe('DB-config routing (#4 task 7)', () => {
+    it('resolves tier pools from modelConfigService when no config is passed', async () => {
+      mockListByTier.mockImplementation(async (tier: string) =>
+        tier === 'small'
+          ? [groqSmall, { provider: 'deepinfra', model: 'gemma-test' }]
+          : [groqLarge],
+      );
+      classifyAs('simple');
+      const result = await routeQuery('Tell me about classic cars', null, () => 0.9);
+      expect(mockListByTier).toHaveBeenCalledWith('small');
+      expect(mockListByTier).toHaveBeenCalledWith('large');
+      expect(result.model).toBe('gemma-test');
+      expect(result.reason).toBe('classifier-simple');
+      expect(result.provider).toBe('deepinfra');
+    });
+
+    it('fails loudly when the DB-config tier resolves empty (#4 G)', async () => {
+      mockListByTier.mockResolvedValue([]);
+      await expect(routeQuery('Hello')).rejects.toThrow('No eligible models configured for tier');
+    });
+  });
+
   describe('Routing metadata contract', () => {
     it('always returns a model and a human-readable reason', async () => {
       const cases: Promise<Routing>[] = [
@@ -167,7 +269,6 @@ describe('Router Service', () => {
         expect(model).toMatch(/^test-(small|large)-model$/);
         expect(typeof reason).toBe('string');
         expect(reason.length).toBeGreaterThan(0);
-        // Until DB-pool routing lands (#4 task 7), the env path is Groq-only.
         expect(provider).toBe('groq');
       }
     });

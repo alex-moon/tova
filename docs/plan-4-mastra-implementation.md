@@ -121,20 +121,17 @@ Concrete, individually commit-safe steps:
    _shipped; results recorded in "Resolved questions (from the task-4
    spike)" below and posted to issue #4. Tasks 5–6 are unblocked._~~
 
-5. ~~**Centralised Mastra service + two provider classes.** — _shipped (see
+5. **Centralised Mastra service + two provider classes.** — _shipped (see
    the task-5 note below)._
 6. **Reroute the blocking paths through provider-aware config**, split so
    it does _not_ depend on task 7 (which is gated on D):
    - **6a — provider plumbing, no DB dependency:** _shipped (see the
      task-6a/6c note below)._
-   - **6b — real-provider smoke (H-residual),** per the task-5 note:
-     with keys present, one call per provider, checking
-     (i) mapping still holds, (ii) whether Mastra retries mid-stream
-     transport failures and re-emits deltas into the same `fullStream`
-     (would duplicate text on `/api/chat/stream` and inside one persisted
-     `Message`), (iii) if retries duplicate deltas, the default retry
-     policy and its disable switch, applied inside `mastraService` only.
-     No keys in this environment — carried from the task-5 note.
+   - **6b — real-provider smoke (H-residual):** _done live with keys (they
+     were in `.env` all along). Found and fixed two real shipped bugs —
+     the flat-`delta` mapper bug and the silent error-chunk swallow.
+     Retry-duplication handling deliberately not added per the user's H
+     answer. See the finishing-pass note._
    - **6c — cheap hardening from the fourth critic pass:** wire
      `req.on('close')` → `abortSignal` through `CompletionOptions`
      (task 6 already touches both streaming call sites; behaviour gap is
@@ -142,8 +139,8 @@ Concrete, individually commit-safe steps:
      note below)._
    - `titleService` / `metricsService` / guard-classifier callers stay
      untagged — they get `groq` implicitly. Their migration is task 8.
-7. **ε-random tier routing in `routerService`.** _Hard-gated on Open
-   question D — do not start._
+7. **ε-random tier routing in `routerService`.** _shipped (see the
+   finishing-pass note; was hard-gated on D, which is now resolved)._
    - `RouterConfig` per tier becomes `ModelRef[]` from
      `modelConfigService.listByTier` (env single-model is the degenerate
      fallback `listByTier` already returns).
@@ -157,7 +154,9 @@ Concrete, individually commit-safe steps:
      here as a deliberate diff, not silently.
 8. **Migrate remaining callers (`titleService`, `metricsService`, guard
    call inside `routerService`) to the central service; delete dead
-   connector code.**
+   connector code.** _done — all callers already route via
+   `inferenceService`/`mastraService`; `groq-sdk` gone; nothing dead left
+   (see the finishing-pass note)._
    - Guard classifier call stays functionally identical (same prompt,
      temperature 0, `max_tokens: 10`) — call-site/provider swap only, not
      into the DB-pool ε-selection (that is D-territory).
@@ -167,9 +166,8 @@ Concrete, individually commit-safe steps:
      the user pins broader.
    - Delete any dead connector code left behind by task 5 once no caller
      hits it.
-9. **Tests.** Existing suites must keep passing with mocked
-   `inferenceService` (chat route tests already mock at the service
-   boundary since task 5's mock retarget). Add:
+9. **Tests.** _done — see the finishing-pass note and the sixth critic
+   pass (route-level DeepInfra). Existing suites keep passing._ Add:
    - router-id construction with a slash-containing model id (6a pin, see
      above);
    - DB-config selection feeding `routeQuery` end-to-end;
@@ -179,7 +177,9 @@ Concrete, individually commit-safe steps:
      not just the connector unit tests;
    - a test that `Message.modelName` records the **chosen** model when
      the pool for a tier is non-trivial.
-10. **`npm run ci`, fix fallout, update `docs/progress.md`.** Explicitly:
+10. **`npm run ci`, fix fallout, update `docs/progress.md`.** _done — `npm
+run ci` fully green (131 server tests incl. stream/sse suites + client
+    suites/build); see the finishing-pass note._ Explicitly:
     check `npm test` output shows the stream/sse suites actually ran
     (jest's per-worker transform failures can shed coverage silently) —
     the I resolution (jest stub + `jest.mock` per suite) means any suite
@@ -205,48 +205,43 @@ Concrete, individually commit-safe steps:
   selectable per chat, query enhancement/decomposition, agentic tool loops —
   tracked separately, not here.
 
-## Open questions
+## Open questions — ALL RESOLVED (by the user, 2026-09-12)
 
-A, B, C, H and I were resolved empirically by the task-4 spike (and I
-definitively in task 5: the jest worker cannot load `@mastra/core`'s CJS
-build because the transitive `@sindresorhus/slugify` is ESM-only; the
-`moduleNameMapper` stub is shipped at `jest.config.js:12`); H's env-naming
-half was answered by the spike, its remaining retry/duplicate half is
-H-residual below. Those items are removed from this section — the detailed
-steps carry them as facts plus the residual verifications. All remaining
-items have already been posted to issue #4:
+All items are now answered; the detailed steps above carry them as facts.
+(Historically: A, B, C and the env-naming half of H were resolved
+empirically by the task-4 spike; the jest-transform half of I definitively
+in task 5 — the worker cannot load `@mastra/core`'s CJS build because the
+transitive `@sindresorhus/slugify` is ESM-only, so the `moduleNameMapper`
+stub is shipped at `jest.config.js:12`.) The remaining items D/E/F/G/H/J
+were answered by the user on 2026-09-12 and are recorded below:
 
-- **D. ε-randomness semantics:** default ε value; randomness within a tier
-  only, vs across tiers when the classifier is uncertain; and whether the
-  guard classifier model moves into the DB pool too (its env default
-  `allam-2-7b` has no provider prefix — no confirmation it is even a Groq
-  model). Task 7 waits for this. The task-5 wiring note adds a factual
-  corollary: `allam-2-7b` now routes as `groq/allam-2-7b`, which is fine at
-  the dispatch level but only meaningful if the model actually exists on
-  Groq.
-- **E. Scope of "reimplement in Mastra":** does non-chat LLM work
-  (`titleService` categories, `metricsService` classifier) become Mastra
-  agents/workflows, or only route through the centralised service? Task 8
-  implements the conservative reading unless pinned otherwise.
-- **F. Stale env-seeded rows** _(posted; affects a follow-up, not a live
-  task — task 2 already shipped)_.
-- **G. Ineligible-tier fallback semantics** _(posted; same note as F)_. The
-  current fallback semantics are pinned by shipped tests, and the
-  unknown-provider dispatch guard (fourth critic pass) was deliberately
-  built loud, consistent with a "fail loudly" reading of G — if G resolves
-  to "silently fall back", that guard should change shape with it.
-- **H-residual. Real-provider smoke** _(posted; folded into task 6b as
-  empirically only-possible with keys, not blocked on beforehand)_: does
-  Mastra retry mid-stream transport failures, and does a retried attempt
-  re-emit deltas into the same `fullStream` (duplicated text in the SSE
-  stream and inside one persisted `Message`)? If yes, we need the default
-  retry policy and a disable switch inside `mastraService`.
-- **J. Empty-response place-holder wording** _(posted; sixth critic pass)_:
-  a provider stream/response with no content now persists
-  `'(no content returned)'` so the turn still completes (`Message.content`
-  is required and `''` throws). That literal was chosen arbitrarily — is
-  there preferred wording, or should empty responses be dropped/surfaced
-  differently?
+- **D. ε-randomness semantics — RESOLVED:** ε (the knob) is free to any
+  value; starting behaviour: when exactly one model is eligible for a tier,
+  always use it; otherwise pick uniformly at random (even distribution).
+  Implemented as standard ε-greedy with an independent explore/index draw
+  (`ROUTER_EPSILON` default 1); no model available at all — fails loudly. The guard classifier call stays a single env/model (`allam-2-7b`,
+  verified live against the real Groq endpoint) — it is tier-0 tooling, not
+  a chat turn.
+- **E. Scope of "reimplement in Mastra" — RESOLVED:** all LLM-facing work
+  goes through Mastra via the centralised service (conservative reading:
+  no per-service Mastra agents/workflows yet; everything will be tied into
+  a workflow later).
+- **F. Stale env-seeded rows — RESOLVED (user clarified it was not about
+  keys): seed only when a tier has no entries; after that the DB is
+  authoritative. Stale rows are editable in the DB; env changes never
+  silently overwrite or fall back.
+- **G. Eligible-tier fallback semantics — RESOLVED:** if no model is
+  available, fail noisily (throw). The unknown-provider dispatch guard
+  already had this shape.
+- **H-residual — RESOLVED:** no special Mastra retry handling for now.
+  Live smoke found that Mastra wraps stream starts in `p-retry` and that
+  upstream errors surface as stream chunks rather than throws — see the
+  task-6b note below; retry-duplication will be observed, not pre-empted.
+- **J. Empty-response handling — RESOLVED:** persist the empty value (`''`)
+  in the DB; present `'(no content returned)'` in the UI only. No silent
+  failure: the turn stays visible.
+
+No unresolved open question remains on this ticket.
 
 No unresolved open question has a live task depending on it: task 6 is
 explicitly structured (6a/6b/6c) so it needs none of D/E/F/G, and tasks 9–10
@@ -542,3 +537,66 @@ Hardening and tests added this pass:
 - jest config comment typo fixed.
 
 One new open question, posted to issue #4: **J (empty-response place-holder wording)**.
+
+### Finishing pass (2026-09-12, tasks 6b + 7 + 8 + J; `npm run ci` fully green, 131 server tests + client suites/build)
+
+With user answers for D/E/F/G/H/J in hand and API keys confirmed present in
+`.env` all along:
+
+- **Task 6b — real-provider smoke (done, live against actual endpoints).**
+  Two shipped problems found and fixed:
+  1. **`toNeutralStream` read a non-existent field.** Real `fullStream`
+     chunks on `@mastra/core@1.66.0` carry text in `payload`:
+     `{ type: 'text-delta', payload: { text } }` — the shipped mapper read
+     flat `chunk.delta`, so every real stream produced empty deltas all the
+     way through the SSE contract. Deltas now map from `payload.text`.
+  2. **Upstream errors do not throw in streaming **— they arrive as
+     `{ type: 'error', payload: { error } }` chunks (blocking `generate`
+     does throw). Per the loud-failure stance (#4 G/H), the mapper rethrows
+     error chunks so the route's existing catch emits the SSE `error` event
+     instead of silently completing an empty turn.
+     Both verified live (Groq + DeepInfra): streaming now delivers real text
+     end-to-end; error chunks fail loudly. H-residual observation recorded:
+     Mastra wraps stream starts in `p-retry` (visible in stack traces); no
+     retry-duplication handling is added for now per the user's H answer.
+- **Reasoning-budget discovery:** `openai/gpt-oss-*` models on Groq spend
+  hidden reasoning tokens from `max_tokens` before producing text — with
+  the 30-token title budget, every call returned `""` (live: at 512 the
+  same call returned `"JavaScript function basics"`). `titleService`
+  `max_tokens` raised 30 → 512. Guard (`allam-2-7b`) and metrics calls
+  verified live and unchanged. Also noted live: `llama-3.1-8b-instant` is
+  NOT available to this key (404) — anything seeded off that id would fail
+  loudly at dispatch; `allam-2-7b` IS available. `allam-2-7b` is an
+  Arabic-first model (metrics output came back with Arabic prose; the JSON
+  parser still coped) — candidate for seed replacement later, tracked in
+  the DB now.
+- **Task 7 — ε-random tier routing (shipped).** `RouterConfig` per tier is
+  now `ModelRef[]` pools from `modelConfigService.listByTier`
+  (`{ small, large, guardModel }`); `routeQuery(query, config?, random?)`
+  picks from the qualifying pool via a new `pickModelRef`: 0 models →
+  throw (G, loud); 1 → deterministic; ≥2 → ε-greedy with independent
+  explore/index draws so the within-pool choice is uniform (D: even
+  distribution), `ROUTER_EPSILON` default 1, injectable PRNG. The picked
+  `ModelRef.provider` rides onto `RoutingResult` (not hard-coded). Tests:
+  single-model determinism, zero-pool loud failure, ε=0/ε=1 edges,
+  multi-model pool with injected PRNG, DeepInfra pick recorded end-to-end,
+  DB-config default path (`listByTier` mocked) feeding both tiers.
+- **Task 8 — callers/dead code:** verified every remaining call site
+  (guard classifier inside `routerService`, `titleService`,
+  `metricsService`) already routes through `inferenceService` →
+  `mastraService`; `groq-sdk` is gone from `src/` entirely; `@mastra/*` is
+  imported only inside `mastraService`. No dead connector code remained to
+  delete.
+- **J — empty content stored, placeholder presented.** `Message.content`
+  changed from `required: true` to a presence validator (`''` now legal);
+  both chat routes persist the raw content (`''` for an empty provider
+  response); the stream test's placeholder pin updated to `''`. The client
+  `ChatWindow` no longer drops empty assistant messages: the in-flight
+  optimistic bubble (`stream-`-prefixed id while loading) is still held
+  for the thinking dots, but a persisted empty turn renders
+  `'(no content returned)'`.
+- Remaining pre-task-9 route-level DeepInfra/mocking bullets were already
+  in place from the sixth critic pass; nothing further needed. Tasks 2–10
+  are complete. Follow-ups worth tickets: retiring `ROUTER_*` envs once DB
+  config is proven; per-model feedback data consumption; guard-model seed
+  replacement question (`allam-2-7b` Arabic-first tendencies).

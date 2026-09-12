@@ -19,20 +19,40 @@ import {
  * Mapping notes (verified in the #4 spike):
  * - `agent.generate` resolves to an object with `text`.
  * - `agent.stream` resolves to an output object whose `fullStream` yields
- *   AI-SDK-style chunks; only `text-delta` chunks carry content (`.delta`).
- *   Every lifecycle chunk (`start`/`step-start`/`text-start`/`text-end`/
- *   `step-finish`/`finish`) is filtered out — the SSE contract upstream
- *   emits only `{ delta }` chunks.
+ *   AI-SDK-style chunks; only `text-delta` chunks carry content (in
+ *   `payload.text`). Every lifecycle chunk (`start`/`step-start`/
+ *   `text-start`/`text-end`/`step-finish`/`finish`) is filtered out — the
+ *   SSE contract upstream emits only `{ delta }` chunks. `error` chunks are
+ *   rethrown (fail loudly).
  */
 
-const toNeutralStream = async (
-  fullStream: AsyncIterable<{ type?: string; delta?: string }>,
-): Promise<NeutralChunkStream> =>
+/*
+ * FullStream chunk shape (verified 2026-09-12 against real Groq/DeepInfra
+ * endpoints, `@mastra/core@1.66.0`): content is nested in `payload`, i.e.
+ * `{ type: 'text-delta', payload: { text: '...' } }` — flat `chunk.delta`
+ * does not exist. Upstream errors surface as `{ type: 'error', payload:
+ * { error } }` chunks rather than iterator rejections; they are rethrown
+ * here so callers fail loudly instead of seeing a silent all-empty stream.
+ */
+interface FullStreamChunk {
+  type?: string;
+  payload?: { text?: string; error?: unknown };
+}
+
+const errorTextFrom = (payload: FullStreamChunk['payload']): string => {
+  const err = payload?.error;
+  if (err instanceof Error) return err.message;
+  if (typeof (err as { message?: unknown })?.message === 'string')
+    return (err as { message: string }).message;
+  return JSON.stringify(err);
+};
+
+const toNeutralStream = async (fullStream: AsyncIterable<unknown>): Promise<NeutralChunkStream> =>
   (async function* () {
-    for await (const chunk of fullStream) {
-      if (chunk?.type === 'text-delta') {
-        yield { delta: chunk.delta ?? null };
-      }
+    for await (const raw of fullStream ?? []) {
+      const chunk = raw as FullStreamChunk;
+      if (chunk?.type === 'error') throw new Error(errorTextFrom(chunk.payload));
+      if (chunk?.type === 'text-delta') yield { delta: chunk.payload?.text ?? null };
     }
   })();
 
