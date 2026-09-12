@@ -1,5 +1,5 @@
 import React, { createContext, useState, useEffect } from 'react';
-import axios from 'axios';
+import AuthService from '../services/auth';
 import type { AuthUser } from '@shared/contracts';
 
 // Re-export of the shared /api/auth/me contract. NOTE (drift, issue #20):
@@ -25,8 +25,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   useEffect(() => {
     const checkAuth = async () => {
       try {
-        const res = await axios.get('/api/auth/me');
-        setUser(res.data.user);
+        setUser(await AuthService.me());
       } catch (_err) {
         setUser(null);
       } finally {
@@ -37,17 +36,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, []);
 
   const login = async (email: string, password: string) => {
-    const res = await axios.post('/api/auth/login', { email, password });
-    setUser(res.data.user);
+    setUser(await AuthService.login(email, password));
   };
 
   const register = async (email: string, password: string) => {
-    const res = await axios.post('/api/auth/register', { email, password });
-    setUser(res.data.user);
+    setUser(await AuthService.register(email, password));
   };
 
   const logout = async () => {
-    await axios.post('/api/auth/logout');
+    await AuthService.logout();
     setUser(null);
   };
 
