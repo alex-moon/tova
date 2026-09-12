@@ -24,7 +24,7 @@ injects structured snapshots into each phase prompt, and validates verdicts.
   retry (avoids pulling zod/ajv into a dev-only script).
 - **Verdict protocol change**: agents return JSON on the final line
   (`{"issue": 34}` / `{"decision": "END", "reason": "..."}` / `{"verdict":
-  "NEW", "info": "..."}`). Harness extracts the last JSON object it can parse
+"NEW", "info": "..."}`). Harness extracts the last JSON object it can parse
   from the output, validates against the schema, retries the agent once with
   the schema + validation error included, then hard-fails the pass (logged,
   never silently skipped).
