@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * Typed TypeScript harness for the iteration loop over GitHub issues.
- * Reimplementation of scripts/iteration.sh (issue #37): same phase body
+ * Typed iteration-loop harness over GitHub issues (issue #37): same phase body
  * (triage -> plan-write -> plan-review -> implement -> critic ->
  * pr-review-rectify -> pr-decision), same loop-state semantics, but with
  * typed state, structured JSON agent verdicts (validated, one retry, then a
