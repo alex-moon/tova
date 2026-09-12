@@ -108,6 +108,28 @@ describe('Mastra service neutral mapping', () => {
         'boom',
       );
     });
+
+    it('attaches trace tags and metadata to the call options when supplied', async () => {
+      mockGenerate.mockResolvedValueOnce({ text: 'x' });
+      await groqConnector.createCompletion({
+        model: 'm',
+        messages: [],
+        trace: { sessionId: 's1', tags: ['model:m', 'reason:test'], metadata: { userId: 'u1' } },
+      });
+      expect(mockGenerate.mock.calls[0][1]).toMatchObject({
+        tags: ['model:m', 'reason:test'],
+        metadata: { userId: 'u1' },
+      });
+    });
+
+    it('forwards nothing trace-related when no trace context is supplied', async () => {
+      mockGenerate.mockResolvedValueOnce({ text: 'x' });
+      await groqConnector.createCompletion({ model: 'm', messages: [] });
+      const callOptions = mockGenerate.mock.calls[0][1] as Record<string, unknown>;
+      expect('tags' in callOptions).toBe(false);
+      expect('metadata' in callOptions).toBe(false);
+      expect('tracingOptions' in callOptions).toBe(false);
+    });
   });
 
   /*
