@@ -34,6 +34,9 @@ const Login: React.FC = () => {
     <main className="flex h-dvh w-full overflow-hidden">
       <Card className="mx-auto my-auto w-[min(20rem,calc(100vw-2rem))]">
         <CardHeader>
+          <div className="mb-1 flex justify-center">
+            <img src="/tova-logo.png" alt="Tova" className="size-12" />
+          </div>
           <CardTitle>{isRegistering ? 'Create Account' : 'Login to Tova'}</CardTitle>
         </CardHeader>
         <CardContent>

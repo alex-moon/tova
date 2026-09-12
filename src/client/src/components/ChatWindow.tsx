@@ -98,7 +98,10 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
         <Button variant="ghost" size="icon" aria-label="Open menu" onClick={onOpenSidebar}>
           <Menu />
         </Button>
-        <h1 className="font-heading text-lg font-semibold">Tova</h1>
+        <div className="flex items-center gap-1.5">
+          <img src="/tova-logo.png" alt="" className="size-7" />
+          <h1 className="font-heading text-lg font-semibold">Tova</h1>
+        </div>
       </header>
       <div className="flex flex-1 flex-col overflow-y-auto px-3 py-4 md:px-6 md:py-6">
         {messages.length === 0 && !isLoading && (
@@ -155,7 +158,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
                 <div className="mb-6 max-w-[92%] md:mb-8 md:max-w-[85%]">
                   <div className="mb-1 flex items-center gap-1.5 text-xs text-muted-foreground">
                     <span className="flex size-5 items-center justify-center rounded-full bg-primary text-[10px] font-semibold text-primary-foreground">
-                      T
+                      <img src="/tova-logo.png" alt="Tova" className="size-5 rounded-full" />
                     </span>
                     Tova
                   </div>
@@ -207,7 +210,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
           <div className="animate-message-in mb-6 self-start md:mb-8">
             <div className="mb-1 flex items-center gap-1.5 text-xs text-muted-foreground">
               <span className="flex size-5 items-center justify-center rounded-full bg-primary text-[10px] font-semibold text-primary-foreground">
-                T
+                <img src="/tova-logo.png" alt="Tova" className="size-5 rounded-full" />
               </span>
               Tova
             </div>

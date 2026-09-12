@@ -41,7 +41,10 @@ const Sidebar: React.FC<SidebarProps> = ({
         )}
       >
         <div className="flex h-(--header-height) shrink-0 items-center justify-between border-b border-border px-4">
-          <h2 className="font-heading text-xl font-semibold">Tova</h2>
+          <div className="flex items-center gap-2">
+            <img src="/tova-logo.png" alt="" className="size-7" />
+            <h2 className="font-heading text-xl font-semibold">Tova</h2>
+          </div>
           <Button
             variant="ghost"
             size="icon"
