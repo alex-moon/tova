@@ -1,6 +1,8 @@
 import request from 'supertest';
 import { createApp } from '../index';
 import { User } from '../models/User';
+import { ProviderRouting } from '../models/ProviderRouting';
+import { ModelMetricStat } from '../models/ModelMetricStat';
 
 const cookieOf = (res: request.Response) => {
   const cookie = res.headers['set-cookie'];
@@ -220,5 +222,48 @@ describe('admin routes', () => {
       expect(typeof user.updatedAt).toBe('string');
       expect(isNaN(Date.parse(user.updatedAt as string))).toBe(false);
     }
+  });
+
+  describe('GET /api/admin/models (issue #33)', () => {
+    it('returns 401 without a cookie and 403 for non-admins', async () => {
+      const app = createApp();
+      const cookie = await registerUser(app, 'models-plain@example.com');
+
+      const unauth = await request(app).get('/api/admin/models');
+      expect(unauth.status).toBe(401);
+
+      const nonAdmin = await request(app).get('/api/admin/models').set('Cookie', cookie);
+      expect(nonAdmin.status).toBe(403);
+    });
+
+    it('lists configured models grouped with tiers and per-band feedback tallies', async () => {
+      const app = createApp();
+      const cookie = await registerAdmin(app, 'models-admin@example.com');
+
+      await ProviderRouting.create({
+        provider: 'groq',
+        model: 'test-large',
+        tier: 'large',
+        eligible: true,
+      });
+      await ProviderRouting.create({
+        provider: 'groq',
+        model: 'test-large',
+        tier: 'guard',
+        eligible: true,
+      });
+      await ModelMetricStat.findOneAndUpdate(
+        { band: 'short|prose', modelName: 'test-large' },
+        { up: 3, down: 1 },
+        { upsert: true },
+      );
+
+      const res = await request(app).get('/api/admin/models').set('Cookie', cookie);
+      expect(res.status).toBe(200);
+      const large = res.body.find((m: { model: string }) => m.model === 'test-large') as
+        Record<string, unknown> | undefined;
+      expect(large).toMatchObject({ provider: 'groq', tiers: ['large', 'guard'] });
+      expect(large?.stats).toEqual([{ band: 'short|prose', up: 3, down: 1 }]);
+    });
   });
 });

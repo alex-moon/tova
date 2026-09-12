@@ -1,11 +1,27 @@
 import { useRef, useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
+import { Toaster, toast } from 'sonner';
 import { useAuth } from './hooks/useAuth';
 import FeedbackService from './services/feedback';
 import Sidebar from './components/Sidebar';
 import ChatWindow from './components/ChatWindow';
 import Login from './components/Login';
 import AdminView from './components/AdminView';
+
+export interface ToolEvent {
+  phase: 'call' | 'result';
+  name: string;
+  label: string;
+  query?: string;
+  status?: 'ok' | 'empty';
+  resultCount?: number;
+  domains?: string[];
+}
+
+export interface SourceTitle {
+  url: string;
+  title: string;
+}
 
 export interface Message {
   _id: string;
@@ -14,6 +30,10 @@ export interface Message {
   modelName?: string;
   isError?: boolean;
   feedback?: { value: 'up' | 'down' | string | null; updatedAt?: Date | string | null };
+  sources?: string[];
+  sourceTitles?: SourceTitle[];
+  suggestions?: string[];
+  tools?: ToolEvent[];
 }
 
 interface Session {
@@ -153,8 +173,18 @@ function App() {
                   : m,
               ),
             );
+          } else if (event === 'tool') {
+            // Tool feedback for the streaming chip (issue #33): appended to
+            // the in-flight message in order, so call → result states render.
+            const toolEvent = data as unknown as ToolEvent;
+            setMessages((prev) =>
+              prev.map((m) =>
+                m._id === streamId ? { ...m, tools: [...(m.tools ?? []), toolEvent] } : m,
+              ),
+            );
           } else if (event === 'done' && data.complete) {
             const saved = data.message as Message | undefined;
+            const sourceTitles = data.sourceTitles as SourceTitle[] | undefined;
             setMessages((prev) =>
               prev.map((m) =>
                 m._id === streamId && saved
@@ -164,6 +194,9 @@ function App() {
                       content: saved.content,
                       modelName: saved.modelName,
                       feedback: saved.feedback,
+                      sources: saved.sources,
+                      sourceTitles: saved.sourceTitles ?? sourceTitles,
+                      suggestions: saved.suggestions,
                     }
                   : m,
               ),
@@ -213,6 +246,7 @@ function App() {
     try {
       await axios.delete(`/api/chat/sessions/${sessionId}`);
       setSessions((prev) => prev.filter((s) => s._id !== sessionId));
+      toast.success('Chat deleted');
       if (activeSessionId === sessionId) {
         setActiveSessionId(null);
         setMessages([]);
@@ -252,6 +286,7 @@ function App() {
 
   return (
     <main className="relative flex h-dvh w-full overflow-hidden">
+      <Toaster position="bottom-center" richColors />
       {showAdminView && user.role === 'admin' ? (
         <>
           <div className="absolute right-4 top-4 z-10 flex flex-col items-start gap-2">

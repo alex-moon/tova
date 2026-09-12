@@ -175,22 +175,25 @@ describe('Chat streaming route', () => {
     expect(persisted?.content).toBe('');
   });
 
-  it('emits a status hint when the agent calls web_search and persists deduped sources (#16)', async () => {
+  it('emits structured tool events when the agent calls web_search and persists deduped sources (#33)', async () => {
     const cookies = await registerUser('stream-search@example.com');
     // The agent ran the tool during a searchable turn: fullStream carries
     // the tool call/result interleaved with the final answer's deltas, and
     // duplicate URLs across two searches are deduped for persistence.
     mockAgentStream.mockImplementation(async () => ({
       fullStream: (async function* () {
-        yield { type: 'tool-call', payload: { toolName: 'web_search', args: { query: 'q' } } };
+        yield {
+          type: 'tool-call',
+          payload: { toolName: 'web_search', args: { query: 'groq pricing' } },
+        };
         yield {
           type: 'tool-result',
           payload: {
             toolName: 'web_search',
             result: {
               results: [
-                { title: 'A', snippet: 'a', url: 'https://a.example.com' },
-                { title: 'B', snippet: 'b', url: 'https://b.example.com' },
+                { title: 'A page', snippet: 'a', url: 'https://a.example.com' },
+                { title: 'B page', snippet: 'b', url: 'https://b.example.com' },
               ],
             },
           },
@@ -202,8 +205,8 @@ describe('Chat streaming route', () => {
             toolName: 'web_search',
             result: {
               results: [
-                { title: 'A again', snippet: 'a', url: 'https://a.example.com' },
-                { title: 'C', snippet: 'c', url: 'https://c.example.com' },
+                { title: 'A page', snippet: 'a', url: 'https://a.example.com' },
+                { title: 'C page', snippet: 'c', url: 'https://c.example.com' },
               ],
             },
           },
@@ -219,15 +222,132 @@ describe('Chat streaming route', () => {
       .send({ content: 'what happened today' });
 
     expect(response.status).toBe(200);
-    expect(response.text).toContain('event: status');
-    expect(response.text).toContain('Searching the web');
-    expect((response.text.match(/event: status/g) ?? []).length).toBe(1);
+    const events = response.text
+      .split('\n\n')
+      .filter((part) => part.trim().length > 0)
+      .map((part) => {
+        const eventLine = part.split('\n').find((l) => l.startsWith('event: '));
+        const dataLine = part.split('\n').find((l) => l.startsWith('data: '));
+        return {
+          event: eventLine?.slice(7),
+          data: dataLine ? JSON.parse(dataLine.slice(6)) : undefined,
+        };
+      });
+    const toolEvents = events.filter((e) => e.event === 'tool');
+    expect(toolEvents).toHaveLength(3);
+    expect(toolEvents[0].data).toMatchObject({
+      phase: 'call',
+      name: 'web_search',
+      label: 'Searched the web',
+      query: 'groq pricing',
+    });
+    expect(toolEvents[1].data).toMatchObject({
+      phase: 'result',
+      name: 'web_search',
+      status: 'ok',
+      resultCount: 2,
+    });
+    expect(toolEvents[1].data.domains).toEqual(
+      expect.arrayContaining(['a.example.com', 'b.example.com']),
+    );
+    expect(toolEvents[2].data).toMatchObject({ phase: 'result', name: 'web_search' });
+    // No prose-only status events remain from #16.
+    expect(response.text).not.toContain('event: status');
     const persisted = await Message.findOne({ role: 'assistant' });
     expect(persisted?.sources).toEqual([
       'https://a.example.com',
       'https://b.example.com',
       'https://c.example.com',
     ]);
+    // Per-source titles persisted with the URL (#33).
+    expect(persisted?.toObject().sourceTitles).toEqual([
+      { url: 'https://a.example.com', title: 'A page' },
+      { url: 'https://b.example.com', title: 'B page' },
+      { url: 'https://c.example.com', title: 'C page' },
+    ]);
+    // Titles ride the final done event so the client has them mid-stream.
+    const done = events.find((e) => e.event === 'done');
+    expect(done?.data.sourceTitles).toHaveLength(3);
+  });
+
+  it('emits an empty-status tool result when the search returns nothing', async () => {
+    const cookies = await registerUser('stream-search-empty@example.com');
+    mockAgentStream.mockImplementation(async () => ({
+      fullStream: (async function* () {
+        yield { type: 'tool-call', payload: { toolName: 'web_search', input: { query: 'q' } } };
+        yield { type: 'tool-result', payload: { toolName: 'web_search', result: { results: [] } } };
+        yield { type: 'text-delta', payload: { text: 'no luck' } };
+      })(),
+    }));
+
+    const app = createApp();
+    const response = await request(app)
+      .post('/api/chat/stream')
+      .set('Cookie', cookies)
+      .send({ content: 'search for something obscure' });
+
+    expect(response.status).toBe(200);
+    expect(response.text).toContain('"phase":"result"');
+    expect(response.text).toContain('"status":"empty"');
+    const persisted = await Message.findOne({ role: 'assistant' });
+    expect(persisted?.sources).toBeUndefined();
+  });
+
+  it('delivers follow-up suggestions on done and persists them on the message', async () => {
+    const cookies = await registerUser('stream-suggestions@example.com');
+    mockAgentStream.mockImplementation(async () => ({
+      fullStream: fullStreamFrom(['A thoughtful answer.']),
+    }));
+    // The follow-up generator is the next plain completion call (the chat
+    // itself streams); classification also rides mockGenerate, so gate it.
+    mockGenerate.mockImplementation(async (messages?: { role: string; content: string }[]) => {
+      if (isClassifierCall({ messages })) return { text: CLASSIFIER_REPLY };
+      if (
+        messages?.[0]?.role === 'system' &&
+        String(messages[0].content).startsWith('Generate 2-3')
+      ) {
+        return { text: '["What about pricing?","Show an example"]' };
+      }
+      return { text: 'plain' };
+    });
+
+    const app = createApp();
+    const response = await request(app)
+      .post('/api/chat/stream')
+      .set('Cookie', cookies)
+      .send({ content: 'hello there' });
+
+    expect(response.status).toBe(200);
+    const done = response.text.split('\n\n').find((part) => part.includes('event: done'));
+    const doneData = JSON.parse(
+      done!
+        .split('\n')
+        .find((l) => l.startsWith('data: '))!
+        .slice(6),
+    );
+    expect(doneData.message.suggestions).toEqual(['What about pricing?', 'Show an example']);
+    const persisted = await Message.findOne({ role: 'assistant' });
+    expect(persisted?.suggestions).toEqual(['What about pricing?', 'Show an example']);
+  });
+
+  it('omits suggestions for trivially neutral prompts', async () => {
+    mockAgentStream.mockImplementation(async () => ({
+      fullStream: fullStreamFrom(['done.']),
+    }));
+    mockGenerate.mockImplementation(async () =>
+      Promise.reject(new Error('no completion calls expected')),
+    );
+
+    const cookies = await registerUser('stream-suggest-trivial@example.com');
+    const app = createApp();
+    const response = await request(app)
+      .post('/api/chat/stream')
+      .set('Cookie', cookies)
+      .send({ content: 'please continue' });
+
+    expect(response.status).toBe(200);
+    const persisted = await Message.findOne({ role: 'assistant' });
+    expect(persisted?.suggestions).toBeUndefined();
   });
 
   it('omits sources entirely on a tool-free turn', async () => {
@@ -241,7 +361,7 @@ describe('Chat streaming route', () => {
       .send({ content: 'hi' });
 
     expect(response.status).toBe(200);
-    expect(response.text).not.toContain('event: status');
+    expect(response.text).not.toContain('event: tool');
     const persisted = await Message.findOne({ role: 'assistant' });
     expect(persisted?.sources).toBeUndefined();
   });

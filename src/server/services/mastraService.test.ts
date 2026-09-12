@@ -332,17 +332,26 @@ describe('Mastra service neutral mapping', () => {
         ]),
       });
       const stream = await groqConnector.createStreamingCompletion({ model: 'm', messages: [] });
-      const chunks: Array<{
-        delta?: string | null;
-        toolCall?: { name: string };
-        toolResult?: { name: string; result: unknown };
-      }> = [];
+      const chunks: unknown[] = [];
       for await (const chunk of stream) chunks.push(chunk);
       expect(chunks).toEqual([
-        { toolCall: { name: 'web_search' } },
+        { toolCall: { name: 'web_search', args: { query: 'q' } } },
         { delta: 't' },
         { toolResult: { name: 'web_search', result: { results: [{ url: 'u' }] } } },
       ]);
+    });
+
+    it('keeps tool-call mapping tool-name-agnostic and drops non-scalar args', async () => {
+      mockStream.mockResolvedValueOnce({
+        fullStream: fullStreamFrom([
+          { type: 'tool-call', payload: { toolName: 'other_tool', input: { opts: { a: 1 } } } },
+          deltaChunk('t'),
+        ]),
+      });
+      const stream = await groqConnector.createStreamingCompletion({ model: 'm', messages: [] });
+      const chunks: unknown[] = [];
+      for await (const chunk of stream) chunks.push(chunk);
+      expect(chunks[0]).toEqual({ toolCall: { name: 'other_tool' } });
     });
   });
 });
