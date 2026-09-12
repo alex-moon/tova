@@ -50,12 +50,18 @@ injects structured snapshots into each phase prompt, and validates verdicts.
 
 - [x] Branch `feat/tv/37-iteration-harness` created; draft PR opened early.
 - [x] Plan doc written and mirrored to the ticket as a comment.
-- [ ] `scripts/iteration.ts` implements: args/env parsing, logger, loop state
+- [x] `scripts/iteration.ts` implements: args/env parsing, logger, loop state
       read/write, agent runner (tee to log pass file), snapshot gathering
       (issues + comments, open PRs incl. PENDING reviews, plan docs),
       typed verdict extraction/validation/retry, pass body (triage, branch,
       plan, implement, critic, pr-review-rectify, pr-decision), main loop
       with `--once` and shutdown-check parity.
+- [x] Unit coverage for the typed verdict protocol and the loop-state
+      round-trip (`src/server/iteration-harness.test.ts`, 9 tests; ts-jest
+      now uses `tsconfig.test.json` without `rootDir` so the suite can import
+      `scripts/iteration.ts` directly).
+- [x] CLI guard verified: `npx tsx scripts/iteration.ts abc` exits 1 with a
+      clear message before any pass starts.
 - [ ] Shell script flagged/removed in favour of the TS harness entrypoint.
 - [ ] `npm run lint`, `npm run typecheck`, `npm test`, `npm run format:check`
       clean; dry usage exits 0 per acceptance criteria.
