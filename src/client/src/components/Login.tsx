@@ -1,9 +1,9 @@
 import React, { useState } from 'react';
-import axios from 'axios';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { useAuth } from '../hooks/useAuth';
+import { AuthError } from '../services/auth';
 
 const Login: React.FC = () => {
   const [email, setEmail] = useState('');
@@ -22,8 +22,8 @@ const Login: React.FC = () => {
         await login(email, password);
       }
     } catch (err: unknown) {
-      if (axios.isAxiosError(err)) {
-        setError(err.response?.data?.message || 'Authentication failed');
+      if (err instanceof AuthError) {
+        setError(err.message);
       } else {
         setError('Authentication failed');
       }

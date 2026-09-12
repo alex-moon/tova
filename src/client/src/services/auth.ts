@@ -1,6 +1,24 @@
 import axios from 'axios';
 import type { AuthUser } from '@shared/contracts';
 
+// Normalised auth failure: message comes from the server response when one
+// arrived, otherwise the fallback. Views catch AuthError and read .message
+// without importing axios (PR #27 review).
+export class AuthError extends Error {
+  constructor(message = 'Authentication failed', options?: { cause?: unknown }) {
+    super(message, options);
+    this.name = 'AuthError';
+  }
+}
+
+const toAuthError = (err: unknown): AuthError => {
+  if (axios.isAxiosError(err)) {
+    const message = (err.response?.data as { message?: string } | undefined)?.message;
+    if (message) return new AuthError(message, { cause: err });
+  }
+  return new AuthError('Authentication failed', { cause: err });
+};
+
 // Connector separating views/context from axios. All auth API traffic goes
 // through this module; views should not import axios directly (PR #27 review).
 const AuthService = {
@@ -10,13 +28,21 @@ const AuthService = {
   },
 
   async login(email: string, password: string): Promise<AuthUser> {
-    const res = await axios.post<{ user: AuthUser }>('/api/auth/login', { email, password });
-    return res.data.user;
+    try {
+      const res = await axios.post<{ user: AuthUser }>('/api/auth/login', { email, password });
+      return res.data.user;
+    } catch (err) {
+      throw toAuthError(err);
+    }
   },
 
   async register(email: string, password: string): Promise<AuthUser> {
-    const res = await axios.post<{ user: AuthUser }>('/api/auth/register', { email, password });
-    return res.data.user;
+    try {
+      const res = await axios.post<{ user: AuthUser }>('/api/auth/register', { email, password });
+      return res.data.user;
+    } catch (err) {
+      throw toAuthError(err);
+    }
   },
 
   async logout(): Promise<void> {
