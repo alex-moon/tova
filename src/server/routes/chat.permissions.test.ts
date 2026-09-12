@@ -2,16 +2,16 @@ import request from 'supertest';
 import { createApp } from '../index';
 import { User } from '../models/User';
 
-const mockCreate = jest.fn();
+const mockGenerate = jest.fn();
+const mockAgentStream = jest.fn();
 
-jest.mock('groq-sdk', () => {
-  return jest.fn().mockImplementation(() => ({
-    chat: {
-      completions: {
-        create: (...args: unknown[]) => mockCreate(...args),
-      },
-    },
-  }));
+jest.mock('@mastra/core/agent', () => {
+  return {
+    Agent: jest.fn().mockImplementation(() => ({
+      generate: (...args: unknown[]) => mockGenerate(...args),
+      stream: (...args: unknown[]) => mockAgentStream(...args),
+    })),
+  };
 });
 
 jest.mock('../services/titleService', () => ({
@@ -33,7 +33,8 @@ const streamRequest = (app: ReturnType<typeof createApp>, cookie: string) =>
 
 describe('chat route routing permission guard', () => {
   beforeEach(() => {
-    mockCreate.mockReset();
+    mockGenerate.mockReset();
+    mockAgentStream.mockReset();
   });
 
   it('streams an error event when the user lacks the routing permission', async () => {
@@ -44,22 +45,23 @@ describe('chat route routing permission guard', () => {
     const res = await streamRequest(app, cookie);
     expect(res.status).toBe(403);
     expect(res.body.message).toBe("You don't have permission to use the model router.");
-    expect(mockCreate).not.toHaveBeenCalled();
+    expect(mockAgentStream).not.toHaveBeenCalled();
+    expect(mockGenerate).not.toHaveBeenCalled();
   });
 
   it('streams normally when the user has the routing permission', async () => {
     const app = createApp();
     const cookie = await registerUser(app, 'has-routing@example.com');
     await User.updateOne({ email: 'has-routing@example.com' }, { permissions: ['routing'] });
-    mockCreate.mockResolvedValue({
-      [Symbol.asyncIterator]: async function* () {
-        yield { choices: [{ delta: { content: 'hi' } }] };
-      },
+    mockAgentStream.mockResolvedValue({
+      fullStream: (async function* () {
+        yield { type: 'text-delta', payload: { text: 'hi' } };
+      })(),
     });
 
     const res = await streamRequest(app, cookie);
     expect(res.text).toContain('event: delta');
     expect(res.text).toContain('event: done');
-    expect(mockCreate).toHaveBeenCalled();
+    expect(mockAgentStream).toHaveBeenCalled();
   });
 });

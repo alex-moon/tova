@@ -35,6 +35,10 @@ const EXAMPLE_CHIPS = [
 
 const pickPlaceholder = () => PLACEHOLDERS[Math.floor(Math.random() * PLACEHOLDERS.length)];
 
+// An assistant message this old means the provider returned no content;
+// show a placeholder in the UI instead of dropping the turn (#4 J).
+const EMPTY_RESPONSE_PLACEHOLDER = '(no content returned)';
+
 const MessageContent: React.FC<{ content: string; markdown: boolean }> = ({
   content,
   markdown,
@@ -111,7 +115,18 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
           </div>
         )}
         {messages
-          .filter((msg) => !(msg.role === 'assistant' && msg.content.length === 0))
+          .filter(
+            (msg) =>
+              !(
+                msg.role === 'assistant' &&
+                msg.content.length === 0 &&
+                // In-flight optimistic placeholder bubbles (ids 'stream-…')
+                // are rendered as thinking dots during streaming; persisted
+                // empty messages stay visible with the placeholder below.
+                isLoading &&
+                msg._id.startsWith('stream-')
+              ),
+          )
           .map((msg) => (
             <div key={msg._id} className="animate-message-in">
               {msg.isError ? (
@@ -133,7 +148,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
                     Tova
                   </div>
                   <div className="px-4 py-3 md:px-5">
-                    <MessageContent content={msg.content} markdown />
+                    <MessageContent content={msg.content || EMPTY_RESPONSE_PLACEHOLDER} markdown />
                   </div>
                   {msg.modelName && (
                     <div className="mt-1 px-4 text-xs text-muted-foreground md:px-5">

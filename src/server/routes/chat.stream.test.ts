@@ -4,16 +4,16 @@ import { Message } from '../models/Message';
 import { Session } from '../models/Session';
 import { User } from '../models/User';
 
-const mockCreate = jest.fn();
+const mockGenerate = jest.fn();
+const mockAgentStream = jest.fn();
 
-jest.mock('groq-sdk', () => {
-  return jest.fn().mockImplementation(() => ({
-    chat: {
-      completions: {
-        create: (...args: unknown[]) => mockCreate(...args),
-      },
-    },
-  }));
+jest.mock('@mastra/core/agent', () => {
+  return {
+    Agent: jest.fn().mockImplementation(() => ({
+      generate: (...args: unknown[]) => mockGenerate(...args),
+      stream: (...args: unknown[]) => mockAgentStream(...args),
+    })),
+  };
 });
 
 const mockRouteQuery = jest.fn();
@@ -28,18 +28,18 @@ jest.mock('../services/titleService', () => ({
 
 const MOCK_ROUTING = { model: 'mock-small-model', reason: 'deterministic-short' };
 
-const mockStream = (chunks: string[]) => {
-  const streamIterator = async function* () {
+const isClassifierCall = (args?: { messages?: { role: string; content: string }[] }) =>
+  args?.messages?.[0]?.content.startsWith('Classify the user prompt') ?? false;
+
+const fullStreamFrom = (chunks: string[]) =>
+  (async function* () {
     for (const chunk of chunks) {
-      yield { choices: [{ delta: { content: chunk } }] };
+      yield { type: 'text-delta', payload: { text: chunk } };
     }
-  };
-  mockCreate.mockImplementation(async (args?: { stream?: boolean }) => {
-    if (args?.stream) {
-      return { [Symbol.asyncIterator]: streamIterator };
-    }
-    return { choices: [{ message: { content: 'plain' } }] };
-  });
+  })();
+
+const mockStream = (chunks: string[]) => {
+  mockAgentStream.mockImplementation(async () => ({ fullStream: fullStreamFrom(chunks) }));
 };
 
 const registerUser = async (email: string): Promise<string[]> => {
@@ -54,15 +54,10 @@ const registerUser = async (email: string): Promise<string[]> => {
 
 describe('Chat streaming route', () => {
   beforeEach(() => {
-    mockCreate.mockReset().mockImplementation(async (args?: { stream?: boolean }) =>
-      args?.stream
-        ? {
-            [Symbol.asyncIterator]: async function* () {
-              yield { choices: [{ delta: { content: 'chunk' } }] };
-            },
-          }
-        : { choices: [{ message: { content: 'plain' } }] },
-    );
+    mockAgentStream
+      .mockReset()
+      .mockImplementation(async () => Promise.resolve({ fullStream: fullStreamFrom(['chunk']) }));
+    mockGenerate.mockReset().mockResolvedValue({ text: 'plain' });
     mockRouteQuery.mockReset().mockResolvedValue(MOCK_ROUTING);
   });
 
@@ -130,6 +125,55 @@ describe('Chat streaming route', () => {
     const session = await Session.findById(sessionId);
     expect(session).not.toBeNull();
   });
+
+  it('passes a client-disconnect abort signal into the provider stream call', async () => {
+    const cookies = await registerUser('stream-abort@example.com');
+    await mockStream(['ok']);
+
+    const app = createApp();
+    const response = await request(app)
+      .post('/api/chat/stream')
+      .set('Cookie', cookies)
+      .send({ content: 'hello there' });
+
+    expect(response.status).toBe(200);
+    const [messages, options] = mockAgentStream.mock.calls[0] as unknown as [
+      unknown,
+      { abortSignal: AbortSignal },
+    ];
+    expect(messages).toBeDefined();
+    expect(options.abortSignal).toBeInstanceOf(AbortSignal);
+    expect(options.abortSignal.aborted).toBe(false);
+  });
+
+  it('emits no delta event and persists an empty-content turn for empty-string deltas', async () => {
+    // The stream consumer skips falsy deltas (`if (delta)`): an
+    // empty-string text-delta must not surface as an SSE `delta` event, and
+    // an all-empty stream must still send `done` and persist an assistant
+    // message with content: '' (#4 J) — the UI shows the placeholder.
+    const cookies = await registerUser('stream-empty-delta@example.com');
+    mockAgentStream.mockImplementation(async () => ({
+      fullStream: (async function* () {
+        yield { type: 'text-delta', payload: { text: '' } };
+      })(),
+    }));
+
+    const app = createApp();
+    const response = await request(app)
+      .post('/api/chat/stream')
+      .set('Cookie', cookies)
+      .send({ content: 'hello there' });
+
+    expect(response.status).toBe(200);
+    expect(response.text).not.toContain('event: delta');
+    const doneLine = response.text.split('\n\n').find((part) => part.includes('event: done'));
+    expect(doneLine).toContain('"complete":true');
+    const persisted = await Message.findOne({
+      role: 'assistant',
+      modelName: 'mock-small-model',
+    });
+    expect(persisted?.content).toBe('');
+  });
 });
 
 const CLASSIFIER_REPLY =
@@ -143,25 +187,21 @@ const flush = async () => {
 
 describe('Chat streaming prompt metrics', () => {
   beforeEach(() => {
-    mockCreate.mockReset();
+    mockGenerate.mockReset();
+    mockAgentStream.mockReset();
     mockRouteQuery.mockReset().mockResolvedValue(MOCK_ROUTING);
   });
 
   it('attaches metrics to streamed turns and classifies the user message', async () => {
-    const streamIterator = async function* () {
-      yield { choices: [{ delta: { content: 'Hi.' } }] };
-    };
-    mockCreate.mockImplementation(
-      async (args?: { stream?: boolean; messages?: { role: string; content: string }[] }) => {
-        if (args?.stream) {
-          return { [Symbol.asyncIterator]: streamIterator };
-        }
-        if (args?.messages?.[0]?.content.startsWith('Classify the user prompt')) {
-          return { choices: [{ message: { content: `\`\`\`json\n${CLASSIFIER_REPLY}\n\`\`\`` } }] };
-        }
-        return { choices: [{ message: { content: 'plain' } }] };
-      },
-    );
+    mockAgentStream.mockImplementation(async () => ({
+      fullStream: fullStreamFrom(['Hi.']),
+    }));
+    mockGenerate.mockImplementation(async (messages?: { role: string; content: string }[]) => {
+      if (isClassifierCall({ messages })) {
+        return { text: `\`\`\`json\n${CLASSIFIER_REPLY}\n\`\`\`` };
+      }
+      return { text: 'plain' };
+    });
 
     const cookies = await registerUser('stream-metrics@example.com');
     const app = createApp();
@@ -213,15 +253,12 @@ describe('Chat streaming prompt metrics', () => {
   it('skips classification for trivially neutral prompts on the streaming endpoint', async () => {
     // Any classifier call here would find a mock client that leaves an
     // 'error'/'parse' reason behind; the skip must avoid the call entirely.
-    mockCreate.mockImplementation(async (args?: { stream?: boolean }) =>
-      args?.stream
-        ? {
-            [Symbol.asyncIterator]: async function* () {
-              yield { choices: [{ delta: { content: 'done.' } }] };
-            },
-          }
-        : Promise.reject(new Error('classifier should not be called')),
+    mockGenerate.mockImplementation(async () =>
+      Promise.reject(new Error('classifier should not be called')),
     );
+    mockAgentStream.mockImplementation(async () => ({
+      fullStream: fullStreamFrom(['done.']),
+    }));
 
     const cookies = await registerUser('stream-trivial@example.com');
     const app = createApp();
@@ -233,12 +270,10 @@ describe('Chat streaming prompt metrics', () => {
     expect(response.status).toBe(200);
     await flush();
     // The only completion call is the streamed chat itself — no classifier.
-    for (const call of mockCreate.mock.calls) {
-      expect(
-        (
-          call[0] as { messages?: { content: string }[] } | undefined
-        )?.messages?.[0]?.content.startsWith('Classify the user prompt'),
-      ).toBe(false);
+    for (const call of mockGenerate.mock.calls) {
+      expect(isClassifierCall({ messages: call[0] as { role: string; content: string }[] })).toBe(
+        false,
+      );
     }
 
     const userMessage = await Message.findOne({ role: 'user' });

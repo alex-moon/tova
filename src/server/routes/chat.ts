@@ -93,6 +93,13 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
     // Save user message
     await saveUserMessageWithMetrics(String(session._id), content);
 
+    // Abort the provider call when the client disconnects before the JSON
+    // response lands. Symmetric with the streaming route's 6c wiring.
+    const abortController = new AbortController();
+    req.on('close', () => {
+      if (!res.writableEnded) abortController.abort();
+    });
+
     // Determine model
     const routingResult = await routeQuery(content);
 
@@ -104,16 +111,20 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
       .reverse()
       .map((m) => ({
         role: m.role as 'user' | 'assistant',
-        content: m.content,
+        content: m.content as string,
       }));
     messages.unshift({ role: 'system', content: SYSTEM_PROMPT });
 
     const chatCompletion = await inferenceService.createCompletion({
       messages,
       model: routingResult.model,
+      provider: routingResult.provider,
+      abortSignal: abortController.signal,
     });
 
-    const assistantContent = chatCompletion.choices[0]?.message?.content || '';
+    // Empty provider responses persist as '' (fail-visibility, #4 J); the
+    // UI presents the '(no content returned)' placeholder.
+    const assistantContent = chatCompletion.choices[0]?.message?.content ?? '';
 
     // Save assistant message
     const assistantMessage = new Message({
@@ -174,7 +185,7 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
       .reverse()
       .map((m) => ({
         role: m.role as 'user' | 'assistant',
-        content: m.content,
+        content: m.content as string,
       }));
     messages.unshift({ role: 'system', content: SYSTEM_PROMPT });
 
@@ -196,14 +207,24 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
 
     let assistantContent = '';
 
+    // Abort the provider call when the client disconnects mid-stream. 'close'
+    // also fires after a normal end, so only abort when the response did not
+    // finish cleanly.
+    const abortController = new AbortController();
+    req.on('close', () => {
+      if (!res.writableEnded) abortController.abort();
+    });
+
     try {
       const stream = await inferenceService.createStreamingCompletion({
         messages,
         model: routingResult.model,
+        provider: routingResult.provider,
+        abortSignal: abortController.signal,
       });
 
       for await (const chunk of stream) {
-        const delta = chunk.choices[0]?.delta?.content;
+        const delta = chunk.delta;
         if (delta) {
           assistantContent += delta;
           sendEvent('delta', { content: delta });
@@ -217,7 +238,9 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
       return;
     }
 
-    // Save assistant message (persist shipped prompt history semantics)
+    // Save assistant message. A provider stream that yields no (or only
+    // empty) deltas still persists a turn with content: '' — the empty
+    // response stays visible as '(no content returned)' in the UI (#4 J).
     const assistantMessage = new Message({
       sessionId: session._id,
       role: 'assistant',

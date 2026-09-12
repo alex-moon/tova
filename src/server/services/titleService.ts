@@ -17,7 +17,11 @@ export const generateChatTitle = async (content: string): Promise<string> => {
         { role: 'user', content: trimmed },
       ],
       temperature: 0.3,
-      max_tokens: 30,
+      // Reasoning models (e.g. `openai/gpt-oss-20b`) spend hidden reasoning
+      // tokens from this budget before any title text; 30 was exhausted for
+      // every call in live smoke (#4 task 6b). The title text itself only
+      // needs ~20 tokens; the rest must absorb the reasoning phase.
+      max_tokens: 512,
     });
     const title = completion.choices[0]?.message?.content?.trim().replace(/^["'“”]+|["'“”]+$/g, '');
     if (!title) return fallback;
