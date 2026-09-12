@@ -1,6 +1,7 @@
 import { useRef, useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 import { useAuth } from './hooks/useAuth';
+import FeedbackService from './services/feedback';
 import Sidebar from './components/Sidebar';
 import ChatWindow from './components/ChatWindow';
 import Login from './components/Login';
@@ -188,9 +189,9 @@ function App() {
   const handleFeedback = async (messageId: string, value: 'up' | 'down' | null) => {
     try {
       if (value === null) {
-        await axios.delete(`/api/messages/${messageId}/feedback`);
+        await FeedbackService.clear(messageId);
       } else {
-        await axios.post(`/api/messages/${messageId}/feedback`, { value });
+        await FeedbackService.record(messageId, value);
       }
       setMessages((prev) =>
         prev.map((m) =>
