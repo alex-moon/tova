@@ -62,13 +62,18 @@ injects structured snapshots into each phase prompt, and validates verdicts.
       `scripts/iteration.ts` directly).
 - [x] CLI guard verified: `npx tsx scripts/iteration.ts abc` exits 1 with a
       clear message before any pass starts.
-- [ ] Shell script flagged/removed in favour of the TS harness entrypoint.
-- [ ] `npm run lint`, `npm run typecheck`, `npm test`, `npm run format:check`
-      clean; dry usage exits 0 per acceptance criteria.
-- [ ] PR ready for merge, review feedback addressed.
+- [x] Shell script removed in favour of the TS harness entrypoint
+      (`feat/tv/37-remove-iteration-sh`); user confirmed deletion
+      ("Delete iteration.sh — iteration.ts is definitely better by default").
+- [x] `npm run lint`, `npm run typecheck`, `npm test`, `npm run format:check`
+      clean in PR #39 (green before merge).
+
+## Follow-ups
+
+- Demo/supervised `--once` run of `iteration.ts` + a new UX ticket
+  (follow-ups UI, sources collapse, dark theme) — user asked for this in the
+  ticket thread; tracked on GitHub as separate work, not part of this PR.
 
 ## Open questions
 
-- (ticket comment posted) Should the old `scripts/iteration.sh` be deleted in
-  the same PR or kept until the new harness survives a real loop day? Default
-  while unanswered: keep the file, point its header help at the TS harness.
+- (resolved) Delete `scripts/iteration.sh`: yes, per user's ticket comment.

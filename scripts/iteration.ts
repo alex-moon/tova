@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * Typed TypeScript harness for the iteration loop over GitHub issues.
- * Reimplementation of scripts/iteration.sh (issue #37): same phase body
+ * Typed iteration-loop harness over GitHub issues (issue #37): same phase body
  * (triage -> plan-write -> plan-review -> implement -> critic ->
  * pr-review-rectify -> pr-decision), same loop-state semantics, but with
  * typed state, structured JSON agent verdicts (validated, one retry, then a
@@ -12,6 +12,10 @@
  *   npx tsx scripts/iteration.ts [--once] [priority-issue-number]
  *
  * Env: STRIKE_LIMIT (default 3), PASS_INTERVAL (seconds between passes, 900).
+ * Strikes: a shutdown decision or an ISSUE:NONE triage is checked no more often
+ * than once per pass. After the third strike the loop waits one final interval,
+ * performs one last strike-free check, and only downs tools if nothing new
+ * arrived - so from the first strike the loop keeps going for roughly an hour.
  * Requires: gh (authenticated), git, opencode on PATH; run from the repo root.
  */
 
@@ -349,7 +353,7 @@ function fetchIssues(): IssueInfo[] {
   const list = JSON.parse(raw) as { number: number; title: string; updatedAt: string }[];
   return list.map((i) => {
     const commentsRaw = ghAllowFail(
-      ['api', `repos/${REPO}/issues/${i.number}/comments`, '--json', 'body,author,createdAt'],
+      ['api', `repos/${REPO}/issues/${i.number}/comments?per_page=50`],
       `comment fetch for #${i.number}`,
     );
     let comments: IssueComment[] = [];
@@ -358,10 +362,10 @@ function fetchIssues(): IssueInfo[] {
         comments = (
           JSON.parse(commentsRaw) as {
             body: string;
-            author: { login: string };
-            createdAt: string;
+            user: { login: string };
+            created_at: string;
           }[]
-        ).map((c) => ({ by: c.author.login, at: c.createdAt, body: c.body }));
+        ).map((c) => ({ by: c.user.login, at: c.created_at, body: c.body }));
       } catch {
         log(`comments for #${i.number} unparsable; treating as none`);
       }
@@ -702,7 +706,9 @@ function runPass(): PassOutcome {
   if (pick.kind === 'none') {
     log('Triage verdict: none');
     if (!addStrike('strikes', 'triage returned ISSUE:NONE')) {
-      log(`All work blocked for ${STRIKE_LIMIT} consecutive passes; ending loop`);
+      log(
+        `All work blocked for ${STRIKE_LIMIT} consecutive strikes; downing tools pending final grace check`,
+      );
       return { productive: false, stop: true };
     }
     return { productive: false, stop: false };
@@ -887,9 +893,10 @@ Final line MUST be the single JSON object: ${LOOP_DECISION_SCHEMA}`,
 
 /**
  * Returns 0: resume full work; 2: strike, skip work phases but keep looping;
- * 1: strikes exhausted, stop the loop.
+ * 1: strikes exhausted, down tools. `countStrike=false` performs a strike-free
+ * check (used for the final grace check before actually stopping).
  */
-function checkShutdown(): 0 | 2 | 1 {
+function checkShutdown(countStrike = true): 0 | 2 | 1 {
   const state = loadLoopState();
   if (state === null || state.mode !== 'decision' || state.decidedAt === null) return 0;
   const priorityNote =
@@ -923,6 +930,10 @@ Final line MUST be the single JSON object: ${CHECK_SCHEMA}`,
     return 0;
   }
   log(`No new information in GitHub issues since ${state.decidedAt}`);
+  if (!countStrike) {
+    log('Final grace check confirmed: nothing new; downing tools');
+    return 1;
+  }
   if (
     addStrike(
       'decision',
@@ -931,8 +942,19 @@ Final line MUST be the single JSON object: ${CHECK_SCHEMA}`,
   ) {
     return 2;
   }
-  log(`Decision exhausted ${STRIKE_LIMIT} strikes; ending loop`);
+  log(`Decision exhausted ${STRIKE_LIMIT} strikes; one final grace check in ${PASS_INTERVAL}s`);
   return 1;
+}
+
+/**
+ * Final grace period before downing tools: wait one more interval, run one
+ * strike-free shutdown check, and resume the loop if new information arrived.
+ * Returns true only when the loop should keep going.
+ */
+function graceResume(): boolean {
+  if (ONCE) return false;
+  sleepSeconds(PASS_INTERVAL);
+  return checkShutdown(false) === 0;
 }
 
 // ---- Main loop -------------------------------------------------------------------------------
@@ -948,6 +970,7 @@ function mainLoop(): void {
     if (state !== null && state.mode === 'decision' && state.decidedAt !== null) {
       const outcome = checkShutdown();
       if (outcome === 1) {
+        if (graceResume()) continue;
         log('Loop ended after shutdown decision exhausted its strikes');
         return;
       }
@@ -973,10 +996,10 @@ function mainLoop(): void {
     }
 
     if (outcome.stop) {
-      if (ONCE) return;
-      log(`Next pass in ${PASS_INTERVAL}s`);
-      sleepSeconds(PASS_INTERVAL);
-      continue;
+      // Strikes exhausted via triage ISSUE:NONE; final grace check, then stop.
+      if (graceResume()) continue;
+      log('Loop ended: all work blocked and strikes exhausted');
+      return;
     }
 
     if (outcome.productive) {
