@@ -1,20 +1,24 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, waitFor, fireEvent, cleanup } from '@testing-library/react';
 import AdminView from './AdminView';
+import { AdminError } from '../services/admin';
 import type { AdminUser } from '../types/admin';
 
 const listUsers = vi.fn();
 const updatePermissions = vi.fn();
 const updateRole = vi.fn();
 
-vi.mock('../services/admin', () => ({
-  default: {
-    listUsers: (...args: unknown[]) => listUsers(...args),
-    updatePermissions: (...args: unknown[]) => updatePermissions(...args),
-    updateRole: (...args: unknown[]) => updateRole(...args),
-  },
-  getErrorMessage: (_err: unknown, fallback: string) => fallback,
-}));
+vi.mock('../services/admin', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../services/admin')>();
+  return {
+    ...actual,
+    default: {
+      listUsers: (...args: unknown[]) => listUsers(...args),
+      updatePermissions: (...args: unknown[]) => updatePermissions(...args),
+      updateRole: (...args: unknown[]) => updateRole(...args),
+    },
+  };
+});
 
 const admin = (): AdminUser => ({
   id: 'u1',
@@ -71,7 +75,7 @@ describe('AdminView', () => {
   });
 
   it('shows the API error message inline when an update fails', async () => {
-    updateRole.mockRejectedValue(new Error('boom'));
+    updateRole.mockRejectedValue(new AdminError('Failed to update role.'));
     render(<AdminView />);
     fireEvent.click(await screen.findByTestId('toggle-role-someone@example.com'));
     expect(await screen.findByTestId('admin-error')).toHaveTextContent('Failed to update role.');

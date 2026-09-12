@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import AdminService, { getErrorMessage } from '../services/admin';
+import AdminService, { AdminError } from '../services/admin';
 import type { AdminUser } from '../types/admin';
 
 const KNOWN_PERMISSIONS = ['routing'];
@@ -14,7 +14,7 @@ const AdminView = () => {
       setUsers(res);
       setError(null);
     } catch (err) {
-      setError(getErrorMessage(err, 'Failed to load users.'));
+      setError(err instanceof AdminError ? err.message : 'Something went wrong.');
     }
   }, []);
 
@@ -31,7 +31,7 @@ const AdminView = () => {
       const res = await AdminService.updatePermissions(user.id, next);
       updateUser(res);
     } catch (err) {
-      setError(getErrorMessage(err, 'Failed to update permissions.'));
+      setError(err instanceof AdminError ? err.message : 'Something went wrong.');
     }
   };
 
@@ -41,7 +41,7 @@ const AdminView = () => {
       const res = await AdminService.updateRole(user.id, role);
       updateUser(res);
     } catch (err) {
-      setError(getErrorMessage(err, 'Failed to update role.'));
+      setError(err instanceof AdminError ? err.message : 'Something went wrong.');
     }
   };
 
