@@ -26,6 +26,15 @@ const messageSchema = new mongoose.Schema({
   modelName: {
     type: String,
   },
+  /*
+   * Provenance URLs from web_search tool runs (issue #16), attached to the
+   * assistant message only when non-empty — one message per turn stays true;
+   * tool internals are trace artifacts, not separate messages.
+   */
+  sources: {
+    type: [String],
+    default: undefined,
+  },
   routingBand: {
     type: String,
   },

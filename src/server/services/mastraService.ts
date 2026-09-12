@@ -4,6 +4,8 @@ import { InMemoryStore } from '@mastra/core/storage';
 import { Observability } from '@mastra/observability';
 import { buildTracingOptions } from '@mastra/observability';
 import { LangSmithExporter, withLangsmithMetadata } from '@mastra/langsmith';
+import { createTool } from '@mastra/core/tools';
+import { z } from 'zod';
 import {
   CompletionOptions,
   LlmConnector,
@@ -12,6 +14,7 @@ import {
   NeutralCompletion,
   TraceContext,
 } from './llmTypes';
+import { webSearch } from './webSearchService';
 
 /*
  * LangSmith tracing (issue #5), via the official Mastra plugin
@@ -74,7 +77,12 @@ export const mastra = new Mastra({
  */
 interface FullStreamChunk {
   type?: string;
-  payload?: { text?: string; error?: unknown };
+  /* For 'text-delta'/'error' the text lives at payload.text / payload.error;
+   * for 'tool-call'/'tool-result' (issue #16) the tool name and structured
+   * result live at payload.toolName / payload.result — verified against
+   * ToolCallPayload/ToolResultPayload in @mastra/core@1.66.0.
+   */
+  payload?: { text?: string; error?: unknown; toolName?: string; result?: unknown };
 }
 
 const errorTextFrom = (payload: FullStreamChunk['payload']): string => {
@@ -91,6 +99,15 @@ const toNeutralStream = async (fullStream: AsyncIterable<unknown>): Promise<Neut
       const chunk = raw as FullStreamChunk;
       if (chunk?.type === 'error') throw new Error(errorTextFrom(chunk.payload));
       if (chunk?.type === 'text-delta') yield { delta: chunk.payload?.text ?? null };
+      // Tool chunks (issue #16): pass the call/result across the neutral
+      // boundary so callers can emit 'Searching the web…' status and collect
+      // provenance without knowing Mastra's shapes. Only `web_search` calls
+      // flow here, but the mapping stays tool-name-agnostic.
+      if (chunk?.type === 'tool-call') yield { toolCall: { name: chunk.payload?.toolName ?? '' } };
+      if (chunk?.type === 'tool-result')
+        yield {
+          toolResult: { name: chunk.payload?.toolName ?? '', result: chunk.payload?.result },
+        };
     }
   })();
 
@@ -107,10 +124,14 @@ const modelSettingsFrom = (options: CompletionOptions) => ({
 /*
  * Abort/disconnect plumbing: forward a caller-supplied signal to Mastra's
  * call options (AI-SDK style) instead of sending undefined keys.
+ * `maxSteps` caps the agent's own tool loop: when the search tool is
+ * attached the agent decides how many rounds to run (search → answer, with
+ * a follow-up round allowed); without tools a completion is single-step,
+ * as before #16.
  */
 const callOptionsFrom = (options: CompletionOptions) => ({
   ...(options.abortSignal ? { abortSignal: options.abortSignal } : {}),
-  maxSteps: 1,
+  maxSteps: hasSearchKey() ? 4 : 1,
   modelSettings: modelSettingsFrom(options),
   ...traceOptionsFrom(options.trace),
 });
@@ -131,14 +152,54 @@ const traceOptionsFrom = (trace?: TraceContext) => ({
 });
 
 /*
+ * Web search tool (issue #16). The tool is defined here, not in a separate
+ * `tools/` module, because this file is the single owner of all `@mastra/*`
+ * imports — `createTool` comes from `@mastra/core/tools`. Execution is the
+ * raw Brave REST client in `webSearchService.ts`; it degrades any failure
+ * (missing key, timeout, HTTP error) into an empty result instead of
+ * throwing, so a tool call can never fail the chat turn.
+ *
+ * When the Brave key is unset the tool is not attached at all: the model
+ * never sees it and plain chat behaves byte-identically to pre-#16.
+ */
+const hasSearchKey = (): boolean =>
+  Boolean(process.env.BRAVE_API_KEY || process.env.BRAVE_SEARCH_API_KEY);
+
+export const webSearchTool = createTool({
+  id: 'web_search',
+  description:
+    'Search the public web for current or factual information. Use it when a question ' +
+    'benefits from up-to-date or external information (recent events, prices, ' +
+    'documentation); do not use it for opinions, personal data, or general knowledge ' +
+    'you are confident about.',
+  inputSchema: z.object({ query: z.string().min(1).describe('Web search query') }),
+  outputSchema: z.object({
+    results: z.array(z.object({ title: z.string(), snippet: z.string(), url: z.string() })),
+  }),
+  execute: async ({ query }) => ({ results: await webSearch(query) }),
+});
+
+const SEARCH_INSTRUCTIONS =
+  'You may call the `web_search` tool to find current or external information. ' +
+  'Write the query as focused keywords. When search results arrive, answer with ' +
+  'terse markdown links ([title](url)) for the claims you used; answer from your ' +
+  'own knowledge when no search is needed.';
+
+/*
  * Agents are memoised per provider/model (creation is stateful — Mastra
  * wires an internal store per agent) so repeated turns on the same model
- * reuse one instance.
+ * reuse one instance. Agent instructions: empty — the system prompt rides
+ * in on the message list. With the tool attached a short instruction tells
+ * the agent when to search and how to answer (title/snippet/url synthesis).
  */
 const agentCache = new Map<string, Agent>();
 
 const agentFor = (provider: LlmProvider, model: string): Agent => {
-  const cacheKey = `${provider}/${model}`;
+  const toolsEnabled = hasSearchKey();
+  // The tool set is baked into the agent at construction, so the cache key
+  // must include the tools state — toggling the Brave key without a restart
+  // (as tests do) must not hand back a stale agent.
+  const cacheKey = `${provider}/${model}/${toolsEnabled ? 'tools' : 'plain'}`;
   const cached = agentCache.get(cacheKey);
   if (cached) return cached;
   const agent = new Agent({
@@ -147,8 +208,9 @@ const agentFor = (provider: LlmProvider, model: string): Agent => {
     // to a single Mastra message variant.
     id: `tova-${provider}`,
     name: `tova-${provider}`,
-    instructions: '',
+    instructions: toolsEnabled ? SEARCH_INSTRUCTIONS : '',
     model: `${provider}/${model}`,
+    ...(toolsEnabled ? { tools: { web_search: webSearchTool } } : {}),
   });
   agentCache.set(cacheKey, agent);
   return agent;
@@ -164,7 +226,17 @@ const buildConnector = (provider: LlmProvider): LlmConnector => {
         asMessageList(options.messages),
         callOptionsFrom(options),
       );
-      return { choices: [{ message: { content: result.text ?? null } }] };
+      // Tool executions (issue #16): FullOutput.toolResults carries every
+      // executed call with its structured result; surfaced so callers can
+      // persist sources. Empty/tool-less runs leave it undefined.
+      const toolResults = (result as { toolResults?: unknown[] }).toolResults?.map((entry) => {
+        const r = entry as { name?: string; result?: unknown };
+        return { name: r.name ?? '', result: r.result };
+      });
+      return {
+        choices: [{ message: { content: result.text ?? null } }],
+        ...(toolResults?.length ? { toolResults } : {}),
+      };
     },
     createStreamingCompletion: async (options: CompletionOptions): Promise<NeutralChunkStream> => {
       const result = await agentFor(provider, options.model).stream(

@@ -13,6 +13,21 @@ const router = express.Router();
 
 const NO_ROUTING_PERMISSION = "You don't have permission to use the model router.";
 
+// Provenance extraction (issue #16): web_search tool results arrive as
+// { results: { title, snippet, url }[] }; URLs are collected incrementally
+// deduplicated across all tool runs of the turn. Malformed entries are
+// skipped, never fatal — the search enriches the turn but must not fail it.
+const collectSourcesInto = (sourceList: string[], toolResult: unknown): string[] => {
+  const items = Array.isArray((toolResult as { results?: unknown })?.results)
+    ? (toolResult as { results: unknown[] }).results
+    : [];
+  for (const item of items) {
+    const url = (item as { url?: unknown } | null)?.url;
+    if (typeof url === 'string' && url !== '' && !sourceList.includes(url)) sourceList.push(url);
+  }
+  return sourceList;
+};
+
 // Feedback aggregation key (issue #18): deterministic prompt features of the
 // user turn, captured at route time — not LLM flags, which are classified
 // fire-and-forget only after routing (plan decisions 4 and 6, Q2).
@@ -144,6 +159,13 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
     // UI presents the '(no content returned)' placeholder.
     const assistantContent = chatCompletion.choices[0]?.message?.content ?? '';
 
+    // Sources from any web_search the agent chose to run (issue #16),
+    // persisted only when non-empty.
+    const sources = (chatCompletion.toolResults ?? []).reduce<string[]>(
+      (acc, r) => collectSourcesInto(acc, r.result),
+      [],
+    );
+
     // Save assistant message
     const assistantMessage = new Message({
       sessionId: session._id,
@@ -151,6 +173,7 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
       content: assistantContent,
       modelName: routingResult.model,
       routingBand,
+      ...(sources.length > 0 ? { sources } : {}),
       metrics: await buildMessageMetrics(String(session._id), assistantContent),
     });
     await assistantMessage.save();
@@ -229,6 +252,8 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
     });
 
     let assistantContent = '';
+    let sources: string[] = [];
+    let statusSent = false;
 
     // Abort the provider call when the client disconnects mid-stream. 'close'
     // also fires after a normal end, so only abort when the response did not
@@ -247,6 +272,15 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
       });
 
       for await (const chunk of stream) {
+        // The agent deciding to search (issue #16): emit the status hint once
+        // per turn, immediately before the search round executes.
+        if (chunk.toolCall && !statusSent) {
+          statusSent = true;
+          sendEvent('status', { message: 'Searching the web…' });
+        }
+        if (chunk.toolResult) {
+          collectSourcesInto(sources, chunk.toolResult.result);
+        }
         const delta = chunk.delta;
         if (delta) {
           assistantContent += delta;
@@ -270,6 +304,7 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
       content: assistantContent,
       modelName: routingResult.model,
       routingBand,
+      ...(sources.length > 0 ? { sources } : {}),
       metrics: await buildMessageMetrics(String(session._id), assistantContent),
     });
     await assistantMessage.save();

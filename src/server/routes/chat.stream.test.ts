@@ -174,6 +174,77 @@ describe('Chat streaming route', () => {
     });
     expect(persisted?.content).toBe('');
   });
+
+  it('emits a status hint when the agent calls web_search and persists deduped sources (#16)', async () => {
+    const cookies = await registerUser('stream-search@example.com');
+    // The agent ran the tool during a searchable turn: fullStream carries
+    // the tool call/result interleaved with the final answer's deltas, and
+    // duplicate URLs across two searches are deduped for persistence.
+    mockAgentStream.mockImplementation(async () => ({
+      fullStream: (async function* () {
+        yield { type: 'tool-call', payload: { toolName: 'web_search', args: { query: 'q' } } };
+        yield {
+          type: 'tool-result',
+          payload: {
+            toolName: 'web_search',
+            result: {
+              results: [
+                { title: 'A', snippet: 'a', url: 'https://a.example.com' },
+                { title: 'B', snippet: 'b', url: 'https://b.example.com' },
+              ],
+            },
+          },
+        };
+        yield { type: 'text-delta', payload: { text: 'Based on research…' } };
+        yield {
+          type: 'tool-result',
+          payload: {
+            toolName: 'web_search',
+            result: {
+              results: [
+                { title: 'A again', snippet: 'a', url: 'https://a.example.com' },
+                { title: 'C', snippet: 'c', url: 'https://c.example.com' },
+              ],
+            },
+          },
+        };
+        yield { type: 'text-delta', payload: { text: ' more' } };
+      })(),
+    }));
+
+    const app = createApp();
+    const response = await request(app)
+      .post('/api/chat/stream')
+      .set('Cookie', cookies)
+      .send({ content: 'what happened today' });
+
+    expect(response.status).toBe(200);
+    expect(response.text).toContain('event: status');
+    expect(response.text).toContain('Searching the web');
+    expect((response.text.match(/event: status/g) ?? []).length).toBe(1);
+    const persisted = await Message.findOne({ role: 'assistant' });
+    expect(persisted?.sources).toEqual([
+      'https://a.example.com',
+      'https://b.example.com',
+      'https://c.example.com',
+    ]);
+  });
+
+  it('omits sources entirely on a tool-free turn', async () => {
+    const cookies = await registerUser('stream-no-search@example.com');
+    await mockStream(['plain answer']);
+
+    const app = createApp();
+    const response = await request(app)
+      .post('/api/chat/stream')
+      .set('Cookie', cookies)
+      .send({ content: 'hi' });
+
+    expect(response.status).toBe(200);
+    expect(response.text).not.toContain('event: status');
+    const persisted = await Message.findOne({ role: 'assistant' });
+    expect(persisted?.sources).toBeUndefined();
+  });
 });
 
 const CLASSIFIER_REPLY =

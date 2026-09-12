@@ -11,6 +11,7 @@ module.exports = {
   // gets inert stubs (src/server/test/mastra*Stub.ts etc.).
   moduleNameMapper: {
     '^@mastra/core/agent$': '<rootDir>/src/server/test/mastraAgentStub.ts',
+    '^@mastra/core/tools$': '<rootDir>/src/server/test/mastraToolsStub.ts',
     '^@mastra/core/storage$': '<rootDir>/src/server/test/mastraStorageStub.ts',
     '^@mastra/core$': '<rootDir>/src/server/test/mastraCoreStub.ts',
     '^@mastra/observability$': '<rootDir>/src/server/test/observabilityStub.ts',

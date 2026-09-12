@@ -11,6 +11,10 @@ import { groqConnector, deepinfraConnector } from './mastraService';
 const mockGenerate = jest.fn();
 const mockStream = jest.fn();
 
+jest.mock('./webSearchService', () => ({ webSearch: jest.fn().mockResolvedValue([]) }));
+
+const mockWebSearch = jest.requireMock('./webSearchService').webSearch as jest.Mock;
+
 jest.mock('@mastra/core/agent', () => {
   return {
     Agent: jest.fn().mockImplementation(() => ({
@@ -23,6 +27,25 @@ jest.mock('@mastra/core/agent', () => {
 const agentCtor = jest.requireMock('@mastra/core/agent').Agent as jest.Mock;
 
 describe('Mastra service neutral mapping', () => {
+  /*
+   * Env pinning: the test host exports BRAVE_SEARCH_API_KEY, which would
+   * flip every agent into tools mode (#16). These suites assert the plain
+   * mapping byte-for-byte, so both Brave names are cleared here and the
+   * tools-mode behavior is exercised separately in the '#16' block below.
+   */
+  const savedBrave = {
+    BRAVE_API_KEY: process.env.BRAVE_API_KEY,
+    BRAVE_SEARCH_API_KEY: process.env.BRAVE_SEARCH_API_KEY,
+  };
+  beforeAll(() => {
+    delete process.env.BRAVE_API_KEY;
+    delete process.env.BRAVE_SEARCH_API_KEY;
+  });
+  afterAll(() => {
+    process.env.BRAVE_API_KEY = savedBrave.BRAVE_API_KEY;
+    process.env.BRAVE_SEARCH_API_KEY = savedBrave.BRAVE_SEARCH_API_KEY;
+  });
+
   beforeEach(() => {
     mockGenerate.mockReset();
     mockStream.mockReset();
@@ -252,6 +275,74 @@ describe('Mastra service neutral mapping', () => {
         abortSignal: controller.signal,
       });
       expect(mockStream.mock.calls[0][1]).toMatchObject({ abortSignal: controller.signal });
+    });
+  });
+
+  describe('web_search tool (issue #16)', () => {
+    beforeAll(() => {
+      process.env.BRAVE_API_KEY = 'test-key';
+    });
+    afterAll(() => {
+      delete process.env.BRAVE_API_KEY;
+      delete process.env.BRAVE_SEARCH_API_KEY;
+    });
+
+    it('attaches the web_search tool and search instructions when the key is set', async () => {
+      mockGenerate.mockResolvedValueOnce({ text: 'x' });
+      await groqConnector.createCompletion({ model: 'm', messages: [] });
+      const config = agentCtor.mock.calls[agentCtor.mock.calls.length - 1][0];
+      expect(config.instructions).toContain('web_search');
+      const tool = config.tools?.web_search as {
+        id?: string;
+        inputSchema?: unknown;
+        execute?: (input: { query: string }) => Promise<unknown>;
+      };
+      expect(tool?.id).toBe('web_search');
+      await expect(tool?.execute?.({ query: 'groq news' })).resolves.toEqual({
+        results: [],
+      });
+      expect(mockWebSearch).toHaveBeenCalledWith('groq news');
+    });
+
+    it('raises maxSteps above 1 so the agent can loop on its own tool calls', async () => {
+      mockGenerate.mockResolvedValueOnce({ text: 'x' });
+      await groqConnector.createCompletion({ model: 'm', messages: [] });
+      const callOptions = mockGenerate.mock.calls[mockGenerate.mock.calls.length - 1][1];
+      expect(callOptions.maxSteps).toBeGreaterThan(1);
+    });
+
+    it('surfaces generate toolResults on the neutral completion', async () => {
+      mockGenerate.mockResolvedValueOnce({
+        text: 'answer',
+        toolResults: [{ name: 'web_search', result: { results: [] } }],
+      });
+      const completion = await groqConnector.createCompletion({ model: 'm', messages: [] });
+      expect(completion.toolResults).toEqual([{ name: 'web_search', result: { results: [] } }]);
+    });
+
+    it('maps tool-call and tool-result stream chunks across the neutral boundary', async () => {
+      mockStream.mockResolvedValueOnce({
+        fullStream: fullStreamFrom([
+          { type: 'tool-call', payload: { toolName: 'web_search', args: { query: 'q' } } },
+          deltaChunk('t'),
+          {
+            type: 'tool-result',
+            payload: { toolName: 'web_search', result: { results: [{ url: 'u' }] } },
+          },
+        ]),
+      });
+      const stream = await groqConnector.createStreamingCompletion({ model: 'm', messages: [] });
+      const chunks: Array<{
+        delta?: string | null;
+        toolCall?: { name: string };
+        toolResult?: { name: string; result: unknown };
+      }> = [];
+      for await (const chunk of stream) chunks.push(chunk);
+      expect(chunks).toEqual([
+        { toolCall: { name: 'web_search' } },
+        { delta: 't' },
+        { toolResult: { name: 'web_search', result: { results: [{ url: 'u' }] } } },
+      ]);
     });
   });
 });
