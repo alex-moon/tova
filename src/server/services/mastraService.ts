@@ -80,9 +80,18 @@ interface FullStreamChunk {
   /* For 'text-delta'/'error' the text lives at payload.text / payload.error;
    * for 'tool-call'/'tool-result' (issue #16) the tool name and structured
    * result live at payload.toolName / payload.result — verified against
-   * ToolCallPayload/ToolResultPayload in @mastra/core@1.66.0.
+   * ToolCallPayload/ToolResultPayload in @mastra/core@1.66.0. Tool-call
+   * arguments surface as payload.input (AI-SDK shape); some versions use
+   * payload.args — both are read (issue #33).
    */
-  payload?: { text?: string; error?: unknown; toolName?: string; result?: unknown };
+  payload?: {
+    text?: string;
+    error?: unknown;
+    toolName?: string;
+    result?: unknown;
+    input?: unknown;
+    args?: unknown;
+  };
 }
 
 const errorTextFrom = (payload: FullStreamChunk['payload']): string => {
@@ -103,7 +112,24 @@ const toNeutralStream = async (fullStream: AsyncIterable<unknown>): Promise<Neut
       // boundary so callers can emit 'Searching the web…' status and collect
       // provenance without knowing Mastra's shapes. Only `web_search` calls
       // flow here, but the mapping stays tool-name-agnostic.
-      if (chunk?.type === 'tool-call') yield { toolCall: { name: chunk.payload?.toolName ?? '' } };
+      if (chunk?.type === 'tool-call') {
+        const args =
+          chunk.payload?.input ?? chunk.payload?.args ?? undefined;
+        yield {
+          toolCall: {
+            name: chunk.payload?.toolName ?? '',
+            ...(args && typeof args === 'object' && !Array.isArray(args)
+              ? {
+                  args: Object.fromEntries(
+                    Object.entries(args as Record<string, unknown>).filter(
+                      ([, v]) => typeof v === 'string' || typeof v === 'number',
+                    ),
+                  ),
+                }
+              : {}),
+          },
+        };
+      }
       if (chunk?.type === 'tool-result')
         yield {
           toolResult: { name: chunk.payload?.toolName ?? '', result: chunk.payload?.result },

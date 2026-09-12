@@ -57,7 +57,11 @@ export interface NeutralCompletion {
 export interface NeutralStreamChunk {
   delta?: string | null;
   /** Emitted when the agent decides to call a tool (e.g. `web_search`). */
-  toolCall?: { name: string };
+  toolCall?: {
+    name: string;
+    /** Structured arguments when the provider surfaces them (issue #33). */
+    args?: Record<string, unknown>;
+  };
   /** Emitted when a tool finishes executing, carrying its structured result. */
   toolResult?: { name: string; result: unknown };
 }

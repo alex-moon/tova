@@ -19,6 +19,17 @@ export interface AdminUser {
   updatedAt: string;
 }
 
+// Read-only model inventory row, GET /api/admin/models (issue #33).
+// `id` is '<provider>/<model>' for stable React keys; `stats` carries the
+// feedback tallies captured in ModelMetricStat (up/down).
+export interface AdminModel {
+  id: string;
+  provider: string;
+  model: string;
+  tiers: string[];
+  stats: { band: string; up: number; down: number }[];
+}
+
 // User payload returned by GET /api/auth/me (includes permissions).
 export interface AuthUser {
   id: string;

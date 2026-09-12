@@ -1,5 +1,5 @@
 import axios from 'axios';
-import type { AdminUser } from '../types/admin';
+import type { AdminModel, AdminUser } from '../types/admin';
 
 // Normalised admin failure: message comes from the server response when one
 // arrived, otherwise the call's fallback. Views catch AdminError and read
@@ -51,3 +51,17 @@ const AdminService = {
 };
 
 export default AdminService;
+
+// Read-only model inventory (issue #33): no actions, list only.
+const listModels = async (): Promise<AdminModel[]> => {
+  try {
+    const res = await axios.get<AdminModel[]>('/api/admin/models');
+    return res.data;
+  } catch (err) {
+    throw toAdminError(err, 'Failed to load models.');
+  }
+};
+
+const AdminModelsService = { listModels };
+
+export { AdminModelsService };

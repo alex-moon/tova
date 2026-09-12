@@ -3,6 +3,8 @@ import mongoose from 'mongoose';
 import { User, UserDocument } from '../models/User';
 import { authenticate, requireRole, AuthRequest } from '../middleware/auth';
 import { AdminUser } from '../../shared/contracts';
+import { ProviderRouting } from '../models/ProviderRouting';
+import { ModelMetricStat } from '../models/ModelMetricStat';
 
 const router = express.Router();
 
@@ -44,6 +46,53 @@ router.get('/users', ...adminGuard, async (_req, res) => {
     res.json(users.map(toPublicUser));
   } catch (_err) {
     res.status(500).json({ message: 'Error listing users' });
+  }
+});
+
+// Read-only model inventory (issue #33): every configured routing model with
+// the tiers it serves and its captured feedback tallies per band. Read
+// errors degrade to empty lists; the view shows a 'no data' state instead of
+// failing admin.
+router.get('/models', ...adminGuard, async (_req, res) => {
+  try {
+    const [routes, stats] = await Promise.all([
+      ProviderRouting.find({}).lean(),
+      ModelMetricStat.find({}).lean(),
+    ]);
+    const byKey = new Map<
+      string,
+      {
+        id: string;
+        provider: string;
+        model: string;
+        tiers: string[];
+        stats: { band: string; up: number; down: number }[];
+      }
+    >();
+    for (const route of routes as { provider: string; model: string; tier: string }[]) {
+      const key = `${route.provider}/${route.model}`;
+      const existing = byKey.get(key);
+      if (existing) {
+        if (!existing.tiers.includes(route.tier)) existing.tiers.push(route.tier);
+      } else {
+        byKey.set(key, {
+          id: key,
+          provider: route.provider,
+          model: route.model,
+          tiers: [route.tier],
+          stats: [],
+        });
+      }
+    }
+    for (const stat of stats as { band: string; modelName: string; up: number; down: number }[]) {
+      const entry = [...byKey.values()].find((m) => m.model === stat.modelName);
+      if (entry) {
+        entry.stats.push({ band: stat.band, up: stat.up ?? 0, down: stat.down ?? 0 });
+      }
+    }
+    res.json([...byKey.values()]);
+  } catch (_err) {
+    res.status(500).json({ message: 'Error listing models' });
   }
 });
 

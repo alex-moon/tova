@@ -35,6 +35,28 @@ const messageSchema = new mongoose.Schema({
     type: [String],
     default: undefined,
   },
+  /*
+   * Per-source page titles from the same web_search runs (issue #33), keyed
+   * by URL so the client renders the sources block with real titles on
+   * reload — without it the block can only label links by hostname.
+   */
+  sourceTitles: {
+    type: [
+      {
+        url: String,
+        title: String,
+      },
+    ],
+    default: undefined,
+  },
+  /*
+   * Generated follow-up questions (issue #33) for the composer chips; absent
+   * when generation was skipped/failed — the client falls back to statics.
+   */
+  suggestions: {
+    type: [String],
+    default: undefined,
+  },
   routingBand: {
     type: String,
   },
