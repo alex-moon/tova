@@ -1,6 +1,7 @@
 import { useRef, useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 import { useAuth } from './hooks/useAuth';
+import FeedbackService from './services/feedback';
 import Sidebar from './components/Sidebar';
 import ChatWindow from './components/ChatWindow';
 import Login from './components/Login';
@@ -12,6 +13,7 @@ export interface Message {
   content: string;
   modelName?: string;
   isError?: boolean;
+  feedback?: { value: 'up' | 'down' | string | null; updatedAt?: Date | string | null };
 }
 
 interface Session {
@@ -161,6 +163,7 @@ function App() {
                       _id: saved._id || m._id,
                       content: saved.content,
                       modelName: saved.modelName,
+                      feedback: saved.feedback,
                     }
                   : m,
               ),
@@ -180,6 +183,23 @@ function App() {
     } finally {
       streamingRef.current = false;
       setIsChatLoading(false);
+    }
+  };
+
+  const handleFeedback = async (messageId: string, value: 'up' | 'down' | null) => {
+    try {
+      if (value === null) {
+        await FeedbackService.clear(messageId);
+      } else {
+        await FeedbackService.record(messageId, value);
+      }
+      setMessages((prev) =>
+        prev.map((m) =>
+          m._id === messageId ? { ...m, feedback: { value, updatedAt: new Date() } } : m,
+        ),
+      );
+    } catch (err) {
+      console.error('Error recording feedback:', err);
     }
   };
 
@@ -271,6 +291,7 @@ function App() {
             onSendMessage={handleSendMessage}
             isLoading={isChatLoading}
             onOpenSidebar={() => setSidebarOpen(true)}
+            onFeedback={handleFeedback}
           />
         </>
       )}

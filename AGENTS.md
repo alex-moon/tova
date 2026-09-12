@@ -40,6 +40,14 @@ Follow `docs/workflow.md` as the specification. In short, every piece of work la
 
 Tweaks (trivial one-line fixes, typos, config nudges) may skip steps 1–3 but still require verification and a PR.
 
+### Cleanup scope policy
+
+Do cleanup-as-we-go, but only with explicit confirmation:
+
+- If the current ticket/PR exposes an issue in its own scope (e.g. a PR review comment), fixing that issue broadly — related files sharing the same defect — is defensible and fine.
+- Do not silently expand scope by default. If you notice a neighbouring issue worth fixing, raise it as a suggestion in your report/PR comment and wait for the user to confirm.
+- Never use a ticket as cover for drive-by refactors of untouched subsystems.
+
 ### Local MongoDB
 
 A local MongoDB is available at `mongodb://localhost:27017/tova` at any time. If it is not running, start the stack with `npm run stack:up`.

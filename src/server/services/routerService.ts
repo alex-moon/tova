@@ -1,6 +1,7 @@
 import { inferenceService } from './inferenceService';
 import { LlmProvider } from './llmTypes';
 import { listByTier, ModelRef } from './modelConfigService';
+import { FitWeight, getFitWeight } from './modelMetricsStatsService';
 
 /*
  * Routing tiers resolve to an ELIGIBLE pool of models (MongoDB-backed,
@@ -30,11 +31,64 @@ export interface RoutingResult {
   provider: LlmProvider;
 }
 
+// Feedback-weighting injectables (issue #18): `band` is the deterministic
+// routing band of the user turn; `getFitWeight` returns the empirical
+// up/down fit for a (band, model) cell. Tests inject stubs so no Mongo is
+// needed.
+export interface RouterDeps {
+  band?: string;
+  getFitWeight?: (band: string, model: string) => Promise<FitWeight>;
+}
+
+const defaultGetFitWeight = getFitWeight;
+
 const epsilonFromEnv = (): number => {
   const raw = process.env.ROUTER_EPSILON;
   if (raw === undefined || raw === '') return 1;
   const parsed = Number(raw);
   return Number.isFinite(parsed) ? Math.min(Math.max(parsed, 0), 1) : 1;
+};
+
+/*
+ * Feedback weighting (issue #18), re-implemented on the #4 tier pools: the
+ * qualifying tier's pool is re-ordered by empirical fit for the band
+ * (highest first, stable ties keep DB order). When the leader's fit beats
+ * the pool's worst cell by `FEEDBACK_FLIP_RATIO`, the pick is FORCED to the
+ * leader — strong evidence overrides randomness, preserving #18's
+ * documentable flip even under the default even distribution. Otherwise the
+ * ε-greedy pick runs normally against the ordered pool, so exploitation
+ * tends to the best fit while exploration still samples uniformly. The old
+ * cross-tier flip is gone by design: pools are tier-partitioned and the
+ * tier decision belongs wholly to the classifier/rules. The appended reason
+ * keeps the `;feedback-weight:<w>:<ups>/<downs>` shape LangSmith (#5)
+ * consumes; no data for the band → no re-ordering, no suffix, pure ε pick.
+ */
+const FEEDBACK_FLIP_RATIO = 1.25;
+
+const orderPoolByFit = async (
+  pool: ModelRef[],
+  band: string,
+  readWeight: (band: string, model: string) => Promise<FitWeight>,
+): Promise<{ pool: ModelRef[]; forced?: ModelRef; reasonSuffix: string }> => {
+  if (!band || pool.length < 2) return { pool, reasonSuffix: '' };
+  const weights = await Promise.all(
+    pool.map(async (modelRef) => ({ modelRef, fit: await readWeight(band, modelRef.model) })),
+  );
+  const anyData = weights.some(({ fit }) => fit.ups + fit.downs > 0);
+  if (!anyData) {
+    return { pool, reasonSuffix: '' };
+  }
+  const ordered = [...weights].sort((a, b) => b.fit.weight - a.fit.weight);
+  const leader = ordered[0];
+  const worst = ordered[ordered.length - 1];
+  const ratio = worst.fit.weight > 0 ? leader.fit.weight / worst.fit.weight : Infinity;
+  const forced: ModelRef | undefined = ratio >= FEEDBACK_FLIP_RATIO ? leader.modelRef : undefined;
+  const suffix = `;feedback-weight:${leader.fit.weight.toFixed(2)}:${leader.fit.ups}/${leader.fit.downs}`;
+  return {
+    pool: ordered.map(({ modelRef }) => modelRef),
+    forced,
+    reasonSuffix: suffix,
+  };
 };
 
 /*
@@ -62,7 +116,7 @@ export const pickModelRef = (
 /*
  * Fetch both tier pools up front (they resolve from the DB config so the
  * pools are authoritative once seeded). The guard-model choice is not part
- * of the pools: the classifier call stays env-bound (see #4 task 8).
+ * of the pools: the classifier call stays env-bound.
  */
 const defaultConfig = async (): Promise<RouterConfig> => {
   const [small, large] = await Promise.all([listByTier('small'), listByTier('large')]);
@@ -77,15 +131,18 @@ export const routeQuery = async (
   query: string,
   config: RouterConfig | null = null,
   random: () => number = Math.random,
+  deps: RouterDeps = {},
 ): Promise<RoutingResult> => {
-  const { small: smallPool, large: largePool, guardModel } = config ?? (await defaultConfig());
+  const { small: smallPoolRaw, large: largePool, guardModel } = config ?? (await defaultConfig());
   const epsilon = epsilonFromEnv();
+  const readWeight = deps.getFitWeight ?? defaultGetFitWeight;
+  const band = deps.band ?? '';
 
   // Tier 1: Deterministic Rules
 
   // Rule 1: Short queries (greetings, simple confirmations)
   if (query.length < 20 && /^(hello|hi|hey|yes|no|ok|thanks|thank you)/i.test(query)) {
-    const modelRef = pickModelRef(smallPool, 'small', epsilon, random);
+    const modelRef = pickModelRef(smallPoolRaw, 'small', epsilon, random);
     return { model: modelRef.model, reason: 'deterministic-short', provider: modelRef.provider };
   }
 
@@ -117,16 +174,27 @@ export const routeQuery = async (
     const classification = response.choices[0]?.message?.content?.trim().toLowerCase();
 
     if (classification === 'complex') {
-      const modelRef = pickModelRef(largePool, 'large', epsilon, random);
-      return { model: modelRef.model, reason: 'classifier-complex', provider: modelRef.provider };
+      const { pool, forced, reasonSuffix } = await orderPoolByFit(largePool, band, readWeight);
+      const modelRef = forced ?? pickModelRef(pool, 'large', epsilon, random);
+      return {
+        model: modelRef.model,
+        reason: `classifier-complex${reasonSuffix}`,
+        provider: modelRef.provider,
+      };
     }
   } catch (err) {
     console.error('Classifier error:', err);
-    // Fallback to large model on error for safety
+    // Fallback to large model on error for safety (raw pool order — the
+    // classifier is down, so its feedback weighting waits for a retry).
     const modelRef = pickModelRef(largePool, 'large', epsilon, random);
     return { model: modelRef.model, reason: 'classifier-error', provider: modelRef.provider };
   }
 
-  const modelRef = pickModelRef(smallPool, 'small', epsilon, random);
-  return { model: modelRef.model, reason: 'classifier-simple', provider: modelRef.provider };
+  const { pool, forced, reasonSuffix } = await orderPoolByFit(smallPoolRaw, band, readWeight);
+  const modelRef = forced ?? pickModelRef(pool, 'small', epsilon, random);
+  return {
+    model: modelRef.model,
+    reason: `classifier-simple${reasonSuffix}`,
+    provider: modelRef.provider,
+  };
 };

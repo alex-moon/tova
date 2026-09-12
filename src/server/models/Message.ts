@@ -26,6 +26,20 @@ const messageSchema = new mongoose.Schema({
   modelName: {
     type: String,
   },
+  routingBand: {
+    type: String,
+  },
+  feedback: {
+    value: {
+      type: String,
+      enum: ['up', 'down'],
+      default: null,
+    },
+    updatedAt: {
+      type: Date,
+      default: null,
+    },
+  },
   timestamp: {
     type: Date,
     default: Date.now,

@@ -7,6 +7,7 @@ import path from 'path';
 import { createProxyMiddleware } from 'http-proxy-middleware';
 import authRoutes from './routes/auth';
 import chatRoutes from './routes/chat';
+import feedbackRoutes from './routes/feedback';
 import adminRoutes from './routes/admin';
 
 const DEFAULT_PORT = 5000;
@@ -31,6 +32,7 @@ export const createApp = (): Express => {
 
   app.use('/api/auth', authRoutes);
   app.use('/api/chat', chatRoutes);
+  app.use('/api/messages', feedbackRoutes);
   app.use('/api/admin', adminRoutes);
 
   app.get('/api/health', (_req, res) => {
