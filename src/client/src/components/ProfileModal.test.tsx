@@ -60,7 +60,7 @@ describe('ProfileModal (issue #35)', () => {
     expect(screen.getByTestId('profile-avatar')).toHaveTextContent('Set by Google');
     const nameInput = screen.getByLabelText(/preferred name/i) as HTMLInputElement;
     expect(nameInput.value).toBe('Al');
-    const promptInput = screen.getByTestId('profile-system-prompt') as HTMLTextAreaElement;
+    const promptInput = screen.getByTestId('profile-custom-instructions') as HTMLTextAreaElement;
     expect(promptInput.value).toBe('Be terse.');
   });
 
@@ -88,7 +88,7 @@ describe('ProfileModal (issue #35)', () => {
     updateProfile.mockResolvedValue(user);
     renderWithUser(user, vi.fn());
 
-    fireEvent.change(screen.getByTestId('profile-system-prompt'), { target: { value: '' } });
+    fireEvent.change(screen.getByTestId('profile-custom-instructions'), { target: { value: '' } });
     fireEvent.click(screen.getByTestId('profile-save'));
 
     await waitFor(() =>

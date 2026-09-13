@@ -10,12 +10,12 @@ interface ProfileModalProps {
 }
 
 const PREFERRED_NAME_LIMIT = 20;
-const SYSTEM_PROMPT_LIMIT = 4000;
+const CUSTOM_INSTRUCTIONS_LIMIT = 4000;
 
 const ProfileModal: React.FC<ProfileModalProps> = ({ onClose }) => {
   const { user, updateUser } = useAuth();
   const [preferredName, setPreferredName] = useState(user?.preferredName ?? '');
-  const [customInstructions, setSystemPrompt] = useState(user?.customInstructions ?? '');
+  const [customInstructions, setCustomInstructions] = useState(user?.customInstructions ?? '');
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -74,12 +74,12 @@ const ProfileModal: React.FC<ProfileModalProps> = ({ onClose }) => {
             />
           </label>
           <label className="block text-sm">
-            <span className="mb-1 block">System prompt</span>
+            <span className="mb-1 block">Custom instructions</span>
             <textarea
-              data-testid="profile-system-prompt"
+              data-testid="profile-custom-instructions"
               value={customInstructions}
-              onChange={(e) => setSystemPrompt(e.target.value)}
-              maxLength={SYSTEM_PROMPT_LIMIT}
+              onChange={(e) => setCustomInstructions(e.target.value)}
+              maxLength={CUSTOM_INSTRUCTIONS_LIMIT}
               rows={5}
               className="w-full rounded-lg border border-border bg-transparent px-3 py-1 text-base outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/30"
             />
