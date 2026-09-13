@@ -1,8 +1,9 @@
 name: Security
 
+# Pull-request scans. On push to main the same scans run inside the CI
+# workflow (ci.yml) so the deploy gate covers them — see the gitleaks job
+# comment there.
 on:
-  push:
-    branches: [main]
   pull_request:
     branches: [main]
 

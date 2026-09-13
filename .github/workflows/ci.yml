@@ -22,19 +22,76 @@ jobs:
 
       - run: npm run ci
 
+  gitleaks:
+    # Security scans gated on deploy: these run on the same workflow run as
+    # `ci` and the gate below requires them, so deploy (triggered via
+    # workflow_run on CI success) can never race past a failed scan.
+    # PR equivalent lives in security.yml.
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: gitleaks/gitleaks-action@v2
+
+  semgrep:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    container:
+      image: semgrep/semgrep
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Semgrep scan (OSS community rules)
+        run: semgrep scan --config p/oss-community-rules --error --metrics=off src/server
+
+  npm-audit:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Audit production dependencies
+        run: npm audit --omit=dev --audit-level=high --fail-on=all
+
   # `workflow_run` can report `conclusion: success` for a cancelled run
   # (known Actions quirk), which would trigger deploy. This gate always
-  # runs and fails unless `ci` itself succeeded — including when it was
-  # cancelled — so a cancelled run never looks successful.
+  # runs and fails unless everything it guards succeeded — including when
+  # a job was cancelled — so a cancelled run never looks successful.
   ci-gate:
-    needs: ci
+    needs: [ci, gitleaks, semgrep, npm-audit]
     if: always()
     runs-on: ubuntu-latest
 
     steps:
-      - name: Fail unless ci succeeded
+      - name: Fail unless ci and security scans succeeded
         run: |
-          if [[ "${{ needs.ci.result }}" != "success" ]]; then
-            echo "ci result: ${{ needs.ci.result }}"
-            exit 1
+          event="${{ github.event_name }}"
+          if [[ "$event" == "push" ]]; then
+            # On push to main, deploy follows this run: every guard must pass.
+            for status in "${{ needs.ci.result }}" "${{ needs.gitleaks.result }}" "${{ needs.semgrep.result }}" "${{ needs.npm-audit.result }}"; do
+              if [[ "$status" != "success" ]]; then
+                echo "guard status: $status"
+                exit 1
+              fi
+            done
+          else
+            # PR run: deploy is gated on push-to-main runs only; the PR-side
+            # scans live in security.yml.
+            if [[ "${{ needs.ci.result }}" != "success" ]]; then
+              echo "ci result: ${{ needs.ci.result }}"
+              exit 1
+            fi
           fi

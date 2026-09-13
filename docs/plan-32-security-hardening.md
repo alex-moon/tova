@@ -96,6 +96,12 @@ instruction below depends on them:
 
 ## Plan / Done
 
+Follow-up: deploy depends on the security scans the same way it depends on CI.
+Since `workflow_run` fires per-workflow (a second trigger would let deploy race
+past a still-running Security run), the push-to-`main` scans run *inside* the
+CI workflow as jobs the `ci-gate` job requires; `security.yml` is the
+pull-request equivalent.
+
 Each item is sized to be one commit:
 
 - [x] **Unify JWT secret resolution.** New `src/server/config/jwt.ts` exporting
