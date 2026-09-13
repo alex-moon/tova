@@ -31,8 +31,8 @@ export interface AdminModel {
 }
 
 // User payload returned by GET /api/auth/me (includes permissions).
-// `name`/`avatarUrl` are optional: omitted from the wire payload until set
-// (profile fields, issue #35 — populated by Google login or profile edits).
+// `name`/`avatarUrl` are optional: omitted from the wire payload until set.
+// `name` is the Google-owned full name; `preferredName` is user-owned.
 export interface AuthUser {
   id: string;
   email: string;
@@ -40,6 +40,7 @@ export interface AuthUser {
   permissions: string[];
   name?: string;
   avatarUrl?: string;
+  preferredName?: string;
 }
 
 // User payload returned by POST /api/auth/login and /register.

@@ -54,6 +54,13 @@ are, and inject only *relevant* profile context into the system prompt.
   info only where relevant to the conversation.
 - **Contract changes are additive and optional** so both server and client keep
   typechecking (`AuthUser` gains optional `name`, `avatarUrl`, `preferredName`).
+- **Critic pass hardening (2026-09-13, completed task 1):** `preferredName` now
+  round-trips via `/me` and `AuthUser`; the Google userinfo fetch has a 5s
+  `AbortSignal.timeout` so a stalled Google request can never hang the OAuth
+  callback; userinfo `picture` is bounded to 2048 chars (mirrors the schema bound
+  on `name`) so a hostile payload cannot push `save()` past validation and turn
+  profile enrichment fatal; tests added for oversize/whitespace/non-string
+  userinfo payloads.
 - **UI is a client-only modal opened from the sidebar footer user area** (no settings
   sheet exists; sidebar footer has only Logout and ThemeToggle). Modal contains:
   name display (read-only), preferred-name input, system-prompt textarea, Save →
@@ -147,9 +154,9 @@ deferred behind them.
 
 ## Done
 
-- [x] 1. Schema + `AuthUser` contract + `GET /api/auth/me` (partially —
-      `preferredName` still to add: schema field added in #35 task-2 commit;
-      `/me` projection and `AuthUser` remain)
+- [x] 1. Schema + `AuthUser` contract + `GET /api/auth/me` (completed on the critic
+      pass: `preferredName` added to `/me` projection, `AuthUser`, and the field
+      round-trip tests)
 - [x] 2. Google login stores/refreshes name + avatarUrl (userinfo endpoint) + tests
       (2026-09-13: `fetchGoogleProfile` in `auth.ts`, `resolveOrCreateUser` takes
       `profile`; Google-owned fields overwritten unconditionally, user-owned

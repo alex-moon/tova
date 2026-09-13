@@ -190,4 +190,37 @@ describe('Google OAuth', () => {
     expect(user?.name).toBeNull();
     expect(user?.avatarUrl).toBeNull();
   });
+
+  it('drops and bounds hostile userinfo payloads without breaking login', async () => {
+    const app = createApp();
+    const res = await loginViaGoogle(
+      app,
+      { sub: 'google-sub-7', email: 'hostile@gmail.com', email_verified: true },
+      {
+        sub: 'google-sub-7',
+        name: 'x'.repeat(150),
+        picture: ['y'.repeat(1500), 'z'.repeat(1500)].join(''),
+        extra: { injected: true },
+      },
+    );
+
+    expect(res.status).toBe(302);
+    const user = await User.findOne({ email: 'hostile@gmail.com' });
+    expect(user?.name).toBe('x'.repeat(100));
+    expect(user?.avatarUrl).toBe('y'.repeat(1500) + 'z'.repeat(548));
+  });
+
+  it('drops whitespace-only and non-string userinfo fields', async () => {
+    const app = createApp();
+    const res = await loginViaGoogle(
+      app,
+      { sub: 'google-sub-8', email: 'blankfields@gmail.com', email_verified: true },
+      { sub: 'google-sub-8', name: '   ', picture: 42 as unknown as string },
+    );
+
+    expect(res.status).toBe(302);
+    const user = await User.findOne({ email: 'blankfields@gmail.com' });
+    expect(user?.name).toBeNull();
+    expect(user?.avatarUrl).toBeNull();
+  });
 });

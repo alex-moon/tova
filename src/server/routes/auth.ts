@@ -21,6 +21,8 @@ const fetchGoogleProfile = async (
 ): Promise<{ name?: string; avatarUrl?: string }> => {
   const res = await fetch(GOOGLE_USERINFO_URL, {
     headers: { Authorization: `Bearer ${accessToken}` },
+    // Never let a stalled userinfo request hang the OAuth callback.
+    signal: AbortSignal.timeout(5000),
   });
   if (!res.ok) {
     throw new Error(`Userinfo request failed with status ${res.status}`);
@@ -28,10 +30,12 @@ const fetchGoogleProfile = async (
   const data = (await res.json()) as { name?: unknown; picture?: unknown };
   const profile: { name?: string; avatarUrl?: string } = {};
   if (typeof data.name === 'string' && data.name.trim()) {
+    // Bounded to match the User schema maxlength so a hostile payload can
+    // never push save() past validation and break login.
     profile.name = data.name.trim().slice(0, 100);
   }
   if (typeof data.picture === 'string' && data.picture.trim()) {
-    profile.avatarUrl = data.picture.trim();
+    profile.avatarUrl = data.picture.trim().slice(0, 2048);
   }
   return profile;
 };
@@ -252,6 +256,7 @@ router.get('/me', authenticate, async (req: AuthRequest, res) => {
     };
     if (user.name) userPayload.name = user.name;
     if (user.avatarUrl) userPayload.avatarUrl = user.avatarUrl;
+    if (user.preferredName) userPayload.preferredName = user.preferredName;
     res.json({ user: userPayload });
   } catch (_err) {
     return res.status(401).json({ message: 'Invalid token' });

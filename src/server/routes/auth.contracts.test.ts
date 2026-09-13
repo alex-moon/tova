@@ -69,6 +69,7 @@ describe('auth route contract drift', () => {
     if (!doc) throw new Error('user not found');
     doc.name = 'Alex Moon';
     doc.avatarUrl = 'https://example.com/a.png';
+    doc.preferredName = 'Alex';
     doc.settings = { systemPrompt: 'Be terse.' };
     await doc.save();
 
@@ -77,6 +78,7 @@ describe('auth route contract drift', () => {
     const user: Record<string, unknown> = res.body.user;
     expect(user.name).toBe('Alex Moon');
     expect(user.avatarUrl).toBe('https://example.com/a.png');
+    expect(user.preferredName).toBe('Alex');
     // settings is internal: never exposed on the /me wire payload.
     expect(user.settings).toBeUndefined();
     expect(user.systemPrompt).toBeUndefined();
@@ -100,6 +102,7 @@ describe('auth route contract drift', () => {
     const user: Record<string, unknown> = res.body.user;
     expect(user.name).toBeUndefined();
     expect(user.avatarUrl).toBeUndefined();
+    expect(user.preferredName).toBeUndefined();
     expect(user.settings).toBeUndefined();
   });
 
