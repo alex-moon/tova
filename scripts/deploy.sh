@@ -43,7 +43,10 @@ fi
 
 # The backend reads the DB state on boot; run migrations after the stack is up,
 # then restart the backend so it serves the migrated DB.
-npm run db:migrate
+# MONGODB_HOST is pinned to 127.0.0.1: .env carries MONGODB_HOST=mongodb (the
+# compose service name the backend container needs), which is unresolvable
+# from the host shell where migrations run.
+MONGODB_HOST=127.0.0.1 npm run db:migrate
 docker compose -f docker-compose.live.yml restart backend
 
 docker system prune -f
