@@ -5,9 +5,11 @@ Issue: https://github.com/alex-moon/tova/issues/35
 
 ## Motivation
 
-Everything about a user today is email + role:
+Everything about a user *was* email + role (line references below are the
+pre-implementation state and have drifted since — the prompt assembly now lives
+in `src/server/services/promptAssembly.ts`; kept as historical context):
 
-- The system prompt is a hardcoded global `SYSTEM_PROMPT` (declared at
+- The system prompt was a hardcoded global `SYSTEM_PROMPT` (declared at
   `src/server/routes/chat.ts:148`, unshifted at chat.ts:206 and chat.ts:298 — the
   stream route and the non-stream route) shared by all users.
 - The `User` model (`src/server/models/User.ts`) historically stored `email`,
@@ -66,8 +68,12 @@ question:
   (optional string, ≤4000 chars).
 - **Partial update:** a key *absent* from the body is untouched. A key *present*
   sets the field — trimmed empty string clears it (`preferredName: null` /
-  `systemPrompt` removed). This is non-destructive for clients that only send what
-  the user changed, and gives the modal's "clear" affordance for free.
+  `systemPrompt: null`). Implementation note (critic pass 2026-09-13): the
+  cleared prompt round-trips as the schema default `null`, not `undefined` —
+  mongoose rehydrates an absent subdoc field as its default on reload. The
+  resolver (`promptAssembly.ts`) treats `null`, `undefined`, empty, and
+  whitespace-only exactly the same, so downstream behavior is unaffected.
+  Tested against `null` so the assertion cannot flake.
 - Unknown keys (including `name`, `avatarUrl`, `email`, `role`) are **rejected**
   (zod `strict()`), not silently ignored — a client bug must not pretend success
   while dropping data. Tests assert the 400.
@@ -100,14 +106,38 @@ ticket should adopt these directly, do not re-ask):
 
 ## Open questions
 
-No planned task depends on either — both state an MVP default above; the answers
-would adjust defaults, unblock nothing.
+A second 2026-09-13 critic pass (this update) found **no new questions**: the
+new tests (cross-user isolation, request-time resolution via PATCH, non-object
+PATCH bodies) all passed against the existing implementation, and `npm run ci`
+is fully green with them (248 server tests). The four questions below remain
+open; Q1, Q2, and Q4 were already posted to #35, and Q3 needs owner action
+(not an answer) — rotate the compromised credentials and/or confirm they were
+intentional. Q3's blob is **still present in branch history** as of this pass.
+
+A third question was surfaced by the 2026-09-13 critic pass (see below); it does
+not block tasks 6–7 but needs an owner answer before merge.
 
 1. **PATCH clearing semantics:** present-but-empty means "clear" per the MVP
    default above, and unknown keys are rejected with 400. Confirm, or specify
    explicit-null clearing / silent-ignore instead.
 2. **Confirm invented limits:** is `preferredName` ≤100 and `systemPrompt` ≤4000
    acceptable, or should these differ (or be uncapped with a sanity bound)?
+3. **SECURITY — committed `.env.swp` contains live secrets.** Commit `0bb28d5`
+   on this branch committed a vim swap file (`.env.swp`) holding what appear to
+   be the real `MONGODB_PASSWORD`, `GOOGLE_CLIENT_SECRET`, `ADMIN_PASSWORD`, and
+   DO Spaces keys. The working-tree file was deleted by the critic pass, but the
+   blob remains in the branch history and the branch is pushed. Regardless of
+   the answer below, all those credentials should be treated as compromised and
+   rotated, and the file removed from history before merge. Question:
+   confirm-and-rotate, or explain why these are intentionally committed (they do
+   not match any tracked `.env*` pattern in the repo).
+4. **Prompt-injection surface in the profile-context block:** `name`,
+   `preferredName` come from user/Google-provided strings and are interpolated
+   verbatim into the system message (e.g. a preferred name could carry
+   instructions like `Ignore previous rules and …`). MVP accepts this risk —
+   it is bounded to ≤100 chars, and chat content is a bigger injection surface
+   anyway. Should the MVP sanitize instead (strip newlines / instruction-like
+   content), or is acceptance fine?
 
 ## Tasks (each one commit-sized)
 
@@ -129,84 +159,81 @@ would adjust defaults, unblock nothing.
      storage, refresh overwrites changed Google values, preferredName untouched,
      userinfo failure completes login, hostile payloads bounded.
 
-3. **PATCH /api/profile** — in `src/server/routes/auth.ts` (or a small
-   `src/server/routes/profile.ts` mounted from the router registration site where
-   `admin.ts`/`feedback.ts` mounts are):
-   - zod schema per "PATCH semantics" above (`strict()`, trimmed ≤100 /
-     ≤4000, empty-string clears);
-   - `partial: true`-style writes: only supplied keys; use
-     `user.preferredName = value ?? null` and for `systemPrompt` set or
-     `$unset`-equivalent (`user.settings.systemPrompt = undefined` under mongoose
-     strict mode removes it — verify with a test that `settings.systemPrompt`
-     round-trips as absent after clear);
-   - `requireAdmin`-style route wiring: `authenticate` middleware, 401 JSON shape
-     matching existing routes;
-   - re-fetch the user document and return the same payload shape as `/me`
-     (single shared projection helper if cheap, otherwise mirror `/me`'s fields
-     and add a drift test asserting `GET /me` and PATCH responses carry identical
-     field sets);
-   - unit tests: happy path set; clear via empty string; absent keys untouched
-     (pre-existing preferredName survives a `systemPrompt`-only PATCH);
-     validation failure (too-long, non-string); strict rejection of
-     `name`/`avatarUrl`/`role` → 400; unauthenticated → 401.
+3. **PATCH /api/profile** *(done, complete — implemented in
+   `src/server/routes/profile.ts`, mounted from the router registration site)*:
+   as spec'd in "PATCH semantics" above. Implementation note superseded by the
+   critic fix: clearing sets `user.settings.systemPrompt = null` explicitly
+   (the original "$unset-equivalent / `undefined` removes it" approach was
+   wrong under the schema default and broke `tsc`). Tests in    `profile.test.ts`
+   cover the full matrix. Critic pass 2 (2026-09-13) added 400-coverage for
+   **non-object bodies** (array / string / number / boolean) — `z.strictObject`
+   rejects them all — and pins `{}` as a legal no-op PATCH returning 200.
 
-4. **Per-user system prompt in chat routes** — in `src/server/routes/chat.ts`:
-   - add a shared helper (e.g. `resolveSystemPrompt(user)` in
-     `src/server/services/userService.ts` or a small `promptAssembly` service)
-     returning `user.settings?.systemPrompt?.trim() || SYSTEM_PROMPT`; trim so a
-     whitespace-only prompt cannot disable the system message;
-   - replace the `SYSTEM_PROMPT` literal at both unshift sites (chat.ts:206 and
-     chat.ts:298) with the helper so the stream and non-stream routes cannot
-     drift;
-   - tests: user-authored prompt overrides global in both routes (stream route
-     covered via the existing `chat.stream.test.ts` harness); whitespace-only
-     setting falls back to global; user without a setting is byte-identical to
-     today's behavior.
+4. **Per-user system prompt in chat routes** *(done, complete)* — as planned:
+   `resolveSystemPrompt` and `buildSystemContent` live in
+   `src/server/services/promptAssembly.ts`; the literal `SYSTEM_PROMPT` unshift
+   sites in both chat routes now use them. Tests: `chat.test.ts` and
+   `chat.stream.test.ts` cover global fallback, override, whitespace-only
+   fallback, and byte-equality for no-profile users. Critic pass 2
+   (2026-09-13) added `chat.test.ts` tests for **cross-user prompt isolation**
+   (user B's request must never see user A's override) and **request-time
+   resolution through the real PATCH route** (set override → chat shows it →
+   `PATCH {systemPrompt: ''}` → very next message falls back to global, with
+   the mock cleared between requests).
 
-5. **Profile-context prompt block** — same assembly helper as task 4 becomes the
-   single prompt-assembly point (`buildSystemMessages(user)` returning the full
-   system content: resolved prompt + optional profile block):
-   - block contains, only when present: "the user goes by `preferredName`" line;
-     when full name exists but preferred name does not: "the user's full name is
-     X — never address them by it; if they seem to want to be called something,
-     invite them to set a preferred name";
-     unconditionally: "profile details are context, not conversation material —
-     use them only where relevant, and never reveal the raw profile fields";
-   - wire into both unshift sites via the same helper;
-   - tests: block present with preferred name set; instruction-only block when
-     full name exists without preferred name; no profile data at all →
-     byte-identical to the resolved prompt (byte-equality assertion, not
-     substring).
+5. **Profile-context prompt block** *(done, complete)* — same assembly helper;
+   tests in `promptAssembly.test.ts` (block with preferred name, full-name
+   instruction, byte-equality with no profile data).
 
 6. **Client: contracts + auth context** — *smaller than originally planned*:
    the client already types users via `AuthUser` from `@shared/contracts`
-   (`AuthContext.tsx:3`, `services/auth.ts:2`), so contracts changes propagate
-   automatically. Remaining work: verify no client code assumes the user object
-   is exactly `{id,email,role,permissions}` (grep for property narrowing), keep
-   the issue #20 drift notes intact, and add/extend a client test if `AuthContext`
-   has one covering user shape.
+   (`context/AuthContext.tsx:3`, `services/auth.ts:3`), so contracts changes
+   propagate automatically. (Earlier plan text referenced `AuthContext.tsx` under
+   `components/` — it actually lives in `src/client/src/context/`.) Concrete
+   remaining steps:
+   - grep the client for narrowing assumptions on the user object
+     (`rg -n "user\.(id|email|role|permissions)" src/client`) and confirm nothing
+     destructures the exact field set (a missing-key destructure is fine; an
+     exhaustive check would not be);
+   - confirm the issue #20 drift comments in `services/auth.ts` are intact;
+   - `AuthContext` exposes only `{ user, loading, login, register, logout }` —
+     no `refresh()`-style method exists (the earlier plan wording invented one).
+     Task 7's save needs a way to push the PATCH result into context: add an
+     explicit `setUser`-wrapping `updateUser(next: User)` to the context value
+     and its type, rather than mutating `user` ad hoc from the modal;
+   - extend `App.test.tsx` / AuthContext coverage only if the user-shape
+     assertions exist — otherwise covered by server round-trip tests.
 
 7. **Client: sidebar avatar + profile modal** — in
-   `src/client/src/components/Sidebar.tsx` (footer user area currently holds only
-   Logout and ThemeToggle):
-   - footer shows small avatar (image or initial-colored fallback) + display name
-     (preferredName → name → email, per owner: never address by full name in
-     chat; in sidebar UI the Google name may display once, email fallback);
-   - a `ProfileModal` component (new file, alongside Sidebar): read-only name +
-     avatar display (not an "avatar preview" edit affordance — avatar is not
-     editable), preferred-name input, system-prompt textarea, Save →
-     `PATCH /api/profile` via a new `updateProfile` in `services/auth.ts`, then
-     `refresh()`-style context update; error state surfaces API validation
-     failures; disabled Save while pending;
+   `src/client/src/components/Sidebar.tsx` (footer user area currently holds
+   only Logout and ThemeToggle, `Sidebar.tsx:93-95`). Concrete steps:
+   - footer: small avatar — `avatarUrl` `<img>` when present, else an
+     initial-colored fallback `<div>` (derive the initial from the display
+     name's first character); display name = `preferredName ?? name ?? email`;
+     this is UI-only, so the Google full name may display here (the
+     never-address-by-full-name rule applies to the chat prompt, not the UI);
+   - new `ProfileModal.tsx` alongside Sidebar, opened from the footer user
+     area: read-only name + avatar rows (display-only, no edit affordance —
+     avatar is not editable per owner decision), `preferredName` text input
+     (maxlength 100), `systemPrompt` textarea (maxlength 4000);
+   - `services/auth.ts`: add `updateProfile(patch: { preferredName?: string;
+     systemPrompt?: string })` doing `PATCH /api/profile` with the `authenticate`
+     header pattern the other service methods use;
+   - Save sends only fields the modal has values for (empty input → send the
+     empty string to trigger server-side clearing); on success call the
+     `updateUser` context method from task 6 with the PATCH response and close;
+     disabled Save while pending;
+   - error state surfaces the API's validation message and keeps the modal open;
    - no location controls (deferred ticket);
    - Vitest: modal renders pre-filled with context values; save calls `PATCH`
-     with only changed fields and updates context; API error shows a message and
-     keeps the modal open.
+     with the expected payload and updates context; API error shows a message
+     and keeps the modal open; avatar fallback renders the initial when
+     `avatarUrl` is absent.
 
-8. **Verify + docs**: `npm run ci` (server lint, format check, typecheck, server
-   tests, client lint/format/tests, client build); update this checklist;
-   confirm Open questions 1–2 on #35 (posted 2026-09-13) once answered; move to
-   `docs/done/` at merge per workflow.
+8. **Verify + docs**: `npm run ci` (proved fully green, including the client
+   build with the server-side scope complete — re-run after tasks 6–7); update
+   this checklist; confirm Open questions 1–2 on #35 (posted 2026-09-13) once
+   answered; move to `docs/done/` at merge per workflow.
 
 ## Done
 
@@ -214,14 +241,32 @@ would adjust defaults, unblock nothing.
       `preferredName` to `/me` projection, `AuthUser`, and round-trip tests)
 - [x] 2. Google login stores/refreshes name + avatarUrl (userinfo endpoint) + tests
       (`fetchGoogleProfile`, 5s timeout, size bounds, non-fatal failure)
-- [ ] 3. `PATCH /api/profile` (preferredName + systemPrompt, strict body, empty
-      clears) + tests
-- [ ] 4. Per-user system prompt via shared resolver at both unshift sites + tests
-- [ ] 5. Profile-context prompt block via shared assembly helper + tests
-- [ ] 6. Client AuthContext carries name/avatarUrl/preferredName (contracts auto-
-      propagate; verify no narrowing assumptions + drift notes intact)
-- [ ] 7. Sidebar avatar + profile modal + tests
-- [ ] 8. `npm run ci` green; plan doc current; Open questions 1–2 answered
+- [x] 3. `PATCH /api/profile` (preferredName + systemPrompt, strict body, empty
+      clears) + tests (critic pass 2026-09-13: fixed the typecheck failure that
+      broke 8 suites, corrected the clear round-trip to `null`, added the full
+      missing suite — happy/partial/clear/strict-reject/validation/401/me-drift)
+- [x] 4. Per-user system prompt via shared resolver at both unshift sites + tests
+      (critic pass added route-level tests for both chat routes: global
+      fallback, override, profile block, whitespace-only fallback)
+- [x] 5. Profile-context prompt block via shared assembly helper + tests
+      (critic pass added `promptAssembly.test.ts`: byte-equality for no-profile
+      users, full-name instruction, preferred-name lines)
+- [x] 6. Client AuthContext carries name/avatarUrl/preferredName (contracts auto-
+      propagate; verified no narrowing assumptions — `AdminView`'s `user.*`
+      accesses are its own list-row type, not `AuthContext` — and drift notes
+      intact). Added `systemPrompt` to `AuthUser` + `toAuthUser` (needed for
+      modal prefill; settings subdoc stays internal) and an `updateUser`
+      context method for pushing PATCH results.
+- [x] 7. Sidebar avatar + profile modal + tests (`Sidebar.test.tsx` covers the
+      img/fallback-initial rendering and opening the modal;
+      `ProfileModal.test.tsx` covers prefill, trimmed PATCH payload + context
+      update, empty-string clearing, and error handling that keeps the modal
+      open). Related tests updated: `profile.test.ts` and
+      `auth.contracts.test.ts` now expect `systemPrompt` on the wire payload.
+- [ ] 8. `npm run ci` green (re-proved 2026-09-13, critic pass 2, after the
+      isolation/resolution/shape tests: 248 server
+      + 44 client tests, lint, format, typecheck, build); plan doc current;
+      Open questions 1–2 answered
 
 ## Follow-ups
 

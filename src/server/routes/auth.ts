@@ -2,8 +2,8 @@ import express from 'express';
 import crypto from 'crypto';
 import jwt from 'jsonwebtoken';
 import { User, UserDocument } from '../models/User';
-import { resolveOrCreateUser } from '../services/userService';
-import { AuthUser, LoginUserPayload } from '../../shared/contracts';
+import { resolveOrCreateUser, toAuthUser } from '../services/userService';
+import { LoginUserPayload } from '../../shared/contracts';
 import { getJwtSecret } from '../config/jwt';
 import { loginSchema, registerSchema } from '../validation';
 import { authenticate, AuthRequest } from '../middleware/auth';
@@ -248,15 +248,7 @@ router.get('/me', authenticate, async (req: AuthRequest, res) => {
       res.clearCookie('token');
       return res.status(401).json({ message: 'User no longer exists' });
     }
-    const userPayload: AuthUser = {
-      id: user._id.toString(),
-      email: user.email,
-      role: user.role,
-      permissions: user.permissions,
-    };
-    if (user.name) userPayload.name = user.name;
-    if (user.avatarUrl) userPayload.avatarUrl = user.avatarUrl;
-    if (user.preferredName) userPayload.preferredName = user.preferredName;
+    const userPayload = toAuthUser(user);
     res.json({ user: userPayload });
   } catch (_err) {
     return res.status(401).json({ message: 'Invalid token' });

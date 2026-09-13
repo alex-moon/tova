@@ -1,5 +1,22 @@
 import crypto from 'crypto';
 import { User, UserDocument } from '../models/User';
+import { AuthUser } from '../../shared/contracts';
+
+// Single projection from a user document to the GET /api/auth/me wire shape.
+// Shared with PATCH /api/profile so the two endpoints cannot drift (issue #35).
+export const toAuthUser = (user: UserDocument): AuthUser => {
+  const payload: AuthUser = {
+    id: user._id.toString(),
+    email: user.email,
+    role: user.role,
+    permissions: user.permissions,
+  };
+  if (user.name) payload.name = user.name;
+  if (user.avatarUrl) payload.avatarUrl = user.avatarUrl;
+  if (user.preferredName) payload.preferredName = user.preferredName;
+  if (user.settings?.systemPrompt) payload.systemPrompt = user.settings.systemPrompt;
+  return payload;
+};
 
 export const ROUTING_PERMISSION = 'routing';
 

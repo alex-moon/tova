@@ -9,6 +9,7 @@ import authRoutes from './routes/auth';
 import chatRoutes from './routes/chat';
 import feedbackRoutes from './routes/feedback';
 import adminRoutes from './routes/admin';
+import profileRoutes from './routes/profile';
 import { buildMongoUri } from './mongoUri';
 import { getJwtSecret } from './config/jwt';
 import helmet from 'helmet';
@@ -61,6 +62,7 @@ export const createApp = (): Express => {
   app.use('/api/chat', chatRoutes);
   app.use('/api/messages', feedbackRoutes);
   app.use('/api/admin', adminRoutes);
+  app.use('/api/profile', profileRoutes);
 
   app.get('/api/health', (_req, res) => {
     res.json({ status: 'ok' });

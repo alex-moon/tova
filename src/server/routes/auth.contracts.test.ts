@@ -79,9 +79,10 @@ describe('auth route contract drift', () => {
     expect(user.name).toBe('Alex Moon');
     expect(user.avatarUrl).toBe('https://example.com/a.png');
     expect(user.preferredName).toBe('Alex');
-    // settings is internal: never exposed on the /me wire payload.
+    // settings stays internal, but the per-user prompt override ride-along on
+    // AuthUser is required by the profile modal prefill (plan tasks 6–7).
     expect(user.settings).toBeUndefined();
-    expect(user.systemPrompt).toBeUndefined();
+    expect(user.systemPrompt).toBe('Be terse.');
   });
 
   it('me omits profile fields not yet set, even when other fields exist', async () => {
@@ -104,6 +105,8 @@ describe('auth route contract drift', () => {
     expect(user.avatarUrl).toBeUndefined();
     expect(user.preferredName).toBeUndefined();
     expect(user.settings).toBeUndefined();
+    // The prompt override is set in this fixture, so it rides along.
+    expect(user.systemPrompt).toBe('Be terse.');
   });
 
   it('me values are trimmed and length-bounded at the schema level (issue #35)', async () => {

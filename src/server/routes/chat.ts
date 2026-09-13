@@ -2,9 +2,11 @@ import express from 'express';
 import { authenticate, AuthRequest } from '../middleware/auth';
 import { Session } from '../models/Session';
 import { Message } from '../models/Message';
+import { User } from '../models/User';
 import { routeQuery } from '../services/routerService';
 import { generateChatTitle } from '../services/titleService';
 import { hasPermission, ROUTING_PERMISSION } from '../services/userService';
+import { buildSystemContent } from '../services/promptAssembly';
 import { inferenceService } from '../services/inferenceService';
 import type { NeutralStreamChunk } from '../services/llmTypes';
 import { classifyAndPersistPromptDimensions, isTriviallyNeutral } from '../services/metricsService';
@@ -145,14 +147,6 @@ const saveUserMessageWithMetrics = async (sessionId: string, content: string) =>
   return userMessage;
 };
 
-const SYSTEM_PROMPT = `You are Tova, a helpful, warm, and direct personal chat assistant — think of yourself as the thing people reach for instead of Googling or texting a friend at 11pm. You are not a coding tool and are not built for engineers who already know their way around AI models; assume the person you're talking to just wants a smart, caring assistant and does not think about or care what "model" they're using. If asked what model or AI you're built on, answer simply: you're Tova. Do not name underlying providers or models.
-
-Talk like a smart, grounded friend: engage with what the person actually said, never generic reassurance or templated advice. Be supportive of the person, not automatically of every idea they float — if a better approach exists, say so kindly and directly.
-
-For anything emotionally heavy — relationships, mental health, grief, major life decisions — be honestly helpful within what a conversation like this can safely offer, and be upfront that you're not a substitute for a therapist or professional when the topic calls for one. Say this plainly, not as a disclaimer bolted onto the start or end, and keep helping regardless — being honest about your limits and being useful are not in tension.
-
-Keep answers focused: prefer a few short paragraphs or a compact list over long exhaustive explanations, but never at the cost of leaving the question unanswered or feeling clipped or cold. Do not pad answers with introductions, summaries, or filler.`;
-
 // Chat endpoint (non-streaming, preserved for compatibility)
 router.post('/', authenticate, async (req: AuthRequest, res) => {
   try {
@@ -203,7 +197,8 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
         role: m.role as 'user' | 'assistant',
         content: m.content as string,
       }));
-    messages.unshift({ role: 'system', content: SYSTEM_PROMPT });
+    const userDoc = await User.findById(userId);
+    messages.unshift({ role: 'system', content: buildSystemContent(userDoc) });
 
     const chatCompletion = await inferenceService.createCompletion({
       messages,
@@ -295,7 +290,8 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
         role: m.role as 'user' | 'assistant',
         content: m.content as string,
       }));
-    messages.unshift({ role: 'system', content: SYSTEM_PROMPT });
+    const streamUserDoc = await User.findById(userId);
+    messages.unshift({ role: 'system', content: buildSystemContent(streamUserDoc) });
 
     // Set SSE headers
     res.setHeader('Content-Type', 'text/event-stream');
