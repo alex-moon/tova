@@ -2,8 +2,8 @@ import express from 'express';
 import crypto from 'crypto';
 import jwt from 'jsonwebtoken';
 import { User, UserDocument } from '../models/User';
-import { resolveOrCreateUser } from '../services/userService';
-import { AuthUser, LoginUserPayload } from '../../shared/contracts';
+import { resolveOrCreateUser, toAuthUser } from '../services/userService';
+import { LoginUserPayload } from '../../shared/contracts';
 import { getJwtSecret } from '../config/jwt';
 import { loginSchema, registerSchema } from '../validation';
 import { authenticate, AuthRequest } from '../middleware/auth';
@@ -12,6 +12,33 @@ const router = express.Router();
 
 const GOOGLE_AUTH_URL = 'https://accounts.google.com/o/oauth2/v2/auth';
 const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token';
+const GOOGLE_USERINFO_URL = 'https://openidconnect.googleapis.com/v1/userinfo';
+
+// Fetch name/picture from Google's userinfo endpoint. Both fields are
+// tolerated-absent (users/orgs may withhold them); invalid values are dropped.
+const fetchGoogleProfile = async (
+  accessToken: string,
+): Promise<{ name?: string; avatarUrl?: string }> => {
+  const res = await fetch(GOOGLE_USERINFO_URL, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+    // Never let a stalled userinfo request hang the OAuth callback.
+    signal: AbortSignal.timeout(5000),
+  });
+  if (!res.ok) {
+    throw new Error(`Userinfo request failed with status ${res.status}`);
+  }
+  const data = (await res.json()) as { name?: unknown; picture?: unknown };
+  const profile: { name?: string; avatarUrl?: string } = {};
+  if (typeof data.name === 'string' && data.name.trim()) {
+    // Bounded to match the User schema maxlength so a hostile payload can
+    // never push save() past validation and break login.
+    profile.name = data.name.trim().slice(0, 100);
+  }
+  if (typeof data.picture === 'string' && data.picture.trim()) {
+    profile.avatarUrl = data.picture.trim().slice(0, 2048);
+  }
+  return profile;
+};
 
 const getGoogleConfig = () => {
   if (
@@ -168,7 +195,7 @@ router.get('/google/callback', async (req, res) => {
       throw new Error(`Token exchange failed with status ${tokenRes.status}`);
     }
 
-    const body = (await tokenRes.json()) as { id_token?: string };
+    const body = (await tokenRes.json()) as { id_token?: string; access_token?: string };
     if (!body.id_token) {
       throw new Error('Missing id_token in token response');
     }
@@ -185,8 +212,20 @@ router.get('/google/callback', async (req, res) => {
       return res.status(401).send('Google account email could not be verified');
     }
 
+    // Profile enrichment is non-fatal: authentication must never break on it.
+    // Google's OIDC docs only "might provide" name/picture as id_token claims,
+    // so the userinfo endpoint is the reliable source.
+    let profile: { name?: string; avatarUrl?: string } | undefined;
+    if (body.access_token) {
+      try {
+        profile = await fetchGoogleProfile(body.access_token);
+      } catch (err) {
+        console.error('Google userinfo fetch failed:', err);
+      }
+    }
+
     const email = payload.email.toLowerCase();
-    const user = await resolveOrCreateUser(email, payload.sub);
+    const user = await resolveOrCreateUser(email, payload.sub, profile);
     issueSessionCookie(user, res);
     res.redirect('/');
   } catch (err) {
@@ -209,12 +248,7 @@ router.get('/me', authenticate, async (req: AuthRequest, res) => {
       res.clearCookie('token');
       return res.status(401).json({ message: 'User no longer exists' });
     }
-    const userPayload: AuthUser = {
-      id: user._id.toString(),
-      email: user.email,
-      role: user.role,
-      permissions: user.permissions,
-    };
+    const userPayload = toAuthUser(user);
     res.json({ user: userPayload });
   } catch (_err) {
     return res.status(401).json({ message: 'Invalid token' });

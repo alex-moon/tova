@@ -1,13 +1,15 @@
-import express from 'express';
 import { isValidObjectId } from 'mongoose';
+import express from 'express';
 import { authenticate, AuthRequest } from '../middleware/auth';
 import { Session } from '../models/Session';
 import { Message } from '../models/Message';
+import { User } from '../models/User';
 import { Asset } from '../models/Asset';
 import { buildAttachmentEnvelope } from '../services/attachmentEnvelope';
 import { routeQuery } from '../services/routerService';
 import { generateChatTitle } from '../services/titleService';
 import { hasPermission, ROUTING_PERMISSION } from '../services/userService';
+import { buildSystemContent } from '../services/promptAssembly';
 import { inferenceService } from '../services/inferenceService';
 import type { NeutralStreamChunk } from '../services/llmTypes';
 import { classifyAndPersistPromptDimensions, isTriviallyNeutral } from '../services/metricsService';
@@ -17,6 +19,49 @@ import { generateFollowups } from '../services/followupService';
 const router = express.Router();
 
 const NO_ROUTING_PERMISSION = "You don't have permission to use the model router.";
+
+type AssetDoc = {
+  _id: unknown;
+  filename: string;
+  contentType: string;
+  size: number;
+  textExtracted?: string | null;
+};
+
+// Asset attach (issue #34): resolves the attached asset for a turn — 'none'
+// when the request sent no assetId, 'invalid' for a malformed reference,
+// 'missing' when it points at a different user's asset.
+const loadAttachedAsset = async (
+  req: AuthRequest,
+): Promise<AssetDoc | null | 'invalid' | 'missing'> => {
+  const assetIdRaw = req.body?.assetId;
+  if (assetIdRaw === undefined || assetIdRaw === null || assetIdRaw === '') return null;
+  if (typeof assetIdRaw !== 'string' || !isValidObjectId(assetIdRaw)) return 'invalid';
+  const asset = await Asset.findOne({
+    _id: assetIdRaw,
+    userId: req.user?.id,
+  });
+  return asset ? (asset as unknown as AssetDoc) : 'missing';
+};
+
+// Attached file text goes in through the structured attachment envelope
+// (services/attachmentEnvelope.ts): untrusted-data rule first, then the
+// <user_content> block. Stored/persisted user message stays the raw user
+// text so the UI and metrics are unaffected.
+const appendAssetBlock = (
+  messages: { role: 'system' | 'user' | 'assistant'; content: string }[],
+  asset: AssetDoc | null,
+): void => {
+  const last = messages[messages.length - 1];
+  if (asset && last?.role === 'user') {
+    last.content += buildAttachmentEnvelope({
+      filename: asset.filename,
+      contentType: asset.contentType,
+      size: asset.size,
+      textExtracted: asset.textExtracted,
+    });
+  }
+};
 
 // Provenance extraction (issue #16): web_search tool results arrive as
 // { results: { title, snippet, url }[] }; URLs are collected incrementally
@@ -153,57 +198,6 @@ const saveUserMessageWithMetrics = async (
   return userMessage;
 };
 
-type AssetDoc = {
-  _id: unknown;
-  filename: string;
-  contentType: string;
-  size: number;
-  textExtracted?: string | null;
-};
-
-// Asset attach (issue #34): resolves the attached asset for a turn — 'none'
-// when the request sent no assetId, 'invalid' for a malformed reference,
-// 'missing' when it points at a different user's asset.
-const loadAttachedAsset = async (
-  req: AuthRequest,
-): Promise<AssetDoc | null | 'invalid' | 'missing'> => {
-  const assetIdRaw = req.body?.assetId;
-  if (assetIdRaw === undefined || assetIdRaw === null || assetIdRaw === '') return null;
-  if (typeof assetIdRaw !== 'string' || !isValidObjectId(assetIdRaw)) return 'invalid';
-  const asset = await Asset.findOne({
-    _id: assetIdRaw,
-    userId: req.user?.id,
-  });
-  return asset ? (asset as unknown as AssetDoc) : 'missing';
-};
-
-// Attached file text goes in through the structured attachment envelope
-// (services/attachmentEnvelope.ts): untrusted-data rule first, then the
-// <user_content> block. Stored/persisted user message stays the raw user
-// text so the UI and metrics are unaffected.
-const appendAssetBlock = (
-  messages: { role: 'system' | 'user' | 'assistant'; content: string }[],
-  asset: AssetDoc | null,
-): void => {
-  const last = messages[messages.length - 1];
-  if (asset && last?.role === 'user') {
-    last.content += buildAttachmentEnvelope({
-      filename: asset.filename,
-      contentType: asset.contentType,
-      size: asset.textExtracted?.length ?? 0,
-      textExtracted: asset.textExtracted,
-    });
-  }
-};
-
-const SYSTEM_PROMPT = `You are Tova, a helpful, warm, and direct personal chat assistant — think of yourself as the thing people reach for instead of Googling or texting a friend at 11pm. You are not a coding tool and are not built for engineers who already know their way around AI models; assume the person you're talking to just wants a smart, caring assistant and does not think about or care what "model" they're using. If asked what model or AI you're built on, answer simply: you're Tova. Do not name underlying providers or models.
-
-Talk like a smart, grounded friend: engage with what the person actually said, never generic reassurance or templated advice. Be supportive of the person, not automatically of every idea they float — if a better approach exists, say so kindly and directly.
-
-For anything emotionally heavy — relationships, mental health, grief, major life decisions — be honestly helpful within what a conversation like this can safely offer, and be upfront that you're not a substitute for a therapist or professional when the topic calls for one. Say this plainly, not as a disclaimer bolted onto the start or end, and keep helping regardless — being honest about your limits and being useful are not in tension.
-
-Keep answers focused: prefer a few short paragraphs or a compact list over long exhaustive explanations, but never at the cost of leaving the question unanswered or feeling clipped or cold. Do not pad answers with introductions, summaries, or filler.`;
-
 // Chat endpoint (non-streaming, preserved for compatibility)
 router.post('/', authenticate, async (req: AuthRequest, res) => {
   try {
@@ -267,7 +261,8 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
         role: m.role as 'user' | 'assistant',
         content: m.content as string,
       }));
-    messages.unshift({ role: 'system', content: SYSTEM_PROMPT });
+    const userDoc = await User.findById(userId);
+    messages.unshift({ role: 'system', content: buildSystemContent(userDoc) });
     appendAssetBlock(messages, attachedAsset);
 
     const chatCompletion = await inferenceService.createCompletion({
@@ -373,7 +368,8 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
         role: m.role as 'user' | 'assistant',
         content: m.content as string,
       }));
-    messages.unshift({ role: 'system', content: SYSTEM_PROMPT });
+    const streamUserDoc = await User.findById(userId);
+    messages.unshift({ role: 'system', content: buildSystemContent(streamUserDoc) });
     appendAssetBlock(messages, attachedAsset);
 
     // Set SSE headers

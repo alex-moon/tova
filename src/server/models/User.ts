@@ -27,6 +27,39 @@ const userSchema = new mongoose.Schema(
       type: [String],
       default: [],
     },
+    // Profile fields (issue #35). `name` and `avatarUrl` are optional: only
+    // present once populated (Google login or PATCH /api/profile).
+    name: {
+      type: String,
+      trim: true,
+      maxlength: 100,
+      default: null,
+    },
+    avatarUrl: {
+      type: String,
+      default: null,
+    },
+    // User-owned (never written by Google); set only via PATCH /api/profile.
+    preferredName: {
+      type: String,
+      trim: true,
+      maxlength: 20,
+      default: null,
+    },
+    // Per-user settings; created lazily on first write (no backfill needed).
+    settings: {
+      type: new mongoose.Schema(
+        {
+          customInstructions: {
+            type: String,
+            maxlength: 4000,
+            default: null,
+          },
+        },
+        { _id: false },
+      ),
+      default: null,
+    },
   },
   {
     timestamps: true,
@@ -50,12 +83,20 @@ userSchema.methods.comparePassword = async function (this: UserDocument, passwor
   return bcrypt.compare(password, this.passwordHash);
 };
 
+export interface UserSettings {
+  customInstructions: string | null;
+}
+
 export interface UserDocument extends mongoose.Document {
   email: string;
   passwordHash: string;
   role: 'user' | 'admin';
   googleId: string | null;
   permissions: string[];
+  name: string | null;
+  avatarUrl: string | null;
+  preferredName: string | null;
+  settings: UserSettings | null;
   createdAt: Date;
   updatedAt: Date;
   comparePassword: (password: string) => Promise<boolean>;

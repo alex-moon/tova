@@ -2,9 +2,20 @@ import React, { useState } from 'react';
 import { Files, LogOut, Plus, Trash2, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import ThemeToggle from './ThemeToggle';
+import ProfileModal from './ProfileModal';
 import AssetLibrary from './AssetLibrary';
 import { cn } from '@/lib/utils';
 import { useAuth } from '../hooks/useAuth';
+
+const avatarInitial = (user: {
+  name?: string;
+  avatarUrl?: string;
+  preferredName?: string;
+  email: string;
+}) => {
+  const source = (user.preferredName ?? '').trim() || (user.name ?? '').trim() || user.email;
+  return source.charAt(0).toUpperCase();
+};
 
 interface Session {
   _id: string;
@@ -30,7 +41,8 @@ const Sidebar: React.FC<SidebarProps> = ({
   onDeleteSession,
   onClose,
 }) => {
-  const { logout } = useAuth();
+  const { user, logout } = useAuth();
+  const [profileOpen, setProfileOpen] = useState(false);
   const [showFiles, setShowFiles] = useState(false);
 
   return (
@@ -95,6 +107,30 @@ const Sidebar: React.FC<SidebarProps> = ({
           ))}
         </div>
         <div className="flex items-center border-t border-border p-4 pb-[calc(1rem+env(safe-area-inset-bottom))]">
+          <Button
+            variant="ghost"
+            size="icon"
+            aria-label="Open profile"
+            title={user?.preferredName ?? user?.name ?? user?.email}
+            className="mr-1 shrink-0"
+            onClick={() => setProfileOpen(true)}
+          >
+            {user?.avatarUrl ? (
+              <img
+                src={user.avatarUrl}
+                alt=""
+                data-testid="avatar-img"
+                className="size-7 rounded-full"
+              />
+            ) : (
+              <span
+                data-testid="avatar-fallback"
+                className="flex size-7 items-center justify-center rounded-full bg-primary text-sm text-white"
+              >
+                {user ? avatarInitial(user) : ''}
+              </span>
+            )}
+          </Button>
           <Button variant="ghost" className="flex-1" onClick={logout}>
             <LogOut />
             Logout
@@ -102,6 +138,7 @@ const Sidebar: React.FC<SidebarProps> = ({
           <ThemeToggle />
         </div>
       </nav>
+      {profileOpen && <ProfileModal onClose={() => setProfileOpen(false)} />}
     </>
   );
 };

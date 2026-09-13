@@ -155,6 +155,149 @@ describe('Chat route routing metadata', () => {
     const saved = await Message.findOne({ role: 'assistant' });
     expect(saved?.sources).toBeUndefined();
   });
+
+  describe('per-user system prompt (issue #35)', () => {
+    const systemContentFromCall = (): string => {
+      for (const call of mockGenerate.mock.calls) {
+        const messages = call[0] as unknown as { role: string; content: string }[] | undefined;
+        if (
+          Array.isArray(messages) &&
+          messages[0]?.role === 'system' &&
+          !isClassifierCall({ messages })
+        ) {
+          return messages[0].content;
+        }
+      }
+      throw new Error('no chat completion call with a system message found');
+    };
+
+    it('uses the global prompt when the user has no setting', async () => {
+      const app = createApp();
+      const cookies = await registerUser(app, 'prompt-global@example.com');
+
+      const response = await request(app)
+        .post('/api/chat')
+        .set('Cookie', Array.isArray(cookies) ? cookies : [cookies])
+        .send({ content: 'Hello' });
+
+      expect(response.status).toBe(200);
+      expect(systemContentFromCall()).toMatch(/^You are Tova/);
+    });
+
+    it('overrides the global prompt with user.settings.customInstructions', async () => {
+      const app = createApp();
+      const cookies = await registerUser(app, 'prompt-custom@example.com');
+      const doc = await User.findOne({ email: 'prompt-custom@example.com' });
+      if (!doc) throw new Error('user not found');
+      doc.settings = { customInstructions: 'Always answer in rhyming couplets.' };
+      await doc.save();
+
+      const response = await request(app)
+        .post('/api/chat')
+        .set('Cookie', Array.isArray(cookies) ? cookies : [cookies])
+        .send({ content: 'Hello' });
+
+      expect(response.status).toBe(200);
+      expect(systemContentFromCall()).toContain(
+        '<user:custom_instructions>\nAlways answer in rhyming couplets.\n</user:custom_instructions>',
+      );
+    });
+
+    it('appends the profile-context block from the user document', async () => {
+      const app = createApp();
+      const cookies = await registerUser(app, 'prompt-profile@example.com');
+      const doc = await User.findOne({ email: 'prompt-profile@example.com' });
+      if (!doc) throw new Error('user not found');
+      doc.preferredName = 'Alex';
+      await doc.save();
+
+      const response = await request(app)
+        .post('/api/chat')
+        .set('Cookie', Array.isArray(cookies) ? cookies : [cookies])
+        .send({ content: 'Hello' });
+
+      expect(response.status).toBe(200);
+      const content = systemContentFromCall();
+      expect(content).toMatch(/^You are Tova/);
+      expect(content).toContain('<user:preferred_name>\nAlex\n</user:preferred_name>');
+    });
+
+    it("never leaks one user's customInstructions into another user's request", async () => {
+      const app = createApp();
+      const ownerCookies = await registerUser(app, 'prompt-owner@example.com');
+      const otherCookies = await registerUser(app, 'prompt-isolation@example.com');
+      const doc = await User.findOne({ email: 'prompt-owner@example.com' });
+      if (!doc) throw new Error('user not found');
+      doc.settings = { customInstructions: 'Owner-only secret prompt.' };
+      await doc.save();
+
+      const mine = await request(app)
+        .post('/api/chat')
+        .set('Cookie', Array.isArray(ownerCookies) ? ownerCookies : [ownerCookies])
+        .send({ content: 'Hello' });
+      expect(mine.status).toBe(200);
+      expect(systemContentFromCall()).toContain('Owner-only secret prompt.');
+
+      mockGenerate.mockClear();
+      const others = await request(app)
+        .post('/api/chat')
+        .set('Cookie', Array.isArray(otherCookies) ? otherCookies : [otherCookies])
+        .send({ content: 'Hello' });
+      expect(others.status).toBe(200);
+      expect(systemContentFromCall()).not.toContain('Owner-only secret prompt.');
+      expect(systemContentFromCall()).toMatch(/^You are Tova/);
+    });
+
+    it('reflects a PATCH-route clear on the very next message (request-time resolution)', async () => {
+      const app = createApp();
+      const cookies = await registerUser(app, 'patch-clear@example.com');
+      const cookieList = Array.isArray(cookies) ? cookies : [cookies];
+
+      const doc = await User.findOne({ email: 'patch-clear@example.com' });
+      if (!doc) throw new Error('user not found');
+      doc.settings = { customInstructions: 'Temporary override.' };
+      await doc.save();
+
+      const first = await request(app)
+        .post('/api/chat')
+        .set('Cookie', cookieList)
+        .send({ content: 'Hello' });
+      expect(first.status).toBe(200);
+      expect(systemContentFromCall()).toContain(
+        '<user:custom_instructions>\nTemporary override.\n</user:custom_instructions>',
+      );
+
+      await request(app)
+        .patch('/api/profile')
+        .set('Cookie', cookieList)
+        .send({ customInstructions: '' });
+      mockGenerate.mockClear();
+
+      const second = await request(app)
+        .post('/api/chat')
+        .set('Cookie', cookieList)
+        .send({ content: 'Hello' });
+      expect(second.status).toBe(200);
+      expect(systemContentFromCall()).toMatch(/^You are Tova/);
+    });
+
+    it('ignores a whitespace-only customInstructions and falls back to the global prompt', async () => {
+      const app = createApp();
+      const cookies = await registerUser(app, 'prompt-blank@example.com');
+      const doc = await User.findOne({ email: 'prompt-blank@example.com' });
+      if (!doc) throw new Error('user not found');
+      doc.settings = { customInstructions: '   \n' };
+      await doc.save();
+
+      const response = await request(app)
+        .post('/api/chat')
+        .set('Cookie', Array.isArray(cookies) ? cookies : [cookies])
+        .send({ content: 'Hello' });
+
+      expect(response.status).toBe(200);
+      expect(systemContentFromCall()).toMatch(/^You are Tova/);
+    });
+  });
 });
 
 const CLASSIFIER_REPLY =

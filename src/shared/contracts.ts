@@ -31,11 +31,18 @@ export interface AdminModel {
 }
 
 // User payload returned by GET /api/auth/me (includes permissions).
+// `name`/`avatarUrl`/`customInstructions` are optional: omitted from the wire
+// payload until set. `name` is the Google-owned full name; `preferredName`
+// is user-owned; `customInstructions` is the user's per-chat prompt override.
 export interface AuthUser {
   id: string;
   email: string;
   role: 'user' | 'admin';
   permissions: string[];
+  name?: string;
+  avatarUrl?: string;
+  preferredName?: string;
+  customInstructions?: string;
 }
 
 // User payload returned by POST /api/auth/login and /register.

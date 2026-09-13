@@ -12,7 +12,10 @@
 // Kept additive: turns without an attachment produce an empty string, so
 // the prompt is byte-identical to the text-only path.
 
-const CLEAR_TAG_NAMES = 'user_content|file|content|instructions';
+// Tag names that must not be popped early from inside an envelope. The last
+// alternative covers issue #35's per-namespace <user:...> envelopes
+// (preferred_name, full_name, custom_instructions) without listing each one.
+const CLEAR_TAG_NAMES = 'user_content|file|content|instructions|user:[a-z_]+';
 
 export const escapeEnvelopeBreakers = (text: string): string =>
   text.replace(new RegExp(`<\\/(${CLEAR_TAG_NAMES})(?=[\\s>])`, 'gi'), '<\\/$1');
@@ -70,3 +73,20 @@ export const buildAttachmentEnvelope = (item: AttachmentItem | null): string => 
     '</user_content>',
   ].join('\n');
 };
+
+// Generic user-data envelope (issue #35, PR #46 review): wraps user-controlled
+// strings — preferred name, full name, custom instructions — in namespace-tagged
+// delimiters so the model can tell system-level instruction from user-supplied
+// data. Same escaping hardening as attachments:' content that contains a
+// literal closing tag cannot pop the envelope early.
+export interface UserEnvelopeItem {
+  tagName: string;
+  intro: string;
+  content: string;
+}
+
+export const buildUserEnvelope = ({ tagName, intro, content }: UserEnvelopeItem): string =>
+  ['', '', intro, `<${tagName}>`, escapeEnvelopeBreakers(content).trim(), `</${tagName}>`]
+    .filter((line, index) => line.trim() !== '' || index >= 4)
+    .join('\n')
+    .trim();

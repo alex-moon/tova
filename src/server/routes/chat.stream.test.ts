@@ -365,6 +365,74 @@ describe('Chat streaming route', () => {
     const persisted = await Message.findOne({ role: 'assistant' });
     expect(persisted?.sources).toBeUndefined();
   });
+
+  describe('per-user system prompt (issue #35)', () => {
+    const streamSystemContent = (): string => {
+      const [messages] = mockAgentStream.mock.calls[
+        mockAgentStream.mock.calls.length - 1
+      ] as unknown as [{ role: string; content: string }[]];
+      const system = messages.find((m) => m.role === 'system');
+      if (!system) throw new Error('no system message found in stream call');
+      return system.content;
+    };
+
+    it('uses the global prompt when the user has no setting or profile', async () => {
+      const cookies = await registerUser('stream-prompt-global@example.com');
+      await mockStream(['ok']);
+
+      const app = createApp();
+      const response = await request(app)
+        .post('/api/chat/stream')
+        .set('Cookie', cookies)
+        .send({ content: 'hi' });
+
+      expect(response.status).toBe(200);
+      expect(streamSystemContent()).toMatch(/^You are Tova/);
+    });
+
+    it('uses user.settings.customInstructions when set, in place of the global prompt', async () => {
+      const cookies = await registerUser('stream-prompt-custom@example.com');
+      const doc = await User.findOne({ email: 'stream-prompt-custom@example.com' });
+      if (!doc) throw new Error('user not found');
+      doc.settings = { customInstructions: 'Stream-time custom prompt.' };
+      await doc.save();
+      await mockStream(['ok']);
+
+      const app = createApp();
+      const response = await request(app)
+        .post('/api/chat/stream')
+        .set('Cookie', cookies)
+        .send({ content: 'hi' });
+
+      expect(response.status).toBe(200);
+      expect(streamSystemContent()).toContain(
+        '<user:custom_instructions>\nStream-time custom prompt.\n</user:custom_instructions>',
+      );
+    });
+
+    it('appends the profile-context block from the user document', async () => {
+      const cookies = await registerUser('stream-prompt-profile@example.com');
+      const doc = await User.findOne({ email: 'stream-prompt-profile@example.com' });
+      if (!doc) throw new Error('user not found');
+      doc.name = 'Ada Lovelace';
+      doc.preferredName = 'Ada';
+      await doc.save();
+      await mockStream(['ok']);
+
+      const app = createApp();
+      const response = await request(app)
+        .post('/api/chat/stream')
+        .set('Cookie', cookies)
+        .send({ content: 'hi' });
+
+      expect(response.status).toBe(200);
+      const content = streamSystemContent();
+      expect(content).toMatch(/^You are Tova/);
+      expect(content).toContain('<user:preferred_name>\nAda\n</user:preferred_name>');
+      expect(content).toContain('<user:full_name>\nAda Lovelace\n</user:full_name>');
+      expect(content).toContain('never address the user by it');
+    });
+  });
 });
 
 const CLASSIFIER_REPLY =
