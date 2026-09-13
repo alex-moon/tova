@@ -4,9 +4,9 @@ import jwt from 'jsonwebtoken';
 import { User, UserDocument } from '../models/User';
 import { resolveOrCreateUser } from '../services/userService';
 import { AuthUser, LoginRequest, LoginUserPayload, RegisterRequest } from '../../shared/contracts';
+import { getJwtSecret } from '../config/jwt';
 
 const router = express.Router();
-const JWT_SECRET = process.env.JWT_SECRET || 'fallback_secret';
 
 const GOOGLE_AUTH_URL = 'https://accounts.google.com/o/oauth2/v2/auth';
 const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token';
@@ -27,7 +27,7 @@ const getGoogleConfig = () => {
 };
 
 const issueSessionCookie = (user: UserDocument, res: express.Response) => {
-  const token = jwt.sign({ id: user._id, email: user.email, role: user.role }, JWT_SECRET, {
+  const token = jwt.sign({ id: user._id, email: user.email, role: user.role }, getJwtSecret(), {
     expiresIn: '7d',
   });
   res.cookie('token', token, {
@@ -187,7 +187,7 @@ router.get('/me', async (req, res) => {
   if (!token) return res.status(401).json({ message: 'Not authenticated' });
 
   try {
-    const decoded = jwt.verify(token, JWT_SECRET) as { id: string };
+    const decoded = jwt.verify(token, getJwtSecret()) as { id: string };
     const user = await User.findById(decoded.id);
     if (!user) {
       res.clearCookie('token');
