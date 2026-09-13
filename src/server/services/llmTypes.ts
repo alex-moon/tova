@@ -71,4 +71,11 @@ export type NeutralChunkStream = AsyncIterable<NeutralStreamChunk>;
 export interface LlmConnector {
   createCompletion(options: CompletionOptions): Promise<NeutralCompletion>;
   createStreamingCompletion(options: CompletionOptions): Promise<NeutralChunkStream>;
+  /**
+   * Completion on a tool-free agent regardless of environment (issue #41):
+   * for auxiliary callers whose target model rejects tool-carrying requests
+   * (follow-up suggestions), so such a call never receives web_search even
+   * when the Brave key is set.
+   */
+  createToolFreeCompletion(options: CompletionOptions): Promise<NeutralCompletion>;
 }

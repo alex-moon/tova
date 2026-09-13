@@ -49,7 +49,11 @@ added two more inputs: the reporter tests on mobile, and the follow-up problem
 - **Branch debris: cleaned.** The throwaway `scripts/test-followup.ts` from the
   first pass is removed.
 
-Remaining work is therefore Task 4 and the final gate (Task 6).
+Remaining work is therefore Task 4 and the final gate (Task 6). — resolved:
+Task 4 is now done (critic pass, 2026-09-13); the Task 6 gate has been run
+(`npm run ci` green except the pre-existing `iteration-harness` main
+failure), the desktop accumulations in Task 6 are covered, and only the
+author's mobile spot checks remain external to this branch.
 
 ## Checklist
 
@@ -82,41 +86,42 @@ above under Item 1. Repro reported on #41; author approved the server-side fix
 in this ticket: _"Server side fix is the way to do this yes - without the
 search tool!"_ Task 4 implements it.
 
-### Task 4 — generate follow-ups without the search tool + tolerant parsing (server)
+### Task 4 — generate follow-ups without the search tool + tolerant parsing (server) — done (critic pass, 2026-09-13)
 
-The author's mental model — _"Should be simple text generation for follow ups
-no?"_ — is correct; the fix keeps it simple:
+Implemented, verified, and hardening-extended during the critic pass:
 
-1. **Tool-free generation path.** Suggestions do not need search. The problem
-   is that `inferenceService.createCompletion` always routes through
-   `agentFor`, which bakes `web_search` into every Groq agent when the Brave
-   key is set. Give `mastraService` a tool-free connector for one-off
-   completions (suggestions never carry tools regardless of the key):
-   `inferenceService` gains an explicit tool-free createCompletion, or the
-   connector factory takes a tools flag. Keep the wiring inside
-   `mastraService.ts` (it is the single owner of `@mastra/*` imports); the
-   `web_search` streaming path used by the main chat must not change.
-2. **Followup service uses it.** `followupService.ts:21` switches to that
-   path. Model, prompt, trimming and `MAX_SUGGESTIONS` stay as-is.
-3. **Tolerant parser.** Replace the strict bracket-slice in
-   `followupService.ts:31-35` with parsing that drops just the malformed
-   content instead of the whole response:
-   - try the `[a, b]` slice first (current behaviour);
-   - on failure, fall back to extracting the first `[…]` array with a
-     regex + `JSON.parse`;
-   - on failure, fall back to splitting the raw text on newline/semicolon
-     boundaries and keeping the same post-filters (`typeof string`, 1–60
-     chars, strip quotes, max 3) so a set literal or prose with usable lines
-     still yields suggestions;
-   - never throw — empty array on total failure, as today.
-4. **Tests.** Extend the server suite: (a) generation succeeds with the search
-   key set and the suggestion model rejects tools — assert the completion
-   request carries no `tools` (unit on the new path or the connector); (b)
-   parser handles a set literal and prose-with-lines; (c) the
-   empty-on-failure contract is preserved.
-5. **Verify live.** Re-run the Task 0 smoke: `done` event carries suggestions,
-   chips render, Mongo persists. Note the result on #41 (the earlier comment
-   promised a report after the fix).
+1. **Tool-free generation path.** `LlmConnector` gains
+   `createToolFreeCompletion` (`llmTypes.ts`); `mastraService.buildConnector`
+   implements it with an agent built via `agentFor(provider, model, false)`
+   — the new `tools` override forces a plain agent regardless of the Brave
+   key, with `maxSteps: 1` forced too. `inferenceService` exposes it
+   (same `connectorFor` routing). The `web_search` streaming path used by
+   the main chat is untouched; a new `mastraService` suite asserts the
+   tool-free agent is constructed with no `tools` and no search
+   instructions even with `BRAVE_SEARCH_API_KEY` set.
+2. **Followup service uses it.** `followupService.ts` now calls
+   `inferenceService.createToolFreeCompletion`; model, prompt, trimming and
+   `MAX_SUGGESTIONS` unchanged; a test asserts `createCompletion` (the
+   tools-attached route) is never called.
+3. **Tolerant parser.** `parseSuggestions` in `followupService.ts`:
+   (a) parse the raw text as a JSON array; (b) the old bracket slice as the
+   next candidate; (c) every `[…]` span in the text, longest first, for
+   prose-wrapped arrays; (d) a plain-list fallback splitting on
+   quotes/newlines/semicolons and stripping bullets, numbering and stray
+   braces (the observed set-literal failure now yields items). Design
+   guards: the line fallback needs **≥2 survivors** (a single line is
+   indistinguishable from prose and would produce one junk chip); total
+   failure still returns [] and never throws.
+4. **Tests.** New `followupService.test.ts` (23 cases: parser formats,
+   post-filters, max cap, no-`createCompletion` contract, empty-on-failure)
+   plus two `mastraService` cases for the tool-free agent. Server suite
+   198/198 green; client suite 35 green; full `npm run ci` green except the
+   documented pre-existing `iteration-harness` failure from `main`.
+5. **Verify live.** Re-ran the Task 0 smoke on this branch: streamed a turn
+   with `BRAVE_SEARCH_API_KEY` set → the `done` event now carries
+   `suggestions` (2 prompts), the message persists them in Mongo
+   (`suggestions` field present on the assistant message). Report posted on
+   #41.
 
 Constraint noted: `BRAVE_SEARCH_API_KEY` exists in this environment; the fix's
 live verification depends on that environment staying as configured.
@@ -184,12 +189,14 @@ has input at least one message."_
 - **Assumption (Task 4):** the live failure is fully explained by the tool
   attachment plus fragile parsing. _Backed by:_ live repro + a raw REST call
   with the same prompt succeeding, both documented in the review comment on
-  #41. _Weakness:_ only one model (`allam-2-7b`, the `ROUTER_GUARD_MODEL`
-  default) was exercised against the live env in one session; a different
-  `ROUTER_GUARD_MODEL` could behave differently, and the tolerant parser's
-  fallbacks are rule-of-thumb, not model-audited. Mitigation: tests assert the
-  request carries no tools (the known, reproducible cause) and the parser
-  never throws.
+  #41, and — additionally — by the fix's own live verification (post-fix
+  `done` event carries suggestions, Mongo persists them). _Weakness:_ only
+  one model (`allam-2-7b`, the `ROUTER_GUARD_MODEL` default) was exercised
+  against the live env in one session; a different `ROUTER_GUARD_MODEL`
+  could behave differently, and the tolerant parser's fallbacks are
+  rule-of-thumb, not model-audited. Mitigation: tests assert the request
+  carries no tools (the known, reproducible cause) and the parser never
+  throws.
 - **Assumption (Task 4):** suggestions should _never_ get search, even when
   the key is set. _Backed by:_ the author's explicit approval and the model's
   tool rejection. _Weakness:_ none observed; but this permanently narrows
@@ -217,15 +224,17 @@ has input at least one message."_
   The plan assumes exactly that; if the author prefers a narrower reading
   (e.g. a one-time dismissal, or only while the input has content), the change
   is a single boolean gate. Task 5 does not depend on the answer to proceed.
-- **Live verification environment for Task 4:** the repro and its fix
-  verification both depend on `BRAVE_SEARCH_API_KEY` staying set in this
-  environment, and the reporter's original observation happened on a build he
-  cannot name ("out of the office"). If the key disappears or the live stack
-  is unavailable when Task 4 lands, the fix would ship on automated-test
-  evidence only; that would be noted in the PR body, and wait for the author
-  for a mobile spot check either way. Not blocking implementation.
+- **Tolerant fallback acceptability (raised during the critic pass):** with
+  the line-split fallback, a model response that is _integer prose_ can slip
+  through as suggestions (main guard: the fallback needs ≥2 split survivors,
+  so a bare sentence yields none, but comma-heavy prose could produce short
+  fragments). Is the "imperfect chip on rare malformed output" trade-off
+  acceptable, or would the author prefer the fallback dropped so only
+  bracketed JSON survives? Code behaves silently-either-way; no test change
+  needed.
 
 Previously asked and answered on #41 (now folded into the plan; they are no
-longer open): the sources collapse threshold (3 — confirmed), the environmental
-theory for the missing follow-ups (disproved — it reproduced live and its
-server-side fix was approved).
+longer open): the sources collapse threshold (3 — confirmed), the
+environmental theory for the missing follow-ups (disproved — it reproduced
+live and its server-side fix was approved with the full fix verified live on
+this branch, reported on #41).
