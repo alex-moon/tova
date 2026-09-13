@@ -35,9 +35,12 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: gitleaks/gitleaks-action@v2
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # Direct CLI, not gitleaks-action: its v2 PR/reporting flow needs
+      # GitHub API calls this repo can't satisfy (see security.yml).
+      - name: Detect secrets in full git history
+        run: |
+          curl -sSfL https://github.com/gitleaks/gitleaks/releases/download/v8.24.3/gitleaks_8.24.3_linux_x64.tar.gz | tar -xz
+          ./gitleaks detect --source . --redact --no-banner
 
   semgrep:
     if: github.event_name == 'push'

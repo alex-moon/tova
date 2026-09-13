@@ -15,9 +15,13 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: gitleaks/gitleaks-action@v2
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # gitleaks-action v2 needs GitHub integration calls (code scanning /
+      # PR context), which this private repo without GHAS can't grant.
+      # Scan directly with the pinned CLI: full history, exit 1 on findings.
+      - name: Detect secrets in full git history
+        run: |
+          curl -sSfL https://github.com/gitleaks/gitleaks/releases/download/v8.24.3/gitleaks_8.24.3_linux_x64.tar.gz | tar -xz
+          ./gitleaks detect --source . --redact --no-banner
   semgrep:
     runs-on: ubuntu-latest
     container:
@@ -34,13 +38,12 @@ jobs:
   # self-contained alternative).
   osv-scanner:
     runs-on: ubuntu-latest
-    container:
-      image: ghcr.io/google/osv-scanner:latest
+    # Image is scratch-based (no shell), so run it directly via docker.
     steps:
       - uses: actions/checkout@v4
 
       - name: Scan package-lock.json for known vulnerabilities
-        run: osv-scanner --lockfile=package-lock.json
+        run: docker run --rm -v "$PWD:/repo" ghcr.io/google/osv-scanner:latest --lockfile=/repo/package-lock.json
 
   npm-audit:
     runs-on: ubuntu-latest
