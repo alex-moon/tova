@@ -42,11 +42,14 @@
     "cookie-parser": "^1.4.7",
     "dotenv": "^17.2.1",
     "express": "^5.1.0",
+    "express-rate-limit": "^8.7.0",
     "groq-sdk": "^0.30.0",
+    "helmet": "^8.3.0",
     "http-proxy-middleware": "^3.0.5",
     "jsonwebtoken": "^9.0.2",
     "mongo-migrate-ts": "^2.0.0",
-    "mongoose": "^8.18.0"
+    "mongoose": "^8.18.0",
+    "zod": "^4.6.4"
   },
   "devDependencies": {
     "@playwright/test": "^1.63.0",

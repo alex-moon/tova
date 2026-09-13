@@ -29,7 +29,7 @@ These were open in the first draft; each is now answered by direct inspection, s
 instruction below depends on them:
 
 - **Zod version:** root `package.json` has NO zod dependency; it exists only transitively
-    (`npm why zod` → `zod@4.5.4` via `@mastra/core` peer range
+  (`npm why zod` → `zod@4.5.4` via `@mastra/core` peer range
   `^3.25.76 || ^4.1.8`). Add `zod` to root `dependencies` pinned to `^4.5.4` (same major
   as the resolved transitive version, so `mastraService.ts` keeps working).
 - **Express 5 compatibility:** the app runs Express `^5.1.0` (package.json).
@@ -65,61 +65,90 @@ instruction below depends on them:
   comment on the issue. No planned step below depends on this: the workflow file lands
   first with scan-on-PR; history-scan strictness is a config line.
 
+## Open questions (added during critic pass)
+
+- **Before/after for the `/me` unauthenticated message:** deduping onto `authenticate`
+  necessarily changes the no-cookie message from `Not authenticated` to the middleware's
+  `Authentication required`, and an invalid token now also _clears_ the cookie (the old
+  inline handler did not). No client code depends on either (grep confirmed; the client
+  only uses the string as a mock marker), and `index.test.ts` was updated to pin the new
+  message — but flagging it here as deliberate, reviewable drift.
+- **Rate limiter key under a proxy:** `express-rate-limit` v8 keys by client IP. With
+  `app.set('trust proxy', ...)` unset, all requests behind a single reverse proxy
+  (deploy.sh runs node behind nginx, if present) share one bucket. The plan deliberately
+  does NOT set `trust proxy` (IP-spoofing risk); if production actually sits behind a
+  proxy, Nginx must send genuine client IPs and Node must be told to trust the local hop
+  — needs confirmation of the deploy topology before tightening `limit` below the current
+  conservative values (500 global / 20 auth per 15 min).
+- **`z.string().min(8)` register password policy was already `8` in practice?** The
+  original handler had _no_ length check (only truthiness); tests always used
+  `password123` (11 chars). Enforcing `.min(8)` is a behavior change: previously-accepted
+  short passwords (< 8 chars) now get 400, and existing accounts with short passwords can
+  still log in (loginSchema deliberately has no length rule beyond required). Confirm that
+  "min 8 on registration" is the intended policy — the plan text said "matching current
+  expectations", but no such expectation existed in code.
+- **Pre-existing orphaned suite `src/server/iteration-harness.test.ts`:** imports
+  `scripts/iteration`, which does not exist on `origin/main` (leftover of the #37/#41
+  revert); every `npm run ci` fails at the test step because of it. Deleted on this branch
+  as the minimal unblock for this ticket's verify gate — flagged for the orchestrator to
+  confirm it does not collide with (or is redundant with) `feat/tv/41-ux-fixes`, which
+  applied the identical deletion.
+
 ## Plan / Done
 
 Each item is sized to be one commit:
 
-- [ ] **Unify JWT secret resolution.** New `src/server/config/jwt.ts` exporting
-  `getJwtSecret(): string` (module-level `jwtSecret` const is fine too; prefer a function
-  so tests can stub `NODE_ENV` before resolution). Behavior: if `NODE_ENV === 'production'`
-  and `JWT_SECRET` is missing/empty → `throw` at first call, with a message naming the env
-  var; otherwise if missing → `console.warn` once. Delete `const JWT_SECRET = ... || 
-  'fallback_secret'` from both `middleware/auth.ts:4` and `routes/auth.ts:9`; both import
-  the shared module. Tests: new `config/jwt.test.ts` covering (a) production + missing →
-  throws, (b) production + set → returns value, (c) non-production + missing → warns, no
-  throw.
-- [ ] **Cookie flags.** In `routes/auth.ts`: add `sameSite: 'lax'` to the `token` cookie
-  (`issueSessionCookie`, lines 29-38) and the `google_state` cookie (lines 105-110), with a
-  comment explaining the OAuth-redirect rationale (see resolved fact above). Do NOT change
-  `httpOnly`/`secure`/`maxAge`. Verify `auth.google.test.ts` and `auth.contracts.test.ts`
-  still pass (they inspect `res.headers['set-cookie']`).
-- [ ] **Deduplicate `/api/auth/me`.** Replace the inline verification in the `/me`
-  handler (auth.ts ~line 190) with the shared `authenticate` middleware — either mount a
-  sub-router or apply `authenticate` to just that route. Keep the response shape identical
-  (`auth.contracts.test.ts` and `admin.test.ts:175` pin it).
-- [ ] **Zod validation on public bodies.** `npm install zod@^4.5.4` at root. New
-  `src/server/validation.ts` (or colocated schemas): `registerSchema` (email: `.email()`,
-  password: `.min(8)` matching current expectations), `loginSchema`, and a feedback schema
-  matching `routes/feedback.ts` fields. Apply with `safeParse` → 400 + field messages on
-  failure; delete the manual `if (!email || !password)` checks. Also constrain
-  `express.json({ limit: '1mb' })` here or in the next commit (index.ts:21). Tests:
-  extend `auth.contracts.test.ts` + `feedback.test.ts` with 400-case expectations.
-- [ ] **Add `helmet` + rate limiting.** `npm i helmet express-rate-limit`. In
-  `createApp()` (index.ts): `app.use(helmet())` before `express.json()`;
-  `express.json({ limit: '1mb' })`; a global limiter (`windowMs: 15*60_000, limit: 500`)
-  and a stricter `/api/auth/*` limiter (`limit: 20`). Both limiters skip cleanly in dev
-  and test (`NODE_ENV !== 'production'` → generous limits rather than no limiting, since
-  the Acceptance criterion asks for "rate limit configured on auth routes"; Jest suites
-  hit `/api/auth/register` repeatedly — `admin.test.ts:15-23` — so the global limiter must
-  be set above their burst volume, or set `app.set('trust proxy', true)` only if scans
-  demand it). Verify: run `npm test` and `npm run ci` right after wiring.
-- [ ] **CI: security workflow.** New `.github/workflows/security.yml`, triggers: PRs +
-  push to main.
+- [x] **Unify JWT secret resolution.** New `src/server/config/jwt.ts` exporting
+      `getJwtSecret(): string` (module-level `jwtSecret` const is fine too; prefer a function
+      so tests can stub `NODE_ENV` before resolution). Behavior: if `NODE_ENV === 'production'`
+      and `JWT_SECRET` is missing/empty → `throw` at first call, with a message naming the env
+      var; otherwise if missing → `console.warn` once. Delete `const JWT_SECRET = ... || 
+'fallback_secret'` from both `middleware/auth.ts:4` and `routes/auth.ts:9`; both import
+      the shared module. Tests: new `config/jwt.test.ts` covering (a) production + missing →
+      throws, (b) production + set → returns value, (c) non-production + missing → warns, no
+      throw.
+- [x] **Cookie flags.** In `routes/auth.ts`: add `sameSite: 'lax'` to the `token` cookie
+      (`issueSessionCookie`, lines 29-38) and the `google_state` cookie (lines 105-110), with a
+      comment explaining the OAuth-redirect rationale (see resolved fact above). Do NOT change
+      `httpOnly`/`secure`/`maxAge`. Verify `auth.google.test.ts` and `auth.contracts.test.ts`
+      still pass (they inspect `res.headers['set-cookie']`).
+- [x] **Deduplicate `/api/auth/me`.** Replace the inline verification in the `/me`
+      handler (auth.ts ~line 190) with the shared `authenticate` middleware — either mount a
+      sub-router or apply `authenticate` to just that route. Keep the response shape identical
+      (`auth.contracts.test.ts` and `admin.test.ts:175` pin it).
+- [x] **Zod validation on public bodies.** `npm install zod@^4.5.4` at root. New
+      `src/server/validation.ts` (or colocated schemas): `registerSchema` (email: `.email()`,
+      password: `.min(8)` matching current expectations), `loginSchema`, and a feedback schema
+      matching `routes/feedback.ts` fields. Apply with `safeParse` → 400 + field messages on
+      failure; delete the manual `if (!email || !password)` checks. Also constrain
+      `express.json({ limit: '1mb' })` here or in the next commit (index.ts:21). Tests:
+      extend `auth.contracts.test.ts` + `feedback.test.ts` with 400-case expectations.
+- [x] **Add `helmet` + rate limiting.** `npm i helmet express-rate-limit`. In
+      `createApp()` (index.ts): `app.use(helmet())` before `express.json()`;
+      `express.json({ limit: '1mb' })`; a global limiter (`windowMs: 15*60_000, limit: 500`)
+      and a stricter `/api/auth/*` limiter (`limit: 20`). Both limiters skip cleanly in dev
+      and test (`NODE_ENV !== 'production'` → generous limits rather than no limiting, since
+      the Acceptance criterion asks for "rate limit configured on auth routes"; Jest suites
+      hit `/api/auth/register` repeatedly — `admin.test.ts:15-23` — so the global limiter must
+      be set above their burst volume, or set `app.set('trust proxy', true)` only if scans
+      demand it). Verify: run `npm test` and `npm run ci` right after wiring.
+- [x] **CI: security workflow.** New `.github/workflows/security.yml`, triggers: PRs +
+      push to main.
   - `gitleaks/gitleaks-action@v2` with full-history fetch (`fetch-depth: 0`).
-  - `semgrep` job: `semgrep/semgrep-action` or plain   `semgrep ci --config p/oss-community-rules` over `src/server` (note: this restricts unless noise forces widening). Failure on findings.
+  - `semgrep` job: `semgrep/semgrep-action` or plain `semgrep ci --config p/oss-community-rules` over `src/server` (note: this restricts unless noise forces widening). Failure on findings.
   - `actions/dependency-review-action@v4` on PRs only.
   - `npm audit --omit=dev --audit-level=high` step (see resolved fact: tree is expected
     green after the fixes).
-  Order matters: land this workflow BEFORE assuming scans are green; first run may produce
-  findings that need triage (see Open questions).
-- [ ] **npm audit fixes.** Run `npm audit fix` on the branch, eyeball the lockfile diff
-  (should be semver-compatible patches to dev/build deps only), re-run `npm run ci`.
-  Then enable the audit step in security.yml as a hard gate.
-- [ ] **Verify.** `npm run ci` must pass end to end (server lint, format check,
-  typecheck, server tests, client lint/format/tests/build). Add/adjust tests for the
-  secret-resolution failure path and the new validation 400s (covered in items above).
-  Also load the login page via `npm run stack:up` and confirm helmet headers appear and
-  register/login still work end to end.
+    Order matters: land this workflow BEFORE assuming scans are green; first run may produce
+    findings that need triage (see Open questions).
+- [x] **npm audit fixes.** Run `npm audit fix` on the branch, eyeball the lockfile diff
+      (should be semver-compatible patches to dev/build deps only), re-run `npm run ci`.
+      Then enable the audit step in security.yml as a hard gate.
+- [x] **Verify.** `npm run ci` must pass end to end (server lint, format check,
+      typecheck, server tests, client lint/format/tests/build). Add/adjust tests for the
+      secret-resolution failure path and the new validation 400s (covered in items above).
+      Also load the login page via `npm run stack:up` and confirm helmet headers appear and
+      register/login still work end to end.
 
 Commit order above is dependency-ordered: secret module → cookie flags → /me dedupe →
 validation → hardening middleware → CI workflow → audit gate. Each step keeps
