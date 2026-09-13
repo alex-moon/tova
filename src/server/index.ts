@@ -9,6 +9,7 @@ import authRoutes from './routes/auth';
 import chatRoutes from './routes/chat';
 import feedbackRoutes from './routes/feedback';
 import adminRoutes from './routes/admin';
+import { buildMongoUri } from './mongoUri';
 
 const DEFAULT_PORT = 5000;
 
@@ -17,9 +18,7 @@ const getPort = () => {
   return Number.isInteger(parsedPort) && parsedPort >= 0 ? parsedPort : DEFAULT_PORT;
 };
 
-export const connectToDatabase = async (
-  mongoUri = `mongodb://tova:${process.env.MONGODB_PASSWORD}@${process.env.MONGODB_HOST ?? 'localhost'}/tova?authSource=admin`,
-) => {
+export const connectToDatabase = async (mongoUri = buildMongoUri()) => {
   await mongoose.connect(mongoUri);
   console.log('Connected to MongoDB');
 };

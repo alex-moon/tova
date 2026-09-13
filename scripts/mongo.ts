@@ -1,6 +1,8 @@
+import 'dotenv/config';
 import { MongoClient } from 'mongodb';
+import { buildMongoUri } from '../src/server/mongoUri';
 
-const uri = process.env.MONGO_URI ?? 'mongodb://localhost:27017';
+const uri = buildMongoUri();
 
 const snippet = process.argv[2];
 if (!snippet) {
