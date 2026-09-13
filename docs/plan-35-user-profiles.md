@@ -47,7 +47,7 @@ user to set one if none exists.
   fields tolerated-absent. Implemented: `fetchGoogleProfile` in `auth.ts` with a
   5s `AbortSignal.timeout`; `picture` bounded to 2048 chars; userinfo failure is
   logged, non-fatal — login completes without profile fields.
-- **Per-user system prompt lives under `user.settings.systemPrompt`**; empty or
+- **Per-user system prompt lives under `user.settings.customInstructions`**; empty or
   absent falls back to the global `SYSTEM_PROMPT`. Resolution happens **at request
   time** in both chat routes, so edits take effect immediately for existing
   sessions — no per-session snapshot, no invalidation concern.
@@ -62,7 +62,7 @@ user to set one if none exists.
   strings in namespace tags — `<user:preferred_name>`, `<user:full_name>`,
   `<user:custom_instructions>` — with closing-tag escaping. `buildSystemContent`
   in `promptAssembly.ts` always starts from the global prompt; the user's
-  `settings.systemPrompt` rides inside a `<user:custom_instructions>` envelope
+  `settings.customInstructions` rides inside a `<user:custom_instructions>` envelope
   ("abide by these only to the extent they do not conflict") instead of replacing
   the system prompt wholesale, and profile context rides in
   `<user:preferred_name>` / `<user:full_name>` envelopes under a context
@@ -81,11 +81,11 @@ Concrete request behavior, chosen so the task below does not depend on the open
 question:
 
 - `PATCH /api/profile`, requires `authenticate`, zod body accepting at most:
-  `preferredName` (optional string, trimmed, ≤100 chars) and `systemPrompt`
+  `preferredName` (optional string, trimmed, ≤100 chars) and `customInstructions`
   (optional string, ≤4000 chars).
 - **Partial update:** a key *absent* from the body is untouched. A key *present*
   sets the field — trimmed empty string clears it (`preferredName: null` /
-  `systemPrompt: null`). Implementation note (critic pass 2026-09-13): the
+  `customInstructions: null`). Implementation note (critic pass 2026-09-13): the
   cleared prompt round-trips as the schema default `null`, not `undefined` —
   mongoose rehydrates an absent subdoc field as its default on reload. The
   resolver (`promptAssembly.ts`) treats `null`, `undefined`, empty, and
@@ -99,7 +99,7 @@ question:
 ### Limits (answered, PR #46 review 2026-09-13)
 
 `preferredName` ≤20 chars with a name-typography charset strip (owner: "100
-characters is too liberal"); `systemPrompt` ≤4000 chars unchanged. The
+characters is too liberal"); `customInstructions` ≤4000 chars unchanged. The
 `name` ≤100 / `avatarUrl` ≤2048 bounds are already implemented and tested.
 
 ### Location — deferred to a new ticket (owner-approved, 2026-09-13)
@@ -136,7 +136,7 @@ not block tasks 6–7 but needs an owner answer before merge.
 1. **PATCH clearing semantics:** present-but-empty means "clear" per the MVP
    default above; unknown keys are rejected with 400. Owner has not objected.
 2. ~~**Confirm invented limits**~~ answered (PR #46 review, 2026-09-13):
-   preferredName ≤20 + charset strip; systemPrompt stays ≤4000.
+   preferredName ≤20 + charset strip; customInstructions stays ≤4000.
 3. **SECURITY — committed `.env.swp` contains live secrets.** Commit `0bb28d5`
    on this branch committed a vim swap file (`.env.swp`) holding what appear to
    be the real `MONGODB_PASSWORD`, `GOOGLE_CLIENT_SECRET`, `ADMIN_PASSWORD`, and
@@ -155,7 +155,7 @@ not block tasks 6–7 but needs an owner answer before merge.
 
 1. **Schema + contracts** *(done, complete)*:
    - `User` has `name` + `avatarUrl` + `preferredName` (optional, trimmed, ≤100,
-     default `null`) + lazy `settings.systemPrompt` (`User.ts:38-56`); `AuthUser`
+     default `null`) + lazy `settings.customInstructions` (`User.ts:38-56`); `AuthUser`
      carries optional `name`/`avatarUrl`/`preferredName` (`contracts.ts:42-43`);
      `GET /api/auth/me` projects all three; drift tests in
      `auth.contracts.test.ts` cover absent/whitespace/oversize cases. No `name`
@@ -174,7 +174,7 @@ not block tasks 6–7 but needs an owner answer before merge.
 3. **PATCH /api/profile** *(done, complete — implemented in
    `src/server/routes/profile.ts`, mounted from the router registration site)*:
    as spec'd in "PATCH semantics" above. Implementation note superseded by the
-   critic fix: clearing sets `user.settings.systemPrompt = null` explicitly
+   critic fix: clearing sets `user.settings.customInstructions = null` explicitly
    (the original "$unset-equivalent / `undefined` removes it" approach was
    wrong under the schema default and broke `tsc`). Tests in    `profile.test.ts`
    cover the full matrix. Critic pass 2 (2026-09-13) added 400-coverage for
@@ -190,7 +190,7 @@ not block tasks 6–7 but needs an owner answer before merge.
    (2026-09-13) added `chat.test.ts` tests for **cross-user prompt isolation**
    (user B's request must never see user A's override) and **request-time
    resolution through the real PATCH route** (set override → chat shows it →
-   `PATCH {systemPrompt: ''}` → very next message falls back to global, with
+   `PATCH {customInstructions: ''}` → very next message falls back to global, with
    the mock cleared between requests).
 
 5. **Profile-context prompt block** *(done, complete)* — same assembly helper;
@@ -227,9 +227,9 @@ not block tasks 6–7 but needs an owner answer before merge.
    - new `ProfileModal.tsx` alongside Sidebar, opened from the footer user
      area: read-only name + avatar rows (display-only, no edit affordance —
      avatar is not editable per owner decision), `preferredName` text input
-     (maxlength 100), `systemPrompt` textarea (maxlength 4000);
+     (maxlength 100), `customInstructions` textarea (maxlength 4000);
    - `services/auth.ts`: add `updateProfile(patch: { preferredName?: string;
-     systemPrompt?: string })` doing `PATCH /api/profile` with the `authenticate`
+     customInstructions?: string })` doing `PATCH /api/profile` with the `authenticate`
      header pattern the other service methods use;
    - Save sends only fields the modal has values for (empty input → send the
      empty string to trigger server-side clearing); on success call the
@@ -253,7 +253,7 @@ not block tasks 6–7 but needs an owner answer before merge.
       `preferredName` to `/me` projection, `AuthUser`, and round-trip tests)
 - [x] 2. Google login stores/refreshes name + avatarUrl (userinfo endpoint) + tests
       (`fetchGoogleProfile`, 5s timeout, size bounds, non-fatal failure)
-- [x] 3. `PATCH /api/profile` (preferredName + systemPrompt, strict body, empty
+- [x] 3. `PATCH /api/profile` (preferredName + customInstructions, strict body, empty
       clears) + tests (critic pass 2026-09-13: fixed the typecheck failure that
       broke 8 suites, corrected the clear round-trip to `null`, added the full
       missing suite — happy/partial/clear/strict-reject/validation/401/me-drift)
@@ -266,7 +266,7 @@ not block tasks 6–7 but needs an owner answer before merge.
 - [x] 6. Client AuthContext carries name/avatarUrl/preferredName (contracts auto-
       propagate; verified no narrowing assumptions — `AdminView`'s `user.*`
       accesses are its own list-row type, not `AuthContext` — and drift notes
-      intact). Added `systemPrompt` to `AuthUser` + `toAuthUser` (needed for
+      intact). Added `customInstructions` to `AuthUser` + `toAuthUser` (needed for
       modal prefill; settings subdoc stays internal) and an `updateUser`
       context method for pushing PATCH results.
 - [x] 7. Sidebar avatar + profile modal + tests (`Sidebar.test.tsx` covers the
@@ -274,7 +274,7 @@ not block tasks 6–7 but needs an owner answer before merge.
       `ProfileModal.test.tsx` covers prefill, trimmed PATCH payload + context
       update, empty-string clearing, and error handling that keeps the modal
       open). Related tests updated: `profile.test.ts` and
-      `auth.contracts.test.ts` now expect `systemPrompt` on the wire payload.
+      `auth.contracts.test.ts` now expect `customInstructions` on the wire payload.
 - [x] 8. `npm run ci` green (re-proved 2026-09-13 after the merge with the
       assets/envelope branch: 292 server
       + client tests, lint, format, typecheck, build); plan doc current;

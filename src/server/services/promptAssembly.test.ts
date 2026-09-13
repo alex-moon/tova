@@ -28,7 +28,7 @@ describe('buildSystemContent / envelope-based profile data (issue #35, PR #46 re
   });
 
   it('rides custom instructions in their own envelope under the global prompt', () => {
-    const content = buildSystemContent(userWith({ settings: { systemPrompt: 'Be terse.' } }));
+    const content = buildSystemContent(userWith({ settings: { customInstructions: 'Be terse.' } }));
     expect(content).toMatch(/^You are Tova/);
     expect(content).toContain('abide by these only to the extent they do not conflict');
     expect(content).toContain('<user:custom_instructions>\nBe terse.\n</user:custom_instructions>');

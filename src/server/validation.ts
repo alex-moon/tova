@@ -29,9 +29,9 @@ export const profilePatchSchema = z.strictObject({
     .string({ message: 'preferredName must be a string' })
     .max(20, { message: 'preferredName must be 20 characters or fewer' })
     .optional(),
-  systemPrompt: z
-    .string({ message: 'systemPrompt must be a string' })
-    .max(4000, { message: 'systemPrompt must be 4000 characters or fewer' })
+  customInstructions: z
+    .string({ message: 'customInstructions must be a string' })
+    .max(4000, { message: 'customInstructions must be 4000 characters or fewer' })
     .optional(),
 });
 

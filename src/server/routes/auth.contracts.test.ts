@@ -70,7 +70,7 @@ describe('auth route contract drift', () => {
     doc.name = 'Alex Moon';
     doc.avatarUrl = 'https://example.com/a.png';
     doc.preferredName = 'Alex';
-    doc.settings = { systemPrompt: 'Be terse.' };
+    doc.settings = { customInstructions: 'Be terse.' };
     await doc.save();
 
     const res = await request(app).get('/api/auth/me').set('Cookie', cookie);
@@ -82,7 +82,7 @@ describe('auth route contract drift', () => {
     // settings stays internal, but the per-user prompt override ride-along on
     // AuthUser is required by the profile modal prefill (plan tasks 6–7).
     expect(user.settings).toBeUndefined();
-    expect(user.systemPrompt).toBe('Be terse.');
+    expect(user.customInstructions).toBe('Be terse.');
   });
 
   it('me omits profile fields not yet set, even when other fields exist', async () => {
@@ -95,7 +95,7 @@ describe('auth route contract drift', () => {
     const { User } = await import('../models/User');
     const doc = await User.findOne({ email: 'contract-partial@example.com' });
     if (!doc) throw new Error('user not found');
-    doc.settings = { systemPrompt: 'Be terse.' };
+    doc.settings = { customInstructions: 'Be terse.' };
     await doc.save();
 
     const res = await request(app).get('/api/auth/me').set('Cookie', cookie);
@@ -106,7 +106,7 @@ describe('auth route contract drift', () => {
     expect(user.preferredName).toBeUndefined();
     expect(user.settings).toBeUndefined();
     // The prompt override is set in this fixture, so it rides along.
-    expect(user.systemPrompt).toBe('Be terse.');
+    expect(user.customInstructions).toBe('Be terse.');
   });
 
   it('me values are trimmed and length-bounded at the schema level (issue #35)', async () => {
@@ -132,7 +132,7 @@ describe('auth route contract drift', () => {
     // System prompts over 4000 chars are rejected by the schema.
     const doc2 = await User.findOne({ email: 'contract-validate@example.com' });
     if (!doc2) throw new Error('user not found');
-    doc2.settings = { systemPrompt: 'y'.repeat(4001) };
+    doc2.settings = { customInstructions: 'y'.repeat(4001) };
     await expect(doc2.save()).rejects.toThrow();
   });
 });

@@ -41,7 +41,7 @@ const RELEVANCE_RULE =
 const customInstructionsBlock = (
   settings: Pick<UserDocument, 'settings'>['settings'] | null | undefined,
 ): string => {
-  const trimmed = settings?.systemPrompt?.trim();
+  const trimmed = settings?.customInstructions?.trim();
   if (!trimmed) return '';
   return buildUserEnvelope({
     tagName: 'user:custom_instructions',

@@ -10,7 +10,7 @@ const router = express.Router();
 //
 // Body semantics: a key absent from the body leaves its field untouched; a
 // key present sets the field, and a trimmed-empty string clears it
-// (preferredName → null, systemPrompt removed). Unknown keys are rejected
+// (preferredName → null, customInstructions removed). Unknown keys are rejected
 // with 400 by the strict zod schema exactly as in validation.ts.
 // preferredName charset (PR #46 review, 2026-09-13): only alphanumerics,
 // spaces and name-typical punctuation survive; anything JSON/XML-ish
@@ -42,16 +42,16 @@ router.patch('/', authenticate, async (req: AuthRequest, res) => {
         : '';
       user.preferredName = cleaned ? cleaned : null;
     }
-    if ('systemPrompt' in parsed.data) {
-      if (!user.settings) user.settings = { systemPrompt: null };
-      const trimmedPrompt = parsed.data.systemPrompt?.trim();
+    if ('customInstructions' in parsed.data) {
+      if (!user.settings) user.settings = { customInstructions: null };
+      const trimmedPrompt = parsed.data.customInstructions?.trim();
       if (trimmedPrompt) {
-        user.settings.systemPrompt = trimmedPrompt;
+        user.settings.customInstructions = trimmedPrompt;
       } else {
         // Cleared prompts round-trip as null (the schema default) rather than
         // '' — '' would block per-user prompt resolution downstream. The
         // resolver treats null/undefined exactly like absence.
-        user.settings.systemPrompt = null;
+        user.settings.customInstructions = null;
       }
     }
 

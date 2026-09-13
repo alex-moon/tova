@@ -390,11 +390,11 @@ describe('Chat streaming route', () => {
       expect(streamSystemContent()).toMatch(/^You are Tova/);
     });
 
-    it('uses user.settings.systemPrompt when set, in place of the global prompt', async () => {
+    it('uses user.settings.customInstructions when set, in place of the global prompt', async () => {
       const cookies = await registerUser('stream-prompt-custom@example.com');
       const doc = await User.findOne({ email: 'stream-prompt-custom@example.com' });
       if (!doc) throw new Error('user not found');
-      doc.settings = { systemPrompt: 'Stream-time custom prompt.' };
+      doc.settings = { customInstructions: 'Stream-time custom prompt.' };
       await doc.save();
       await mockStream(['ok']);
 

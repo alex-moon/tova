@@ -184,12 +184,12 @@ describe('Chat route routing metadata', () => {
       expect(systemContentFromCall()).toMatch(/^You are Tova/);
     });
 
-    it('overrides the global prompt with user.settings.systemPrompt', async () => {
+    it('overrides the global prompt with user.settings.customInstructions', async () => {
       const app = createApp();
       const cookies = await registerUser(app, 'prompt-custom@example.com');
       const doc = await User.findOne({ email: 'prompt-custom@example.com' });
       if (!doc) throw new Error('user not found');
-      doc.settings = { systemPrompt: 'Always answer in rhyming couplets.' };
+      doc.settings = { customInstructions: 'Always answer in rhyming couplets.' };
       await doc.save();
 
       const response = await request(app)
@@ -222,13 +222,13 @@ describe('Chat route routing metadata', () => {
       expect(content).toContain('<user:preferred_name>\nAlex\n</user:preferred_name>');
     });
 
-    it("never leaks one user's systemPrompt into another user's request", async () => {
+    it("never leaks one user's customInstructions into another user's request", async () => {
       const app = createApp();
       const ownerCookies = await registerUser(app, 'prompt-owner@example.com');
       const otherCookies = await registerUser(app, 'prompt-isolation@example.com');
       const doc = await User.findOne({ email: 'prompt-owner@example.com' });
       if (!doc) throw new Error('user not found');
-      doc.settings = { systemPrompt: 'Owner-only secret prompt.' };
+      doc.settings = { customInstructions: 'Owner-only secret prompt.' };
       await doc.save();
 
       const mine = await request(app)
@@ -255,7 +255,7 @@ describe('Chat route routing metadata', () => {
 
       const doc = await User.findOne({ email: 'patch-clear@example.com' });
       if (!doc) throw new Error('user not found');
-      doc.settings = { systemPrompt: 'Temporary override.' };
+      doc.settings = { customInstructions: 'Temporary override.' };
       await doc.save();
 
       const first = await request(app)
@@ -267,7 +267,10 @@ describe('Chat route routing metadata', () => {
         '<user:custom_instructions>\nTemporary override.\n</user:custom_instructions>',
       );
 
-      await request(app).patch('/api/profile').set('Cookie', cookieList).send({ systemPrompt: '' });
+      await request(app)
+        .patch('/api/profile')
+        .set('Cookie', cookieList)
+        .send({ customInstructions: '' });
       mockGenerate.mockClear();
 
       const second = await request(app)
@@ -278,12 +281,12 @@ describe('Chat route routing metadata', () => {
       expect(systemContentFromCall()).toMatch(/^You are Tova/);
     });
 
-    it('ignores a whitespace-only systemPrompt and falls back to the global prompt', async () => {
+    it('ignores a whitespace-only customInstructions and falls back to the global prompt', async () => {
       const app = createApp();
       const cookies = await registerUser(app, 'prompt-blank@example.com');
       const doc = await User.findOne({ email: 'prompt-blank@example.com' });
       if (!doc) throw new Error('user not found');
-      doc.settings = { systemPrompt: '   \n' };
+      doc.settings = { customInstructions: '   \n' };
       await doc.save();
 
       const response = await request(app)

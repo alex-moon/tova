@@ -14,7 +14,8 @@ export const toAuthUser = (user: UserDocument): AuthUser => {
   if (user.name) payload.name = user.name;
   if (user.avatarUrl) payload.avatarUrl = user.avatarUrl;
   if (user.preferredName) payload.preferredName = user.preferredName;
-  if (user.settings?.systemPrompt) payload.systemPrompt = user.settings.systemPrompt;
+  if (user.settings?.customInstructions)
+    payload.customInstructions = user.settings.customInstructions;
   return payload;
 };
 

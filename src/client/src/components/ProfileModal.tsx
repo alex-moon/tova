@@ -15,7 +15,7 @@ const SYSTEM_PROMPT_LIMIT = 4000;
 const ProfileModal: React.FC<ProfileModalProps> = ({ onClose }) => {
   const { user, updateUser } = useAuth();
   const [preferredName, setPreferredName] = useState(user?.preferredName ?? '');
-  const [systemPrompt, setSystemPrompt] = useState(user?.systemPrompt ?? '');
+  const [customInstructions, setSystemPrompt] = useState(user?.customInstructions ?? '');
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -29,7 +29,7 @@ const ProfileModal: React.FC<ProfileModalProps> = ({ onClose }) => {
     try {
       const next = await AuthService.updateProfile({
         preferredName: preferredName.trim(),
-        systemPrompt,
+        customInstructions,
       });
       updateUser(next);
       onClose();
@@ -77,7 +77,7 @@ const ProfileModal: React.FC<ProfileModalProps> = ({ onClose }) => {
             <span className="mb-1 block">System prompt</span>
             <textarea
               data-testid="profile-system-prompt"
-              value={systemPrompt}
+              value={customInstructions}
               onChange={(e) => setSystemPrompt(e.target.value)}
               maxLength={SYSTEM_PROMPT_LIMIT}
               rows={5}

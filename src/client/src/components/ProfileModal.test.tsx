@@ -42,7 +42,7 @@ const user: User = {
   permissions: [],
   name: 'Alex Moon',
   preferredName: 'Al',
-  systemPrompt: 'Be terse.',
+  customInstructions: 'Be terse.',
 };
 
 const avatarUser: User = { ...user, avatarUrl: 'https://example.com/a.png' };
@@ -77,7 +77,7 @@ describe('ProfileModal (issue #35)', () => {
     await waitFor(() =>
       expect(updateProfile).toHaveBeenCalledWith({
         preferredName: 'Friendly Al',
-        systemPrompt: 'Be terse.',
+        customInstructions: 'Be terse.',
       }),
     );
     await waitFor(() => expect(onClose).toHaveBeenCalled());
@@ -94,7 +94,7 @@ describe('ProfileModal (issue #35)', () => {
     await waitFor(() =>
       expect(updateProfile).toHaveBeenCalledWith({
         preferredName: 'Al',
-        systemPrompt: '',
+        customInstructions: '',
       }),
     );
   });

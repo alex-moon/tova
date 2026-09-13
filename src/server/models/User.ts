@@ -50,7 +50,7 @@ const userSchema = new mongoose.Schema(
     settings: {
       type: new mongoose.Schema(
         {
-          systemPrompt: {
+          customInstructions: {
             type: String,
             maxlength: 4000,
             default: null,
@@ -84,7 +84,7 @@ userSchema.methods.comparePassword = async function (this: UserDocument, passwor
 };
 
 export interface UserSettings {
-  systemPrompt: string | null;
+  customInstructions: string | null;
 }
 
 export interface UserDocument extends mongoose.Document {

@@ -23,12 +23,12 @@ const getUser = (email: string) =>
   });
 
 describe('PATCH /api/profile (issue #35)', () => {
-  it('sets preferredName and systemPrompt and returns the /me payload shape', async () => {
+  it('sets preferredName and customInstructions and returns the /me payload shape', async () => {
     const { app, cookie } = await registerUser('patch-happy@example.com');
 
     const res = await patchProfile(app, cookie, {
       preferredName: '  Alex  ',
-      systemPrompt: 'Always answer in list form.',
+      customInstructions: 'Always answer in list form.',
     });
 
     expect(res.status).toBe(200);
@@ -38,12 +38,12 @@ describe('PATCH /api/profile (issue #35)', () => {
       role: 'user',
       permissions: [],
       preferredName: 'Alex',
-      systemPrompt: 'Always answer in list form.',
+      customInstructions: 'Always answer in list form.',
     });
 
     const user = await getUser('patch-happy@example.com');
     expect(user.preferredName).toBe('Alex');
-    expect(user.settings?.systemPrompt).toBe('Always answer in list form.');
+    expect(user.settings?.customInstructions).toBe('Always answer in list form.');
 
     // PATCH response and GET /me must carry an identical field set (plan
     // task 3 drift requirement).
@@ -54,14 +54,14 @@ describe('PATCH /api/profile (issue #35)', () => {
 
   it('leaves a key absent from the body untouched', async () => {
     const { app, cookie } = await registerUser('patch-partial@example.com');
-    await patchProfile(app, cookie, { preferredName: 'Alex', systemPrompt: 'Be terse.' });
+    await patchProfile(app, cookie, { preferredName: 'Alex', customInstructions: 'Be terse.' });
 
     const res = await patchProfile(app, cookie, { preferredName: 'A' });
 
     expect(res.status).toBe(200);
     const user = await getUser('patch-partial@example.com');
     expect(user.preferredName).toBe('A');
-    expect(user.settings?.systemPrompt).toBe('Be terse.');
+    expect(user.settings?.customInstructions).toBe('Be terse.');
   });
 
   it('strips JSON/XML-like characters and newlines from preferredName', async () => {
@@ -96,22 +96,22 @@ describe('PATCH /api/profile (issue #35)', () => {
     expect(res.body.user).not.toHaveProperty('preferredName');
   });
 
-  it('clears and round-trips systemPrompt as absent, not empty string', async () => {
+  it('clears and round-trips customInstructions as absent, not empty string', async () => {
     const { app, cookie } = await registerUser('patch-clear-prompt@example.com');
-    await patchProfile(app, cookie, { systemPrompt: 'Be terse.' });
+    await patchProfile(app, cookie, { customInstructions: 'Be terse.' });
 
-    await patchProfile(app, cookie, { systemPrompt: '' });
+    await patchProfile(app, cookie, { customInstructions: '' });
 
     const user = await getUser('patch-clear-prompt@example.com');
     // Schema rehydrates a cleared field as its default (null), never '':
     // '' would block per-user prompt resolution downstream.
-    expect(user.settings?.systemPrompt).toBeNull();
+    expect(user.settings?.customInstructions).toBeNull();
 
     // Whitespace-only input clears too, so a blank prompt cannot disable the
     // system message.
-    await patchProfile(app, cookie, { systemPrompt: '   ' });
+    await patchProfile(app, cookie, { customInstructions: '   ' });
     const user2 = await getUser('patch-clear-prompt@example.com');
-    expect(user2.settings?.systemPrompt).toBeNull();
+    expect(user2.settings?.customInstructions).toBeNull();
   });
 
   it('rejects unknown keys (name, avatarUrl, role) with 400', async () => {
@@ -142,18 +142,18 @@ describe('PATCH /api/profile (issue #35)', () => {
     const res = await patchProfile(app, cookie, { preferredName: 'x'.repeat(21) });
     expect(res.status).toBe(400);
 
-    const res2 = await patchProfile(app, cookie, { systemPrompt: 'y'.repeat(4001) });
+    const res2 = await patchProfile(app, cookie, { customInstructions: 'y'.repeat(4001) });
     expect(res2.status).toBe(400);
 
     const res3 = await patchProfile(app, cookie, { preferredName: 42 as unknown as string });
     expect(res3.status).toBe(400);
 
-    const res4 = await patchProfile(app, cookie, { systemPrompt: null });
+    const res4 = await patchProfile(app, cookie, { customInstructions: null });
     expect(res4.status).toBe(400);
 
     const user = await getUser('patch-validate@example.com');
     expect(user.preferredName).toBeNull();
-    expect(user.settings?.systemPrompt).toBeUndefined();
+    expect(user.settings?.customInstructions).toBeUndefined();
   });
 
   it('rejects unauthenticated requests with 401', async () => {

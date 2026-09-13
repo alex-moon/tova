@@ -51,7 +51,10 @@ const AuthService = {
 
   // PATCHes the user-owned profile (issue #35). Sends only the keys present
   // in the patch — an empty string clears the field server-side.
-  async updateProfile(patch: { preferredName?: string; systemPrompt?: string }): Promise<AuthUser> {
+  async updateProfile(patch: {
+    preferredName?: string;
+    customInstructions?: string;
+  }): Promise<AuthUser> {
     try {
       const res = await axios.patch<{ user: AuthUser }>('/api/profile', patch);
       return res.data.user;
