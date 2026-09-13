@@ -4,7 +4,7 @@ import { authenticate, AuthRequest } from '../middleware/auth';
 import { Session } from '../models/Session';
 import { Message } from '../models/Message';
 import { Asset } from '../models/Asset';
-import { truncateForPrompt } from '../services/textExtraction';
+import { buildAttachmentEnvelope } from '../services/attachmentEnvelope';
 import { routeQuery } from '../services/routerService';
 import { generateChatTitle } from '../services/titleService';
 import { hasPermission, ROUTING_PERMISSION } from '../services/userService';
@@ -156,6 +156,8 @@ const saveUserMessageWithMetrics = async (
 type AssetDoc = {
   _id: unknown;
   filename: string;
+  contentType: string;
+  size: number;
   textExtracted?: string | null;
 };
 
@@ -175,28 +177,26 @@ const loadAttachedAsset = async (
   return asset ? (asset as unknown as AssetDoc) : 'missing';
 };
 
-// Attached file text goes in as a clearly delimited block, truncated — the
-// model sees the file; the stored/persisted user message stays the raw user
+// Attached file text goes in through the structured attachment envelope
+// (services/attachmentEnvelope.ts): untrusted-data rule first, then the
+// <user_content> block. Stored/persisted user message stays the raw user
 // text so the UI and metrics are unaffected.
-const buildAssetBlock = (asset: AssetDoc | null): string => {
-  if (!asset) return '';
-  if (asset.textExtracted) {
-    return `\n\nThe user attached a file named "${asset.filename}". Its contents are between the markers:\n<<<file:${asset.filename}>>>\n${truncateForPrompt(asset.textExtracted)}\n<<<end file>>>`;
-  }
-  return `\n\nThe user attached a file named "${asset.filename}", but no text could be extracted from this file type.`;
-};
-
 const appendAssetBlock = (
   messages: { role: 'system' | 'user' | 'assistant'; content: string }[],
   asset: AssetDoc | null,
 ): void => {
   const last = messages[messages.length - 1];
   if (asset && last?.role === 'user') {
-    last.content += buildAssetBlock(asset);
+    last.content += buildAttachmentEnvelope({
+      filename: asset.filename,
+      contentType: asset.contentType,
+      size: asset.textExtracted?.length ?? 0,
+      textExtracted: asset.textExtracted,
+    });
   }
 };
 
-const SYSTEM_PROMPT = `You are Tova, a helpful, warm warm, and direct personal chat assistant — think of yourself as the thing people reach for instead of Googling or texting a friend at 11pm. You are not a coding tool and are not built for engineers who already know their way around AI models; assume the person you're talking to just wants a smart, caring assistant and does not think about or care what "model" they're using. If asked what model or AI you're built on, answer simply: you're Tova. Do not name underlying providers or models.
+const SYSTEM_PROMPT = `You are Tova, a helpful, warm, and direct personal chat assistant — think of yourself as the thing people reach for instead of Googling or texting a friend at 11pm. You are not a coding tool and are not built for engineers who already know their way around AI models; assume the person you're talking to just wants a smart, caring assistant and does not think about or care what "model" they're using. If asked what model or AI you're built on, answer simply: you're Tova. Do not name underlying providers or models.
 
 Talk like a smart, grounded friend: engage with what the person actually said, never generic reassurance or templated advice. Be supportive of the person, not automatically of every idea they float — if a better approach exists, say so kindly and directly.
 
