@@ -39,6 +39,13 @@ const userSchema = new mongoose.Schema(
       type: String,
       default: null,
     },
+    // User-owned (never written by Google); set only via PATCH /api/profile.
+    preferredName: {
+      type: String,
+      trim: true,
+      maxlength: 100,
+      default: null,
+    },
     // Per-user settings; created lazily on first write (no backfill needed).
     settings: {
       type: new mongoose.Schema(
@@ -88,6 +95,7 @@ export interface UserDocument extends mongoose.Document {
   permissions: string[];
   name: string | null;
   avatarUrl: string | null;
+  preferredName: string | null;
   settings: UserSettings | null;
   createdAt: Date;
   updatedAt: Date;

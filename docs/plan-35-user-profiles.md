@@ -148,8 +148,12 @@ deferred behind them.
 ## Done
 
 - [x] 1. Schema + `AuthUser` contract + `GET /api/auth/me` (partially —
-      `preferredName` still to add)
-- [ ] 2. Google login stores/refreshes name + avatarUrl (userinfo endpoint) + tests
+      `preferredName` still to add: schema field added in #35 task-2 commit;
+      `/me` projection and `AuthUser` remain)
+- [x] 2. Google login stores/refreshes name + avatarUrl (userinfo endpoint) + tests
+      (2026-09-13: `fetchGoogleProfile` in `auth.ts`, `resolveOrCreateUser` takes
+      `profile`; Google-owned fields overwritten unconditionally, user-owned
+      fields never touched; userinfo failure non-fatal)
 - [ ] 3. `PATCH /api/profile` (preferredName + systemPrompt) + tests
 - [ ] 4. Per-user system prompt overrides global in chat routes + test
 - [ ] 5. Profile-context prompt block + tests
