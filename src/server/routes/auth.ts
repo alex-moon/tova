@@ -215,6 +215,8 @@ router.get('/me', authenticate, async (req: AuthRequest, res) => {
       role: user.role,
       permissions: user.permissions,
     };
+    if (user.name) userPayload.name = user.name;
+    if (user.avatarUrl) userPayload.avatarUrl = user.avatarUrl;
     res.json({ user: userPayload });
   } catch (_err) {
     return res.status(401).json({ message: 'Invalid token' });

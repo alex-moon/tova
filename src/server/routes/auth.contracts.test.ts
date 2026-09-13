@@ -55,6 +55,32 @@ describe('auth route contract drift', () => {
     expect(user.role).toBe('user');
     expect(Array.isArray(user.permissions)).toBe(true);
   });
+
+  it('me round-trips profile fields when set (issue #35)', async () => {
+    const app = createApp();
+    const reg = await request(app)
+      .post('/api/auth/register')
+      .send({ email: 'contract-profile@example.com', password: 'password123' });
+    const cookie = reg.headers['set-cookie'];
+
+    // Populate the fields directly on the model (PATCH /api/profile is task 3).
+    const { User } = await import('../models/User');
+    const doc = await User.findOne({ email: 'contract-profile@example.com' });
+    if (!doc) throw new Error('user not found');
+    doc.name = 'Alex Moon';
+    doc.avatarUrl = 'https://example.com/a.png';
+    doc.settings = { systemPrompt: 'Be terse.' };
+    await doc.save();
+
+    const res = await request(app).get('/api/auth/me').set('Cookie', cookie);
+    expect(res.status).toBe(200);
+    const user: Record<string, unknown> = res.body.user;
+    expect(user.name).toBe('Alex Moon');
+    expect(user.avatarUrl).toBe('https://example.com/a.png');
+    // settings is internal: never exposed on the /me wire payload.
+    expect(user.settings).toBeUndefined();
+    expect(user.systemPrompt).toBeUndefined();
+  });
 });
 
 describe('auth route hardening (issue #32)', () => {

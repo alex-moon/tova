@@ -31,11 +31,15 @@ export interface AdminModel {
 }
 
 // User payload returned by GET /api/auth/me (includes permissions).
+// `name`/`avatarUrl` are optional: omitted from the wire payload until set
+// (profile fields, issue #35 — populated by Google login or profile edits).
 export interface AuthUser {
   id: string;
   email: string;
   role: 'user' | 'admin';
   permissions: string[];
+  name?: string;
+  avatarUrl?: string;
 }
 
 // User payload returned by POST /api/auth/login and /register.

@@ -124,7 +124,7 @@ Google-provided profile data we already have access to.
 
 ## Done
 
-- [ ] 1. Schema + `AuthUser` contract + `GET /api/auth/me`
+- [x] 1. Schema + `AuthUser` contract + `GET /api/auth/me`
 - [ ] 2. Google login stores/refreshes name + avatarUrl (userinfo endpoint) + tests
 - [ ] 3. `PATCH /api/profile` with zod validation + tests
 - [ ] 4. Per-user system prompt overrides global in chat routes + test
