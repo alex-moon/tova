@@ -1,184 +1,222 @@
-# Plan: UX fixes (#41) — collapsed sources list, theme-switcher fix
+# Plan: UX fixes (#41) — collapsed sources list, theme-switcher fix, follow-ups
 
 - **Ticket:** [alex-moon/tova#41](https://github.com/alex-moon/tova/issues/41)
 - **Branch:** `feat/tv/41-ux-fixes`
-- **Scope:** chat UI (`src/client`, tiny logic-only pieces only), small well-contained fixes.
+- **Revised scope:** one server-side fix (`followupService`/`mastraService`, author
+  confirmed), one client placeholder fix, plus the already-delivered client items
+  below. The original `src/client`-only scope was widened by the author's
+  approval of the follow-up server fix on #41.
 
 ## Motivation
 
-Issue #41 reports three UX problems from a review of the current chat UI:
-
-1. Follow-up suggestions from the assistant are never shown to the user.
-2. The Sources list can grow very long and clutters the conversation.
-3. The dark/light theme switcher does nothing.
-
-The intent is a chat UI that _demotes_ secondary content (sources) and _honours_
-explicit user choices (theme), with follow-up prompts actually surfacing.
+Issue #41 reports three UX problems from a review of the chat UI. Comment thread
+added two more inputs: the reporter tests on mobile, and the follow-up problem
+"in reality" turned out to be the chat input's placeholder text.
 
 ## State of the repo (verified from code, not the issue text)
 
-Important finding: two of the three items are **already implemented on `main`**
-(commits `225759c` and `1f2f12a`, which the branch HEAD `20821ef` includes):
-
-- **Item 1 — Follow-ups not shown: Done on main.** Server generates
+- **Item 1 — Follow-ups: reproduced live on this branch.** Server generates
   suggestions (`src/server/routes/chat.ts:379-387`), delivers them on the SSE
-  `done` event, persists them (`Message.ts:57`, `App.tsx:197-199`), and the UI
-  renders `FollowupChips` you can click (`ChatWindow.tsx:177, 249, 440`). Server
-  and client tests cover the path (`chat.stream.test.ts:296`,
-  `ChatWindow.features.test.tsx:133`). No implementation work planned; see
-  Task 0 for a live smoke test.
-- **Item 2 — Sources list too long: was not done; delivered in this review pass.**
-  `SourcesBlock` (`ChatWindow.tsx:98-112`) originally always rendered the full
-  `<ul>` of URLs with no collapse and no "show all".
-- **Item 3 — Theme switcher does nothing: mostly done on main; one class-toggling
-  bug remained.** `ThemeToggle.tsx` persists and applies the choice;
-  `index.css:46-119` has a complete light palette, a `.dark` override and a
-  system-preference fallback. The defect: `applyTheme` only toggled the `dark`
-  class on `<html>`. When the OS prefers dark and the user picks _light_,
-  `index.css:96`'s `@media (prefers-color-scheme: dark) { html:not(.light, .dark)
-{ … } }` re-applied dark, so the switcher appeared to do nothing in that common
-  case.
+  `done` event, persists them, and `FollowupChips` render and click
+  (`ChatWindow.tsx:203-250, 465`). Client side is fine and covered by tests.
+  The live path fails _server-side_: `generateFollowups`
+  (`followupService.ts:21`) routes through `inferenceService.createCompletion`
+  → `mastraService` connectors, and `agentFor` (`mastraService.ts:221-237`)
+  attaches the `web_search` tool to every Groq agent whenever
+  `BRAVE_SEARCH_API_KEY` is set. `allam-2-7b` rejects tool-carrying requests,
+  so generation throws → catch → `[]` every time. With tools disabled, the
+  model additionally emits non-JSON prose (e.g. a set literal
+  `{'German', 'English', 'Spanish'}`), which the bracket-extraction +
+  `JSON.parse` in `followupService.ts:31-35` discards wholesale. A raw REST
+  call with the same prompt (no tools) returns clean JSON arrays, so the model
+  and prompt are fine. **Fix: Task 4.**
+- **Item 2 — Sources list: delivered on this branch** (review pass).
+  `SourcesBlock` in `ChatWindow.tsx` collapses to the first 3 items behind a
+  `COLLAPSED_SOURCES_COUNT = 3` constant, with "Show all N sources" /
+  "Show fewer sources" toggles and three new client test cases. Threshold 3
+  confirmed by the author on #41.
+- **Item 3 — Theme switcher: delivered on this branch.** `ThemeToggle.tsx`
+  `applyTheme` now sets/removes both `light` and `dark` classes; empty class
+  when the user has not picked a theme, preserving the
+  `html:not(.light, .dark)` system-preference fallback in `index.css`. Test
+  cases cover dark→light under emulated system-dark, fresh load, and the full
+  toggle round-trip.
+- **Placeholder (from comments, not the original ticket text): not started.**
+  `ChatWindow.tsx:250` picks a random static placeholder once per mount;
+  `ChatWindow.tsx:474` puts it on the textarea. The reporter's real complaint:
+  on mobile the placeholder is noise once a conversation is underway. Fix:
+  Task 5.
+- **Branch debris: cleaned.** The throwaway `scripts/test-followup.ts` from the
+  first pass is removed.
 
-So this plan covers two small deliverables, not three rewrites. It is deliberately
-scoped to what the repo does not already have.
+Remaining work is therefore Task 4, Task 5 and the final gate (Task 6).
 
 ## Checklist
 
-### Task 0 — live smoke test of follow-ups (verification only, no code)
+### Task 1 — fix theme switcher override bug — done
 
-Run the full stack (`npm run stack:up` if Mongo is down, then the dev server),
-send a chat message that produces suggestions, and confirm:
+`applyTheme` in `ThemeToggle.tsx` now sets both classes explicitly (`theme ===
+null` → no class, keeping the `index.css:96` system fallback; `'light'` →
+`light` without `dark`; `'dark'` → `dark` without `light`). Extended
+`ThemeToggle.test.tsx` accordingly. Client lint + vitest green.
 
-1. The SSE `done` event carries `followUps` (DevTools network tab).
-2. `FollowupChips` render under the assistant message.
-3. Clicking a chip sends it as a new prompt.
+**Residual before PR/merge:** a DevTools-emulated manual smoke matching a real
+browser (toggle → light sticks; reload → still light), since jsdom stubs
+`matchMedia` and cannot validate the CSS media query itself. Do this in Task 6.
 
-Expected outcome: the path works (automated tests already cover it), and this
-task exists only to disprove the issue reporter's observation. If it reproduces
-live, stop and report on #41 _before_ opening any new ticket — do not chase it
-in this one (cleanup-scope policy).
+### Task 2 — collapse Sources block by default — done
 
-Say explicitly in the PR body what was observed, so item 1 is closed with
-evidence rather than assumption.
+`SourcesBlock` in `ChatWindow.tsx`: collapse to first 3 (`COLLAPSED_SOURCES_COUNT
+= 3`), "Show all N sources" / "Show fewer" toggle button
+(`data-testid="sources-show-all"`), `data-testid="sources-block"` unchanged, no
+server contract change, per-message state (old messages stay collapsed). Three
+new cases in `ChatWindow.features.test.tsx`. Threshold 3 confirmed on #41;
+one-line constant change if the author ever wants another number.
 
-**Run during the review pass — item 1 REPRODUCED live.** Details:
+### Task 0 — live smoke test of follow-ups — done (repros)
 
-- Stack up, registered a test user, streamed a chat turn over SSE.
-- The final `done` event carries **no `suggestions`** field; nothing is
-  persisted in Mongo. Automated tests keep passing because their mocks do not
-  model the live configuration.
-- Root cause chain:
-  1. `BRAVE_SEARCH_API_KEY` (set in this environment) makes every Groq
-     completion go through the Mastra agent with the `web_search` tool baked
-     in (`mastraService.ts` `agentFor` → `toolsEnabled`).
-  2. The suggestion model `allam-2-7b` rejects any call that carries tools
-     ("`tool calling` is not supported with this model"), so
-     `generateFollowups` throws → catches → returns `[]` every time.
-  3. A direct raw Groq REST call with the same prompt (tools omitted) works
-     and returns clean JSON arrays, confirming the model and prompt are fine.
-     With tools disabled at the connector there is a second, independent failure:
-     the model occasionally emits non-JSON prose (e.g. a set literal
-     `{'German', 'English', 'Spanish'}`), which the strict `JSON.parse`
-     discards wholesale instead of dropping just the malformed content.
+Ran the stack, streamed a turn: the `done` event carries no `suggestions`;
+nothing persisted in Mongo; automated tests stay green because their mocks do
+not model the tool-attached live configuration. Root-cause chain documented
+above under Item 1. Repro reported on #41; author approved the server-side fix
+in this ticket: _"Server side fix is the way to do this yes - without the
+search tool!"_ Task 4 implements it.
 
-**The fix is server-side** (`followupService`/`mastraService`), outside the
-ticket's declared scope, so per the cleanup-scope policy it is reported here
-for author confirmation rather than fixed unilaterally in this ticket.
+### Task 4 — generate follow-ups without the search tool + tolerant parsing (server)
 
-### Task 1 — fix theme switcher override bug (`fix`) — done
+The author's mental model — _"Should be simple text generation for follow ups
+no?"_ — is correct; the fix keeps it simple:
 
-1. In `ThemeToggle.tsx`, `applyTheme` now sets both classes explicitly:
-   - `theme === null` → no class at all, so the `html:not(.light, .dark)`
-     system-preference fallback in `index.css:96` keeps working.
-   - `theme === 'light'` → add `light`, remove `dark`.
-   - `theme === 'dark'` → add `dark`, remove `light`.
-2. CSS audit confirmed `:root`/`html.light` styling applies and nothing else
-   toggles the class outside `ThemeToggle.tsx`.
-3. `aria-label` keys off the same conditions as before — verified, unchanged.
-4. Extended `ThemeToggle.test.tsx`: with `prefers-color-scheme: dark` mocked,
-   explicit light keeps `light` without `dark`; fresh load gets no class;
-   system-dark → toggle → light → toggle → dark round-trip asserted.
-5. Verified with client lint + vitest. A DevTools-emulated manual smoke
-   (toggle → light sticks; reload → still light) still needs to happen before
-   merge if it has not already.
+1. **Tool-free generation path.** Suggestions do not need search. The problem
+   is that `inferenceService.createCompletion` always routes through
+   `agentFor`, which bakes `web_search` into every Groq agent when the Brave
+   key is set. Give `mastraService` a tool-free connector for one-off
+   completions (suggestions never carry tools regardless of the key):
+   `inferenceService` gains an explicit tool-free createCompletion, or the
+   connector factory takes a tools flag. Keep the wiring inside
+   `mastraService.ts` (it is the single owner of `@mastra/*` imports); the
+   `web_search` streaming path used by the main chat must not change.
+2. **Followup service uses it.** `followupService.ts:21` switches to that
+   path. Model, prompt, trimming and `MAX_SUGGESTIONS` stay as-is.
+3. **Tolerant parser.** Replace the strict bracket-slice in
+   `followupService.ts:31-35` with parsing that drops just the malformed
+   content instead of the whole response:
+   - try the `[a, b]` slice first (current behaviour);
+   - on failure, fall back to extracting the first `[…]` array with a
+     regex + `JSON.parse`;
+   - on failure, fall back to splitting the raw text on newline/semicolon
+     boundaries and keeping the same post-filters (`typeof string`, 1–60
+     chars, strip quotes, max 3) so a set literal or prose with usable lines
+     still yields suggestions;
+   - never throw — empty array on total failure, as today.
+4. **Tests.** Extend the server suite: (a) generation succeeds with the search
+   key set and the suggestion model rejects tools — assert the completion
+   request carries no `tools` (unit on the new path or the connector); (b)
+   parser handles a set literal and prose-with-lines; (c) the
+   empty-on-failure contract is preserved.
+5. **Verify live.** Re-run the Task 0 smoke: `done` event carries suggestions,
+   chips render, Mongo persists. Note the result on #41 (the earlier comment
+   promised a report after the fix).
 
-### Task 2 — collapse Sources block by default (`feat`) — done in review pass
+Constraint noted: `BRAVE_SEARCH_API_KEY` exists in this environment; the fix's
+live verification depends on that environment staying as configured.
 
-Delivered late by the review agent; the first implementation pass on this
-branch skipped it entirely.
+### Task 5 — hide the composer placeholder once the user has spoken (client)
 
-1. `SourcesBlock` in `ChatWindow.tsx` gained a local `useState(false)` for
-   `expanded` and a `COLLAPSED_SOURCES_COUNT = 3` constant.
-2. When `!expanded && sources.length > 3`, only the first 3 items render plus
-   a `data-testid="sources-show-all"` button labelled "Show all N sources".
-3. At 3 or fewer, the full list renders with no button.
-4. `data-testid="sources-block"` unchanged; per-message state means old
-   messages stay collapsed; no Mongo or SSE/API contract change.
-5. Expanded state offers a "Show fewer sources" toggle back to collapsed.
-6. `ChatWindow.features.test.tsx` extended with the three planned cases;
-   the existing two-sources test passes unchanged.
+From the author's comment: _"Probably simplest fix is remove it after the user
+has input at least one message."_
 
-### Task 3 — final gate
+1. In `ChatWindow.tsx`, hide the placeholder when the conversation contains at
+   least one user message (i.e. `messages.some((m) => m.role === 'user')`).
+   Because this derives from `messages`, it also behaves correctly across
+   reloads (history loaded from Mongo → no placeholder) and after switching or
+   creating a session (empty message list → placeholder returns). Default
+   behaviour assumed; asked on #41 (see Open questions).
+2. Keep the random placeholder logic and `#33` empty-path comments intact —
+   this only gates the `placeholder` prop on the textarea (`ChatWindow.tsx:474`).
+3. Tests in `ChatWindow.features.test.tsx`: placeholder visible on fresh load
+   (no messages); hidden after one user message; visible again after a
+   session switch to a fresh session.
+4. Manual mobile check (author tests on mobile): placeholder gone after first
+   send. Fold into the Task 6 smoke.
 
-No backend or Mongo work is expected; the suggestions pipeline already works.
+### Task 6 — final gate
+
+1. `npm run ci` (root lint, format check, typecheck, server tests, client
+   lint + format + tests, client build). Known pre-existing `main` failure:
+   `src/server/iteration-harness.test.ts` imports `../../scripts/iteration`,
+   which commit `6f71fda` deleted while keeping the test file. Do not fix it
+   in this ticket unless blocked; flag it in the PR body (offer of a separate
+   ticket already on #41).
+2. Manual smokes accumulated in Tasks 1 and 5 (theme toggle, mobile
+   placeholder).
+3. Update the PR body: what was already done on `main` vs this branch, the
+   live follow-up repro, the server fix, and the placeholder rationale.
+4. Move this plan doc to `docs/done/` after merge (orchestrator handles
+   commits/pushes; no commits from this agent).
 
 ## Decisions so far
 
-- Items 1 and 3 as originally worded are closed by pre-existing work; we only
-  close the _residual_ part of item 3 (the `:not(.light, .dark)` interaction)
-  and the untouched item 2. Communicating this in the PR body is part of the
-  work so the issue author knows why the scope shrank.
+- The server-side follow-up fix is folded **into this ticket**, not split off:
+  the author answered his own verification question on #41 with explicit
+  approval, and it is the only remaining cause for the issue's item 1.
 - The "show all" control is a simple in-block toggle rather than a modal or a
   `<details>` element — matches the existing plain `SourcesBlock` markup and
-  keeps the change small. A height-capped scroll box was considered and
-  rejected: it needs scroll math that is flaky in tests and does not match the
-  issue's "show all button" wording.
-- `expanded` state intentionally does not persist: the issue asks for
-  "collapsed by default", which always-restart-collapsed satisfies, and it
-  avoids touching storage or the server contract.
+  the issue's "show all button" wording. Height-capped scroll box was
+  rejected.
+- `expanded` sources state does not persist: "collapsed by default" means
+  always-restart-collapsed, and persistence would touch storage or the server
+  contract for no stated need.
+- Placeholder behaviour derives from `messages` so an empty/new session
+  naturally regains it — no extra state, no persistence touch.
 
 ## Assumptions (critiqued)
 
-- **Assumption:** item 1 is already done. _Backed by_ server+client automated
-  tests and code reading. _Weakness:_ the issue reporter claims it "never
-  reaches the user" — against some build, that may have been true. Task 0 exists
-  specifically to falsify this before the PR claims it; if it reproduces live,
-  this assumption collapses and item 1 goes back to open.
-- **Assumption:** the theme defect is only the class-toggling bug. _Backed by_
-  the CSS audit above. _Weakness:_ jsdom's `matchMedia` is stubbed in tests, so
-  an integration regression involving the CSS media query itself would not show
-  in vitest — hence the DevTools-emulated manual smoke in Task 1.
-- **Assumption:** hiding sources beyond the first 3 does not break downstream
-  consumers of the DOM/test ids. _Backed by_ the test id audit above. _Weakness:_
-  any e2e test beyond `ChatWindow.features.test.tsx` that reads sources from the
-  DOM could break — Task 3's full `npm run ci` is the safety net.
+- **Assumption (Task 4):** the live failure is fully explained by the tool
+  attachment plus fragile parsing. _Backed by:_ live repro + a raw REST call
+  with the same prompt succeeding, both documented in the review comment on
+  #41. _Weakness:_ only one model (`allam-2-7b`, the `ROUTER_GUARD_MODEL`
+  default) was exercised against the live env in one session; a different
+  `ROUTER_GUARD_MODEL` could behave differently, and the tolerant parser's
+  fallbacks are rule-of-thumb, not model-audited. Mitigation: tests assert the
+  request carries no tools (the known, reproducible cause) and the parser
+  never throws.
+- **Assumption (Task 4):** suggestions should _never_ get search, even when
+  the key is set. _Backed by:_ the author's explicit approval and the model's
+  tool rejection. _Weakness:_ none observed; but this permanently narrows
+  what suggestions can draw on (no current-events suggestions). If someone
+  later wants that, it is a new feature, not this ticket.
+- **Assumption (Task 5):** "at least one message" means any user message in
+  the _current session's_ history, including on reload. _Backed by:_ the
+  author's phrasing. _Weakness:_ he is out of the office and could mean
+  something narrower (e.g. only while the input has text); asked on #41 with
+  the default stated. If he corrects us, the change is one boolean gate.
+- **Assumption (Tasks 1/2):** the rendered results hold up in a real browser,
+  not just jsdom. _Backed by:_ code reading and CSS audit. _Weakness:_
+  `matchMedia` is stubbed in vitest, so the media-query interaction is only
+  provable manually — hence the Task 6 smoke.
+- **Assumption:** hiding collapsed sources does not break other consumers of
+  the DOM/test ids. _Weakness:_ any e2e beyond `ChatWindow.features.test.tsx`
+  that reads all sources from the DOM could break; `npm run ci` in Task 6 is
+  the safety net.
 
 ## Open questions
 
-- **Collapse threshold (asked on #41):** the issue says "collapsed by default
-  with a show all button" but not how many entries to show. I plan to show **3**
-  before collapsing; this is a guess. If the author wants a different number or
-  a different control, that is a trivial tweak. Not blocking: Task 2 uses the
-  constant either way.
-- **Item 1 environmental cause (asked on #41):** the end-to-end path (SSE →
-  chips) is covered by automated tests, but the issue claims it "never reaches
-  the user". If the reporter observed this against a _current_ build, something
-  environmental may be involved (e.g. a very old session in Mongo without
-  stored suggestions). Task 0 resolves this by live smoke test; an open ticket
-  is only filed if a live repro is found, and per the cleanup-scope policy it
-  will not be chased inside this ticket without author confirmation.
+- **Placeholder lifecycle (posted on #41, not blocking Task 5):** does "remove
+  after the user has input at least one message" mean hidden for the rest of
+  the session (including reloads, and returning only on a fresh/new session)?
+  The plan assumes exactly that; if the author prefers a narrower reading
+  (e.g. a one-time dismissal, or only while the input has content), the change
+  is a single boolean gate. Task 5 does not depend on the answer to proceed.
+- **Live verification environment for Task 4:** the repro and its fix
+  verification both depend on `BRAVE_SEARCH_API_KEY` staying set in this
+  environment, and the reporter's original observation happened on a build he
+  cannot name ("out of the office"). If the key disappears or the live stack
+  is unavailable when Task 4 lands, the fix would ship on automated-test
+  evidence only; that would be noted in the PR body, and wait for the author
+  for a mobile spot check either way. Not blocking implementation.
 
-- **Debug script residue:** the first implementation pass also left a
-  throwaway `scripts/test-followup.ts` (commit "the") that imports the server's
-  `followupService` hard-codedly, requires a configured Groq key, and is
-  referenced nowhere. Removed during review; flag any objection in the PR.
-- **Task 0 never evidenced:** plan said the follow-ups smoke test would be
-  reported in the PR body. Nothing in this branch shows it was run. Either run
-  it before merge or close item 1 explicitly on automated-test evidence only.
-
-- **Follow-ups need a server-side fix (needs author confirmation):** item 1
-  reproduced live; the fix touches `followupService`/`mastraService`
-  (deliver followup generation without the web-search tool attached, plus a
-  more tolerant array parser). Both files sit outside the ticket's declared
-  `src/client` scope. Confirm and I will either fold it in here or split it
-  into its own ticket.
+Previously asked and answered on #41 (now folded into the plan; they are no
+longer open): the sources collapse threshold (3 — confirmed), the environmental
+theory for the missing follow-ups (disproved — it reproduced live and its
+server-side fix was approved).
