@@ -10,6 +10,9 @@ import chatRoutes from './routes/chat';
 import feedbackRoutes from './routes/feedback';
 import adminRoutes from './routes/admin';
 import { buildMongoUri } from './mongoUri';
+import { getJwtSecret } from './config/jwt';
+import helmet from 'helmet';
+import rateLimit from 'express-rate-limit';
 
 const DEFAULT_PORT = 5000;
 
@@ -26,10 +29,35 @@ export const connectToDatabase = async (mongoUri = buildMongoUri()) => {
 export const createApp = (): Express => {
   const app = express();
 
-  app.use(express.json());
+  // Strict clientside hardening headers; CSP is intentionally using helmet's
+  // defaults (CSP tuning is out of scope for #32).
+  app.use(helmet());
+
+  // Same-origin app in both dev (Vite proxy) and prod (static build): no
+  // cross-origin API consumer exists, so no CORS middleware (issue #32).
+  const isProduction = process.env.NODE_ENV === 'production';
+
+  // JWT configuration should fail at boot in production, not per request.
+  if (isProduction) getJwtSecret();
+
+  const globalLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    limit: isProduction ? 500 : 100000,
+    standardHeaders: 'draft-8',
+    legacyHeaders: false,
+  });
+  const authLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    limit: isProduction ? 20 : 100000,
+    standardHeaders: 'draft-8',
+    legacyHeaders: false,
+  });
+
+  app.use(globalLimiter);
+  app.use(express.json({ limit: '1mb' }));
   app.use(cookieParser());
 
-  app.use('/api/auth', authRoutes);
+  app.use('/api/auth', authLimiter, authRoutes);
   app.use('/api/chat', chatRoutes);
   app.use('/api/messages', feedbackRoutes);
   app.use('/api/admin', adminRoutes);

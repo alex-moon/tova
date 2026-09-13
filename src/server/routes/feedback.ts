@@ -4,6 +4,7 @@ import { authenticate, AuthRequest } from '../middleware/auth';
 import { Session } from '../models/Session';
 import { Message } from '../models/Message';
 import { recordFeedback, clearFeedback, FeedbackValue } from '../services/modelMetricsStatsService';
+import { feedbackValueSchema } from '../validation';
 
 const router = express.Router();
 
@@ -38,10 +39,13 @@ const loadOwnedMessage = async (req: AuthRequest, res: express.Response) => {
 
 router.post('/:messageId/feedback', authenticate, async (req: AuthRequest, res) => {
   try {
-    const { value } = req.body ?? {};
-    if (value !== 'up' && value !== 'down') {
-      return res.status(400).json({ message: 'value must be "up" or "down"' });
+    const parsed = feedbackValueSchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      return res
+        .status(400)
+        .json({ message: parsed.error.issues[0]?.message ?? 'value must be "up" or "down"' });
     }
+    const value = parsed.data.value;
 
     const message = await loadOwnedMessage(req, res);
     if (!message) return;

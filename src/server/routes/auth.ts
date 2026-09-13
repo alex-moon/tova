@@ -3,10 +3,12 @@ import crypto from 'crypto';
 import jwt from 'jsonwebtoken';
 import { User, UserDocument } from '../models/User';
 import { resolveOrCreateUser } from '../services/userService';
-import { AuthUser, LoginRequest, LoginUserPayload, RegisterRequest } from '../../shared/contracts';
+import { AuthUser, LoginUserPayload } from '../../shared/contracts';
+import { getJwtSecret } from '../config/jwt';
+import { loginSchema, registerSchema } from '../validation';
+import { authenticate, AuthRequest } from '../middleware/auth';
 
 const router = express.Router();
-const JWT_SECRET = process.env.JWT_SECRET || 'fallback_secret';
 
 const GOOGLE_AUTH_URL = 'https://accounts.google.com/o/oauth2/v2/auth';
 const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token';
@@ -27,30 +29,36 @@ const getGoogleConfig = () => {
 };
 
 const issueSessionCookie = (user: UserDocument, res: express.Response) => {
-  const token = jwt.sign({ id: user._id, email: user.email, role: user.role }, JWT_SECRET, {
+  const token = jwt.sign({ id: user._id, email: user.email, role: user.role }, getJwtSecret(), {
     expiresIn: '7d',
   });
   res.cookie('token', token, {
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',
+    // 'lax' rather than 'strict': Google OAuth returns via a cross-site
+    // top-level GET, and 'strict' cookies are not sent on that navigation.
+    sameSite: 'lax',
     maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
   });
 };
 
 router.post('/register', async (req, res) => {
   try {
-    const { email, password } = req.body as Partial<RegisterRequest>;
-
-    if (!email || !password) {
-      return res.status(400).json({ message: 'Email and password are required' });
+    const { email, password } = req.body ?? {};
+    const parsed = registerSchema.safeParse({ email, password });
+    if (!parsed.success) {
+      return res
+        .status(400)
+        .json({ message: parsed.error.issues[0]?.message ?? 'Invalid payload' });
     }
+    const registerData = parsed.data;
 
-    const existingUser = await User.findOne({ email });
+    const existingUser = await User.findOne({ email: registerData.email });
     if (existingUser) {
       return res.status(400).json({ message: 'Email is already registered' });
     }
 
-    const user = new User({ email, passwordHash: password });
+    const user = new User({ email: registerData.email, passwordHash: registerData.password });
     await user.save();
 
     const userPayload: LoginUserPayload = {
@@ -68,10 +76,17 @@ router.post('/register', async (req, res) => {
 
 router.post('/login', async (req, res) => {
   try {
-    const { email, password } = req.body as Partial<LoginRequest>;
+    const { email, password } = req.body ?? {};
+    const parsed = loginSchema.safeParse({ email, password });
+    if (!parsed.success) {
+      return res
+        .status(400)
+        .json({ message: parsed.error.issues[0]?.message ?? 'Invalid payload' });
+    }
+    const loginData = parsed.data;
 
-    const user = await User.findOne({ email });
-    if (!user || !(await user.comparePassword(password ?? ''))) {
+    const user = await User.findOne({ email: loginData.email });
+    if (!user || !(await user.comparePassword(loginData.password))) {
       return res.status(401).json({ message: 'Invalid credentials' });
     }
 
@@ -105,6 +120,9 @@ router.get('/google', (req, res) => {
   res.cookie('google_state', state, {
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',
+    // 'lax': the provider redirect back to /callback is a cross-site
+    // top-level GET; under 'strict' the state cookie would not be sent.
+    sameSite: 'lax',
     maxAge: 10 * 60 * 1000, // 10 minutes
   });
   res.redirect(url.toString());
@@ -182,13 +200,11 @@ router.post('/logout', (req, res) => {
   res.json({ message: 'Logged out' });
 });
 
-router.get('/me', async (req, res) => {
-  const token = req.cookies.token;
-  if (!token) return res.status(401).json({ message: 'Not authenticated' });
-
+// User lookup happens in the handler (verify is the shared middleware) so
+// that live role/permission changes are reflected on every read.
+router.get('/me', authenticate, async (req: AuthRequest, res) => {
   try {
-    const decoded = jwt.verify(token, JWT_SECRET) as { id: string };
-    const user = await User.findById(decoded.id);
+    const user = await User.findById(req.user?.id);
     if (!user) {
       res.clearCookie('token');
       return res.status(401).json({ message: 'User no longer exists' });
@@ -201,7 +217,7 @@ router.get('/me', async (req, res) => {
     };
     res.json({ user: userPayload });
   } catch (_err) {
-    res.status(401).json({ message: 'Invalid token' });
+    return res.status(401).json({ message: 'Invalid token' });
   }
 });
 

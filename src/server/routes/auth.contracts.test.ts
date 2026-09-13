@@ -56,3 +56,52 @@ describe('auth route contract drift', () => {
     expect(Array.isArray(user.permissions)).toBe(true);
   });
 });
+
+describe('auth route hardening (issue #32)', () => {
+  it.each([
+    ['invalid email', { email: 'not-an-email', password: 'password123' }, 'valid email'],
+    ['short password', { email: 'zod-validation@example.com', password: 'short' }, '8 characters'],
+    ['missing fields', {}, 'valid email'],
+  ])('register returns 400 for %s', async (_label, body, messagePart) => {
+    const app = createApp();
+
+    const res = await request(app).post('/api/auth/register').send(body);
+
+    expect(res.status).toBe(400);
+    expect(res.body.message).toContain(messagePart);
+  });
+
+  it('register rejects other field types without leaking a stack', async () => {
+    const app = createApp();
+
+    const res = await request(app)
+      .post('/api/auth/register')
+      .set('Content-Type', 'application/json')
+      .send('{"password": 42}');
+
+    expect(res.status).toBe(400);
+    expect(res.text).not.toContain('at ');
+  });
+
+  it('login returns 400 for a missing password', async () => {
+    const app = createApp();
+
+    const res = await request(app).post('/api/auth/login').send({ email: 'zod-login@example.com' });
+
+    expect(res.status).toBe(400);
+    expect(res.body.message).toContain('Password is required');
+  });
+
+  it('session cookie carries sameSite=Lax (issue #32)', async () => {
+    const app = createApp();
+
+    const res = await request(app)
+      .post('/api/auth/register')
+      .send({ email: 'cookie-flags@example.com', password: 'password123' });
+
+    const setCookie = res.headers['set-cookie'] as unknown as string[];
+    const sessionCookie = setCookie.find((c) => c.startsWith('token='));
+    expect(sessionCookie).toContain('SameSite=Lax');
+    expect(sessionCookie).toContain('HttpOnly');
+  });
+});
