@@ -114,7 +114,13 @@ Implemented, verified, and hardening-extended during the critic pass:
    braces (the observed set-literal failure now yields items). Design
    guards: the line fallback needs **≥2 survivors** (a single line is
    indistinguishable from prose and would produce one junk chip); total
-   failure still returns [] and never throws.
+   failure still returns [] and never throws. **Second critic pass
+   (2026-09-13) added a duplicate guard**: `parseList` now dedupes via
+   `Set` before the cap — probed on the live parser, duplicated model
+   output (`["a","a","b"]`, a repeated set literal) previously survived as
+   duplicate chips, and the lenient fallback makes repeats likelier. Three
+   more parser tests added (JSON-array duplicates, set-literal duplicates,
+   unbalanced bracket tail); server suite green, full `npm run ci` green.
 4. **Tests.** New `followupService.test.ts` (23 cases: parser formats,
    post-filters, max cap, no-`createCompletion` contract, empty-on-failure)
    plus two `mastraService` cases for the tool-free agent. Server suite
@@ -274,6 +280,11 @@ has input at least one message."_
   acceptable, or would the author prefer the fallback dropped so only
   bracketed JSON survives? Code behaves silently-either-way; no test change
   needed.
+- **Second critic pass (2026-09-13, no new question posted):** the pass found
+  and fixed one real gap (duplicate chips — now deduped in `parseList`) and
+  re-confirmed the already-posted comma-prose trade-off above (probed live:
+  comma-heavy prose still yields fragment chips under the fallback; zero
+  survivors fall back to []). No open question that is not already on #41.
 
 Previously asked and answered on #41 (now folded into the plan; they are no
 longer open): the sources collapse threshold (3 — confirmed), the

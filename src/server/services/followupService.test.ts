@@ -88,6 +88,18 @@ describe('parseSuggestions', () => {
     expect(parseSuggestions('["\'What?\'"]')).toEqual(['What?']);
   });
 
+  it('drops duplicate items from a JSON array', () => {
+    expect(parseSuggestions('["a","a","b"]')).toEqual(['a', 'b']);
+  });
+
+  it('drops duplicate items recovered via the set-literal fallback', () => {
+    expect(parseSuggestions("{'German', 'German', 'English'}")).toEqual(['German', 'English']);
+  });
+
+  it('discards an unbalanced bracket tail rather than swallowing the slice', () => {
+    expect(parseSuggestions('x ["a","b"] y [trailing')).toEqual(['a', 'b']);
+  });
+
   it('degrades to [] on unrecognisable output (needs ≥2 items to count as a list)', () => {
     expect(parseSuggestions('no advice to be found')).toEqual([]);
   });

@@ -98,18 +98,22 @@ const bracketSpans = (text: string): string[] => {
 };
 
 /*
- * Shared normalisation for array items (identical to pre-#41 plus a wider
- * quote class): trim, strip symmetric wrapping quotes, keep non-empty
- * phraselike strings and cap the list.
+ * Shared normalisation for array items (pre-#41 plus a wider quote class
+ * and a duplicate guard — the lenient fallbacks make repeated model output
+ * likelier, and duplicated chips are noise): trim, strip symmetric wrapping
+ * quotes, keep non-empty phraselike strings, drop duplicates, cap the list.
  */
 const parseList = (items: unknown[]): string[] =>
-  items
-    .filter((s): s is string => typeof s === 'string')
-    .map((s) =>
-      s
-        .trim()
-        .replace(/^["'`]+|["'`]+$/g, '')
-        .trim(),
-    )
-    .filter((s) => s.length > 0 && s.length <= 60)
-    .slice(0, MAX_SUGGESTIONS);
+  Array.from(
+    new Set(
+      items
+        .filter((s): s is string => typeof s === 'string')
+        .map((s) =>
+          s
+            .trim()
+            .replace(/^["'`]+|["'`]+$/g, '')
+            .trim(),
+        )
+        .filter((s) => s.length > 0 && s.length <= 60),
+    ),
+  ).slice(0, MAX_SUGGESTIONS);
