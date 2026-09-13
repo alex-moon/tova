@@ -98,7 +98,7 @@ instruction below depends on them:
 
 Follow-up: deploy depends on the security scans the same way it depends on CI.
 Since `workflow_run` fires per-workflow (a second trigger would let deploy race
-past a still-running Security run), the push-to-`main` scans run *inside* the
+past a still-running Security run), the push-to-`main` scans run _inside_ the
 CI workflow as jobs the `ci-gate` job requires; `security.yml` is the
 pull-request equivalent.
 
