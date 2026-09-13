@@ -3,6 +3,8 @@ import { authenticate, AuthRequest } from '../middleware/auth';
 import { Session } from '../models/Session';
 import { Message } from '../models/Message';
 import { User } from '../models/User';
+import { Asset } from '../models/Asset';
+import { buildAttachmentEnvelope } from '../services/attachmentEnvelope';
 import { routeQuery } from '../services/routerService';
 import { generateChatTitle } from '../services/titleService';
 import { hasPermission, ROUTING_PERMISSION } from '../services/userService';
@@ -16,6 +18,49 @@ import { generateFollowups } from '../services/followupService';
 const router = express.Router();
 
 const NO_ROUTING_PERMISSION = "You don't have permission to use the model router.";
+
+type AssetDoc = {
+  _id: unknown;
+  filename: string;
+  contentType: string;
+  size: number;
+  textExtracted?: string | null;
+};
+
+// Asset attach (issue #34): resolves the attached asset for a turn — 'none'
+// when the request sent no assetId, 'invalid' for a malformed reference,
+// 'missing' when it points at a different user's asset.
+const loadAttachedAsset = async (
+  req: AuthRequest,
+): Promise<AssetDoc | null | 'invalid' | 'missing'> => {
+  const assetIdRaw = req.body?.assetId;
+  if (assetIdRaw === undefined || assetIdRaw === null || assetIdRaw === '') return null;
+  if (typeof assetIdRaw !== 'string' || !isValidObjectId(assetIdRaw)) return 'invalid';
+  const asset = await Asset.findOne({
+    _id: assetIdRaw,
+    userId: req.user?.id,
+  });
+  return asset ? (asset as unknown as AssetDoc) : 'missing';
+};
+
+// Attached file text goes in through the structured attachment envelope
+// (services/attachmentEnvelope.ts): untrusted-data rule first, then the
+// <user_content> block. Stored/persisted user message stays the raw user
+// text so the UI and metrics are unaffected.
+const appendAssetBlock = (
+  messages: { role: 'system' | 'user' | 'assistant'; content: string }[],
+  asset: AssetDoc | null,
+): void => {
+  const last = messages[messages.length - 1];
+  if (asset && last?.role === 'user') {
+    last.content += buildAttachmentEnvelope({
+      filename: asset.filename,
+      contentType: asset.contentType,
+      size: asset.size,
+      textExtracted: asset.textExtracted,
+    });
+  }
+};
 
 // Provenance extraction (issue #16): web_search tool results arrive as
 // { results: { title, snippet, url }[] }; URLs are collected incrementally
@@ -126,12 +171,17 @@ const createSessionWithUser = async (userId: string, content: string) => {
 // failed ('parse'/'error') classification; non-trivial prompts get a
 // fire-and-forget classification call back (docs/plan-17-prompt-metrics.md
 // tasks 6 and 9). The gate is computed once and reused for both purposes.
-const saveUserMessageWithMetrics = async (sessionId: string, content: string) => {
+const saveUserMessageWithMetrics = async (
+  sessionId: string,
+  content: string,
+  asset?: { _id: unknown } | null,
+) => {
   const triviallyNeutral = isTriviallyNeutral(content);
   const userMessage = new Message({
     sessionId,
     role: 'user',
     content,
+    ...(asset ? { assetId: asset._id } : {}),
     metrics: {
       ...(await buildMessageMetrics(sessionId, content)),
       ...(triviallyNeutral ? { llmSkipReason: 'trivial' as const } : {}),
@@ -161,6 +211,15 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
       return res.status(403).json({ message: NO_ROUTING_PERMISSION });
     }
 
+    const attachResult = await loadAttachedAsset(req);
+    if (attachResult === 'invalid') {
+      return res.status(400).json({ message: 'Invalid asset reference' });
+    }
+    if (attachResult === 'missing') {
+      return res.status(404).json({ message: 'Asset not found' });
+    }
+    const attachedAsset = attachResult;
+
     let session;
     if (sessionId) {
       session = await Session.findOne({ _id: sessionId, userId, deletedAt: null });
@@ -171,7 +230,7 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
       session = await createSessionWithUser(userId as string, content);
     }
     // Save user message
-    const userMessage = await saveUserMessageWithMetrics(String(session._id), content);
+    const userMessage = await saveUserMessageWithMetrics(String(session._id), content, attachedAsset);
 
     // Feedback aggregation happens under the band captured at route time, so
     // it must be computed before the router sees the turn (decision 4).
@@ -199,6 +258,7 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
       }));
     const userDoc = await User.findById(userId);
     messages.unshift({ role: 'system', content: buildSystemContent(userDoc) });
+    appendAssetBlock(messages, attachedAsset);
 
     const chatCompletion = await inferenceService.createCompletion({
       messages,
@@ -260,6 +320,15 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
       return res.status(403).json({ message: NO_ROUTING_PERMISSION });
     }
 
+    const attachResult = await loadAttachedAsset(req);
+    if (attachResult === 'invalid') {
+      return res.status(400).json({ message: 'Invalid asset reference' });
+    }
+    if (attachResult === 'missing') {
+      return res.status(404).json({ message: 'Asset not found' });
+    }
+    const attachedAsset = attachResult;
+
     let session;
     if (sessionId) {
       session = await Session.findOne({ _id: sessionId, userId, deletedAt: null });
@@ -271,7 +340,7 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
     }
 
     // Save user message
-    const userMessage = await saveUserMessageWithMetrics(String(session._id), content);
+    const userMessage = await saveUserMessageWithMetrics(String(session._id), content, attachedAsset);
 
     // Feedback aggregation happens under the band captured at route time, so
     // it must be computed before the router sees the turn (decision 4).
@@ -292,6 +361,7 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
       }));
     const streamUserDoc = await User.findById(userId);
     messages.unshift({ role: 'system', content: buildSystemContent(streamUserDoc) });
+    appendAssetBlock(messages, attachedAsset);
 
     // Set SSE headers
     res.setHeader('Content-Type', 'text/event-stream');

@@ -27,6 +27,29 @@ per `docs/workflow.md`.
    hidden reasoning tokens from `max_tokens` — `titleService` budget
    raised 30 → 512 after live verification. `npm run ci` green.
 
+8. **#34 — Asset library: uploads to DigitalOcean Spaces via presigned URLs (complete).**
+   Browser uploads go directly to Spaces (AWS SDK v3 signed against the
+   `lon1` endpoint; region absent from `.env` initially, confirmed `lon1`
+   empirically against the real bucket and set in `.env`/`.env.example`);
+   the Express server never touches file bytes. New `/api/assets` surface: `presign`
+   (allowlist + 15 MB cap, 60 s PUT), `confirm` (real HEAD, size
+   reconciliation, light text extraction for `txt`/`md`/`csv` with a
+   truncation cap, stale-pending rejection), cursor-paged list, 5-min
+   presigned GET URLs, delete converging on missing objects (NoSuchKey
+   treated as deleted). Ownership isolation tested; S3 interactions mocked
+   in CI (no live dependency). Client: "Files" panel in the sidebar
+   (drag-drop upload, icon-only cards — never rendering contents —
+   download, delete) and a composer paperclip attach flow feeding one
+   `assetId` per message into `/api/chat/stream`; the send path pastes
+   extracted file text into the prompt in a delimited block (truncated)
+   while stored message content and text-only behavior stay unchanged.
+   Owner asked "no extracted text" to be user-visible: confirm carries
+   `hasText` and the composer toasts the marker. Verified end-to-end
+   against the real `tova` Space in `lon1` (presign → PUT → confirm →
+   list → GET-back → delete, guest blocked). No DB migration required
+   (new collection, optional `Message.assetId`; indexes from the schema).
+   `npm run ci` green.
+
 ## Delivery History (summary)
 
 1. **Plan 001 — Reconcile root tooling and doc status.** Aligned the documented workflow, root tooling, and runnable entry points.
