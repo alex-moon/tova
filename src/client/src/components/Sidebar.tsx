@@ -1,7 +1,8 @@
-import React from 'react';
-import { LogOut, Plus, Trash2, X } from 'lucide-react';
+import React, { useState } from 'react';
+import { Files, LogOut, Plus, Trash2, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import ThemeToggle from './ThemeToggle';
+import AssetLibrary from './AssetLibrary';
 import { cn } from '@/lib/utils';
 import { useAuth } from '../hooks/useAuth';
 
@@ -30,10 +31,12 @@ const Sidebar: React.FC<SidebarProps> = ({
   onClose,
 }) => {
   const { logout } = useAuth();
+  const [showFiles, setShowFiles] = useState(false);
 
   return (
     <>
       {open && <div className="fixed inset-0 z-30 bg-black/50 md:hidden" onClick={onClose} />}
+      {showFiles && <AssetLibrary onClose={() => setShowFiles(false)} />}
       <nav
         className={cn(
           'fixed inset-y-0 left-0 z-40 flex h-full w-(--sidebar-width) shrink-0 flex-col border-r border-border bg-sidebar transition-transform md:static md:translate-x-0',
@@ -59,6 +62,10 @@ const Sidebar: React.FC<SidebarProps> = ({
           <Button variant="outline" className="w-full" onClick={onNewChat}>
             <Plus />
             New Chat
+          </Button>
+          <Button variant="ghost" className="mt-1 w-full" onClick={() => setShowFiles(true)}>
+            <Files />
+            Files
           </Button>
         </div>
         <div className="flex-1 overflow-y-auto px-4">

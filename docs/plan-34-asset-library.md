@@ -66,7 +66,7 @@ chat, reference in prompts — that in-flight work (profiles, MCP) can build on.
 
 ## Checklist (each item ≈ one commit)
 
-- [ ] **Deps + config.** Add `@aws-sdk/client-s3` + `@aws-sdk/s3-request-presigner`.
+- [x] **Deps + config.** Add `@aws-sdk/client-s3` + `@aws-sdk/s3-request-presigner`.
       New `src/server/services/storageService.ts`: lazy singleton S3 client
       (endpoint `https://<region>.digitaloceanspaces.com`, v4 signature,
       virtual-hosted-style bucket host). Feature-gated off when env vars
@@ -74,12 +74,12 @@ chat, reference in prompts — that in-flight work (profiles, MCP) can build on.
       that file first and mirror its env check + export style). Document
       `DO_SPACES_KEY` / `DO_SPACES_SECRET` / `DO_SPACES_BUCKET` / region in
       `.env.example`.
-- [ ] **Asset model.** `src/server/models/Asset.ts` modeled on existing
+- [x] **Asset model.** `src/server/models/Asset.ts` modeled on existing
       `Session`/`Message` model files: userId, filename, key, contentType,
       size, textExtracted (nullable string), status
       (`pending|ready|failed`), timestamps. Index on `{ userId, _id }` for
       cursor-paged listing.
-- [ ] **Upload API.** `POST /api/assets/presign` (auth'd, zod-validated:
+- [x] **Upload API.** `POST /api/assets/presign` (auth'd, zod-validated:
       filename, contentType, size) → allowlist mime types, 15 MB max →
       create asset doc with status `pending` → mint 60s-expiry presigned PUT
       for key `<userId>/<assetId>/<filename>` → return `{ uploadUrl, asset }`.
@@ -89,7 +89,7 @@ chat, reference in prompts — that in-flight work (profiles, MCP) can build on.
       reconciles stored contentType/size from HEAD results. Reject confirm
       on assets older than ~1 h (presign + headroom) to avoid reviving stale
       pending rows.
-- [ ] **List/read/delete API.** `GET /api/assets` (cursor-paged, strict
+- [x] **List/read/delete API.** `GET /api/assets` (cursor-paged, strict
       `userId` scoping — reuse the paging pattern from chat-session listing;
       if sessions don't paginate, simple `_id`-based cursor), `GET
       /api/assets/:id/url` (presigned GET, ~5 min expiry), `DELETE
@@ -97,22 +97,22 @@ chat, reference in prompts — that in-flight work (profiles, MCP) can build on.
       `NoSuchKey` as success so deletes converge). Ownership enforced on
       every route (`requireAuth` + explicit `userId` match, matching
       existing route conventions).
-- [ ] **Server tests.** Ownership isolation (user A cannot list/GET/delete
+- [x] **Server tests.** Ownership isolation (user A cannot list/GET/delete
       user B's assets), presign rejects oversized/disallowed types, confirm
       rejects when HEAD fails or size mismatches, delete tolerates missing
       objects, extraction unit tests incl. truncation cap. All with a mocked
       S3 client — no live Space dependency in CI tests.
-- [ ] **Client: asset library panel.** Route/section in `src/client/src`
+- [x] **Client: asset library panel.** Route/section in `src/client/src`
       mirroring how existing client routes are declared. Drag-drop + file
       picker upload, XHR directly to Spaces with progress; grid of
       per-asset cards with type icon only (owner constraint), filename,
       size, created date, delete with confirmation. No `objectURL`/img
       rendering of asset content anywhere.
-- [ ] **Client wiring + e2e-ish verification.** Hook panel into app shell;
+- [x] **Client wiring + e2e-ish verification.** Hook panel into app shell;
       verify upload → confirm → list → download → delete against the real
       Space locally using `test-`-prefixed keys (script or hand-run per
       dev-server workflow). `npm run ci` green.
-- [ ] **Attach to message.** Schema change: single `assetId` FK on the
+- [x] **Attach to message.** Schema change: single `assetId` FK on the
       message (owner asked for single-file reference; keep a column not an
       array until multi-attach is asked for). Composer gets an "attach file"
       affordance (presign + upload + auto-confirm), attached filename shown
@@ -120,7 +120,7 @@ chat, reference in prompts — that in-flight work (profiles, MCP) can build on.
       carries an assetId and the asset is `ready`, include a clearly
       delimited block with the extracted text (truncated) in the prompt; no
       asset → prompt identical to today. Add tests for both branches.
-- [ ] **Light text extraction.** Deterministic, dependency-free module:
+- [x] **Light text extraction.** Deterministic, dependency-free module:
       deterministic UTF-8 decode for `txt`/`md`/`csv`; everything else
       returns null ("no text extracted"). Truncation cap applied before
       prompt inclusion. Extract even if the extension is uppercase/differed
@@ -128,21 +128,22 @@ chat, reference in prompts — that in-flight work (profiles, MCP) can build on.
       "no text". Runs synchronously inside `/confirm` (single write, no
       worker — worker idea explicitly deferred by owner to follow-up).
 
-## Open questions
+## Resolved questions
 
-1. **PDF extraction — in scope or follow-up?** Question posted to #34.
-   `pdf-parse`-style deps are heavy and behave poorly under Jest; even a
-   thin hand-rolled text-layer extraction is fiddly and unbounded. Proposal
-   to the owner: ship `txt`/`md`/`csv` + "no text extracted" for everything
-   else on this ticket, and take PDF (and any worker story) in a scoped
-   follow-up. No task here depends on the answer — the checklist above is
-   written so it is correct for either choice.
+1. **PDF extraction — out of scope for this ticket.** Owner confirmed:
+   text-only formats (`txt`/`md`/`csv`) for now, everything else gets a
+   "no text extracted" marker — and, per the owner's later comment, user
+   feedback for it. Shipped: confirm responses carry `hasText`, and the
+   composer attach flow toasts "No text could be extracted from this file
+   type — Tova will see the filename only." PDF (and any worker story) goes
+   to a scoped follow-up ticket.
 2. **Live `.env`/deploy parity.** Owner said find the vars on local and on
    live, but deploy path (#32/#8) is outside this ticket's reach; treat the
-   live side as expected-done and verify at deploy time — flagged in
-   comments as a deploy-time check, not a plan task.
-3. **Actual Spaces region.** Region is derivable from the endpoint the live
-   service uses, but we haven't read a working Spaces URL in this codebase.
-   Confirm region (likely `nyc3`, but do not assume) from a real successful
-   PUT during verification; guess wrong and errors will surface immediately
-   in the e2e run, so this blocks verification only, not planning.
+   live side as expected-done and verify at deploy time — a deploy-time
+   check, not a code task. NOTE: local `.env` was missing
+   `DO_SPACES_REGION`; it is now set to `lon1` locally and documented in
+   `.env.example`. Live needs the same var before the feature works there.
+3. **Actual Spaces region — resolved `lon1`.** Confirmed empirically with
+   a ListObjectsV2 call against the real bucket (region sweep over every
+   DO Spaces region). Endpoint hardcodes `lon1` as fallback; env override
+   (`DO_SPACES_REGION`) kept decisive for other hosts.

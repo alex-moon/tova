@@ -1,7 +1,10 @@
 import express from 'express';
+import { isValidObjectId } from 'mongoose';
 import { authenticate, AuthRequest } from '../middleware/auth';
 import { Session } from '../models/Session';
 import { Message } from '../models/Message';
+import { Asset } from '../models/Asset';
+import { truncateForPrompt } from '../services/textExtraction';
 import { routeQuery } from '../services/routerService';
 import { generateChatTitle } from '../services/titleService';
 import { hasPermission, ROUTING_PERMISSION } from '../services/userService';
@@ -124,12 +127,17 @@ const createSessionWithUser = async (userId: string, content: string) => {
 // failed ('parse'/'error') classification; non-trivial prompts get a
 // fire-and-forget classification call back (docs/plan-17-prompt-metrics.md
 // tasks 6 and 9). The gate is computed once and reused for both purposes.
-const saveUserMessageWithMetrics = async (sessionId: string, content: string) => {
+const saveUserMessageWithMetrics = async (
+  sessionId: string,
+  content: string,
+  asset?: { _id: unknown } | null,
+) => {
   const triviallyNeutral = isTriviallyNeutral(content);
   const userMessage = new Message({
     sessionId,
     role: 'user',
     content,
+    ...(asset ? { assetId: asset._id } : {}),
     metrics: {
       ...(await buildMessageMetrics(sessionId, content)),
       ...(triviallyNeutral ? { llmSkipReason: 'trivial' as const } : {}),
@@ -145,7 +153,50 @@ const saveUserMessageWithMetrics = async (sessionId: string, content: string) =>
   return userMessage;
 };
 
-const SYSTEM_PROMPT = `You are Tova, a helpful, warm, and direct personal chat assistant — think of yourself as the thing people reach for instead of Googling or texting a friend at 11pm. You are not a coding tool and are not built for engineers who already know their way around AI models; assume the person you're talking to just wants a smart, caring assistant and does not think about or care what "model" they're using. If asked what model or AI you're built on, answer simply: you're Tova. Do not name underlying providers or models.
+type AssetDoc = {
+  _id: unknown;
+  filename: string;
+  textExtracted?: string | null;
+};
+
+// Asset attach (issue #34): resolves the attached asset for a turn — 'none'
+// when the request sent no assetId, 'invalid' for a malformed reference,
+// 'missing' when it points at a different user's asset.
+const loadAttachedAsset = async (
+  req: AuthRequest,
+): Promise<AssetDoc | null | 'invalid' | 'missing'> => {
+  const assetIdRaw = req.body?.assetId;
+  if (assetIdRaw === undefined || assetIdRaw === null || assetIdRaw === '') return null;
+  if (typeof assetIdRaw !== 'string' || !isValidObjectId(assetIdRaw)) return 'invalid';
+  const asset = await Asset.findOne({
+    _id: assetIdRaw,
+    userId: req.user?.id,
+  });
+  return asset ? (asset as unknown as AssetDoc) : 'missing';
+};
+
+// Attached file text goes in as a clearly delimited block, truncated — the
+// model sees the file; the stored/persisted user message stays the raw user
+// text so the UI and metrics are unaffected.
+const buildAssetBlock = (asset: AssetDoc | null): string => {
+  if (!asset) return '';
+  if (asset.textExtracted) {
+    return `\n\nThe user attached a file named "${asset.filename}". Its contents are between the markers:\n<<<file:${asset.filename}>>>\n${truncateForPrompt(asset.textExtracted)}\n<<<end file>>>`;
+  }
+  return `\n\nThe user attached a file named "${asset.filename}", but no text could be extracted from this file type.`;
+};
+
+const appendAssetBlock = (
+  messages: { role: 'system' | 'user' | 'assistant'; content: string }[],
+  asset: AssetDoc | null,
+): void => {
+  const last = messages[messages.length - 1];
+  if (asset && last?.role === 'user') {
+    last.content += buildAssetBlock(asset);
+  }
+};
+
+const SYSTEM_PROMPT = `You are Tova, a helpful, warm warm, and direct personal chat assistant — think of yourself as the thing people reach for instead of Googling or texting a friend at 11pm. You are not a coding tool and are not built for engineers who already know their way around AI models; assume the person you're talking to just wants a smart, caring assistant and does not think about or care what "model" they're using. If asked what model or AI you're built on, answer simply: you're Tova. Do not name underlying providers or models.
 
 Talk like a smart, grounded friend: engage with what the person actually said, never generic reassurance or templated advice. Be supportive of the person, not automatically of every idea they float — if a better approach exists, say so kindly and directly.
 
@@ -167,6 +218,15 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
       return res.status(403).json({ message: NO_ROUTING_PERMISSION });
     }
 
+    const attachResult = await loadAttachedAsset(req);
+    if (attachResult === 'invalid') {
+      return res.status(400).json({ message: 'Invalid asset reference' });
+    }
+    if (attachResult === 'missing') {
+      return res.status(404).json({ message: 'Asset not found' });
+    }
+    const attachedAsset = attachResult;
+
     let session;
     if (sessionId) {
       session = await Session.findOne({ _id: sessionId, userId, deletedAt: null });
@@ -177,7 +237,11 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
       session = await createSessionWithUser(userId as string, content);
     }
     // Save user message
-    const userMessage = await saveUserMessageWithMetrics(String(session._id), content);
+    const userMessage = await saveUserMessageWithMetrics(
+      String(session._id),
+      content,
+      attachedAsset,
+    );
 
     // Feedback aggregation happens under the band captured at route time, so
     // it must be computed before the router sees the turn (decision 4).
@@ -204,6 +268,7 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
         content: m.content as string,
       }));
     messages.unshift({ role: 'system', content: SYSTEM_PROMPT });
+    appendAssetBlock(messages, attachedAsset);
 
     const chatCompletion = await inferenceService.createCompletion({
       messages,
@@ -265,6 +330,15 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
       return res.status(403).json({ message: NO_ROUTING_PERMISSION });
     }
 
+    const attachResult = await loadAttachedAsset(req);
+    if (attachResult === 'invalid') {
+      return res.status(400).json({ message: 'Invalid asset reference' });
+    }
+    if (attachResult === 'missing') {
+      return res.status(404).json({ message: 'Asset not found' });
+    }
+    const attachedAsset = attachResult;
+
     let session;
     if (sessionId) {
       session = await Session.findOne({ _id: sessionId, userId, deletedAt: null });
@@ -276,7 +350,11 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
     }
 
     // Save user message
-    const userMessage = await saveUserMessageWithMetrics(String(session._id), content);
+    const userMessage = await saveUserMessageWithMetrics(
+      String(session._id),
+      content,
+      attachedAsset,
+    );
 
     // Feedback aggregation happens under the band captured at route time, so
     // it must be computed before the router sees the turn (decision 4).
@@ -296,6 +374,7 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
         content: m.content as string,
       }));
     messages.unshift({ role: 'system', content: SYSTEM_PROMPT });
+    appendAssetBlock(messages, attachedAsset);
 
     // Set SSE headers
     res.setHeader('Content-Type', 'text/event-stream');

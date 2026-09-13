@@ -35,6 +35,11 @@ const assetSchema = new mongoose.Schema(
       enum: ['pending', 'ready', 'failed'],
       default: 'pending',
     },
+    // Populated only when status is 'failed' (HEAD miss, oversize, stale).
+    failureReason: {
+      type: String,
+      default: null,
+    },
   },
   {
     timestamps: true,
@@ -43,5 +48,7 @@ const assetSchema = new mongoose.Schema(
 
 // Cursor-paged per-user listing (`{ userId, _id }` ascending).
 assetSchema.index({ userId: 1, _id: 1 });
+
+export type AssetDocument = mongoose.HydratedDocument<mongoose.InferSchemaType<typeof assetSchema>>;
 
 export const Asset = mongoose.model('Asset', assetSchema);

@@ -1,4 +1,9 @@
-import { extractText, isExtractable } from './textExtraction';
+import {
+  extractText,
+  isExtractable,
+  MAX_PROMPT_TEXT_CHARS,
+  truncateForPrompt,
+} from './textExtraction';
 
 describe('textExtraction', () => {
   it('extracts UTF-8 text for txt', () => {
@@ -30,5 +35,19 @@ describe('textExtraction', () => {
   it('strips a UTF-8 BOM', () => {
     const buf = Buffer.from([0xef, 0xbb, 0xbf, 0x68, 0x69]);
     expect(extractText('bom.txt', buf)).toBe('hi');
+  });
+});
+
+describe('truncateForPrompt', () => {
+  it('returns text unchanged under the cap', () => {
+    expect(truncateForPrompt('hello')).toBe('hello');
+  });
+
+  it('truncates with a marker over the cap', () => {
+    const long = 'a'.repeat(MAX_PROMPT_TEXT_CHARS + 50);
+    const result = truncateForPrompt(long);
+    expect(result.length).toBeLessThan(long.length);
+    expect(result).toContain('truncated 50 characters');
+    expect(result.startsWith('a'.repeat(MAX_PROMPT_TEXT_CHARS))).toBe(true);
   });
 });

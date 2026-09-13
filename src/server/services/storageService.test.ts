@@ -30,6 +30,53 @@ describe('storageService', () => {
   it('rejects operations when unconfigured instead of crashing', async () => {
     await expect(deleteObject('x')).rejects.toThrow(/not configured/);
   });
+
+  describe('deleteObject convergence', () => {
+    beforeEach(() => {
+      mockSend.mockReset();
+    });
+
+    it('resolves true when the object existed and was deleted', async () => {
+      process.env.DO_SPACES_KEY = 'k';
+      process.env.DO_SPACES_SECRET = 's';
+      process.env.DO_SPACES_BUCKET = 'tova';
+      mockSend.mockResolvedValue({});
+      await expect(deleteObject('u/a/f.txt')).resolves.toBe(true);
+    });
+
+    it('resolves true when the object was already gone (NoSuchKey/NotFound)', async () => {
+      process.env.DO_SPACES_KEY = 'k';
+      process.env.DO_SPACES_SECRET = 's';
+      process.env.DO_SPACES_BUCKET = 'tova';
+      mockSend.mockRejectedValue({ name: 'NoSuchKey' });
+      await expect(deleteObject('u/a/gone.txt')).resolves.toBe(true);
+      mockSend.mockRejectedValue({ name: 'NotFound' });
+      await expect(deleteObject('u/a/gone2.txt')).resolves.toBe(true);
+    });
+
+    it('propagates unrelated errors', async () => {
+      process.env.DO_SPACES_KEY = 'k';
+      process.env.DO_SPACES_SECRET = 's';
+      process.env.DO_SPACES_BUCKET = 'tova';
+      mockSend.mockRejectedValue({ name: 'InternalError' });
+      await expect(deleteObject('u/a/bad.txt')).rejects.toMatchObject({ name: 'InternalError' });
+    });
+  });
 });
 
 import { deleteObject, isStorageConfigured } from './storageService';
+
+// The DeleteObjectCommand shape is swappable at this boundary: the mocked
+// client routes every send() through a single shared mock.
+jest.mock('@aws-sdk/client-s3', () => ({
+  DeleteObjectCommand: jest.fn(),
+  GetObjectCommand: jest.fn(),
+  HeadObjectCommand: jest.fn(),
+  PutObjectCommand: jest.fn(),
+  S3Client: jest.fn().mockImplementation(() => ({ send: mockSend })),
+}));
+jest.mock('@aws-sdk/s3-request-presigner', () => ({
+  getSignedUrl: jest.fn(),
+}));
+
+const mockSend = jest.fn();

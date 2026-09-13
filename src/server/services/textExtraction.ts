@@ -14,6 +14,16 @@ export const extractText = (filename: string, buf: Buffer): string | null => {
   return stripBom(buf.toString('utf8'));
 };
 
+// Cap applied at prompt-inclusion time (issue #34): extraction stores the
+// decoded text, but the attached block pasted into the prompt never carries
+// more than MAX_PROMPT_TEXT_CHARS so a huge CSV cannot blow the context.
+export const MAX_PROMPT_TEXT_CHARS = 12_000;
+
+export const truncateForPrompt = (text: string, max = MAX_PROMPT_TEXT_CHARS): string => {
+  if (text.length <= max) return text;
+  return `${text.slice(0, max)}\n[...truncated ${text.length - max} characters...]`;
+};
+
 const extensionOf = (filename: string): string => {
   const dot = filename.lastIndexOf('.');
   return dot === -1 ? '' : filename.slice(dot + 1).toLowerCase();
