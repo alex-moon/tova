@@ -34,6 +34,11 @@ export interface Message {
   sourceTitles?: SourceTitle[];
   suggestions?: string[];
   tools?: ToolEvent[];
+  // Attached asset reference (issue #34): id persisted server-side;
+  // assetFilename is display-only on the optimistic message (the persisted
+  // history chip is resolved from the file list when needed).
+  assetId?: string;
+  assetFilename?: string;
 }
 
 interface Session {
@@ -92,11 +97,14 @@ function App() {
     }
   }, [activeSessionId, fetchMessages]);
 
-  const handleSendMessage = async (content: string) => {
+  const handleSendMessage = async (content: string, assetId?: string, assetFilename?: string) => {
     setIsChatLoading(true);
     streamingRef.current = true;
     // Show the user message immediately
-    setMessages((prev) => [...prev, { _id: Date.now().toString(), role: 'user', content }]);
+    setMessages((prev) => [
+      ...prev,
+      { _id: Date.now().toString(), role: 'user', content, assetId, assetFilename },
+    ]);
     const streamId = `stream-${Date.now()}`;
     setMessages((prev) => [...prev, { _id: streamId, role: 'assistant', content: '' }]);
     try {
@@ -104,7 +112,11 @@ function App() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
-        body: JSON.stringify({ sessionId: activeSessionId, content }),
+        body: JSON.stringify({
+          sessionId: activeSessionId,
+          content,
+          ...(assetId ? { assetId } : {}),
+        }),
       });
 
       if (!res.ok || !res.body) {

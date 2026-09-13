@@ -3,13 +3,26 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeRaw from 'rehype-raw';
 import rehypeSanitize from 'rehype-sanitize';
-import { Check, ChevronDown, ExternalLink, Menu, Send, ThumbsDown, ThumbsUp } from 'lucide-react';
+import {
+  Check,
+  ChevronDown,
+  ExternalLink,
+  Loader2,
+  Menu,
+  Paperclip,
+  Send,
+  ThumbsDown,
+  ThumbsUp,
+  X,
+} from 'lucide-react';
+import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
+import AssetService from '@/services/assets';
 import type { Message, ToolEvent } from '../App';
 
 interface ChatWindowProps {
   messages: Message[];
-  onSendMessage: (content: string) => void;
+  onSendMessage: (content: string, assetId?: string, assetFilename?: string) => void;
   isLoading: boolean;
   onOpenSidebar: () => void;
   onFeedback?: (messageId: string, value: 'up' | 'down' | null) => void;
@@ -250,6 +263,12 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
   const [placeholder] = useState(pickPlaceholder);
   const textareaRef = React.useRef<HTMLTextAreaElement>(null);
   const scrollRef = React.useRef<HTMLDivElement>(null);
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
+  // Attached file (issue #34): a single asset per message; uploaded
+  // immediately on selection (presign → direct PUT → confirm) and referenced
+  // by id when the message is sent.
+  const [attachment, setAttachment] = useState<{ id: string; filename: string } | null>(null);
+  const [uploading, setUploading] = useState(false);
   // Follow-to-bottom: pinned while the user sits at (or near) the bottom;
   // scrolling up releases the pin, sending/deltas restore it (#33 item 3).
   const pinnedRef = React.useRef(true);
@@ -311,9 +330,29 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
     e.preventDefault();
     if (input.trim() && !isLoading) {
       pinnedRef.current = true;
-      onSendMessage(input);
+      onSendMessage(input, attachment?.id, attachment?.filename);
       setInput('');
+      setAttachment(null);
       if (textareaRef.current) textareaRef.current.style.height = 'auto';
+    }
+  };
+
+  const handleAttachFile = async (files: FileList | null) => {
+    const file = files?.[0];
+    if (!file || uploading) return;
+    setUploading(true);
+    try {
+      const asset = await AssetService.upload(file);
+      setAttachment({ id: asset.id, filename: asset.filename });
+      if (!asset.hasText) {
+        toast.info(
+          'No text could be extracted from this file type — Tova will see the filename only.',
+        );
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Upload failed');
+    } finally {
+      setUploading(false);
     }
   };
 
@@ -379,6 +418,15 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
                 </div>
               ) : msg.role === 'user' ? (
                 <div className="mb-4 flex flex-col items-end md:mb-6">
+                  {msg.assetFilename && (
+                    <span
+                      className="mb-1 inline-flex items-center gap-1 rounded-full border border-border bg-muted px-2 py-0.5 text-xs text-muted-foreground"
+                      data-testid="message-attachment-chip"
+                    >
+                      <Paperclip className="size-3" aria-hidden />
+                      {msg.assetFilename ?? 'Attached file'}
+                    </span>
+                  )}
                   <div className="max-w-[92%] rounded-lg rounded-br-sm border border-primary/25 bg-msg-user px-4 py-3 md:max-w-[85%] md:px-5 md:py-4">
                     <MessageContent content={msg.content} markdown={false} />
                   </div>
@@ -467,9 +515,26 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
         )}
         <form onSubmit={handleSubmit}>
           <div className="relative rounded-lg border border-border bg-msg-assistant px-3 py-2 shadow-sm">
+            {attachment && (
+              <div
+                className="mb-1.5 flex items-center gap-2 rounded-md border border-border bg-muted px-2.5 py-1.5 text-xs text-muted-foreground"
+                data-testid="attachment-chip"
+              >
+                <Paperclip className="size-3.5 shrink-0" aria-hidden />
+                <span className="min-w-0 flex-1 truncate">{attachment.filename}</span>
+                <button
+                  type="button"
+                  aria-label={`Remove attachment ${attachment.filename}`}
+                  onClick={() => setAttachment(null)}
+                  className="rounded p-0.5 transition-colors hover:bg-accent hover:text-foreground"
+                >
+                  <X className="size-3.5" />
+                </button>
+              </div>
+            )}
             <textarea
               ref={textareaRef}
-              className="block max-h-[40dvh] w-full resize-none overflow-y-auto bg-transparent pr-20 text-base outline-none placeholder:text-muted-foreground"
+              className="block max-h-[40dvh] w-full resize-none overflow-y-auto bg-transparent pr-24 text-base outline-none placeholder:text-muted-foreground"
               rows={2}
               placeholder={messages.some((m) => m.role === 'user') ? '' : placeholder}
               value={input}
@@ -485,15 +550,38 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
               }}
               disabled={isLoading}
             />
-            <Button
-              type="submit"
-              size="sm"
-              className="absolute bottom-2 right-2 h-8"
-              disabled={isLoading || !input.trim()}
-            >
-              <Send />
-              Send
-            </Button>
+            <div className="absolute bottom-2 right-2 flex items-center gap-1">
+              <input
+                ref={fileInputRef}
+                type="file"
+                className="hidden"
+                aria-hidden
+                onChange={(e) => {
+                  void handleAttachFile(e.target.files);
+                  e.target.value = '';
+                }}
+              />
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                aria-label="Attach a file"
+                title="Attach a file"
+                disabled={isLoading || uploading}
+                onClick={() => fileInputRef.current?.click()}
+                className="h-8 w-8 text-muted-foreground hover:text-foreground"
+              >
+                {uploading ? (
+                  <Loader2 className="size-4 animate-spin" />
+                ) : (
+                  <Paperclip className="size-4" />
+                )}
+              </Button>
+              <Button type="submit" size="sm" className="h-8" disabled={isLoading || !input.trim()}>
+                <Send />
+                Send
+              </Button>
+            </div>
           </div>
         </form>
       </footer>

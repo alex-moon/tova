@@ -61,6 +61,14 @@ const messageSchema = new mongoose.Schema({
   routingBand: {
     type: String,
   },
+  /*
+   * Attached asset reference (issue #34): a single-file FK per the owner's
+   * comment — a column, not an array, until multi-attach is asked for.
+   */
+  assetId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Asset',
+  },
   feedback: {
     value: {
       type: String,
