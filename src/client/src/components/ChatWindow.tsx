@@ -95,18 +95,44 @@ const SourceItem: React.FC<{ url: string; title?: string }> = ({ url, title }) =
   </li>
 );
 
+// Sources collapse (#41): lists longer than COLLAPSED_SOURCES_COUNT render
+// only the first entries plus a "show all" toggle. State is per-message and
+// intentionally not persisted — "collapsed by default" on every load.
+const COLLAPSED_SOURCES_COUNT = 3;
+
 const SourcesBlock: React.FC<{ message: Message }> = ({ message }) => {
+  const [expanded, setExpanded] = useState(false);
   const titles = message.sourceTitles ?? [];
   const urls = message.sources ?? [];
   if (urls.length === 0) return null;
+  const collapsed = !expanded && urls.length > COLLAPSED_SOURCES_COUNT;
+  const visibleUrls = collapsed ? urls.slice(0, COLLAPSED_SOURCES_COUNT) : urls;
   return (
     <div data-testid="sources-block" className="mt-2 px-4 text-muted-foreground md:px-5">
       <div className="mb-1 text-xs font-medium uppercase tracking-wide">Sources</div>
       <ul className="space-y-1">
-        {urls.map((url) => (
+        {visibleUrls.map((url) => (
           <SourceItem key={url} url={url} title={titles.find((t) => t.url === url)?.title} />
         ))}
       </ul>
+      {collapsed ? (
+        <button
+          type="button"
+          data-testid="sources-show-all"
+          onClick={() => setExpanded(true)}
+          className="mt-1 text-xs underline hover:text-foreground"
+        >
+          Show all {urls.length} sources
+        </button>
+      ) : expanded ? (
+        <button
+          type="button"
+          onClick={() => setExpanded(false)}
+          className="mt-1 text-xs underline hover:text-foreground"
+        >
+          Show fewer sources
+        </button>
+      ) : null}
     </div>
   );
 };
@@ -445,7 +471,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
               ref={textareaRef}
               className="block max-h-[40dvh] w-full resize-none overflow-y-auto bg-transparent pr-20 text-base outline-none placeholder:text-muted-foreground"
               rows={2}
-              placeholder={placeholder}
+              placeholder={messages.some((m) => m.role === 'user') ? '' : placeholder}
               value={input}
               onChange={(e) => {
                 setInput(e.target.value);

@@ -217,8 +217,14 @@ const SEARCH_INSTRUCTIONS =
  */
 const agentCache = new Map<string, Agent>();
 
-const agentFor = (provider: LlmProvider, model: string): Agent => {
-  const toolsEnabled = hasSearchKey();
+/**
+ * `tools` override: `false` forces a plain agent with no tool attached
+ * regardless of the Brave key — used by one-off completions (follow-up
+ * suggestions) whose target model may reject tool-carrying requests.
+ * `undefined` keeps the default key-driven behaviour.
+ */
+const agentFor = (provider: LlmProvider, model: string, tools?: boolean): Agent => {
+  const toolsEnabled = tools ?? hasSearchKey();
   // The tool set is baked into the agent at construction, so the cache key
   // must include the tools state — toggling the Brave key without a restart
   // (as tests do) must not hand back a stale agent.
@@ -267,6 +273,20 @@ const buildConnector = (provider: LlmProvider): LlmConnector => {
         callOptionsFrom(options),
       );
       return toNeutralStream(result.fullStream);
+    },
+    /**
+     * One-off completion path for auxiliary generation (title, guard,
+     * follow-up suggestions): built with a tool-free agent even when the
+     * Brave key is set, so small tool-rejecting models cannot fail the call
+     * (issue #41). No tool mapping is needed — a plain agent never emits
+     * tool transport.
+     */
+    createToolFreeCompletion: async (options: CompletionOptions): Promise<NeutralCompletion> => {
+      const result = await agentFor(provider, options.model, false).generate(
+        asMessageList(options.messages),
+        { ...callOptionsFrom(options), maxSteps: 1 },
+      );
+      return { choices: [{ message: { content: result.text ?? null } }] };
     },
   };
 };

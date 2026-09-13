@@ -354,4 +354,39 @@ describe('Mastra service neutral mapping', () => {
       expect(chunks[0]).toEqual({ toolCall: { name: 'other_tool' } });
     });
   });
+
+  describe('createToolFreeCompletion (issue #41)', () => {
+    afterAll(() => {
+      delete process.env.BRAVE_API_KEY;
+      delete process.env.BRAVE_SEARCH_API_KEY;
+    });
+
+    it('builds a plain agent (no tools, no search instructions) even with the Brave key set', async () => {
+      process.env.BRAVE_SEARCH_API_KEY = 'mock-key';
+      // Fresh model id: the agent cache is module-level, so an id used by an
+      // earlier suite would silently skip construction.
+      const model = 'suggestion-model-plain';
+      mockGenerate.mockResolvedValueOnce({ text: 'ok' });
+      const completion = await groqConnector.createToolFreeCompletion({
+        model,
+        messages: [],
+      });
+      expect(completion).toEqual({ choices: [{ message: { content: 'ok' } }] });
+      const config = agentCtor.mock.calls[agentCtor.mock.calls.length - 1][0];
+      expect(config.tools).toBeUndefined();
+      expect(config.instructions).toBe('');
+      delete process.env.BRAVE_SEARCH_API_KEY;
+    });
+
+    it('caps maxSteps at 1 on the tool-free path', async () => {
+      process.env.BRAVE_SEARCH_API_KEY = 'mock-key';
+      mockGenerate.mockResolvedValueOnce({ text: 'x' });
+      await deepinfraConnector.createToolFreeCompletion({
+        model: 'suggestion-model-steps',
+        messages: [],
+      });
+      expect(mockGenerate.mock.calls[0][1]).toMatchObject({ maxSteps: 1 });
+      delete process.env.BRAVE_SEARCH_API_KEY;
+    });
+  });
 });

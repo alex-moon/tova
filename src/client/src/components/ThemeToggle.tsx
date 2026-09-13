@@ -13,8 +13,15 @@ const systemPrefersDark =
 
 const applyTheme = (theme: Theme | null) => {
   if (typeof document === 'undefined') return;
-  const dark = theme ? theme === 'dark' : systemPrefersDark;
-  document.documentElement.classList.toggle('dark', dark);
+  const root = document.documentElement;
+  if (theme === null) {
+    // No explicit choice: clear both classes so the system-preference
+    // fallback CSS (html:not(.light, .dark)) applies.
+    root.classList.remove('light', 'dark');
+    return;
+  }
+  root.classList.toggle('dark', theme === 'dark');
+  root.classList.toggle('light', theme === 'light');
 };
 
 const ThemeToggle: React.FC = () => {

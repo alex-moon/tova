@@ -39,4 +39,8 @@ export const inferenceService = {
     const connector = connectorFor(options.provider);
     return connector.createStreamingCompletion(options);
   },
+  createToolFreeCompletion: async (options: CompletionOptions) => {
+    const connector = connectorFor(options.provider);
+    return connector.createToolFreeCompletion(options);
+  },
 };
