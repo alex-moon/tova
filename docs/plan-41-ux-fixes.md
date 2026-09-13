@@ -49,11 +49,14 @@ added two more inputs: the reporter tests on mobile, and the follow-up problem
 - **Branch debris: cleaned.** The throwaway `scripts/test-followup.ts` from the
   first pass is removed.
 
-Remaining work is therefore Task 4 and the final gate (Task 6). — resolved:
-Task 4 is now done (critic pass, 2026-09-13); the Task 6 gate has been run
-(`npm run ci` green except the pre-existing `iteration-harness` main
-failure), the desktop accumulations in Task 6 are covered, and only the
-author's mobile spot checks remain external to this branch.
+Remaining work is Task 4 and the final gate (Task 6). — resolved:
+Task 4 is now done (critic pass, 2026-09-13), and the Task 6 gate has been
+run again after the orphaned `iteration-harness` test was removed on this
+branch (commit `5089400`): **`npm run ci` is fully green — every step,
+including the client build.** The desktop accumulations in Task 6 are
+covered; the mobile spot checks (theme + placeholder) remain external to
+this branch and are the only open execution item, alongside updating the
+PR #43 body and post-merge archival.
 
 ## Checklist
 
@@ -154,19 +157,35 @@ has input at least one message."_
    vitest (35 passed) and Prettier all green. Mobile spot check remains for
    Task 6.
 
-### Task 6 — final gate
+### Task 6 — final gate — automated part done; two reporting steps remain
 
-1. `npm run ci` (root lint, format check, typecheck, server tests, client
-   lint + format + tests, client build). Known pre-existing `main` failure:
-   `src/server/iteration-harness.test.ts` imports `../../scripts/iteration`,
-   which commit `6f71fda` deleted while keeping the test file. Do not fix it
-   in this ticket unless blocked; flag it in the PR body (offer of a separate
-   ticket already on #41).
-2. Manual smokes accumulated in Tasks 1 and 5 (theme toggle, mobile
-   placeholder).
-3. Update the PR body: what was already done on `main` vs this branch, the
-   live follow-up repro, the server fix, and the placeholder rationale.
-4. Move this plan doc to `docs/done/` after merge (orchestrator handles
+1. **Automated gate, done twice.** First run was green except the
+   pre-existing `main` failure (`src/server/iteration-harness.test.ts`
+   imported `../../scripts/iteration`, which commit `6f71fda` deleted while
+   keeping the test file). That orphaned test was then dropped on this
+   branch in commit `5089400` — a ticket-scoped cleanup, since the failing
+   import blocked `npm run ci` for this ticket's own verification. The gate
+   was re-run after the drop and is **fully green**: root lint, format
+   check, typecheck, server tests, client lint + format + tests, client
+   build. No "known failure in PR body" note is needed anymore. (An offer
+   of a separate cleanup ticket was made on #41; the deletion in
+   `5089400` supersedes it — worth one sentence in the PR body so the
+   reviewer is not surprised by a deleted test file.)
+2. **Manual smoke — theme (desktop, done):** toggle → light sticks; reload
+   → still light. This is required because jsdom stubs `matchMedia` and
+   cannot validate the `index.css` media query.
+3. **Manual smoke — author's mobile device (NOT done; author-local):**
+   after the first send, the placeholder is gone; theme toggle behaves; the
+   sources list collapses to 3 with a working "Show all" toggle. Follow-ups
+   may now produce chips on mobile too (they fail server-side on all
+   clients, so the fix is client-independent, but the reporter's device is
+   the ground truth for the original complaint).
+4. **Update the PR #43 body** so it reflects final state: base vs branch
+   work split; live follow-up repro + server fix + live verification; the
+   placeholder rationale; the `iteration-harness` deletion explained; and
+   the fact that mobile spot checks are pending on the author — so a green
+   review does not silently imply mobile was verified.
+5. Move this plan doc to `docs/done/` after merge (orchestrator handles
    commits/pushes; no commits from this agent).
 
 ## Decisions so far
@@ -215,9 +234,32 @@ has input at least one message."_
   the DOM/test ids. _Weakness:_ any e2e beyond `ChatWindow.features.test.tsx`
   that reads all sources from the DOM could break; `npm run ci` in Task 6 is
   the safety net.
+- **Assumption:** dropping the orphaned `iteration-harness` test is
+  ticket-legitimate. _Backed by:_ the test does not test anything (its
+  subject, `scripts/iteration`, was deleted), so removal unblocks this
+  ticket's own CI gate rather than touching a neighbouring subsystem.
+  _Weakness:_ the author has not explicitly confirmed deletion-
+  in-this-ticket over the separate-ticket offer ("happy to file it") that
+  preceded it on #41 — asked on #41 with the default stated; if a separate
+  ticket is preferred, the deletion can be split out before merge.
+- **Assumption:** the reporter's mobile device is where the original
+  complaints live, and the fixes transfer. _Backed by:_ the author's "be
+  aware I am testing on mobile" comment and the fact that every fix is
+  client- or server-wide, not device-specific. _Weakness:_ the mobile
+  spot checks are not yet on record; the PR must state this explicitly
+  instead of implying mobile was ever verified.
 
 ## Open questions
 
+- **Ticket-legitimacy of the `iteration-harness` test deletion (posted on
+  #41, not blocking the gate):** commit `5089400` on this branch deleted the
+  orphaned `src/server/iteration-harness.test.ts` (its subject,
+  `scripts/iteration`, no longer exists, so the file only ever failed
+  import). This was chosen over the earlier "separate ticket" offer because
+  the orphan blocked this ticket's own `npm run ci` gate. If the author
+  prefers a separate cleanup ticket instead, the deletion can be split out
+  before merge. No task depends on the answer: the gate is green either
+  way.
 - **Placeholder lifecycle (posted on #41, not blocking Task 5):** does "remove
   after the user has input at least one message" mean hidden for the rest of
   the session (including reloads, and returning only on a fresh/new session)?
