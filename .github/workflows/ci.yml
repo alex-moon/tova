@@ -36,6 +36,8 @@ jobs:
           fetch-depth: 0
 
       - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   semgrep:
     if: github.event_name == 'push'
@@ -46,8 +48,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Semgrep scan (OSS community rules)
-        run: semgrep scan --config p/oss-community-rules --error --metrics=off src/server
+      - name: Semgrep scan (default OSS rules)
+        run: semgrep scan --config p/default --error --metrics=off src/server
 
   npm-audit:
     if: github.event_name == 'push'

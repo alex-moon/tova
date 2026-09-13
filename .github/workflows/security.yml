@@ -16,7 +16,8 @@ jobs:
           fetch-depth: 0
 
       - uses: gitleaks/gitleaks-action@v2
-
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
   semgrep:
     runs-on: ubuntu-latest
     container:
@@ -24,18 +25,22 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Semgrep scan (OSS community rules)
-        run: semgrep scan --config p/oss-community-rules --error --metrics=off src/server
+      - name: Semgrep scan (default OSS rules)
+        run: semgrep scan --config p/default --error --metrics=off src/server
 
-  dependency-review:
-    if: github.event_name == 'pull_request'
+  # dependency-review-action needs GitHub Advanced Security on private repos,
+  # which this repository doesn't have; osv-scanner over the lockfile covers
+  # the same ground self-contained (issue #32 mentions it as the
+  # self-contained alternative).
+  osv-scanner:
     runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/google/osv-scanner:latest
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/dependency-review-action@v4
-        with:
-          fail-on-severity: high
+      - name: Scan package-lock.json for known vulnerabilities
+        run: osv-scanner --lockfile=package-lock.json
 
   npm-audit:
     runs-on: ubuntu-latest
