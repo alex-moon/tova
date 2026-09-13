@@ -81,6 +81,54 @@ describe('auth route contract drift', () => {
     expect(user.settings).toBeUndefined();
     expect(user.systemPrompt).toBeUndefined();
   });
+
+  it('me omits profile fields not yet set, even when other fields exist', async () => {
+    const app = createApp();
+    const reg = await request(app)
+      .post('/api/auth/register')
+      .send({ email: 'contract-partial@example.com', password: 'password123' });
+    const cookie = reg.headers['set-cookie'];
+
+    const { User } = await import('../models/User');
+    const doc = await User.findOne({ email: 'contract-partial@example.com' });
+    if (!doc) throw new Error('user not found');
+    doc.settings = { systemPrompt: 'Be terse.' };
+    await doc.save();
+
+    const res = await request(app).get('/api/auth/me').set('Cookie', cookie);
+    expect(res.status).toBe(200);
+    const user: Record<string, unknown> = res.body.user;
+    expect(user.name).toBeUndefined();
+    expect(user.avatarUrl).toBeUndefined();
+    expect(user.settings).toBeUndefined();
+  });
+
+  it('me values are trimmed and length-bounded at the schema level (issue #35)', async () => {
+    const app = createApp();
+    const reg = await request(app)
+      .post('/api/auth/register')
+      .send({ email: 'contract-validate@example.com', password: 'password123' });
+
+    const { User } = await import('../models/User');
+    const doc = await User.findOne({ email: 'contract-validate@example.com' });
+    if (!doc) throw new Error('user not found');
+
+    // Whitespace-only names trim away and must not surface on /me.
+    doc.name = '   ';
+    await doc.save();
+    const blank = await request(app).get('/api/auth/me').set('Cookie', reg.headers['set-cookie']);
+    expect(blank.body.user.name).toBeUndefined();
+
+    // Names over 100 chars are rejected by the schema, not silently truncated.
+    doc.name = 'x'.repeat(101);
+    await expect(doc.save()).rejects.toThrow();
+
+    // System prompts over 4000 chars are rejected by the schema.
+    const doc2 = await User.findOne({ email: 'contract-validate@example.com' });
+    if (!doc2) throw new Error('user not found');
+    doc2.settings = { systemPrompt: 'y'.repeat(4001) };
+    await expect(doc2.save()).rejects.toThrow();
+  });
 });
 
 describe('auth route hardening (issue #32)', () => {

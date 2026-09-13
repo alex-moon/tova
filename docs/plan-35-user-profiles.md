@@ -65,6 +65,18 @@ Google-provided profile data we already have access to.
 - Out of scope (per issue): custom avatar upload (#34), prompt presets, per-user API
   keys or model preferences.
 
+## Review notes (branch review, 2026-09-13)
+
+- Task 1 slice review: schema, `GET /me`, and contracts are sound; additive optional
+  fields keep the issue #20 drift tests intact. `npm run ci` green on the slice.
+- Hardening tests added in `src/server/routes/auth.contracts.test.ts`: per-field
+  absence on `/me` when only `settings` is set, whitespace-only `name` trims to
+  absent, and >100-char `name` / >4000-char `systemPrompt` are rejected at the
+  schema level. These guard the truthy-filter logic in `auth.ts` from regressions
+  when tasks 2–3 land.
+- No new open questions raised; the name-refresh question below is already on the
+  issue and remains pending user confirmation.
+
 ## Open questions
 
 - **Does a subsequent Google login overwrite a user-edited display name?** The issue
