@@ -8,145 +8,164 @@ Issue: https://github.com/alex-moon/tova/issues/35
 Everything about a user today is email + role:
 
 - The system prompt is a hardcoded global `SYSTEM_PROMPT` (`src/server/routes/chat.ts:148`,
-  used at lines 206 and 298) shared by all users.
+  unshifted at lines 206 and 298) shared by all users.
 - The `User` model (`src/server/models/User.ts`) stores `email`, `passwordHash`, `role`,
-  `googleId`, `permissions` — no display name, no avatar, no per-user settings, no
-  `settings` subdocument at all yet.
-- The Google OAuth flow (`src/server/routes/auth.ts:131-196`) already requests
-  `openid email profile` (scope set at the authorize call) but at the token exchange
-  (`auth.ts:171-182`) it only parses `id_token` out of the response body and decodes
-  only `sub`/`email` from the payload, discarding `name`, `picture`, **and** the
-  `access_token` that comes back alongside it.
+  `googleId`, `permissions` — no profile fields, no `settings` subdocument.
+- The Google OAuth flow (`src/server/routes/auth.ts:131-196`) requests
+  `openid email profile` but at token exchange only decodes `sub`/`email` from the
+  `id_token`, discarding `name`, `picture`, and the `access_token`.
 - `AuthUser` / `LoginUserPayload` in `src/shared/contracts.ts` carry only
   `id, email, role, permissions`.
 
-Personalizing Tova should start here: per-user system prompt, profile fields, and the
-Google-provided profile data we already have access to.
+The owner has additionally clarified the intent in issue comments: Tova should know
+who the user is (their **preferred** name, not their full name), where they roughly
+are, and inject only *relevant* profile context into the system prompt.
 
-## Decisions so far
+## Decisions (adopted)
 
-(Adopt unless contradicted during implementation; each cites its source.)
-
-- **Schema is migration-free (Mongo)**, extending `src/server/models/User.ts`. The
-  `settings` subdocument is created lazily on first write (Mongoose handles missing
-  nested paths; no backfill migration needed).
-- **Google profile data comes from the userinfo endpoint, not `id_token` claims.**
-  Verified against current Google docs (2026-06 revisions of
-  `developers.google.com/identity/openid-connect/reference` + the Discovery document
-  in `.../openid-connect/openid-connect`): with the `profile` scope, `name`/`picture`
-  in the `id_token` are only "might be provided", while the userinfo endpoint
-  (`https://openidconnect.googleapis.com/v1/userinfo` — the `userinfo_endpoint` in
-  Google's Discovery doc) reliably returns `name` and `picture`. The callback already
-  receives the `access_token` in the token-exchange response (`auth.ts:171` currently
-  casts it away); add `access_token` to the parsed type and call userinfo there. No
-  new scope is requested (`email profile` is already in the authorize URL). This was
-  an explicit instruction in the issue body ("confirm against current docs rather
-  than assuming") — done, resolution recorded here.
-- **Per-user system prompt lives under `user.settings.systemPrompt`** (as the issue
-  specifies); empty/absent falls back to the global `SYSTEM_PROMPT`, resolved at both
-  unshift sites in `chat.ts`.
-- **`PATCH /api/profile`** (zod-validated) is the only new API surface; updatable
-  fields per the issue: name, systemPrompt. Avatar is managed by the Google-login
-  refresh path, not by this endpoint (manual upload is #34, later).
-- **Google login always refreshes `name` + `avatarUrl` in MVP.** Rationale: manual
-  avatar upload doesn't exist yet (#34), so there is no "user has set a custom
-  avatar" state to protect, and the issue's acceptance criteria say Google login
-  populates name + avatar "on refresh". The "unless the user has set a custom avatar"
-  caveat from the issue applies only once #34 lands — no flag is added now. (See
-  Open questions for the one unresolved edge: user-*edited* display names.)
+- **Name model, per owner's comment (2026-09-13):** the Google-provided full name is
+  the single source of truth for `name` and is **never user-editable**. The user's
+  **`preferredName`** is a separate field that only the user sets; Tova never guesses
+  it. Schema field `name` (already implemented on the branch) is styled as the Google
+  full name (trimmed, ≤100 chars); add `preferredName` with the same constraints.
+- **Avatar is not user-editable** (owner: "Avatar should not be editable"). `PATCH
+  /api/profile` therefore never touches `name` or `avatarUrl`. Manual avatar upload
+  remains #34, out of scope.
+- **Google login refreshes `name` and `avatarUrl` unconditionally** on every Google
+  login (both are Google-owned fields now that user edits are excluded). This
+  resolves the earlier "does re-login overwrite a user-edited name?" open question —
+  it is moot because user-edited display *names* no longer exist; `preferredName` is
+  never written by Google.
+- **Google profile data comes from the userinfo endpoint, not `id_token` claims**
+  (verified against 2026-06 Google OIDC docs: `name`/`picture` in the ID token are
+  "might be provided"; `https://openidconnect.googleapis.com/v1/userinfo` reliably
+  returns them). The callback already receives the `access_token` and casts it away
+  (`auth.ts:171`); parse it and call userinfo. No new scopes. Both `name` and
+  `picture` are tolerated-absent (Google users/orgs may withhold them).
+- **The userinfo call is non-fatal:** on failure, log and continue login without
+  profile fields. Authentication must never break on profile enrichment.
+- **Per-user system prompt lives under `user.settings.systemPrompt`**; empty/absent
+  falls back to the global `SYSTEM_PROMPT`, resolved at both unshift sites.
+- **Profile context is injected into the system prompt as a separate, short block**
+  built from what exists: preferred name (if set), full name disclosure only if the
+  user asks, location (once location lands, see Open questions). Explicit prompt
+  instructions per the owner's comments: never address the user by their full name;
+  surface/mention that they can set a preferred name if none is set; use profile
+  info only where relevant to the conversation.
 - **Contract changes are additive and optional** so both server and client keep
-  typechecking (`AuthUser` gets optional `name`/`avatarUrl`).
-- **UI surface is a client-only modal opened from the footer user area.** The issue
-  says "reuse the existing settings sheet surface if one exists; otherwise a minimal
-  page/modal". Repo check: no settings sheet exists — the sidebar footer only has
-  Logout and ThemeToggle — so we build the minimal modal rather than inventing a
-  settings framework. A dedicated page would be more churn for no benefit at this
-  scope.
-- Out of scope (per issue): custom avatar upload (#34), prompt presets, per-user API
-  keys or model preferences.
-
-## Review notes (branch review, 2026-09-13)
-
-- Task 1 slice review: schema, `GET /me`, and contracts are sound; additive optional
-  fields keep the issue #20 drift tests intact. `npm run ci` green on the slice.
-- Hardening tests added in `src/server/routes/auth.contracts.test.ts`: per-field
-  absence on `/me` when only `settings` is set, whitespace-only `name` trims to
-  absent, and >100-char `name` / >4000-char `systemPrompt` are rejected at the
-  schema level. These guard the truthy-filter logic in `auth.ts` from regressions
-  when tasks 2–3 land.
-- No new open questions raised; the name-refresh question below is already on the
-  issue and remains pending user confirmation.
+  typechecking (`AuthUser` gains optional `name`, `avatarUrl`, `preferredName`).
+- **UI is a client-only modal opened from the sidebar footer user area** (no settings
+  sheet exists; sidebar footer has only Logout and ThemeToggle). Modal contains:
+  name display (read-only), preferred-name input, system-prompt textarea, Save →
+  `PATCH /api/profile`, then refresh AuthContext. Location controls are added only
+  after the location open questions resolve.
+- Out of scope (per issue + owner): custom avatar upload (#34), prompt presets,
+  per-user API keys/model preferences, behavior-based profiles from message metrics,
+  and a memory mechanism (both flagged by the owner as "direction, not this ticket").
 
 ## Open questions
 
-- **Does a subsequent Google login overwrite a user-edited display name?** The issue
-  says Google populates name + avatar "first login and on refresh", and `PATCH
-  /api/profile` lets the user edit `name` — but these collide: if a Google user edits
-  their name and then logs in again, the refresh (decision above) would revert it.
-  The issue's "unless the user has set a custom avatar" carve-out is written about
-  avatars only. Interpretation for now: MVP refreshes `avatarUrl` on every Google
-  login but sets `name` only when it is currently empty, so a user-edited name
-  survives. Asking on the issue to confirm.
+No planned task below depends on any of these. Location work is intentionally
+deferred behind them.
+
+1. **Which IP-geolocation source?** The owner said location would be a "rough lookup
+   based on IP address", but the repo has no geo-IP library and no credentials for a
+   hosted IP-geo API. Options: (a) a hosted API (needs a key/secret management),
+   (b) an offline coarse DB (e.g. MaxMind GeoLite2 city/country). Either way this picks
+   a dependency and, for hosted APIs, a secret. Also unresolvable locally: in local dev
+   the client IP is loopback/private and has no geo answer.
+2. **How does "use precise location" actually work?** Precise location can only come
+   from the browser Geolocation API, which requires a per-browser permission prompt
+   and user gesture; it cannot be enabled once in a profile modal and silently
+   honored everywhere. Concrete sub-questions: does the profile toggle mean "the
+   client asks for geolocation and sends coordinates when the user grants them in
+   that browser", and is precise location re-requested each session? What happens
+   when the grant is denied — fall back to rough IP location, or no location?
+3. **Is rough IP location opt-in or default-on?** The owner's comment reads as
+   "rough IP lookup plus an opt-in for precise". If rough location is on by default,
+   that needs to be surfaced in the profile modal and possibly called out on first
+   login (privacy). Confirm intended default.
 
 ## Tasks (each one commit-sized)
 
-1. **Schema + contracts**: add `name` (optional, trimmed, ≤100 chars) and
-   `avatarUrl` (optional, string) to `User`;
-   add `settings.systemPrompt` (optional, ≤4000 chars) inside a lazily-created
-   `settings` subdocument. Add optional `name` / `avatarUrl` to `AuthUser` in
-   `src/shared/contracts.ts`. Extend `GET /api/auth/me` (`src/server/routes/auth.ts:212-217`)
-   to include them when present. Update any contract-drift comments if needed.
-   Tests: `GET /me` round-trips the new fields; absent fields stay absent.
-2. **Google avatar/name pull via userinfo**: in `/google/callback` (`src/server/routes/auth.ts:131-196`):
+1. **Schema + contracts** *(done, incomplete vs the new name model — extend it)*:
+   - Status on branch: `User` already has `name` + `avatarUrl` + lazy
+     `settings.systemPrompt`; `AuthUser` carries optional `name`/`avatarUrl`;
+     `GET /api/auth/me` projects them; drift tests in `auth.contracts.test.ts` cover
+     absent/whitespace/oversize cases.
+   - Remaining: add `preferredName` (optional, trimmed, ≤100, default `null`) to
+     `User` and the `/me` projection and `AuthUser`; do **not** add `name` editing
+     anywhere.
+2. **Google avatar/name pull via userinfo**: in `/google/callback`
+   (`src/server/routes/auth.ts:131-196`):
    - add `access_token` to the token-exchange response type (`auth.ts:171`);
-   - fetch `https://openidconnect.googleapis.com/v1/userinfo` with the access token;
-   - read `name` and `picture` from the response (both optional — the Google docs
-     note users/orgs may withhold fields; tolerate their absence);
-   - extend `resolveOrCreateUser` (`src/server/services/userService.ts:14`) to take
-     the profile and store on create; on refresh, always update `avatarUrl`, set
-     `name` only if currently empty (pending confirmation in Open questions);
-   - keep the userinfo call non-fatal: if it fails, log and continue login without
-     profile fields (profile data must not break authentication);
-   - update/join the existing google-route test (`src/server/routes/auth.google.test.ts`):
-     happy path storing both fields on first login, refresh updates avatar,
+   - fetch the userinfo endpoint with the access token; read `name` and `picture`
+     (both optional, tolerate absence);
+   - extend `resolveOrCreateUser` (`src/server/services/userService.ts:14`) to accept
+     the profile: store both on create; on refresh overwrite `name` and `avatarUrl`
+     unconditionally; never write `preferredName`;
+   - userinfo failure: log, continue login without profile fields;
+   - update `src/server/routes/auth.google.test.ts`: both fields stored on first
+     login; refresh overwrites changed Google values; preferredName untouched;
      userinfo failure still completes login.
-3. **PATCH /api/profile**: new route in `src/server/routes/` with a zod schema
-   (`name`: optional trimmed string ≤100; `systemPrompt`: optional string ≤4000);
-   partial update — only supplied fields are written; returns the updated
+3. **PATCH /api/profile**: new route with a zod schema accepting only
+   `preferredName` (optional trimmed ≤100) and `systemPrompt` (optional ≤4000);
+   partial update — only supplied fields written; rectifies the earlier plan's
+   "name" updatable field (now removed per owner decision); returns the updated
    `AuthUser`-shaped payload; requires `authenticate`. Unit tests: happy path,
-   validation failure (too-long values), unauthenticated 401.
+   validation failure (too-long values, attempt to send `name`/`avatarUrl` ignored or
+   rejected — pick and test one), unauthenticated 401.
 4. **Per-user system prompt in chat routes**: at both unshift sites
    (`src/server/routes/chat.ts:206`, `:298`) resolve
-   `user.settings?.systemPrompt || SYSTEM_PROMPT` into a local before the unshift.
-   Tests: a user-authored prompt overrides the global default for that user; a user
-   without one gets the global default unchanged; the two sites share the resolution
-   helper so they cannot drift.
-5. **Client: contracts + auth context**: refresh the client's `AuthUser` usage
+   `user.settings?.systemPrompt || SYSTEM_PROMPT` through a shared helper so they
+   cannot drift. Tests: user-authored prompt overrides the global default; a user
+   without one gets the global default unchanged.
+5. **Profile-context prompt block**: helper in
+   `src/server/services/` (next to the task-4 helper) that, given the user document,
+   appends a short profile block after the resolved system prompt containing only
+   what exists: `preferredName` (if set), a "the user's full name is X — never
+   address them by it; if they seem to want to be called something, invite them to
+   set a preferred name" instruction (when full name exists and preferred name
+   does not), and the owner's "do not use profile information where it is not
+   relevant to the chat" instruction unconditionally. Wire into the same two unshift
+   sites so the helper is the single source of prompt assembly. Tests: block present
+   with/without preferred name; absent profile yields prompt byte-identical to the
+   global one.
+6. **Client: contracts + auth context**: refresh `AuthUser` usage
    (`src/client/src/services/auth.ts`, `src/client/src/context/AuthContext.tsx`) to
-   carry optional name/avatarUrl; keep the issue #20 drift notes intact.
-6. **Client: sidebar avatar + profile modal**: footer user area in
-   `src/client/src/components/Sidebar.tsx` shows name (fallback: email) and a small
-   avatar with an initials fallback for users without one. Clicking it opens the
-   modal: name input, avatar preview, system-prompt textarea, Save →
-   `PATCH /api/profile`, then refreshes AuthContext state so the sidebar updates.
-   Vitest coverage: modal renders with current values, save calls the API and
-   updates context.
-7. **Verify + docs**: run `npm run ci`; update this plan's Done checklist; note any
-   decisions changed above (including the outcome of the name-refresh open question).
+   carry optional `name`/`avatarUrl`/`preferredName`; keep the issue #20 drift notes
+   intact.
+7. **Client: sidebar avatar + profile modal**: footer user area in
+   `src/client/src/components/Sidebar.tsx` shows name/fallback email and small
+   avatar with initials fallback; clicking opens the modal: read-only name display,
+   profile name input, avatar preview, system-prompt textarea, Save →
+   `PATCH /api/profile`, then refresh AuthContext. Vitest coverage: modal renders
+   with current values; save calls the API and updates context.
+8. **Verify + docs**: run `npm run ci`; update the Done checklist; record any
+   decision changes; move location follow-up into a new ticket or this ticket once
+   the open questions are answered.
 
 ## Done
 
-- [x] 1. Schema + `AuthUser` contract + `GET /api/auth/me`
+- [x] 1. Schema + `AuthUser` contract + `GET /api/auth/me` (partially —
+      `preferredName` still to add)
 - [ ] 2. Google login stores/refreshes name + avatarUrl (userinfo endpoint) + tests
-- [ ] 3. `PATCH /api/profile` with zod validation + tests
+- [ ] 3. `PATCH /api/profile` (preferredName + systemPrompt) + tests
 - [ ] 4. Per-user system prompt overrides global in chat routes + test
-- [ ] 5. Client AuthContext carries name/avatarUrl
-- [ ] 6. Sidebar avatar + profile modal + tests
-- [ ] 7. `npm run ci` green; plan doc current
+- [ ] 5. Profile-context prompt block + tests
+- [ ] 6. Client AuthContext carries name/avatarUrl/preferredName
+- [ ] 7. Sidebar avatar + profile modal + tests
+- [ ] 8. `npm run ci` green; plan doc current
 
 ## Follow-ups
 
+- Location (rough IP + precise browser coords) waits on Open questions 1–3; then
+  either extends this ticket or opens a new one.
 - Custom avatar upload waits on #34 (asset storage); the "custom avatar wins over
-  Google refresh" flag belongs to that ticket, not this one.
+  Google refresh" flag belongs to that ticket — though with avatar now non-editable,
+  #34 will need its own decision from the owner on how a user changes their avatar
+  at all.
+- Behavior-based user profiles from message metrics: owner direction, separate ticket.
+- Opt-in memory mechanism (agent decides to remember things, and tells the user):
+  owner direction, separate ticket.
 - Prompt presets / multiple named system prompts: schema stays open, no UI.
-- Per-user API keys and model preferences: separate ticket.
