@@ -1,3 +1,4 @@
+import { isValidObjectId } from 'mongoose';
 import express from 'express';
 import { authenticate, AuthRequest } from '../middleware/auth';
 import { Session } from '../models/Session';
@@ -230,7 +231,11 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
       session = await createSessionWithUser(userId as string, content);
     }
     // Save user message
-    const userMessage = await saveUserMessageWithMetrics(String(session._id), content, attachedAsset);
+    const userMessage = await saveUserMessageWithMetrics(
+      String(session._id),
+      content,
+      attachedAsset,
+    );
 
     // Feedback aggregation happens under the band captured at route time, so
     // it must be computed before the router sees the turn (decision 4).
@@ -340,7 +345,11 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
     }
 
     // Save user message
-    const userMessage = await saveUserMessageWithMetrics(String(session._id), content, attachedAsset);
+    const userMessage = await saveUserMessageWithMetrics(
+      String(session._id),
+      content,
+      attachedAsset,
+    );
 
     // Feedback aggregation happens under the band captured at route time, so
     // it must be computed before the router sees the turn (decision 4).

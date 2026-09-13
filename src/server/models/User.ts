@@ -43,7 +43,7 @@ const userSchema = new mongoose.Schema(
     preferredName: {
       type: String,
       trim: true,
-      maxlength: 100,
+      maxlength: 20,
       default: null,
     },
     // Per-user settings; created lazily on first write (no backfill needed).

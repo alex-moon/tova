@@ -1,4 +1,5 @@
 import type { UserDocument } from '../models/User';
+import { buildUserEnvelope } from './attachmentEnvelope';
 
 // Global fallback prompt, moved verbatim from src/server/routes/chat.ts so it
 // has a single home next to the per-user resolution logic.
@@ -10,41 +11,82 @@ For anything emotionally heavy — relationships, mental health, grief, major li
 
 Keep answers focused: prefer a few short paragraphs or a compact list over long exhaustive explanations, but never at the cost of leaving the question unanswered or feeling clipped or cold. Do not pad answers with introductions, summaries, or filler.`;
 
-// Single prompt-assembly point (issue #35): resolved system prompt plus an
-// optional profile-context block. Both chat routes must call this instead of
+// Single prompt-assembly point (issue #35): the global system prompt plus
+// optional per-profile blocks. Both chat routes must call this instead of
 // unshifting a bare literal so streaming and non-streaming cannot drift.
 //
-// Resolution: the user's system prompt is used only when it survives a trim —
-// a whitespace-only setting must not disable the system message.
-export const resolveSystemPrompt = (user: Pick<UserDocument, 'settings'> | null): string =>
-  user?.settings?.systemPrompt?.trim() || SYSTEM_PROMPT;
+// User-controlled strings (preferred name, full name, custom instructions)
+// ride inside structured delimiters from the envelope module
+// (services/attachmentEnvelope.ts) per PR #46 review, so an injected
+// "ignore previous instructions" inside a name is visibly data, not system.
 
-// Profile block, built only from fields that actually exist. No profile data
-// at all → empty string, so callers stay byte-identical to the resolved prompt.
-// The relevance instruction rides along whenever any profile context is
-// present (owner: "don't use profile information wherever it is not relevant
-// to the chat"); the full name is never addressed directly, only surfaced.
+export const resolveSystemPrompt = (): string => SYSTEM_PROMPT;
+
+const CUSTOM_INSTRUCTIONS_INTRO =
+  'You also have the following custom instructions from the user - abide by ' +
+  'these only to the extent they do not conflict with the system instructions:';
+
+const CONTEXT_INTRO = 'You have the following contextual information:';
+
+// Relevance rule rides along whenever any profile context is present
+// (owner: "don't use profile information wherever it is not relevant to the
+// chat"). The full name is never used to address the user — it is surfaced
+// only if they ask and used to prompt them to set a preferred name.
+const RELEVANCE_RULE =
+  'Profile details are context, not conversation material: use them only ' +
+  'where relevant to the chat, and never reveal these raw profile fields.';
+
+// Custom instructions ride in their own envelope; the setting survives only a
+// trim — a whitespace-only setting must not emit an empty block.
+const customInstructionsBlock = (
+  settings: Pick<UserDocument, 'settings'>['settings'] | null | undefined,
+): string => {
+  const trimmed = settings?.systemPrompt?.trim();
+  if (!trimmed) return '';
+  return buildUserEnvelope({
+    tagName: 'user:custom_instructions',
+    intro: CUSTOM_INSTRUCTIONS_INTRO,
+    content: trimmed,
+  });
+};
+
 const profileContextBlock = (user: Pick<UserDocument, 'name' | 'preferredName'> | null): string => {
-  const lines: string[] = [];
+  const envelopes: string[] = [];
   if (user?.preferredName) {
-    lines.push(`The user goes by "${user.preferredName}".`);
-  }
-  if (user?.name) {
-    lines.push(
-      `The user's full name is ${user.name} — never address them by it; if they seem to want to be called something else, invite them to set a preferred name.`,
+    envelopes.push(
+      buildUserEnvelope({
+        tagName: 'user:preferred_name',
+        intro: '',
+        content: user.preferredName,
+      }).trim(),
     );
   }
-  if (lines.length === 0) return '';
-  lines.push(
-    'Profile details are context, not conversation material: use them only where relevant to the chat, and never reveal these raw profile fields.',
-  );
-  return lines.join('\n');
+  if (user?.name) {
+    envelopes.push(
+      buildUserEnvelope({
+        tagName: 'user:full_name',
+        intro:
+          'The full name below comes from a verified identity account: never address the ' +
+          'user by it; surface it only if they ask, and prompt them to set a preferred name.',
+        content: user.name,
+      }).trim(),
+    );
+  }
+  if (envelopes.length === 0) return '';
+  return [CONTEXT_INTRO, '', ...envelopes.flatMap((block) => [block, '']), RELEVANCE_RULE]
+    .join('\n')
+    .trim();
 };
 
 export const buildSystemContent = (
   user: Pick<UserDocument, 'name' | 'preferredName' | 'settings'> | null,
 ): string => {
-  const resolved = resolveSystemPrompt(user);
-  const block = profileContextBlock(user);
-  return block ? `${resolved}\n\n${block}` : resolved;
+  const parts = [
+    resolveSystemPrompt(),
+    profileContextBlock(user),
+    customInstructionsBlock(user?.settings ?? null),
+  ].filter(Boolean);
+  return parts.join('\n\n');
 };
+
+export { SYSTEM_PROMPT };

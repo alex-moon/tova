@@ -198,7 +198,9 @@ describe('Chat route routing metadata', () => {
         .send({ content: 'Hello' });
 
       expect(response.status).toBe(200);
-      expect(systemContentFromCall()).toBe('Always answer in rhyming couplets.');
+      expect(systemContentFromCall()).toContain(
+        '<user:custom_instructions>\nAlways answer in rhyming couplets.\n</user:custom_instructions>',
+      );
     });
 
     it('appends the profile-context block from the user document', async () => {
@@ -217,7 +219,7 @@ describe('Chat route routing metadata', () => {
       expect(response.status).toBe(200);
       const content = systemContentFromCall();
       expect(content).toMatch(/^You are Tova/);
-      expect(content).toContain('The user goes by "Alex".');
+      expect(content).toContain('<user:preferred_name>\nAlex\n</user:preferred_name>');
     });
 
     it("never leaks one user's systemPrompt into another user's request", async () => {
@@ -261,7 +263,9 @@ describe('Chat route routing metadata', () => {
         .set('Cookie', cookieList)
         .send({ content: 'Hello' });
       expect(first.status).toBe(200);
-      expect(systemContentFromCall()).toBe('Temporary override.');
+      expect(systemContentFromCall()).toContain(
+        '<user:custom_instructions>\nTemporary override.\n</user:custom_instructions>',
+      );
 
       await request(app).patch('/api/profile').set('Cookie', cookieList).send({ systemPrompt: '' });
       mockGenerate.mockClear();

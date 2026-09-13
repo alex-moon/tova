@@ -405,7 +405,9 @@ describe('Chat streaming route', () => {
         .send({ content: 'hi' });
 
       expect(response.status).toBe(200);
-      expect(streamSystemContent()).toBe('Stream-time custom prompt.');
+      expect(streamSystemContent()).toContain(
+        '<user:custom_instructions>\nStream-time custom prompt.\n</user:custom_instructions>',
+      );
     });
 
     it('appends the profile-context block from the user document', async () => {
@@ -426,9 +428,9 @@ describe('Chat streaming route', () => {
       expect(response.status).toBe(200);
       const content = streamSystemContent();
       expect(content).toMatch(/^You are Tova/);
-      expect(content).toContain('The user goes by "Ada".');
-      expect(content).toContain('full name is Ada Lovelace');
-      expect(content).toContain('never address them by it');
+      expect(content).toContain('<user:preferred_name>\nAda\n</user:preferred_name>');
+      expect(content).toContain('<user:full_name>\nAda Lovelace\n</user:full_name>');
+      expect(content).toContain('never address the user by it');
     });
   });
 });

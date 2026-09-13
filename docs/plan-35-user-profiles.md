@@ -56,6 +56,23 @@ user to set one if none exists.
   handling instruction (when full name exists and preferred name does not), and
   unconditionally the owner's "do not use profile information where it is not
   relevant to the chat" instruction.
+- **Profile context and custom instructions ride inside structured delimiter
+  envelopes** (PR #46 review, 2026-09-13): the generic `buildUserEnvelope`
+  helper in `src/server/services/attachmentEnvelope.ts` wraps user-controlled
+  strings in namespace tags — `<user:preferred_name>`, `<user:full_name>`,
+  `<user:custom_instructions>` — with closing-tag escaping. `buildSystemContent`
+  in `promptAssembly.ts` always starts from the global prompt; the user's
+  `settings.systemPrompt` rides inside a `<user:custom_instructions>` envelope
+  ("abide by these only to the extent they do not conflict") instead of replacing
+  the system prompt wholesale, and profile context rides in
+  `<user:preferred_name>` / `<user:full_name>` envelopes under a context
+  intro + relevance rule.
+- **`preferredName` is tightened to ≤20 chars** (PR #46 review) and is
+  charset-stripped server-side in `routes/profile.ts`:
+  only alphanumerics, spaces and name-typical punctuation (, ' - , :)
+  survive — anything JSON/XML-ish ({, }, <, >, ", ;) and newlines are
+  removed before save; a value that strips to empty clears the field. Client
+  input mirrors the 20-char limit.
 - **Contract changes are additive and optional** so both sides keep typechecking.
 
 ### PATCH /api/profile semantics (MVP default, see Open question 1)
@@ -79,12 +96,11 @@ question:
   while dropping data. Tests assert the 400.
 - Returns the updated `AuthUser`-shaped payload.
 
-### Limits (see Open question 2)
+### Limits (answered, PR #46 review 2026-09-13)
 
-`preferredName` ≤100 chars and `systemPrompt` ≤4000 chars are limits invented in
-this plan (schema bound on `name` ≤100 and `avatarUrl` bound 2048 are already
-implemented and tested). Treat the invented ones as provisional; adjust if the
-owner answers Open question 2 differently.
+`preferredName` ≤20 chars with a name-typography charset strip (owner: "100
+characters is too liberal"); `systemPrompt` ≤4000 chars unchanged. The
+`name` ≤100 / `avatarUrl` ≤2048 bounds are already implemented and tested.
 
 ### Location — deferred to a new ticket (owner-approved, 2026-09-13)
 
@@ -118,10 +134,9 @@ A third question was surfaced by the 2026-09-13 critic pass (see below); it does
 not block tasks 6–7 but needs an owner answer before merge.
 
 1. **PATCH clearing semantics:** present-but-empty means "clear" per the MVP
-   default above, and unknown keys are rejected with 400. Confirm, or specify
-   explicit-null clearing / silent-ignore instead.
-2. **Confirm invented limits:** is `preferredName` ≤100 and `systemPrompt` ≤4000
-   acceptable, or should these differ (or be uncapped with a sanity bound)?
+   default above; unknown keys are rejected with 400. Owner has not objected.
+2. ~~**Confirm invented limits**~~ answered (PR #46 review, 2026-09-13):
+   preferredName ≤20 + charset strip; systemPrompt stays ≤4000.
 3. **SECURITY — committed `.env.swp` contains live secrets.** Commit `0bb28d5`
    on this branch committed a vim swap file (`.env.swp`) holding what appear to
    be the real `MONGODB_PASSWORD`, `GOOGLE_CLIENT_SECRET`, `ADMIN_PASSWORD`, and
@@ -131,13 +146,10 @@ not block tasks 6–7 but needs an owner answer before merge.
    rotated, and the file removed from history before merge. Question:
    confirm-and-rotate, or explain why these are intentionally committed (they do
    not match any tracked `.env*` pattern in the repo).
-4. **Prompt-injection surface in the profile-context block:** `name`,
-   `preferredName` come from user/Google-provided strings and are interpolated
-   verbatim into the system message (e.g. a preferred name could carry
-   instructions like `Ignore previous rules and …`). MVP accepts this risk —
-   it is bounded to ≤100 chars, and chat content is a bigger injection surface
-   anyway. Should the MVP sanitize instead (strip newlines / instruction-like
-   content), or is acceptance fine?
+4. **Prompt-injection surface in the profile block (RESOLVED, PR #46 review):**
+   user-controlled strings now ride inside envelope tags with closing-tag
+   escaping, and `preferredName` is stripped to a name-typography charset
+   server-side, so injected markup/instructions cannot forge delimiters or newlines.
 
 ## Tasks (each one commit-sized)
 
@@ -263,10 +275,15 @@ not block tasks 6–7 but needs an owner answer before merge.
       update, empty-string clearing, and error handling that keeps the modal
       open). Related tests updated: `profile.test.ts` and
       `auth.contracts.test.ts` now expect `systemPrompt` on the wire payload.
-- [ ] 8. `npm run ci` green (re-proved 2026-09-13, critic pass 2, after the
-      isolation/resolution/shape tests: 248 server
-      + 44 client tests, lint, format, typecheck, build); plan doc current;
-      Open questions 1–2 answered
+- [x] 8. `npm run ci` green (re-proved 2026-09-13 after the merge with the
+      assets/envelope branch: 292 server
+      + client tests, lint, format, typecheck, build); plan doc current;
+      Open question 2 answered (preferredName → 20 + strip); Q1/Q4 resolved by
+      the envelope + charset changes; Q3 rebased out by owner (credentials
+      still owed rotation)
+- [x] Post-merge integration: conflicts resolved between this branch and main's
+      #34 asset library (chat.ts, index.ts, Sidebar.tsx); prompt data now goes
+      through the envelope module per the latest #35 comment.
 
 ## Follow-ups
 

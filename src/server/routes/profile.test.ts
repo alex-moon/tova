@@ -64,6 +64,26 @@ describe('PATCH /api/profile (issue #35)', () => {
     expect(user.settings?.systemPrompt).toBe('Be terse.');
   });
 
+  it('strips JSON/XML-like characters and newlines from preferredName', async () => {
+    const { app, cookie } = await registerUser('patch-strip@example.com');
+
+    await patchProfile(app, cookie, {
+      preferredName: '{Alex\n<y>}',
+    });
+
+    const user = await getUser('patch-strip@example.com');
+    expect(user.preferredName).toBe('Alexy');
+  });
+
+  it('clears a preferred name that is only hostile characters', async () => {
+    const { app, cookie } = await registerUser('patch-strip-empty@example.com');
+    await patchProfile(app, cookie, { preferredName: 'Alex' });
+
+    await patchProfile(app, cookie, { preferredName: '{"<>' });
+    const user = await getUser('patch-strip-empty@example.com');
+    expect(user.preferredName).toBeNull();
+  });
+
   it('clears preferredName via present-but-empty string', async () => {
     const { app, cookie } = await registerUser('patch-clear-name@example.com');
     await patchProfile(app, cookie, { preferredName: 'Alex' });
@@ -119,7 +139,7 @@ describe('PATCH /api/profile (issue #35)', () => {
   it('rejects too-long and non-string values with 400', async () => {
     const { app, cookie } = await registerUser('patch-validate@example.com');
 
-    const res = await patchProfile(app, cookie, { preferredName: 'x'.repeat(101) });
+    const res = await patchProfile(app, cookie, { preferredName: 'x'.repeat(21) });
     expect(res.status).toBe(400);
 
     const res2 = await patchProfile(app, cookie, { systemPrompt: 'y'.repeat(4001) });

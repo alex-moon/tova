@@ -9,7 +9,7 @@ interface ProfileModalProps {
   onClose: () => void;
 }
 
-const PREFERRED_NAME_LIMIT = 100;
+const PREFERRED_NAME_LIMIT = 20;
 const SYSTEM_PROMPT_LIMIT = 4000;
 
 const ProfileModal: React.FC<ProfileModalProps> = ({ onClose }) => {

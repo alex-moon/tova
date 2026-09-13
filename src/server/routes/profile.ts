@@ -12,6 +12,15 @@ const router = express.Router();
 // key present sets the field, and a trimmed-empty string clears it
 // (preferredName → null, systemPrompt removed). Unknown keys are rejected
 // with 400 by the strict zod schema exactly as in validation.ts.
+// preferredName charset (PR #46 review, 2026-09-13): only alphanumerics,
+// spaces and name-typical punctuation survive; anything JSON/XML-ish
+// ({, }, <, >, ", $, backticks, etc.) is stripped, then trimmed, so a
+// preferred name cannot forge structured delimiters in the system prompt.
+const PREFERRED_NAME_STRIP = /[^a-zA-Z0-9 ,:'-]/g;
+
+export const sanitizePreferredName = (raw: string): string =>
+  raw.replace(PREFERRED_NAME_STRIP, '').trim();
+
 router.patch('/', authenticate, async (req: AuthRequest, res) => {
   try {
     const parsed = profilePatchSchema.safeParse(req.body ?? {});
@@ -28,8 +37,10 @@ router.patch('/', authenticate, async (req: AuthRequest, res) => {
     }
 
     if ('preferredName' in parsed.data) {
-      const trimmed = parsed.data.preferredName?.trim();
-      user.preferredName = trimmed ? trimmed : null;
+      const cleaned = parsed.data.preferredName
+        ? sanitizePreferredName(parsed.data.preferredName)
+        : '';
+      user.preferredName = cleaned ? cleaned : null;
     }
     if ('systemPrompt' in parsed.data) {
       if (!user.settings) user.settings = { systemPrompt: null };

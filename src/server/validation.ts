@@ -19,11 +19,15 @@ export const loginSchema = z.object({
 // PATCH /api/profile body (issue #35). Strict on purpose: unknown keys
 // (name, avatarUrl, email, role…) are a 400, not silently dropped — a client
 // bug must not pretend success while losing data. Telegram-style: absent keys
-// are untouched; present keys set the field (trimmed empty string clears).
+// are untouched; present keys set the field (trimmed-empty string clears).
+//
+// preferredName (PR #46 review): 20 chars max, and the charset is tightened
+// server-side in routes/profile.ts — only alphanumerics, spaces and
+// name-typical punctuation (, ' - , :) survive; anything JSON/XML-ish ({ } < > " ;) is stripped.
 export const profilePatchSchema = z.strictObject({
   preferredName: z
     .string({ message: 'preferredName must be a string' })
-    .max(100, { message: 'preferredName must be 100 characters or fewer' })
+    .max(20, { message: 'preferredName must be 20 characters or fewer' })
     .optional(),
   systemPrompt: z
     .string({ message: 'systemPrompt must be a string' })
