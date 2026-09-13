@@ -471,7 +471,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
               ref={textareaRef}
               className="block max-h-[40dvh] w-full resize-none overflow-y-auto bg-transparent pr-20 text-base outline-none placeholder:text-muted-foreground"
               rows={2}
-              placeholder={placeholder}
+              placeholder={messages.some((m) => m.role === 'user') ? '' : placeholder}
               value={input}
               onChange={(e) => {
                 setInput(e.target.value);

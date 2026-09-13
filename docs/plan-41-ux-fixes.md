@@ -49,7 +49,7 @@ added two more inputs: the reporter tests on mobile, and the follow-up problem
 - **Branch debris: cleaned.** The throwaway `scripts/test-followup.ts` from the
   first pass is removed.
 
-Remaining work is therefore Task 4, Task 5 and the final gate (Task 6).
+Remaining work is therefore Task 4 and the final gate (Task 6).
 
 ## Checklist
 
@@ -121,7 +121,7 @@ no?"_ — is correct; the fix keeps it simple:
 Constraint noted: `BRAVE_SEARCH_API_KEY` exists in this environment; the fix's
 live verification depends on that environment staying as configured.
 
-### Task 5 — hide the composer placeholder once the user has spoken (client)
+### Task 5 — hide the composer placeholder once the user has spoken (client) — done (desktop)
 
 From the author's comment: _"Probably simplest fix is remove it after the user
 has input at least one message."_
@@ -139,6 +139,15 @@ has input at least one message."_
    session switch to a fresh session.
 4. Manual mobile check (author tests on mobile): placeholder gone after first
    send. Fold into the Task 6 smoke.
+5. Implemented: the textarea's `placeholder` prop is now gated on
+   `messages.some((m) => m.role === 'user')` (`ChatWindow.tsx:474`), so it is
+   hidden once a user message exists in the session — including history
+   reloaded from Mongo — and returns on a fresh/empty session. Random
+   placeholder logic and `#33` empty-path comments unchanged. Three cases added
+   to `ChatWindow.features.test.tsx` (fresh load shows it, hidden after one
+   user message, rerender transition). Client lint, root typecheck, client
+   vitest (35 passed) and Prettier all green. Mobile spot check remains for
+   Task 6.
 
 ### Task 6 — final gate
 

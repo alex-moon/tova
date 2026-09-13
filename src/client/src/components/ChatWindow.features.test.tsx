@@ -172,6 +172,36 @@ describe('Message content links (issue #33)', () => {
   });
 });
 
+describe('Composer placeholder (issue #41)', () => {
+  afterEach(cleanup);
+
+  it('shows a placeholder on a fresh session with no user messages', () => {
+    renderChat([]);
+    const textarea = document.querySelector('textarea');
+    expect(textarea?.getAttribute('placeholder')).toBeTruthy();
+  });
+
+  it('hides the placeholder once the user has sent at least one message', () => {
+    renderChat([{ _id: 'u1', role: 'user', content: 'hello' }]);
+    expect(document.querySelector('textarea')?.getAttribute('placeholder')).toBe('');
+  });
+
+  it('uses a non-empty placeholder that disappears once a user message exists', () => {
+    const { rerender } = renderChat([base()]);
+    const textarea = document.querySelector('textarea')!;
+    expect(textarea.getAttribute('placeholder')).toBeTruthy();
+    rerender(
+      <ChatWindow
+        messages={[{ _id: 'u1', role: 'user', content: 'hello' }, base()]}
+        onSendMessage={vi.fn()}
+        isLoading={false}
+        onOpenSidebar={vi.fn()}
+      />,
+    );
+    expect(textarea.getAttribute('placeholder')).toBe('');
+  });
+});
+
 describe('Follow-up suggestions (issue #33)', () => {
   afterEach(cleanup);
 
