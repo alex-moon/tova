@@ -128,6 +128,48 @@ describe('Message content links (issue #33)', () => {
     renderChat([{ _id: 'm1', role: 'assistant', content: 'answer' }]);
     expect(screen.queryByTestId('sources-block')).not.toBeInTheDocument();
   });
+
+  it('collapses sources beyond 3 with a show-all button (issue #41)', () => {
+    const urls = [
+      'https://1.example.com',
+      'https://2.example.com',
+      'https://3.example.com',
+      'https://4.example.com',
+      'https://5.example.com',
+    ];
+    renderChat([base({ sources: urls })]);
+    const block = screen.getByTestId('sources-block');
+    const links = block.querySelectorAll('a');
+    expect(links).toHaveLength(3);
+    expect(screen.getByTestId('sources-show-all')).toHaveTextContent('Show all 5 sources');
+  });
+
+  it('expands to the full list and collapses back (issue #41)', () => {
+    const urls = [
+      'https://1.example.com',
+      'https://2.example.com',
+      'https://3.example.com',
+      'https://4.example.com',
+    ];
+    renderChat([base({ sources: urls })]);
+    fireEvent.click(screen.getByTestId('sources-show-all'));
+    let links = screen.getByTestId('sources-block').querySelectorAll('a');
+    expect(links).toHaveLength(4);
+    fireEvent.click(screen.getByText('Show fewer sources'));
+    links = screen.getByTestId('sources-block').querySelectorAll('a');
+    expect(links).toHaveLength(3);
+    expect(screen.getByTestId('sources-show-all')).toBeInTheDocument();
+  });
+
+  it('shows the full list with no button at exactly 3 sources (issue #41)', () => {
+    renderChat([
+      base({
+        sources: ['https://a.example.com', 'https://b.example.com', 'https://c.example.com'],
+      }),
+    ]);
+    expect(screen.getByTestId('sources-block').querySelectorAll('a')).toHaveLength(3);
+    expect(screen.queryByTestId('sources-show-all')).not.toBeInTheDocument();
+  });
 });
 
 describe('Follow-up suggestions (issue #33)', () => {
