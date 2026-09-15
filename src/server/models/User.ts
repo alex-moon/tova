@@ -60,6 +60,20 @@ const userSchema = new mongoose.Schema(
       ),
       default: null,
     },
+    // Coarse country-level geolocation (issue #50), resolved server-side from
+    // the request IP. Absent = unresolved; only country/countryCode and the
+    // resolution timestamp are ever stored — no city or lat/lon data.
+    location: {
+      type: new mongoose.Schema(
+        {
+          country: { type: String, maxlength: 100 },
+          countryCode: { type: String, uppercase: true, maxlength: 2 },
+          resolvedAt: { type: Date },
+        },
+        { _id: false },
+      ),
+      default: null,
+    },
   },
   {
     timestamps: true,
@@ -87,6 +101,12 @@ export interface UserSettings {
   customInstructions: string | null;
 }
 
+export interface UserLocation {
+  country: string | null;
+  countryCode: string | null;
+  resolvedAt: Date | null;
+}
+
 export interface UserDocument extends mongoose.Document {
   email: string;
   passwordHash: string;
@@ -97,6 +117,7 @@ export interface UserDocument extends mongoose.Document {
   avatarUrl: string | null;
   preferredName: string | null;
   settings: UserSettings | null;
+  location: UserLocation | null;
   createdAt: Date;
   updatedAt: Date;
   comparePassword: (password: string) => Promise<boolean>;

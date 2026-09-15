@@ -50,7 +50,26 @@ const customInstructionsBlock = (
   });
 };
 
-const profileContextBlock = (user: Pick<UserDocument, 'name' | 'preferredName'> | null): string => {
+const LOCATION_INTRO =
+  'The location below is coarse (country-level only), derived from network ' +
+  'data, and may be stale or wrong. Use it only when relevant for local ' +
+  'context — locale, currency, weather or "near me" questions — and never ' +
+  'state it back unprompted.';
+
+const locationBlock = (
+  user: Pick<UserDocument, 'location'>['location'] | null | undefined,
+): string => {
+  if (!user?.country || !user.countryCode) return '';
+  return buildUserEnvelope({
+    tagName: 'user:location',
+    intro: LOCATION_INTRO,
+    content: `User is in ${user.country} (${user.countryCode})`,
+  }).trim();
+};
+
+const profileContextBlock = (
+  user: Pick<UserDocument, 'name' | 'preferredName' | 'location'> | null,
+): string => {
   const envelopes: string[] = [];
   if (user?.preferredName) {
     envelopes.push(
@@ -72,6 +91,8 @@ const profileContextBlock = (user: Pick<UserDocument, 'name' | 'preferredName'> 
       }).trim(),
     );
   }
+  const location = locationBlock(user?.location);
+  if (location) envelopes.push(location);
   if (envelopes.length === 0) return '';
   return [CONTEXT_INTRO, '', ...envelopes.flatMap((block) => [block, '']), RELEVANCE_RULE]
     .join('\n')
@@ -79,7 +100,7 @@ const profileContextBlock = (user: Pick<UserDocument, 'name' | 'preferredName'> 
 };
 
 export const buildSystemContent = (
-  user: Pick<UserDocument, 'name' | 'preferredName' | 'settings'> | null,
+  user: Pick<UserDocument, 'name' | 'preferredName' | 'location' | 'settings'> | null,
 ): string => {
   const parts = [
     resolveSystemPrompt(),

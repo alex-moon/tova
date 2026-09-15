@@ -85,6 +85,37 @@ describe('auth route contract drift', () => {
     expect(user.customInstructions).toBe('Be terse.');
   });
 
+  it('me rides the coarse location when resolved, and omits it otherwise (#50)', async () => {
+    const app = createApp();
+    const reg = await request(app)
+      .post('/api/auth/register')
+      .send({ email: 'contract-location@example.com', password: 'password123' });
+    const cookie = reg.headers['set-cookie'];
+
+    // Freshly registered: no location yet, and the loopback request IP skips
+    // resolution entirely, so none must appear.
+    const before = await request(app).get('/api/auth/me').set('Cookie', cookie);
+    expect(before.body.user.location).toBeUndefined();
+
+    // Populate the location exactly like the geo service does, then read.
+    const { User } = await import('../models/User');
+    const doc = await User.findOne({ email: 'contract-location@example.com' });
+    if (!doc) throw new Error('user not found');
+    doc.location = {
+      country: 'Finland',
+      countryCode: 'FI',
+      resolvedAt: new Date(),
+    } as never;
+    await doc.save();
+
+    const res = await request(app).get('/api/auth/me').set('Cookie', cookie);
+    expect(res.status).toBe(200);
+    const user: Record<string, unknown> = res.body.user;
+    expect(user.location).toEqual({ country: 'Finland', countryCode: 'FI' });
+    // resolvedAt is deliberately not exposed (see userService.toAuthUser).
+    expect((user.location as Record<string, unknown>).resolvedAt).toBeUndefined();
+  });
+
   it('me omits profile fields not yet set, even when other fields exist', async () => {
     const app = createApp();
     const reg = await request(app)

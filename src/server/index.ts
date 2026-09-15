@@ -31,6 +31,15 @@ export const connectToDatabase = async (mongoUri = buildMongoUri()) => {
 export const createApp = (): Express => {
   const app = express();
 
+  // Coarse geolocation (#50) reads req.ip; behind nginx the socket address is
+  // the proxy, so trust the last TRUST_PROXY_HOPS entries of X-Forwarded-For.
+  // Deploy concern: the outermost proxy must overwrite (not append to)
+  // client-supplied X-Forwarded-For or users could spoof their location.
+  const hops = Number(process.env.TRUST_PROXY_HOPS ?? 1);
+  if (Number.isInteger(hops) && hops > 0) {
+    app.set('trust proxy', hops);
+  }
+
   // Strict clientside hardening headers; CSP is intentionally using helmet's
   // defaults (CSP tuning is out of scope for #32).
   app.use(helmet());

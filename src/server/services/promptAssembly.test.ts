@@ -1,8 +1,9 @@
 import { buildSystemContent, resolveSystemPrompt } from './promptAssembly';
 import { UserDocument } from '../models/User';
 
-const userWith = (fields: Partial<Pick<UserDocument, 'name' | 'preferredName' | 'settings'>>) =>
-  fields as Pick<UserDocument, 'name' | 'preferredName' | 'settings'>;
+const userWith = (
+  fields: Partial<Pick<UserDocument, 'name' | 'preferredName' | 'location' | 'settings'>>,
+) => fields as Pick<UserDocument, 'name' | 'preferredName' | 'location' | 'settings'>;
 
 describe('resolveSystemPrompt', () => {
   it('returns the global fallback prompt', () => {
@@ -45,5 +46,37 @@ describe('buildSystemContent / envelope-based profile data (issue #35, PR #46 re
     expect(content).toContain('<\\/user:preferred_name>');
     // The envelope's real closing tag still closes it on its own line.
     expect(content).toContain('\n</user:preferred_name>');
+  });
+});
+
+describe('buildSystemContent / coarse location (issue #50)', () => {
+  it('emits a user:location envelope with country and code when resolved', () => {
+    const content = buildSystemContent(
+      userWith({ location: { country: 'Finland', countryCode: 'FI', resolvedAt: new Date() } }),
+    );
+    expect(content).toContain('<user:location>\nUser is in Finland (FI)\n</user:location>');
+    expect(content).toContain('coarse (country-level only)');
+  });
+
+  it('adds location under the contextual-information intro and relevance rule', () => {
+    const content = buildSystemContent(
+      userWith({
+        preferredName: 'Alex',
+        location: { country: 'Finland', countryCode: 'FI', resolvedAt: new Date() },
+      }),
+    );
+    expect(content).toContain('You have the following contextual information:');
+    expect(content).toContain('<user:location>');
+    expect(content).toContain('Profile details are context');
+  });
+
+  it('emits no location envelope when location is absent or partial', () => {
+    expect(buildSystemContent(userWith({})).split('<user:location>')).toHaveLength(1);
+    expect(buildSystemContent(null).split('<user:location>')).toHaveLength(1);
+    expect(
+      buildSystemContent(
+        userWith({ location: { country: null, countryCode: null, resolvedAt: null } }),
+      ).split('<user:location>'),
+    ).toHaveLength(1);
   });
 });

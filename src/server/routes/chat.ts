@@ -10,6 +10,7 @@ import { routeQuery } from '../services/routerService';
 import { generateChatTitle } from '../services/titleService';
 import { hasPermission, ROUTING_PERMISSION } from '../services/userService';
 import { buildSystemContent } from '../services/promptAssembly';
+import { ensureUserLocation } from '../services/geoLocationService';
 import { inferenceService } from '../services/inferenceService';
 import type { NeutralStreamChunk } from '../services/llmTypes';
 import { classifyAndPersistPromptDimensions, isTriviallyNeutral } from '../services/metricsService';
@@ -262,6 +263,10 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
         content: m.content as string,
       }));
     const userDoc = await User.findById(userId);
+    // Coarse geolocation (#50): awaited so this turn's prompt can include the
+    // country; cheap when cached (fresh/cooldown returns immediately) and the
+    // service itself never throws, so chat cannot block hard on it.
+    if (userDoc) await ensureUserLocation(userDoc, req.ip);
     messages.unshift({ role: 'system', content: buildSystemContent(userDoc) });
     appendAssetBlock(messages, attachedAsset);
 
@@ -369,6 +374,9 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
         content: m.content as string,
       }));
     const streamUserDoc = await User.findById(userId);
+    // Same geo wiring as the non-streaming route (#50): awaited so the
+    // streamed prompt is deterministic, cheap when cached.
+    if (streamUserDoc) await ensureUserLocation(streamUserDoc, req.ip);
     messages.unshift({ role: 'system', content: buildSystemContent(streamUserDoc) });
     appendAssetBlock(messages, attachedAsset);
 
