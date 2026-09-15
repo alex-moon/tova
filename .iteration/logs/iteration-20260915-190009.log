@@ -1,0 +1,77 @@
+[20:00:09] Starting iteration harness on alex-moon/tova (priority: none, once: false)
+[20:00:09] gh-api: GET /repos/{owner}/{repo}/issues
+[20:00:10] gh-api: GET /repos/{owner}/{repo}/issues/{issue_number}/comments
+[20:00:10] gh-api: GET /repos/{owner}/{repo}/issues/{issue_number}/comments
+[20:00:10] gh-api: GET /repos/{owner}/{repo}/issues/{issue_number}/comments
+[20:00:10] gh-api: GET /repos/{owner}/{repo}/issues/{issue_number}/comments
+[20:00:10] gh-api: GET /repos/{owner}/{repo}/issues/{issue_number}/comments
+[20:00:10] gh-api: GET /repos/{owner}/{repo}/issues/{issue_number}/comments
+[20:00:10] gh-api: GET /repos/{owner}/{repo}/issues/{issue_number}/comments
+[20:00:10] ticket cache refreshed: 7 open issues
+[20:00:10] gh-api: GET /repos/{owner}/{repo}/pulls
+[20:00:11] gh-api: POST /graphql
+[20:00:11] Snapshot gathered: 7 open issues, 1 open PRs at 2026-09-15T19:00:11.104Z
+[20:00:11] phase: triage-tickets
+----- phase triage-tickets -----
+Triage:
+
+- **#53** — READY: self-contained frontend theming work, no dependencies.
+- **#52** — READY, but its location-aware half depends on #50's country caching landing first.
+- **#51** — DONE: open PR #54 carrying the deliverable (critic pass confirms all acceptance criteria met, CI green).
+- **#50** — READY: small, well-scoped, no dependencies; unblocks #52.
+- **#49** — BLOCKED: already noted in the existing comment (needs user-provided LangSmith config / authorization).
+- **#48** — READY but larger with an undecided test strategy.
+- **#36** — READY but sprawling.
+
+Picking #50: it's the smallest clean READY ticket and unblocks the location-aware half of #52. No new BLOCKED comments to queue (#49's already exists).
+
+{"kind":"issue","issue":50}
+
+----- end triage-tickets -----
+[20:00:59] Triage verdict: ISSUE:50
+[20:00:59] gh-api: GET /repos/{owner}/{repo}/issues/{issue_number}
+[20:01:00] Created branch feat/50-coarse-user
+[20:01:00] Working branch: feat/50-coarse-user
+[20:01:00] phase: plan-write
+----- phase plan-write -----
+Plan written at `.iteration/docs/plan-50-coarse-user.md`. It covers:
+
+- **Motivation/links** to issue #50 with existing-code anchors (User model, `toAuthUser`, `buildSystemContent`, `authenticate` middleware)
+- **6 small, commit-sized tasks**: model+contracts → geo service (country.is → ip-api fallback, private-IP skip, cache) → wire-up + `trust proxy` → chat context `user:location` envelope → tests with mocked fetch → lint/ci/PR
+- **4 honest open questions**: proxy trust value, failure-retry policy (7-day cache vs transient failures), hook placement (fire-and-forget on streaming routes), and ip-api being HTTP-only on the free tier
+- Final line is `{}` as required; nothing committed
+
+----- end plan-write -----
+[20:04:13] phase plan-write: no parsable JSON verdict; one retry with schema
+----- phase plan-write -----
+I'll check the repo state and existing conventions first.
+A plan file already exists — let me read it.
+The plan file `.iteration/docs/plan-50-coarse-user.md` already exists on disk, matches the branch summary (`coarse-user`), is grounded in verified code anchors (User model, `toAuthUser`, `buildSystemContent`, `authenticate` middleware, global-`fetch` mocking conventions), contains a commit-sized task checklist, honest open questions, and ends with the required `{}` line. The ticket is neither done nor blocked — implementation hasn't started. No changes needed; delivering the verdict.
+
+{}
+
+----- end plan-write -----
+[20:07:11] Committed and pushed plan updates
+[20:07:11] phase: plan-review
+----- phase plan-review -----
+Let me quickly inspect the repo to resolve some of the open questions myself before revising.
+Now I have everything needed. Key findings from repo inspection (these change the plan):
+
+- `docs/done/plan-32-security-hardening.md` records that `trust proxy` is **deliberately unset** repo-wide due to IP-spoofing risk — geo-from-IP directly conflicts with that decision. Real doubt → open question.
+- Verified topology: user → host nginx (outside repo) → `src/client/nginx.conf` → backend:5000; nginx already sets `X-Real-IP` and `X-Forwarded-For`. So `req.ip` is currently meaningless in live (backend sees the client nginx container IP, a private address).
+- Mock convention confirmed: `webSearchService.test.ts` stubs `global.fetch` with `jest.fn()` and restores the real one — no need for injected-fetch parameterization.
+- `buildSystemContent` signature takes a `Pick<UserDocument, ...>` — task must extend that Pick, a concrete detail the plan missed.
+
+Rewriting the plan file:
+Plan revised at `.iteration/docs/plan-50-coarse-user.md`:
+
+- **Settled into the plan** (verified in-repo): `global.fetch` jest-stub convention from `webSearchService.test.ts`; the verified two-hop nginx topology and existing `X-Forwarded-For` forwarding; the `Pick<UserDocument, ...>` signature change needed in `promptAssembly.ts`; ip-api HTTP-only noted in the ticket body itself; no-hidden-fields guarantee via `$set` of only the three location fields.
+- **Honesty changes**: flagged the conflict between this ticket and `plan-32`'s deliberate decision to leave `trust proxy` unset (spoofing risk); called out that client nginx's `X-Real-IP` points at the *host* nginx, not the real user, so the plan now forbids hand-parsing headers; added explicit shape validation (`/^[A-Z]{2}$/`), a failure-cooldown mechanism with no Mongo write on failure, and `AbortSignal.timeout(2000)`.
+- **Queued comment on #50** with the two genuinely open questions: `TRUST_PROXY_HOPS=2` sign-off vs the plan-32 stance, and the failed-lookup retry cadence. No planned task depends on either open question — both answers change only an env value or a constant.
+
+{}
+
+----- end plan-review -----
+[20:12:05] Committed and pushed plan updates
+[20:12:05] Dirty worktree; skipping implement phase
+[20:12:05] phase: critic

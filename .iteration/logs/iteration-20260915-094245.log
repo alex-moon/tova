@@ -1,0 +1,29 @@
+[10:42:45] Starting iteration harness on alex-moon/tova (priority: none, once: false)
+[10:42:45] gh-api: GET /repos/{owner}/{repo}/issues
+[10:42:46] gh-api: GET /repos/{owner}/{repo}/issues/{issue_number}/comments
+[10:42:46] gh-api: GET /repos/{owner}/{repo}/issues/{issue_number}/comments
+[10:42:46] gh-api: GET /repos/{owner}/{repo}/issues/{issue_number}/comments
+[10:42:46] gh-api: GET /repos/{owner}/{repo}/issues/{issue_number}/comments
+[10:42:46] gh-api: GET /repos/{owner}/{repo}/issues/{issue_number}/comments
+[10:42:46] gh-api: GET /repos/{owner}/{repo}/issues/{issue_number}/comments
+[10:42:46] gh-api: GET /repos/{owner}/{repo}/issues/{issue_number}/comments
+[10:42:47] ticket cache refreshed: 7 open issues
+[10:42:47] gh-api: GET /repos/{owner}/{repo}/pulls
+[10:42:47] Snapshot gathered: 7 open issues, 0 open PRs at 2026-09-15T09:42:47.390Z
+[10:42:47] phase: triage-tickets
+[10:42:48] opencode phase triage-tickets exited non-zero
+[10:42:48] opencode phase triage-tickets stderr: [91m[1mError: [0mUnexpected error
+
+ENAMETOOLONG: name too long, open
+----- phase triage-tickets -----
+
+----- end triage-tickets -----
+[10:42:48] phase triage-tickets: no parsable JSON verdict; one retry with schema
+[10:42:49] opencode phase triage-tickets exited non-zero
+[10:42:49] opencode phase triage-tickets stderr: [91m[1mError: [0mUnexpected error
+
+ENAMETOOLONG: name too long, open
+----- phase triage-tickets -----
+
+----- end triage-tickets -----
+[10:42:49] Pass failed hard: phase triage-tickets: retry also invalid (no parsable JSON verdict)
