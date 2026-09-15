@@ -147,14 +147,16 @@ const modelSettingsFrom = (options: CompletionOptions) => ({
 /*
  * Abort/disconnect plumbing: forward a caller-supplied signal to Mastra's
  * call options (AI-SDK style) instead of sending undefined keys.
- * `maxSteps` caps the agent's own tool loop: when the search tool is
- * attached the agent decides how many rounds to run (search → answer, with
- * a follow-up round allowed); without tools a completion is single-step,
- * as before #16.
+ * `maxSteps` caps the agent's own tool loop: with built-in tools attached
+ * the agent decides how many rounds to run (search → answer, with a
+ * follow-up round allowed); without tools a completion is single-step,
+ * as before #16. Since #52 the tools-mode, not the Brave key, drives this:
+ * the key-free `current_datetime` keeps tools attached for key-less
+ * deployments too.
  */
-const callOptionsFrom = (options: CompletionOptions) => ({
+const callOptionsFrom = (options: CompletionOptions, mode: ToolsMode = 'full') => ({
   ...(options.abortSignal ? { abortSignal: options.abortSignal } : {}),
-  maxSteps: hasSearchKey() ? 4 : 1,
+  maxSteps: mode === 'full' ? 4 : 1,
   modelSettings: modelSettingsFrom(options),
   ...traceOptionsFrom(options.trace),
 });
@@ -202,8 +204,33 @@ export const webSearchTool = createTool({
   execute: async ({ query }) => ({ results: await webSearch(query) }),
 });
 
-const SEARCH_INSTRUCTIONS =
+/*
+ * Built-in clock tool (issue #52): deterministic, zero-dependency, no
+ * external calls. It answers "what's the date/time" without a web-search
+ * round trip. No user timezone is stored anywhere (#50 model), so the
+ * offset is always `null` — the tool and instructions both report UTC so
+ * the model stays honest about it.
+ */
+export const currentDatetimeTool = createTool({
+  id: 'current_datetime',
+  description:
+    'Get the current date and time. Always call this instead of guessing the current ' +
+    'date or time. It reports UTC only — it does not know the local time of day.',
+  inputSchema: z.object({}),
+  outputSchema: z.object({
+    utc: z.string().describe('Current time as an ISO 8601 UTC timestamp'),
+    timezoneOffsetMinutes: z
+      .number()
+      .nullable()
+      .describe('Minutes from UTC the user is — always null: not resolved yet'),
+  }),
+  execute: async () => ({ utc: new Date().toISOString(), timezoneOffsetMinutes: null }),
+});
+
+const TOOL_INSTRUCTIONS =
   'You may call the `web_search` tool to find current or external information. ' +
+  'When the user asks about the current date or time, call the `current_datetime` ' +
+  'tool instead of guessing; it reports UTC only, do not convert to local time. ' +
   'Write the query as focused keywords. When search results arrive, answer with ' +
   'terse markdown links ([title](url)) for the claims you used; answer from your ' +
   'own knowledge when no search is needed.';
@@ -221,14 +248,17 @@ const agentCache = new Map<string, Agent>();
  * `tools` override: `false` forces a plain agent with no tool attached
  * regardless of the Brave key — used by one-off completions (follow-up
  * suggestions) whose target model may reject tool-carrying requests.
- * `undefined` keeps the default key-driven behaviour.
+ * `undefined` keeps the default built-in-tools behaviour (#52): the
+ * key-free `current_datetime` tool is always attached.
  */
+type ToolsMode = 'full' | 'plain';
+
 const agentFor = (provider: LlmProvider, model: string, tools?: boolean): Agent => {
-  const toolsEnabled = tools ?? hasSearchKey();
+  const mode: ToolsMode = tools === false ? 'plain' : 'full';
   // The tool set is baked into the agent at construction, so the cache key
-  // must include the tools state — toggling the Brave key without a restart
-  // (as tests do) must not hand back a stale agent.
-  const cacheKey = `${provider}/${model}/${toolsEnabled ? 'tools' : 'plain'}`;
+  // must include the Brave-key state — toggling it without a restart (as
+  // tests do) must not hand back a stale full agent without web_search.
+  const cacheKey = `${provider}/${model}/${mode}/${hasSearchKey() ? 'search' : 'nosearch'}`;
   const cached = agentCache.get(cacheKey);
   if (cached) return cached;
   const agent = new Agent({
@@ -237,9 +267,19 @@ const agentFor = (provider: LlmProvider, model: string, tools?: boolean): Agent 
     // to a single Mastra message variant.
     id: `tova-${provider}`,
     name: `tova-${provider}`,
-    instructions: toolsEnabled ? SEARCH_INSTRUCTIONS : '',
+    instructions: mode === 'full' ? TOOL_INSTRUCTIONS : '',
     model: `${provider}/${model}`,
-    ...(toolsEnabled ? { tools: { web_search: webSearchTool } } : {}),
+    ...(mode === 'full'
+      ? {
+          tools: {
+            // web_search stays key-gated (its execution needs a Brave key and
+            // degrades to empty results without one); current_datetime has no
+            // such dependency (#52).
+            ...(hasSearchKey() ? { web_search: webSearchTool } : {}),
+            current_datetime: currentDatetimeTool,
+          },
+        }
+      : {}),
   });
   agentCache.set(cacheKey, agent);
   return agent;
@@ -248,12 +288,14 @@ const agentFor = (provider: LlmProvider, model: string, tools?: boolean): Agent 
 const buildConnector = (provider: LlmProvider): LlmConnector => {
   const asMessageList = (messages: CompletionOptions['messages']) =>
     messages as unknown as Parameters<Agent['generate']>[0];
+  // #52: the default main-chat path always carries built-in tools now.
+  const defaultMode: ToolsMode = 'full';
 
   return {
     createCompletion: async (options: CompletionOptions): Promise<NeutralCompletion> => {
       const result = await agentFor(provider, options.model).generate(
         asMessageList(options.messages),
-        callOptionsFrom(options),
+        callOptionsFrom(options, defaultMode),
       );
       // Tool executions (issue #16): FullOutput.toolResults carries every
       // executed call with its structured result; surfaced so callers can
@@ -270,7 +312,7 @@ const buildConnector = (provider: LlmProvider): LlmConnector => {
     createStreamingCompletion: async (options: CompletionOptions): Promise<NeutralChunkStream> => {
       const result = await agentFor(provider, options.model).stream(
         asMessageList(options.messages),
-        callOptionsFrom(options),
+        callOptionsFrom(options, defaultMode),
       );
       return toNeutralStream(result.fullStream);
     },

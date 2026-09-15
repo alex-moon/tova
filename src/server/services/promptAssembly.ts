@@ -104,6 +104,10 @@ export const buildSystemContent = (
 ): string => {
   const parts = [
     resolveSystemPrompt(),
+    // Server-rendered constant from the process clock (issue #52): most
+    // date questions care about the day, not clock ticks, so it rides in
+    // the system prompt as a belt to the `current_datetime` tool braces.
+    `Today's date is ${new Date().toISOString().slice(0, 10)} (UTC).`,
     profileContextBlock(user),
     customInstructionsBlock(user?.settings ?? null),
   ].filter(Boolean);
