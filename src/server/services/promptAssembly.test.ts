@@ -39,6 +39,15 @@ describe('buildSystemContent / envelope-based profile data (issue #35, PR #46 re
     expect(content).toMatch(/Today's date is \d{4}-\d{2}-\d{2} \(UTC\)\./);
   });
 
+  it('emits the date line exactly once and outside any user envelope (issue #52)', () => {
+    const content = buildSystemContent(userWith({ preferredName: 'Alex' }));
+    expect(content.match(/Today's date is \d{4}-\d{2}-\d{2} \(UTC\)\./g)?.length).toBe(1);
+    // The date line must not ride inside the appended profile-data section.
+    expect(content.indexOf("Today's date is")).toBeLessThan(
+      content.indexOf('You have the following contextual information:'),
+    );
+  });
+
   it('keeps the global prompt itself unchanged with no profile data', () => {
     const resolved = resolveSystemPrompt();
     expect(buildSystemContent(userWith({})).startsWith(resolved)).toBe(true);
