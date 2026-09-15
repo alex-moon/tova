@@ -1,7 +1,22 @@
 import { describe, expect, it, vi, afterEach } from 'vitest';
-import { render, screen, fireEvent, cleanup } from '@testing-library/react';
+import { render, screen, fireEvent, cleanup, waitFor } from '@testing-library/react';
+import type { ComponentProps } from 'react';
+import { toast } from 'sonner';
+
+vi.mock('../services/assets', async (importOriginal) => {
+  const original = await importOriginal<typeof import('../services/assets')>();
+  return {
+    ...original,
+    default: Object.assign(vi.fn(), original.default, { upload: vi.fn() }),
+  };
+});
+
+import AssetService from '../services/assets';
 import ChatWindow from './ChatWindow';
 import type { Message } from '../App';
+
+const NO_TEXT_TOAST =
+  'No text could be extracted from this file type — Tova will see the filename only.';
 
 const base = (over: Partial<Message> = {}): Message => ({
   _id: 'm1',
@@ -11,13 +26,18 @@ const base = (over: Partial<Message> = {}): Message => ({
   ...over,
 });
 
-const renderChat = (messages: Message[], isLoading = false) =>
+const renderChat = (
+  messages: Message[],
+  isLoading = false,
+  extra: Partial<ComponentProps<typeof ChatWindow>> = {},
+) =>
   render(
     <ChatWindow
       messages={messages}
       onSendMessage={vi.fn()}
       isLoading={isLoading}
       onOpenSidebar={vi.fn()}
+      {...extra}
     />,
   );
 
@@ -224,5 +244,77 @@ describe('Follow-up suggestions (issue #33)', () => {
   it('does not render chips without suggestion data', () => {
     renderChat([{ _id: 'm1', role: 'assistant', content: 'plain answer' }]);
     expect(screen.queryByTestId('suggestion-chips')).not.toBeInTheDocument();
+  });
+});
+
+describe('Composer library-pick (issue #51)', () => {
+  const infoSpy = vi.spyOn(toast, 'info');
+  afterEach(() => {
+    cleanup();
+    infoSpy.mockClear();
+  });
+
+  it('turns a picked asset into the attachment chip and fires the no-text toast when hasText is false', () => {
+    const onPickedConsumed = vi.fn();
+    renderChat([], false, {
+      incomingAsset: { id: 'a9', filename: 'scan.png', hasText: false },
+      onPickedConsumed,
+    });
+    expect(screen.getByTestId('attachment-chip')).toHaveTextContent('scan.png');
+    expect(onPickedConsumed).toHaveBeenCalledTimes(1);
+    expect(toast.info).toHaveBeenCalledWith(NO_TEXT_TOAST);
+  });
+
+  it('shows no toast when the picked asset has text', () => {
+    const onPickedConsumed = vi.fn();
+    renderChat([], false, {
+      incomingAsset: { id: 'a9', filename: 'notes.txt', hasText: true },
+      onPickedConsumed,
+    });
+    expect(screen.getByTestId('attachment-chip')).toHaveTextContent('notes.txt');
+    expect(onPickedConsumed).toHaveBeenCalledTimes(1);
+    expect(toast.info).not.toHaveBeenCalled();
+  });
+
+  it('does not fire without a pick (no regression to the picker flow)', () => {
+    const onPickedConsumed = vi.fn();
+    renderChat([base()], false, { onPickedConsumed });
+    expect(screen.queryByTestId('attachment-chip')).not.toBeInTheDocument();
+    expect(onPickedConsumed).not.toHaveBeenCalled();
+  });
+
+  it('consumes a pick without applying it while an upload is in flight (race rule)', async () => {
+    vi.mocked(AssetService.upload).mockReturnValue(
+      new Promise(() => {
+        /* hang: uploading stays true */
+      }),
+    );
+    const onPickedConsumed = vi.fn();
+    const view = render(
+      <ChatWindow
+        messages={[]}
+        onSendMessage={vi.fn()}
+        isLoading={false}
+        onOpenSidebar={vi.fn()}
+        onPickedConsumed={onPickedConsumed}
+      />,
+    );
+    const file = new File(['x'], 'inflight.pdf', { type: 'application/pdf' });
+    fireEvent.change(document.querySelector('input[type="file"]')!, { target: { files: [file] } });
+    await waitFor(() => expect(AssetService.upload).toHaveBeenCalled());
+    // Pick arrives while the upload is still in flight.
+    view.rerender(
+      <ChatWindow
+        messages={[]}
+        onSendMessage={vi.fn()}
+        isLoading={false}
+        onOpenSidebar={vi.fn()}
+        incomingAsset={{ id: 'a8', filename: 'late.txt', hasText: true }}
+        onPickedConsumed={onPickedConsumed}
+      />,
+    );
+    expect(onPickedConsumed).toHaveBeenCalledTimes(1);
+    expect(screen.queryByTestId('attachment-chip')).not.toBeInTheDocument();
+    view.unmount();
   });
 });

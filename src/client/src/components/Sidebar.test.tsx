@@ -25,6 +25,8 @@ const renderSidebar = (user: User | null) => {
         onNewChat={vi.fn()}
         onDeleteSession={vi.fn()}
         onClose={onClose}
+        showFiles={false}
+        onToggleFiles={vi.fn()}
       />
     </AuthContext.Provider>,
   );
