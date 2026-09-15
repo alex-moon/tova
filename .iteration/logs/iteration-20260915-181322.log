@@ -1,0 +1,78 @@
+[19:13:22] Starting iteration harness on alex-moon/tova (priority: none, once: false)
+[19:13:22] gh-api: GET /repos/{owner}/{repo}/issues
+[19:13:23] gh-api: GET /repos/{owner}/{repo}/issues/{issue_number}/comments
+[19:13:23] gh-api: GET /repos/{owner}/{repo}/issues/{issue_number}/comments
+[19:13:23] gh-api: GET /repos/{owner}/{repo}/issues/{issue_number}/comments
+[19:13:23] gh-api: GET /repos/{owner}/{repo}/issues/{issue_number}/comments
+[19:13:23] gh-api: GET /repos/{owner}/{repo}/issues/{issue_number}/comments
+[19:13:23] gh-api: GET /repos/{owner}/{repo}/issues/{issue_number}/comments
+[19:13:23] gh-api: GET /repos/{owner}/{repo}/issues/{issue_number}/comments
+[19:13:24] ticket cache refreshed: 7 open issues
+[19:13:24] gh-api: GET /repos/{owner}/{repo}/pulls
+[19:13:24] Snapshot gathered: 7 open issues, 0 open PRs at 2026-09-15T18:13:24.399Z
+[19:13:24] phase: triage-tickets
+----- phase triage-tickets -----
+Triage:
+
+- **#53** theme identity rework — READY (well-scoped but touches many files; medium size).
+- **#52** — READY, but depends on #50 for the location half (datetime half independent).
+- **#51** — READY, small and well-scoped; mostly client attach handoff + one server ownership check.
+- **#50** — READY, medium; geo helper + caching + tests.
+- **#49** — BLOCKED: "human sweep" items (LangSmith trace ingestion, UI upload error) require owner/human action; no agent basis to resolve.
+- **#48** — READY, but test-strategy decision (Jest vs pdf deps) makes it heavier; owner input noted but not strictly blocking.
+- **#36** — READY but sprawling (SSRF/design surface, multiple subsystems).
+Picking **#51** — it's the smallest, fully-scoped READY ticket: server may only need a verified ownership check, client work is a single attach handoff to the composer, and it unblocks the "attachments unusable" pain noted in #49's second item.
+
+{"kind":"issue","issue":51}
+
+----- end triage-tickets -----
+[19:14:06] Triage verdict: ISSUE:51
+[19:14:06] gh-api: GET /repos/{owner}/{repo}/issues/{issue_number}
+[19:14:06] Created branch feat/51-asset-library
+[19:14:06] Working branch: feat/51-asset-library
+[19:14:06] phase: plan-write
+----- phase plan-write -----
+I have what I need. The server-side ownership check already exists (chat.ts:34 `loadAttachedAsset` rejects foreign assets as `'missing'`) and is already covered by `assets.attach.test.ts:143` — so this ticket is almost purely client-side. Writing the plan now.
+Fixing the final line to the required JSON marker:
+Plan written to `.iteration/docs/plan-51-asset-library.md`.
+
+Key findings from the codebase:
+- Server requires no changes: `src/server/routes/chat.ts:34` (`loadAttachedAsset`) already scopes `assetId` to the requesting user, and the cross-user rejection test already exists at `src/server/routes/assets.attach.test.ts:143`.
+- Work is client-side: hand an `AssetSummary` from `AssetLibrary` (rendered via `Sidebar.tsx:51`) up to `App.tsx` and feed it into ChatWindow's existing `attachment` state (`ChatWindow.tsx:270`), reusing the identical `hasText: false` toast path from `ChatWindow.tsx:347`.
+- The plan has 4 checklist commits (thread callback → consume pick + toast → vitest coverage → full `npm run ci` gate), with the composer "browse library" button explicitly gated behind an open question so it can be deferred per the ticket's scope note. Final line of the file is `{}` as required.
+
+----- end plan-write -----
+[19:17:46] phase plan-write: no parsable JSON verdict; one retry with schema
+----- phase plan-write -----
+Ticket #51 is not done and not blocked. The plan already exists at `.iteration/docs/plan-51-asset-library.md` and its claims were verified against the code: the server-side cross-user `assetId` rejection already exists (`src/server/routes/chat.ts:41` scopes to `_id` + `userId`; tested at `src/server/routes/assets.attach.test.ts:143`), so the work is client-only. Checkout summary:
+
+- **1:** thread `pickedAsset` state + `onPickAsset` through `App.tsx → Sidebar → AssetLibrary` with a per-asset attach button.
+- **2:** consume the pick in `ChatWindow.tsx` = `setAttachment({id, filename})` + identical `hasText: false` toast, then reset so re-picks retrigger.
+- **3:** vitest tests for the pick flow, toast parity, and no regressions to the existing picker.
+- **4:** full CI gate.
+
+Composer-side "browse library" stays deferred unless it mounts trivially standalone (open question in the plan, does not block items 1–3).
+Verified and submitted. Plan is on disk at `.iteration/docs/plan-51-asset-library.md` with all file/line claims checked against the actual code. Nothing committed.
+
+{}
+
+----- end plan-write -----
+[19:18:31] Committed and pushed plan updates
+[19:18:31] phase: plan-review
+----- phase plan-review -----
+All cross-checks done. Facts confirmed: ownership check exists (`chat.ts:40`), cross-user test exists, list endpoint does **not** filter status (so `pending`/`failed` assets do appear and the disable guard is real), and `attachment` is not reset on session switch (so picked assets should persist identically). Now revising the plan.
+Plan revised: verified all server assumptions in code (ownership check `chat.ts:40`, cross-user test, status enum, list endpoint not filtering status — so the disable guard is real), moved resolved questions into the plan, kept two non-blocking open questions (composer UX placement; pick-vs-upload race policy), and queued a comment on #51 with the findings and the race-policy question.
+
+----- end plan-review -----
+[19:21:53] phase plan-review: no parsable JSON verdict; one retry with schema
+----- phase plan-review -----
+Verified the plan's server-side and client-side claims against the code — all accurate. Now revising the plan: converting the two "open questions" into concrete deterministic decisions (so no task depends on an open question), and pinning down test file details.
+Plan revised: re-verified the server claims (ownership-scoped `loadAttachedAsset` on both POST routes, existing cross-user test, `['pending','ready','failed']` status enum with no list filter), converted the two former open questions into concrete decisions (pick/upload race rule: ignore the pick while `uploading`, mark consumed; composer "Browse library" beside the attach button), and pinned test details to real files (new `AssetLibrary.test.tsx`, additions in `ChatWindow.features.test.tsx`). No blocking open questions remain, so no `iteration queue-comment` needed; nothing committed.
+{}
+
+{documentPreferences: {depth: "medium", length: "medium"}}
+
+----- end plan-review -----
+[19:23:38] Committed and pushed plan updates
+[19:23:38] Dirty worktree; skipping implement phase
+[19:23:38] phase: critic

@@ -1,0 +1,13 @@
+[10:49:20] Starting iteration harness on alex-moon/tova (priority: none, once: false)
+[10:49:20] gh-api: GET /repos/{owner}/{repo}/issues
+[10:49:21] gh-api: GET /repos/{owner}/{repo}/issues/{issue_number}/comments
+[10:49:21] gh-api: GET /repos/{owner}/{repo}/issues/{issue_number}/comments
+[10:49:21] gh-api: GET /repos/{owner}/{repo}/issues/{issue_number}/comments
+[10:49:21] gh-api: GET /repos/{owner}/{repo}/issues/{issue_number}/comments
+[10:49:21] gh-api: GET /repos/{owner}/{repo}/issues/{issue_number}/comments
+[10:49:21] gh-api: GET /repos/{owner}/{repo}/issues/{issue_number}/comments
+[10:49:21] gh-api: GET /repos/{owner}/{repo}/issues/{issue_number}/comments
+[10:49:21] ticket cache refreshed: 7 open issues
+[10:49:21] gh-api: GET /repos/{owner}/{repo}/pulls
+[10:49:21] Snapshot gathered: 7 open issues, 0 open PRs at 2026-09-15T09:49:21.783Z
+[10:49:21] phase: triage-tickets

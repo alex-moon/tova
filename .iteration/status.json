@@ -1,0 +1,13 @@
+{
+  "updatedAt": "2026-09-15T18:23:38.403Z",
+  "phase": "critic",
+  "mode": "running",
+  "strikes": null,
+  "repo": "alex-moon/tova",
+  "ticket": {
+    "number": 51,
+    "title": "Asset library: attach an existing uploaded asset to a chat message without re-uploading",
+    "branch": "feat/51-asset-library",
+    "pr": null
+  }
+}
