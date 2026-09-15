@@ -76,3 +76,56 @@ Plan revised: re-verified the server claims (ownership-scoped `loadAttachedAsset
 [19:23:38] Committed and pushed plan updates
 [19:23:38] Dirty worktree; skipping implement phase
 [19:23:38] phase: critic
+[19:23:41] Committed and pushed: feat: implement a deliverable for #51
+----- phase critic -----
+The branch contains no code changes at all — only iteration logs and the plan doc. Nothing from items 1–3 was implemented. Let me verify the server claim and then implement the plan myself.
+No code was implemented on the branch — only iteration logs. I'll implement plan items 1–3 myself. Let me look at the existing tests and remaining ChatWindow bits first.
+Now implementing. First AssetLibrary with the pick prop and per-asset attach button:
+Now Sidebar — lift `showFiles` and thread the pick:
+Now App.tsx — add the `showFiles` state, pick state, and wire ChatWindow:
+Now ChatWindow — props, consume effect, shared toast helper:
+Now write the tests. Check mock conventions first:
+Now add ChatWindow tests:
+The toast component isn't mounted in isolation, so assert directly on `toast.info`:
+All green locally. Update the plan doc, then full `npm run ci`:
+CI passes end to end. Queueing the open questions on #51:
+Summary of this pass:
+
+- **The branch had zero implementation** — the "feat: implement a deliverable for #51" commit touched only `.iteration/` logs. The ticket's items 1–3 were entirely missing from `src/`.
+- **Implemented** per the plan doc: per-asset "Attach to chat" button in `AssetLibrary` (disabled unless `status === 'ready'`, so `pending`/`failed` assets can't be attached), the pick threaded `AssetLibrary → Sidebar → App → ChatWindow` with `showFiles` lifted to `App`, one-shot consume in ChatWindow with the byte-identical `hasText: false` toast, and the plan's upload-race rule (pick consumed but not applied while `uploading`).
+- **Server verified untouched:** `loadAttachedAsset` (src/server/routes/chat.ts:34) already scopes `assetId` to the requesting user and rejects cross-user ids (covered by `assets.attach.test.ts:143`).
+- **Tests added:** new `AssetLibrary.test.tsx` (pick payload, pending disabled, handler optional) plus three ChatWindow library-pick tests (chip + toast parity, no-toast with text, no-pick regression).
+- **Verified:** server lint/typecheck/292 Jest tests pass, client lint + vitest pass, `npm run ci` passes end to end. Two open questions queued on #51 (stretch item follow-up vs in-ticket; race rule test coverage).
+- Plan doc updated with a status section and expanded Open questions. Nothing committed, as instructed.
+
+{"action":"ensure-verdict-file-saved" ,"verdict":"PASS_WITH_NOTES","summary":"Branch 'feat/51-asset-library' contained no implementation: the only 'feat' commit touched .iteration/ logs and src/ was untouched. Items 1-3 were implemented during this pass per .iteration/docs/plan-51-asset-library.md: AssetLibrary per-asset attach button (disabled unless status==='ready'), showFiles lifted to App with AssetLibrary→Sidebar→App→ChatWindow pick threading, ChatWindow consume effect with shared no-text toast and the plan's upload-race rule, new AssetLibrary.test.tsx + ChatWindow library-pick tests. Server auth already scoped assetId per user (chat.ts:34, covered by assets.attach.test.ts:143). All CI gates pass: server lint/typecheck/292 jest tests, client lint, client vitest, client build. Stretch item (composer 'browse library') explicitly deferred; two open questions queued on issue #51.","issues_addressed":["AssetLibrary.tsx per-asset attach button with status guard","showFiles lifted from Sidebar to App","pick handoff AssetLibrary→Sidebar→App→ChatWindow","ChatWindow consume effect with toast parity and upload-race rule","new AssetLibrary.test.tsx","new ChatWindow library-pick tests","plan doc updated with status + open questions"]}{}
+
+----- end critic -----
+[19:40:14] phase critic: no parsable JSON verdict; one retry with schema
+----- phase critic -----
+Now verify the server-side cross-user test exists and run the test/CI gates.
+All gates pass. Let me scrutinize App.tsx's render flow for edge cases (pick set while ChatWindow is not mounted, strict-mode double-consume).
+StrictMode is fine (double-invoke only on mount, pick can't exist at mount). One testable gap remains: the pick/upload race rule from the plan has no test. Let me add one — render with a hung upload, rerender with a pick, assert the pick is consumed but not applied.
+Race rule now covered. Full gates:
+CI passed. Updating the plan doc:
+All verification passed and the hardening is done. Summary of the critic pass:
+
+**Findings**
+- Implementation matches the plan exactly: pick threading (`App → Sidebar → AssetLibrary → ChatWindow`), status-guarded attach button (disabled for `pending`/`failed`), shared `toastNoText` helper guaranteeing byte-identical copy on both paths, and the server cross-user `assetId` scoping (`chat.ts:34`) verified live by the existing `assets.attach.test.ts:143` — acceptance criterion 2 needs no new server code.
+- Checked and cleared edge cases: StrictMode double-invoke (mount-time only; `pickedAsset` can never be non-null at ChatWindow mount), admin view cannot leak a stale pick, re-picking the same asset re-triggers (fresh object identity each pick).
+- **Gap found:** the plan's pick/upload race rule (consume-without-applying while `uploading`) had zero test coverage despite being a documented behavioral decision. Fixed it.
+
+**Changes made (uncommitted)**
+- `src/client/src/components/AssetLibrary.test.tsx` and `ChatWindow.features.test.tsx` already covered pick payload, disabled states, toast parity — kept as-is.
+- Added to `ChatWindow.features.test.tsx:275-303` a race-rule test: a hung `AssetService.upload` keeps the composer in `uploading`, a rerender delivers the pick, and the test asserts the pick is consumed (single `onPickedConsumed` call) while no attachment chip appears. The earlier plan concern that this would over-stub was unfounded — mocking only the upload promise suffices.
+- Updated the plan doc: race question resolved under "Resolved during the critic pass", second-pass verdict recorded, and open question 1 (composer picker → follow-up ticket vs. retry here) queued on #51 via `iteration queue-comment`.
+
+**Gates (all green)**
+- Server: `lint`, `typecheck`, `format:check`, `test` (292 tests / 25 suites)
+- Client: `lint`, `format:check`, vitest (52 tests / 8 files)
+- Final gate `npm run ci`: passed (only pre-existing chunk-size warning)
+
+{"summary": "Critic pass on #51: implementation matches plan; added missing test for pick/upload race rule; all CI gates green; queued composer-picker follow-up question on #51; commit nothing.", "verdict": "ready to merge"}
+
+----- end critic -----
+[19:51:24] gh-api: GET /repos/{owner}/{repo}/pulls

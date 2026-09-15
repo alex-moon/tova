@@ -26,6 +26,8 @@ interface ChatWindowProps {
   isLoading: boolean;
   onOpenSidebar: () => void;
   onFeedback?: (messageId: string, value: 'up' | 'down' | null) => void;
+  incomingAsset?: { id: string; filename: string; hasText: boolean } | null;
+  onPickedConsumed?: () => void;
 }
 
 const PLACEHOLDERS = [
@@ -258,6 +260,8 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
   isLoading,
   onOpenSidebar,
   onFeedback,
+  incomingAsset,
+  onPickedConsumed,
 }) => {
   const [input, setInput] = useState('');
   const [placeholder] = useState(pickPlaceholder);
@@ -273,6 +277,11 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
   // scrolling up releases the pin, sending/deltas restore it (#33 item 3).
   const pinnedRef = React.useRef(true);
   const [pendingFeedbackId, setPendingFeedbackId] = useState<string | null>(null);
+
+  // Issue #51: byte-identical toast for both attach paths (fresh upload and
+  // library pick) — a shared helper so the copy can't drift.
+  const toastNoText = () =>
+    toast.info('No text could be extracted from this file type — Tova will see the filename only.');
 
   const handleScroll = () => {
     const el = scrollRef.current;
@@ -344,17 +353,29 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
     try {
       const asset = await AssetService.upload(file);
       setAttachment({ id: asset.id, filename: asset.filename });
-      if (!asset.hasText) {
-        toast.info(
-          'No text could be extracted from this file type — Tova will see the filename only.',
-        );
-      }
+      if (!asset.hasText) toastNoText();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Upload failed');
     } finally {
       setUploading(false);
     }
   };
+
+  // Library pick (issue #51): the pick carries { id, filename, hasText }; it
+  // becomes the same in-memory attachment shape as a fresh upload. The pick is
+  // consumed exactly once (so re-picking the same asset re-triggers later). If
+  // an upload is in flight, the pick is consumed without applying — the
+  // in-flight upload wins and would otherwise silently overwrite the pick.
+  React.useEffect(() => {
+    if (!incomingAsset) return;
+    if (!uploading) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setAttachment({ id: incomingAsset.id, filename: incomingAsset.filename });
+      if (!incomingAsset.hasText) toastNoText();
+    }
+    onPickedConsumed?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [incomingAsset]);
 
   return (
     <section className="flex min-w-0 flex-1 flex-col overflow-hidden">

@@ -58,6 +58,15 @@ function App() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [isChatLoading, setIsChatLoading] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  // Files overlay + asset pick (issue #51): App owns both ends of the
+  // handoff so the library (in the Sidebar) can close itself and the
+  // composer (ChatWindow) can consume the pick.
+  const [showFiles, setShowFiles] = useState(false);
+  const [pickedAsset, setPickedAsset] = useState<{
+    id: string;
+    filename: string;
+    hasText: boolean;
+  } | null>(null);
   const streamingRef = useRef(false);
 
   const fetchSessions = useCallback(async () => {
@@ -332,6 +341,13 @@ function App() {
             onNewChat={handleNewChat}
             onDeleteSession={handleDeleteSession}
             onClose={() => setSidebarOpen(false)}
+            showFiles={showFiles}
+            onToggleFiles={setShowFiles}
+            onPickAsset={(asset) => {
+              setPickedAsset({ id: asset.id, filename: asset.filename, hasText: asset.hasText });
+              setShowFiles(false);
+              setSidebarOpen(false);
+            }}
           />
           <ChatWindow
             messages={messages}
@@ -339,6 +355,8 @@ function App() {
             isLoading={isChatLoading}
             onOpenSidebar={() => setSidebarOpen(true)}
             onFeedback={handleFeedback}
+            incomingAsset={pickedAsset}
+            onPickedConsumed={() => setPickedAsset(null)}
           />
         </>
       )}

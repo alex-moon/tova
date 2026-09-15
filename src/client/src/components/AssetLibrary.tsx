@@ -5,6 +5,7 @@ import {
   FileSpreadsheet,
   FileText,
   Loader2,
+  Paperclip,
   Trash2,
   Upload,
   X,
@@ -41,9 +42,12 @@ const IconFor: React.FC<{ contentType: string; filename: string }> = ({
 
 interface AssetLibraryProps {
   onClose: () => void;
+  // Issue #51: hands a library asset back to the composer without re-uploading
+  // bytes. Optional so the library works standalone (Sidebar render).
+  onPickAsset?: (asset: AssetSummary) => void;
 }
 
-const AssetLibrary: React.FC<AssetLibraryProps> = ({ onClose }) => {
+const AssetLibrary: React.FC<AssetLibraryProps> = ({ onClose, onPickAsset }) => {
   const [assets, setAssets] = useState<AssetSummary[]>([]);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -169,6 +173,23 @@ const AssetLibrary: React.FC<AssetLibraryProps> = ({ onClose }) => {
                         {formatSize(asset.size)} · {new Date(asset.createdAt).toLocaleDateString()}
                       </span>
                     </span>
+                    {onPickAsset && (
+                      <button
+                        type="button"
+                        title={
+                          asset.status === 'ready'
+                            ? 'Attach to chat'
+                            : 'This file is not ready to attach'
+                        }
+                        aria-label={`Attach ${asset.filename} to chat`}
+                        disabled={asset.status !== 'ready' || deletingId === asset.id}
+                        data-testid="asset-attach"
+                        onClick={() => onPickAsset(asset)}
+                        className="shrink-0 rounded p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        <Paperclip className="size-4" />
+                      </button>
+                    )}
                     <button
                       type="button"
                       title="Download"

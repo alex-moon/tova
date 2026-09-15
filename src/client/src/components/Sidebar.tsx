@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import ThemeToggle from './ThemeToggle';
 import ProfileModal from './ProfileModal';
 import AssetLibrary from './AssetLibrary';
+import type { AssetSummary } from '@/services/assets';
 import { cn } from '@/lib/utils';
 import { useAuth } from '../hooks/useAuth';
 
@@ -30,6 +31,12 @@ interface SidebarProps {
   onNewChat: () => void;
   onDeleteSession: (id: string) => void;
   onClose: () => void;
+  // Files overlay state is owned by App (issue #51): picking an asset from
+  // the library has to close the overlay and reach the composer, both of
+  // which live above this component.
+  showFiles: boolean;
+  onToggleFiles: (open: boolean) => void;
+  onPickAsset?: (asset: AssetSummary) => void;
 }
 
 const Sidebar: React.FC<SidebarProps> = ({
@@ -40,15 +47,17 @@ const Sidebar: React.FC<SidebarProps> = ({
   onNewChat,
   onDeleteSession,
   onClose,
+  showFiles,
+  onToggleFiles,
+  onPickAsset,
 }) => {
   const { user, logout } = useAuth();
   const [profileOpen, setProfileOpen] = useState(false);
-  const [showFiles, setShowFiles] = useState(false);
 
   return (
     <>
       {open && <div className="fixed inset-0 z-30 bg-black/50 md:hidden" onClick={onClose} />}
-      {showFiles && <AssetLibrary onClose={() => setShowFiles(false)} />}
+      {showFiles && <AssetLibrary onClose={() => onToggleFiles(false)} onPickAsset={onPickAsset} />}
       <nav
         className={cn(
           'fixed inset-y-0 left-0 z-40 flex h-full w-(--sidebar-width) shrink-0 flex-col border-r border-border bg-sidebar transition-transform md:static md:translate-x-0',
@@ -75,7 +84,7 @@ const Sidebar: React.FC<SidebarProps> = ({
             <Plus />
             New Chat
           </Button>
-          <Button variant="ghost" className="mt-1 w-full" onClick={() => setShowFiles(true)}>
+          <Button variant="ghost" className="mt-1 w-full" onClick={() => onToggleFiles(true)}>
             <Files />
             Files
           </Button>

@@ -98,11 +98,11 @@ Client:
      `status !== 'ready'` (aria-disabled + disabled styling consistent with the file's buttons).
 2. **[client] Consume the pick in ChatWindow.**
    - New prop `incomingAsset`; consumer effect: on a non-null pick, `setAttachment({ id, filename })`,
-      fires the byte-identical `toast.info` when `hasText` is false, then resets the pick in `App`
-      (via an `onPickConsumed` callback or a one-shot state clear in `App` after ChatWindow
-      acknowledges) so re-picking the same asset later re-triggers the effect. Skip the
-      `setAttachment` and toast when `uploading === true` (see Decisions race rule); still mark
-      the pick consumed.
+     fires the byte-identical `toast.info` when `hasText` is false, then resets the pick in `App`
+     (via an `onPickConsumed` callback or a one-shot state clear in `App` after ChatWindow
+     acknowledges) so re-picking the same asset later re-triggers the effect. Skip the
+     `setAttachment` and toast when `uploading === true` (see Decisions race rule); still mark
+     the pick consumed.
    - Confirm no regression: run ChatWindow tests (`picker flow` untouched; `setAttachment(null)`
      paths — send and Remove chip — still work with a pick-sourced attachment, which is the same
      state shape).
@@ -121,7 +121,7 @@ Client:
      in the ChatWindow composer; on click, if `AssetLibrary` (already a standalone modal taking
      only `onClose`) mounts and lists assets cleanly when rendered from ChatWindow (verify by
      importing it in a test render), wire it with `onPickAsset = (a) =>
-     onPickedFromLibrary({ id, filename, hasText })` sharing the same consume logic as item 2;
+onPickedFromLibrary({ id, filename, hasText })` sharing the same consume logic as item 2;
      close the modal on pick / Cancel / X.
    - **Bail-out rule (from the ticket):** if this costs more than half the remaining ticket
      effort (e.g. mounting AssetLibrary standalone needs non-trivial refactor of Sidebar-owned
@@ -137,6 +137,66 @@ auth/scoping + existing cross-user test, asset status enum) or converted into an
 decision above (pick/upload race rule, composer picker placement). If the stretch item (list
 item 4) survives its bail-out rule and AssetLibrary proves not to mount standalone without a
 refactor, that becomes a new follow-up ticket rather than an open question here.
+
+## Status (2026-09-15, critic pass)
+
+Items 1–3 are implemented on `feat/51-asset-library` (the earlier "feat: implement a
+deliverable for #51" commit contained only `.iteration/` logs — no code; this pass delivered
+the code):
+
+- `AssetLibrary.tsx`: optional `onPickAsset` prop + per-asset paperclip button, disabled unless
+  `status === 'ready'` (deletion-in-flight also disables).
+- `Sidebar.tsx`: `showFiles`/`onToggleFiles` lifted to `App`; forwards `onPickAsset`.
+- `App.tsx`: owns `showFiles` and `pickedAsset`; a pick sets the asset, closes the library and
+  the mobile drawer; hands `incomingAsset`/`onPickedConsumed` to ChatWindow.
+- `ChatWindow.tsx`: consume effect applying the pick to the same `attachment` shape, shared
+  `toastNoText` helper (byte-identical copy for both paths), upload-race rule per Decisions.
+- Tests: new `AssetLibrary.test.tsx` (pick payload, pending-disabled, handler-optional) and
+  ChatWindow feature tests (chip + toast parity with/without `hasText`, no-pick regression).
+- Server: no changes; existing cross-user guard `chat.ts:34` + `assets.attach.test.ts:143`
+  cover acceptance criterion 2.
+
+Verified: server lint/typecheck/tests, client lint/vitest all pass at time of writing;
+`npm run ci` run as final gate.
+
+**Deferred (follow-up ticket territory — item 4 bail-out):** the composer-side "browse
+library" picker. Rather than bail mid-way it was skipped entirely; the library→composer path
+satisfies all acceptance criteria on its own.
+
+## Open questions (updated)
+
+1. Should the stretch item 4 (composer "pick from library" button) be spun into a follow-up
+   ticket, or re-attempted on this ticket while it is still open? The library→composer handoff
+   alone meets all acceptance criteria, so the PR does not depend on it.
+   → Queued on #51 for the orchestrator.
+
+### Resolved during the critic pass
+
+- 2. The pick/upload race rule (consume without applying while `uploading`) — now covered by an
+     automated test in `ChatWindow.features.test.tsx` ("consumes a pick without applying it while
+     an upload is in flight"): a hung `AssetService.upload` keeps `uploading` true, a rerender
+     delivers the pick, and the test asserts the pick is consumed (`onPickedConsumed` called once)
+     while no attachment chip appears. Earlier concern about over-stubbing was unfounded —
+     mocking only the upload promise is enough.
+
+## Status (2026-09-15, second critic pass)
+
+All gates re-run green after the hardening test was added: server lint/typecheck/tests
+(292 tests, 25 suites), client lint, client vitest (52 tests), `npm run ci` as final gate.
+
+Verdict on the delivered code beyond the race test:
+
+- Threading (`App → Sidebar → AssetLibrary → ChatWindow`) matches the plan exactly; `showFiles`
+  lifted to `App` and consumed via `onToggleFiles`, pick closes both the library and the mobile
+  drawer (`App.tsx:344-350`).
+- Toast copy is shared via `toastNoText` in `ChatWindow.tsx:283` — the fresh-upload path (":357")
+  and the pick path (":374") cannot drift.
+- Admin screen cannot leave a stale pick behind: the library is only rendered through the
+  Sidebar, which is unmounted in admin view, and a pick always lands on a mounted ChatWindow
+  (`App.tsx:304-361`); StrictMode double-invoke is mount-time only and `pickedAsset` can never
+  be non-null at ChatWindow mount.
+- Server acceptance criterion 2 confirmed live: `chat.ts:34` scoping + `assets.attach.test.ts:143`
+  cross-user rejection both present and passing.
 
 ## Out of scope
 
