@@ -34,10 +34,15 @@ describe('buildSystemContent / envelope-based profile data (issue #35, PR #46 re
     expect(content).toContain('<user:custom_instructions>\nBe terse.\n</user:custom_instructions>');
   });
 
-  it('stays byte-identical to the global prompt when no profile data exists', () => {
+  it('rides the server-rendered date line even when no profile data exists (issue #52)', () => {
+    const content = buildSystemContent(null);
+    expect(content).toMatch(/Today's date is \d{4}-\d{2}-\d{2} \(UTC\)\./);
+  });
+
+  it('keeps the global prompt itself unchanged with no profile data', () => {
     const resolved = resolveSystemPrompt();
-    expect(buildSystemContent(userWith({}))).toBe(resolved);
-    expect(buildSystemContent(null)).toBe(resolved);
+    expect(buildSystemContent(userWith({})).startsWith(resolved)).toBe(true);
+    expect(buildSystemContent(null).startsWith(resolved)).toBe(true);
   });
 
   it('escapes a forged closing tag inside user data', () => {

@@ -1,4 +1,4 @@
-import { groqConnector, deepinfraConnector } from './mastraService';
+import { groqConnector, deepinfraConnector, currentDatetimeTool } from './mastraService';
 
 /*
  * Tests the Mastra→neutral mapping boundary directly. All transport is
@@ -68,12 +68,15 @@ describe('Mastra service neutral mapping', () => {
     it('builds an agent aimed at the provider router id', async () => {
       mockGenerate.mockResolvedValueOnce({ text: 'x' });
       await groqConnector.createCompletion({ model: 'm', messages: [] });
-      expect(agentCtor.mock.calls[0][0]).toEqual({
+      const config = agentCtor.mock.calls[0][0];
+      expect(config).toEqual({
         id: 'tova-groq',
         name: 'tova-groq',
-        instructions: '',
+        instructions: expect.stringContaining('current_datetime'),
         model: 'groq/m',
+        tools: expect.objectContaining({ current_datetime: expect.anything() }),
       });
+      expect(config.tools?.web_search).toBeUndefined();
     });
 
     it('keeps slash-containing model ids intact after the provider prefix', async () => {
@@ -99,7 +102,7 @@ describe('Mastra service neutral mapping', () => {
       expect(mockGenerate.mock.calls[0][1]).toMatchObject({ abortSignal: controller.signal });
     });
 
-    it('forwards temperature and max_tokens as model settings and caps maxSteps at 1', async () => {
+    it('forwards temperature and max_tokens as model settings and allows the tool loop', async () => {
       mockGenerate.mockResolvedValueOnce({ text: 'x' });
       await groqConnector.createCompletion({
         model: 'm',
@@ -110,7 +113,7 @@ describe('Mastra service neutral mapping', () => {
       expect(mockGenerate).toHaveBeenCalledWith(
         [{ role: 'user', content: 'q' }],
         expect.objectContaining({
-          maxSteps: 1,
+          maxSteps: 4,
           modelSettings: { temperature: 0, maxOutputTokens: 10 },
         }),
       );
@@ -120,7 +123,7 @@ describe('Mastra service neutral mapping', () => {
       mockGenerate.mockResolvedValueOnce({ text: 'x' });
       await groqConnector.createCompletion({ model: 'm', messages: [] });
       expect(mockGenerate.mock.calls[0][1]).toEqual({
-        maxSteps: 1,
+        maxSteps: 4,
         modelSettings: {},
       });
     });
@@ -258,12 +261,15 @@ describe('Mastra service neutral mapping', () => {
     it('builds an agent aimed at the provider router id for streaming', async () => {
       mockStream.mockResolvedValueOnce({ fullStream: fullStreamFrom([]) });
       await deepinfraConnector.createStreamingCompletion({ model: 'm', messages: [] });
-      expect(agentCtor.mock.calls[0][0]).toEqual({
+      const config = agentCtor.mock.calls[0][0];
+      expect(config).toEqual({
         id: 'tova-deepinfra',
         name: 'tova-deepinfra',
-        instructions: '',
+        instructions: expect.stringContaining('current_datetime'),
         model: 'deepinfra/m',
+        tools: expect.objectContaining({ current_datetime: expect.anything() }),
       });
+      expect(config.tools?.web_search).toBeUndefined();
     });
 
     it('forwards an abort signal into the streaming call options when supplied', async () => {
@@ -275,6 +281,25 @@ describe('Mastra service neutral mapping', () => {
         abortSignal: controller.signal,
       });
       expect(mockStream.mock.calls[0][1]).toMatchObject({ abortSignal: controller.signal });
+    });
+  });
+
+  describe('current_datetime tool (issue #52)', () => {
+    it('returns a parseable ISO UTC timestamp within a sane skew, with a null offset', async () => {
+      const result = (await currentDatetimeTool.execute?.(
+        {},
+        { observe: { span: jest.fn(), log: jest.fn() } },
+      )) as unknown as { utc: string; timezoneOffsetMinutes: number | null };
+      const parsed = new Date(result.utc);
+      expect(result.timezoneOffsetMinutes).toBeNull();
+      expect(Number.isFinite(parsed.getTime())).toBe(true);
+      // ISO 8601 with the Z designator: UTC, never a shifted local instant
+      expect(result.utc).toMatch(/Z$/);
+      expect(Math.abs(parsed.getTime() - Date.now())).toBeLessThanOrEqual(5000);
+    });
+
+    it('stays key-free: the built-in tool rides no external service', () => {
+      expect(currentDatetimeTool.id).toBe('current_datetime');
     });
   });
 
@@ -292,6 +317,7 @@ describe('Mastra service neutral mapping', () => {
       await groqConnector.createCompletion({ model: 'm', messages: [] });
       const config = agentCtor.mock.calls[agentCtor.mock.calls.length - 1][0];
       expect(config.instructions).toContain('web_search');
+      expect(config.tools?.current_datetime?.id).toBe('current_datetime');
       const tool = config.tools?.web_search as {
         id?: string;
         inputSchema?: unknown;
