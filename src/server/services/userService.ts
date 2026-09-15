@@ -16,6 +16,14 @@ export const toAuthUser = (user: UserDocument): AuthUser => {
   if (user.preferredName) payload.preferredName = user.preferredName;
   if (user.settings?.customInstructions)
     payload.customInstructions = user.settings.customInstructions;
+  // Country-level geolocation (#50) rides only once resolved; no timestamp
+  // is exposed — route consumers never need it and the "remove my location"
+  // follow-up can pick it up if it turns out to want it.
+  if (user.location?.country && user.location.countryCode)
+    payload.location = {
+      country: user.location.country,
+      countryCode: user.location.countryCode,
+    };
   return payload;
 };
 

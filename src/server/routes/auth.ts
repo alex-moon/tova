@@ -7,6 +7,7 @@ import { LoginUserPayload } from '../../shared/contracts';
 import { getJwtSecret } from '../config/jwt';
 import { loginSchema, registerSchema } from '../validation';
 import { authenticate, AuthRequest } from '../middleware/auth';
+import { ensureUserLocation } from '../services/geoLocationService';
 
 const router = express.Router();
 
@@ -248,6 +249,9 @@ router.get('/me', authenticate, async (req: AuthRequest, res) => {
       res.clearCookie('token');
       return res.status(401).json({ message: 'User no longer exists' });
     }
+    // Coarse geolocation (#50): resolves at most once per user per week and
+    // never throws; fresh or cooldown-suppressed calls return immediately.
+    await ensureUserLocation(user, req.ip);
     const userPayload = toAuthUser(user);
     res.json({ user: userPayload });
   } catch (_err) {

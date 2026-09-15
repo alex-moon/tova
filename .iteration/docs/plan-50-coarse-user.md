@@ -5,7 +5,7 @@ Branch: `feat/50-coarse-user`
 ## Motivation
 
 The server knows nothing about where a user is, so locale/timezone/weather/"near me"
-questions go unanswered. Issue #50 asks for *coarse*, country-level geolocation only,
+questions go unanswered. Issue #50 asks for _coarse_, country-level geolocation only,
 resolved from the request IP on authenticated requests, cached on the user document,
 and surfaced both in the chat system context and `GET /api/auth/me`. Explicit
 non-goals: city/postal precision, geofencing, consent UI beyond a "remove my location"
@@ -41,7 +41,7 @@ affordance (follow-up), and any frontend use beyond display.
   `src/shared/contracts.ts`.
 - System context: `profileContextBlock` in `src/server/services/promptAssembly.ts`
   builds namespace-tagged envelopes (`buildUserEnvelope`); note its `Pick<UserDocument,
-  ...>` signature must grow `location` too. `buildSystemContent` composes the blocks.
+...>` signature must grow `location` too. `buildSystemContent` composes the blocks.
 - Middleware: `authenticate` (`src/server/middleware/auth.ts`) provides `req.user.id`.
 - Proxy topology (verified from `src/client/nginx.conf` and deploy history):
   user → host nginx (`/opt/ajmoon/nginx/ajmoon.conf`, outside the repo) →
@@ -80,7 +80,7 @@ affordance (follow-up), and any frontend use beyond display.
        success is Mongo's job. Write-only growth of one entry per user is fine at
        this scale; note it.
      - Persist via `User.updateOne({ _id }, { $set: { location: { country,
-       countryCode, resolvedAt } } })` — `$set` only, never writes city-like data;
+countryCode, resolvedAt } } })` — `$set` only, never writes city-like data;
        countryCode persisted verbatim from the provider (uppercase-normalized).
    - Export the fetch handle resolution through `global.fetch` only; tests stub it.
 3. **Wire-up: IP acquisition + trust proxy + call sites**
@@ -108,7 +108,7 @@ affordance (follow-up), and any frontend use beyond display.
 4. **Chat context injection**
    - `profileContextBlock`: add `location` to the Pick; when `user.location?.country`
      exists, emit `buildUserEnvelope({ tagName: 'user:location', intro: ...,
-     content: 'User is in <Country> (<CC>)' })`. Intro wording: instruct the model
+content: 'User is in <Country> (<CC>)' })`. Intro wording: instruct the model
      that this is coarse, may be stale, and to use it only for locale-flavored
      answers ("near me", weather, currency).
    - No envelope line at all when location is absent — no "location unknown" noise.
@@ -127,6 +127,46 @@ affordance (follow-up), and any frontend use beyond display.
    `npm --prefix src/client run lint`, `npm run ci`; update this plan; open the PR
    with the XFF header note and the ip-api HTTP-only note; archive plan on merge.
 
+## Delivered (critic pass, 2026-09-15)
+
+- Prior commit on this branch shipped **no source code** (only `.iteration` logs);
+  the whole feature was built from scratch in the critic pass.
+- `src/server/services/geoLocationService.ts`: `isPrivateIp`,
+  `resolveCountry` (country.is → ip-api, 2s timeout each, shape-validated, never
+  throws), `ensureUserLocation` (7-day freshness, in-process 1h failure
+  cooldown, `$set`-only persist, resolves in place on the passed document).
+  Extras hardened beyond the plan: IPv4-mapped IPv6 checks the embedded v4
+  address; CGNAT `100.64/10` and `0.0.0.0/8` treated as non-resolvable;
+  country.is answer must echo back the requested IP; 2-letter codes
+  normalized to uppercase at the boundary regardless of provider case.
+- Model `location` subdocument (+`UserLocation` type), `AuthUser.location`
+  contract, `toAuthUser` projection (never exposes `resolvedAt`).
+- `/api/auth/me`: awaited `ensureUserLocation`. Chat routes (`POST /api/chat`
+  - `/api/chat/stream`): **awaited** (plan said fire-and-forget — revised,
+    see decision below) so the same turn's prompt deterministically includes
+    the country from the freshly-resolved document.
+- `promptAssembly.ts`: `user:location` envelope (`User is in <Country>
+(<CC>)`) under the contextual-info intro, coarse/may-be-wrong wording, no
+  envelope at all when unresolved; `RELEVANCE_RULE` covers it.
+- `index.ts`: `app.set('trust proxy', TRUST_PROXY_HOPS)` (default 1, only in
+  production paths that matter — hop count is deploy config; spoofing trade
+  remains open question 1).
+- Tests: 20-case `geoLocationService.test.ts`, promptAssembly location cases,
+  `auth.contracts` wire test (location present with exactly
+  `{country, countryCode}`, absent otherwise, `resolvedAt` never exposed).
+  Critic-pass additions worth noting: router `data.ip !== ip` echo check,
+  IPv4-mapped-IPv6, 172.32.0.1 boundary here / 172.16 boundary there,
+  case-normalization of lowercase provider codes.
+
+### Decision revision (from the plan)
+
+- Chat wiring is **awaited**, not fire-and-forget. Fire-and-forget could not
+  satisfy the acceptance criterion "Location appears in chat context" (the
+  prompt race would be nondeterministic) and awaiting is bounded anyway:
+  fresh/cooldown hits return in microseconds; the provider path costs ≤4s
+  only once per user per 7 days (plus 1h after outages), and the service
+  never throws, so chat cannot break on it.
+
 ## Open questions
 
 1. **`trust proxy` hop count vs the plan-32 anti-spoofing stance.** live topology is
@@ -140,5 +180,12 @@ affordance (follow-up), and any frontend use beyond display.
    missing" is silent on failures; never retrying makes a transient outage permanent
    for a user. Proposed: no Mongo write on failure + in-process 1h cooldown. Any
    owner preference (shorter/longer, or fail-forever) only changes a constant.
+3. **Chat resolution is awaited — latency tradeoff sign-off.** The first
+   authenticated request per user per week can take ≤~4s extra while both
+   providers are consulted (bounded by two 2s timeouts). Rejected the plan's
+   fire-and-forget wiring: the prompt race made "location appears in chat
+   context" nondeterministic. Alternatives if the owner prefers zero added
+   latency: resolve only from `/api/auth/me` (the client calls it on load)
+   and fire-and-forget in chat — costs one turn's delay. Owner call.
 
 {}

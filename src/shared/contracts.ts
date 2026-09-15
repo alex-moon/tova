@@ -30,6 +30,13 @@ export interface AdminModel {
   stats: { band: string; up: number; down: number }[];
 }
 
+// `location` is the coarse country-level geolocation (issue #50): only the
+// country name and 2-letter code are exposed, and only once resolved.
+export interface AuthUserLocation {
+  country: string;
+  countryCode: string;
+}
+
 // User payload returned by GET /api/auth/me (includes permissions).
 // `name`/`avatarUrl`/`customInstructions` are optional: omitted from the wire
 // payload until set. `name` is the Google-owned full name; `preferredName`
@@ -43,6 +50,7 @@ export interface AuthUser {
   avatarUrl?: string;
   preferredName?: string;
   customInstructions?: string;
+  location?: AuthUserLocation;
 }
 
 // User payload returned by POST /api/auth/login and /register.
