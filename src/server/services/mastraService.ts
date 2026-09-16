@@ -38,9 +38,9 @@ export const mastra = new Mastra({
     ? {
         observability: new Observability({
           configs: {
-            langsmith: {
+            default: {
               serviceName: 'tova',
-              exporters: [new LangSmithExporter({ apiKey: langsmithKey })],
+              exporters: [new LangSmithExporter({ apiKey: langsmithKey, projectName: 'tova-dev' })],
             },
           },
         }),
