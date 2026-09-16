@@ -3,6 +3,7 @@ import {
   COOKIE_NAME,
   STORAGE_KEY,
   applyTheme,
+  applyUserTheme,
   persistTheme,
   readStoredTheme,
   resolveTheme,
@@ -124,5 +125,30 @@ describe('blocked storage', () => {
     });
     persistTheme('dark');
     expect(document.cookie).toContain(`${COOKIE_NAME}=dark`);
+  });
+});
+
+describe('applyUserTheme (issue #53)', () => {
+  it('applies and mirrors a saved user preference, overriding device storage', () => {
+    localStorage.setItem(STORAGE_KEY, 'light');
+    applyUserTheme('dark');
+    expect(localStorage.getItem(STORAGE_KEY)).toBe('dark');
+    expect(document.cookie).toContain(`${COOKIE_NAME}=dark`);
+    expect(document.documentElement).toHaveClass('dark');
+  });
+
+  it('does nothing (and keeps the device behaviour) with no saved preference', () => {
+    localStorage.setItem(STORAGE_KEY, 'light');
+    applyUserTheme(undefined);
+    expect(localStorage.getItem(STORAGE_KEY)).toBe('light');
+    expect(document.documentElement).toHaveClass('light');
+    expect(document.documentElement).not.toHaveClass('dark');
+  });
+
+  it('ignores values outside the wire enum', () => {
+    applyUserTheme('midnight');
+    expect(localStorage.getItem(STORAGE_KEY)).toBeNull();
+    expect(document.documentElement).not.toHaveClass('dark');
+    expect(document.documentElement).not.toHaveClass('light');
   });
 });

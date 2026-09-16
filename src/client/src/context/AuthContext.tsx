@@ -1,5 +1,6 @@
 import React, { createContext, useState, useEffect } from 'react';
 import AuthService from '../services/auth';
+import { applyUserTheme } from '../theme';
 import type { AuthUser } from '@shared/contracts';
 
 // Re-export of the shared /api/auth/me contract. NOTE (drift, issue #20):
@@ -52,6 +53,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const updateUser = (next: User) => setUser(next);
+
+  // Per-user theme (#53): as soon as the account is known, its saved theme
+  // wins and mirrors into the cookie/storage fast path.
+  useEffect(() => {
+    applyUserTheme(user?.theme);
+  }, [user]);
 
   return (
     <AuthContext.Provider value={{ user, loading, login, register, logout, updateUser }}>

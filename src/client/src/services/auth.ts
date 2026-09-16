@@ -54,6 +54,7 @@ const AuthService = {
   async updateProfile(patch: {
     preferredName?: string;
     customInstructions?: string;
+    theme?: string;
   }): Promise<AuthUser> {
     try {
       const res = await axios.patch<{ user: AuthUser }>('/api/profile', patch);

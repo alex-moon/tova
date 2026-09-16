@@ -119,3 +119,46 @@ describe('ProfileModal (issue #35)', () => {
     expect(screen.getByTestId('profile-modal')).toBeInTheDocument();
   });
 });
+
+describe('ProfileModal theme choice (issue #53)', () => {
+  beforeEach(() => {
+    updateProfile.mockReset();
+  });
+
+  afterEach(cleanup);
+
+  it('saves a changed theme through the patch and keeps an unchanged choice out of it', async () => {
+    updateProfile.mockResolvedValue(user);
+    renderWithUser(user);
+
+    // Unchanged (light from resolveTheme) — a Save must not pin a theme.
+    fireEvent.click(screen.getByTestId('profile-save'));
+    await waitFor(() => expect(updateProfile).toHaveBeenCalled());
+    expect(updateProfile).toHaveBeenLastCalledWith({
+      preferredName: 'Al',
+      customInstructions: 'Be terse.',
+    });
+
+    // Flipping to dark patches the theme.
+    fireEvent.click(screen.getByTestId('theme-option-dark'));
+    fireEvent.click(screen.getByTestId('profile-save'));
+    await waitFor(() =>
+      expect(updateProfile).toHaveBeenLastCalledWith({
+        preferredName: 'Al',
+        customInstructions: 'Be terse.',
+        theme: 'dark',
+      }),
+    );
+  });
+
+  it('marks the active choice via aria-checked', () => {
+    renderWithUser(user);
+
+    expect(screen.getByTestId('theme-option-light')).toHaveAttribute('aria-checked', 'true');
+    expect(screen.getByTestId('theme-option-dark')).toHaveAttribute('aria-checked', 'false');
+
+    fireEvent.click(screen.getByTestId('theme-option-dark'));
+    expect(screen.getByTestId('theme-option-light')).toHaveAttribute('aria-checked', 'false');
+    expect(screen.getByTestId('theme-option-dark')).toHaveAttribute('aria-checked', 'true');
+  });
+});

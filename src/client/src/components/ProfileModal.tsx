@@ -2,7 +2,9 @@ import React, { useState } from 'react';
 import { X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import type { Theme } from '@/theme';
 import AuthService, { AuthError } from '../services/auth';
+import { persistTheme, resolveTheme } from '../theme';
 import { useAuth } from '../hooks/useAuth';
 
 interface ProfileModalProps {
@@ -12,10 +14,39 @@ interface ProfileModalProps {
 const PREFERRED_NAME_LIMIT = 20;
 const CUSTOM_INSTRUCTIONS_LIMIT = 4000;
 
+const ThemeChoice: React.FC<{
+  value: Theme;
+  onChange: (next: Theme) => void;
+}> = ({ value, onChange }) => (
+  <div className="flex gap-2" role="radiogroup" aria-label="Theme">
+    {(['light', 'dark'] as Theme[]).map((option) => (
+      <button
+        key={option}
+        type="button"
+        role="radio"
+        aria-checked={value === option}
+        data-testid={`theme-option-${option}`}
+        onClick={() => onChange(option)}
+        className={`rounded-lg border px-3 py-1.5 text-sm capitalize transition-colors ${
+          value === option
+            ? 'border-ring bg-accent text-accent-foreground'
+            : 'border-border hover:bg-accent hover:text-accent-foreground'
+        }`}
+      >
+        {option}
+      </button>
+    ))}
+  </div>
+);
+
 const ProfileModal: React.FC<ProfileModalProps> = ({ onClose }) => {
   const { user, updateUser } = useAuth();
+  const initialTheme = (
+    user?.theme === 'light' || user?.theme === 'dark' ? user.theme : resolveTheme()
+  ) as Theme;
   const [preferredName, setPreferredName] = useState(user?.preferredName ?? '');
   const [customInstructions, setCustomInstructions] = useState(user?.customInstructions ?? '');
+  const [theme, setTheme] = useState<Theme>(initialTheme);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -30,7 +61,13 @@ const ProfileModal: React.FC<ProfileModalProps> = ({ onClose }) => {
       const next = await AuthService.updateProfile({
         preferredName: preferredName.trim(),
         customInstructions,
+        // Only patched when the choice actually moved, so a plain profile
+        // edit cannot silently pin the device's theme onto the account.
+        ...(theme !== initialTheme ? { theme } : {}),
       });
+      // The saved choice rides the mirror immediately so pre-auth pages and
+      // reloads paint it without waiting on the profile round-trip.
+      if (theme !== initialTheme) persistTheme(theme);
       updateUser(next);
       onClose();
     } catch (err) {
@@ -73,6 +110,10 @@ const ProfileModal: React.FC<ProfileModalProps> = ({ onClose }) => {
               maxLength={PREFERRED_NAME_LIMIT}
             />
           </label>
+          <div className="text-sm">
+            <span className="mb-1 block">Theme</span>
+            <ThemeChoice value={theme} onChange={setTheme} />
+          </div>
           <label className="block text-sm">
             <span className="mb-1 block">Custom instructions</span>
             <textarea

@@ -55,6 +55,13 @@ const userSchema = new mongoose.Schema(
             maxlength: 4000,
             default: null,
           },
+          // Theme preference (issue #53): null = no explicit choice, the
+          // client follows prefers-color-scheme then light.
+          theme: {
+            type: String,
+            enum: ['light', 'dark'],
+            default: null,
+          },
         },
         { _id: false },
       ),
@@ -99,6 +106,10 @@ userSchema.methods.comparePassword = async function (this: UserDocument, passwor
 
 export interface UserSettings {
   customInstructions: string | null;
+  // Absent at the TS level when never written; runtime default is null = no
+  // explicit preference (issue #53). Marked optional so existing partial
+  // literals (`{ customInstructions }`) keep typechecking.
+  theme?: 'light' | 'dark';
 }
 
 export interface UserLocation {

@@ -51,3 +51,18 @@ export function readStoredTheme(): Theme | undefined {
   const stored = readLocalStorage();
   return stored === 'light' || stored === 'dark' ? stored : undefined;
 }
+
+/**
+ * Apply an explicit per-user theme preference (issue #53) once the profile
+ * is known. The user record is the source of truth once logged in: it wins
+ * over device storage, and it is mirrored back into both stores so the
+ * inline-script fast path (cookie → localStorage → system → light) paints
+ * the account's theme on the next load without waiting for the profile
+ * fetch. No saved preference keeps the device behaviour untouched.
+ */
+export function applyUserTheme(userTheme: string | undefined | null): void {
+  if (userTheme === 'light' || userTheme === 'dark') {
+    persistTheme(userTheme);
+    applyTheme(userTheme);
+  }
+}
