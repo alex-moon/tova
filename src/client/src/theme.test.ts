@@ -59,6 +59,18 @@ describe('resolveTheme', () => {
     localStorage.setItem(STORAGE_KEY, 'sepia');
     expect(resolveTheme()).toBe('light');
   });
+
+  it('falls through to the system preference when the cookie value is empty', () => {
+    setCookie('');
+    expect(resolveTheme()).toBe('light');
+    mockPrefersDark(true);
+    expect(resolveTheme()).toBe('dark');
+  });
+
+  it('prefers a dark cookie even when the system prefers light', () => {
+    setCookie('dark');
+    expect(resolveTheme()).toBe('dark');
+  });
 });
 
 describe('applyTheme', () => {
@@ -78,6 +90,14 @@ describe('persistTheme', () => {
     expect(localStorage.getItem(STORAGE_KEY)).toBe('dark');
     expect(readStoredTheme()).toBe('dark');
     expect(document.cookie).toContain(`${COOKIE_NAME}=dark`);
+  });
+
+  it('replaces a previously persisted cookie rather than keeping both values', () => {
+    persistTheme('light');
+    persistTheme('dark');
+    expect(document.cookie).toContain(`${COOKIE_NAME}=dark`);
+    expect(document.cookie).not.toContain(`${COOKIE_NAME}=light`);
+    expect(resolveTheme()).toBe('dark');
   });
 });
 
