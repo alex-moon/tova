@@ -20,11 +20,14 @@ const asCtx = (userId?: string) => {
 
 // `createTool` is the identity stub, so the tools keep their plain config
 // shape; pick the execute off it explicitly for direct invocation.
-const listExecute = (listFilesTool as { execute: (args: unknown[], ctx: unknown) => Promise<unknown> })
-  .execute;
-const readExecute = (readFileTool as unknown as {
-  execute: (args: unknown[], ctx: unknown) => Promise<unknown>;
-}).execute;
+const listExecute = (
+  listFilesTool as { execute: (args: unknown[], ctx: unknown) => Promise<unknown> }
+).execute;
+const readExecute = (
+  readFileTool as unknown as {
+    execute: (args: unknown[], ctx: unknown) => Promise<unknown>;
+  }
+).execute;
 
 const createAsset = (
   userId: string,
@@ -41,8 +44,7 @@ const createAsset = (
     ...(extra.textExtracted !== undefined ? { textExtracted: extra.textExtracted } : {}),
   });
 
-const createUser = async (email: string) =>
-  User.create({ email, password: 'password123' });
+const createUser = async (email: string) => User.create({ email, password: 'password123' });
 
 describe('list_files tool (#58)', () => {
   it('requires a userId in the request context', async () => {
@@ -60,7 +62,13 @@ describe('list_files tool (#58)', () => {
     await new Promise((r) => setTimeout(r, 10));
     const second = await createAsset(user.id, 'b.md', { textExtracted: 'b' });
     const out = (await listExecute([], asCtx(user.id))) as {
-      files: { id: string; filename: string; contentType: string; size: number; createdAt: string }[];
+      files: {
+        id: string;
+        filename: string;
+        contentType: string;
+        size: number;
+        createdAt: string;
+      }[];
     };
     expect(out.files.map((f) => f.id)).toEqual([second.id, first.id]);
     expect(out.files[1]).toMatchObject({
@@ -89,7 +97,9 @@ describe('list_files tool (#58)', () => {
   it('signals truncation with more: true above 20 files', async () => {
     const user = await createUser('list-many@example.com');
     await Promise.all(
-      Array.from({ length: 23 }, (_, i) => createAsset(user.id, `f${i}.txt`, { textExtracted: 'x' })),
+      Array.from({ length: 23 }, (_, i) =>
+        createAsset(user.id, `f${i}.txt`, { textExtracted: 'x' }),
+      ),
     );
     const out = (await listExecute([], asCtx(user.id))) as {
       files: { filename: string }[];

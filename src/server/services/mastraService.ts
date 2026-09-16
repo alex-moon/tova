@@ -254,7 +254,7 @@ export const listFilesTool = createTool({
   description:
     'List the files in the calling user’s asset library (uploaded documents/text ' +
     'files), newest first, with metadata (filename, type, size, upload date). ' +
-    "Call it when the user refers to their files, assets, or library; call it " +
+    'Call it when the user refers to their files, assets, or library; call it ' +
     'first whenever the user wants anything from the library.',
   inputSchema: z.object({}),
   outputSchema: z.object({
