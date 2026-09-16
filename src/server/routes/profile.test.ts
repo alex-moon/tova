@@ -156,6 +156,54 @@ describe('PATCH /api/profile (issue #35)', () => {
     expect(user.settings?.customInstructions).toBeUndefined();
   });
 
+  it('saves a theme preference and reports it on PATCH and /me, omitted when unset', async () => {
+    const { app, cookie } = await registerUser('patch-theme@example.com');
+
+    // Before any save the field is absent from the wire payload (same
+    // convention as preferredName/customInstructions).
+    const before = await request(app).get('/api/auth/me').set('Cookie', cookie);
+    expect(before.body.user).not.toHaveProperty('theme');
+
+    const res = await patchProfile(app, cookie, { theme: 'dark' });
+    expect(res.status).toBe(200);
+    expect(res.body.user.theme).toBe('dark');
+
+    const me = await request(app).get('/api/auth/me').set('Cookie', cookie);
+    expect(me.body.user).toEqual(res.body.user);
+
+    const user = await getUser('patch-theme@example.com');
+    expect(user.settings?.theme).toBe('dark');
+
+    // Switching is a normal PATCH; other settings survive.
+    await patchProfile(app, cookie, { customInstructions: 'Be terse.' });
+    const switchRes = await patchProfile(app, cookie, { theme: 'light' });
+    expect(switchRes.body.user.theme).toBe('light');
+    expect(switchRes.body.user.customInstructions).toBe('Be terse.');
+  });
+
+  it('leaves the theme untouched when absent from the body', async () => {
+    const { app, cookie } = await registerUser('patch-theme-partial@example.com');
+    await patchProfile(app, cookie, { theme: 'dark' });
+
+    const res = await patchProfile(app, cookie, { preferredName: 'Alex' });
+    expect(res.status).toBe(200);
+    expect(res.body.user.theme).toBe('dark');
+  });
+
+  it('rejects invalid theme values with 400', async () => {
+    const { app, cookie } = await registerUser('patch-theme-invalid@example.com');
+
+    for (const bad of ['midnight', '', null, 42, 'SYSTEM']) {
+      const res = await patchProfile(app, cookie, { theme: bad });
+      expect(res.status).toBe(400);
+    }
+
+    // Unset on a fresh user: settings stays null (lazily created), so a
+    // rejected body must never have materialized a preference.
+    const user = await getUser('patch-theme-invalid@example.com');
+    expect(user.settings?.theme ?? null).toBeNull();
+  });
+
   it('rejects unauthenticated requests with 401', async () => {
     const app = createApp();
     const res = await request(app).patch('/api/profile').send({ preferredName: 'Alex' });

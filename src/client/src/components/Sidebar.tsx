@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import { Files, LogOut, Plus, Trash2, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import ThemeToggle from './ThemeToggle';
 import ProfileModal from './ProfileModal';
 import AssetLibrary from './AssetLibrary';
 import type { AssetSummary } from '@/services/assets';
@@ -144,7 +143,6 @@ const Sidebar: React.FC<SidebarProps> = ({
             <LogOut />
             Logout
           </Button>
-          <ThemeToggle />
         </div>
       </nav>
       {profileOpen && <ProfileModal onClose={() => setProfileOpen(false)} />}

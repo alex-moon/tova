@@ -50,6 +50,7 @@ export interface AuthUser {
   avatarUrl?: string;
   preferredName?: string;
   customInstructions?: string;
+  theme?: 'light' | 'dark';
   location?: AuthUserLocation;
 }
 

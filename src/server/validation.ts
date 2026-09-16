@@ -33,6 +33,7 @@ export const profilePatchSchema = z.strictObject({
     .string({ message: 'customInstructions must be a string' })
     .max(4000, { message: 'customInstructions must be 4000 characters or fewer' })
     .optional(),
+  theme: z.enum(['light', 'dark'], { message: 'theme must be "light" or "dark"' }).optional(),
 });
 
 export const feedbackValueSchema = z.object({
