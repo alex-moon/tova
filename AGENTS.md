@@ -57,17 +57,15 @@ There is no `mongosh` binary in this environment (yet). To query or mutate the l
 - `npx tsx scripts/mongo.ts <js-expression>` — evaluates a snippet with `db` bound to the `tova` database, prints the result. Examples: `npx tsx scripts/mongo.ts "await db.listCollections().toArray()"`, `npx tsx scripts/mongo.ts "await db.collection('sessions').countDocuments()"`.
 - Prefer small, explicit snippets; this is a debugging tool, not an ORM.
 
-### Code quality commands
+### Code quality gate
 
-Run these before finishing any code change:
+`npm run ci` is the single gate for any code change. It runs everything in sequence (server lint, format check, typecheck, server tests, client lint, client format check, client tests, client build), fails at the first error, and is mirrored by the CI workflow that gates merges to `main`. Run it as the final step before finishing any change; it must pass with exit code 0. Per-step commands below are only for iterating on a single failure without re-running the whole gate:
 
-- `npm run lint` — ESLint (TypeScript rules + Prettier rules) over `src/` and `migrations/`. Must pass with 0 errors. Use `npm run lint:fix` to auto-fix.
-- `npm run typecheck` — TypeScript; must pass.
-- `npm test` — backend Jest suite; must pass.
+- `npm run lint` — ESLint (TypeScript rules + Prettier rules) over `src/` and `migrations/`. Use `npm run lint:fix` to auto-fix.
+- `npm run typecheck` — TypeScript.
+- `npm test` — backend Jest suite.
 - `npm run format` / `npm run format:check` — Prettier over the repo (config in `.prettierrc`). Do not hand-format; let these run.
 
-After changing frontend code, also run `npm --prefix src/client run lint`. Per-app shortcut scripts: `lint:server` / `format:server` / `test:server`, and `lint:client` / `format:client` / `test:client` (client tests use `vitest`, config in `src/client/vite.config.ts`).
+After changing frontend code, iterate with `npm --prefix src/client run lint` and the client shortcut scripts: `lint:client` / `format:client` / `test:client` (vitest, config in `src/client/vite.config.ts`).
 
 Style: Prettier settings in `.prettierrc` (single quotes, trailing commas, 100 print width). Rules live in the root `eslint.config.js`.
-
-- `npm run ci` — runs everything in sequence: server lint, format check, typecheck, server tests, client lint, client format check, client tests, client build. Fails at the first error. Run this as the final gate for any code change.

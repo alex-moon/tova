@@ -4,6 +4,7 @@ import { AuthContext } from '../context/AuthContext';
 import ProfileModal from './ProfileModal';
 import { AuthError } from '../services/auth';
 import type { User } from '../context/AuthContext';
+import { COOKIE_NAME } from '../theme';
 
 const updateProfile = vi.fn();
 
@@ -123,6 +124,10 @@ describe('ProfileModal (issue #35)', () => {
 describe('ProfileModal theme choice (issue #53)', () => {
   beforeEach(() => {
     updateProfile.mockReset();
+    // resolveTheme() reads the theme cookie and localStorage; both persist
+    // across tests in this file (jsdom keeps them module-wide), so reset them.
+    localStorage.clear();
+    document.cookie = `${COOKIE_NAME}=;path=/;max-age=0`;
   });
 
   afterEach(cleanup);

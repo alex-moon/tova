@@ -58,11 +58,14 @@ export function readStoredTheme(): Theme | undefined {
  * over device storage, and it is mirrored back into both stores so the
  * inline-script fast path (cookie → localStorage → system → light) paints
  * the account's theme on the next load without waiting for the profile
- * fetch. No saved preference keeps the device behaviour untouched.
+ * fetch. No saved preference keeps the device behaviour: the resolved
+ * device theme is applied. A value outside the wire enum does nothing.
  */
 export function applyUserTheme(userTheme: string | undefined | null): void {
   if (userTheme === 'light' || userTheme === 'dark') {
     persistTheme(userTheme);
     applyTheme(userTheme);
+    return;
   }
+  if (userTheme == null) applyTheme(resolveTheme());
 }

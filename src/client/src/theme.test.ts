@@ -25,6 +25,7 @@ const mockPrefersDark = (dark: boolean) => {
 };
 
 beforeEach(() => {
+  vi.restoreAllMocks();
   document.cookie = '';
   clearCookie();
   localStorage.clear();
