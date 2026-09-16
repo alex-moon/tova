@@ -286,12 +286,8 @@ const agentFor = (provider: LlmProvider, model: string, tools?: boolean): Agent 
   });
   // Register with the singleton so the call context carries observability;
   // unregistered agents generate without spans and LangSmithExporter
-  // never sees them. addAgent skips duplicates on the same key. The hook
-  // check keeps test doubles (which lack Mastra's internal hooks, and run
-  // with observability unconfigured) out of the registration path.
-  if (typeof (agent as { __registerMastra?: unknown }).__registerMastra === 'function') {
-    mastra.addAgent(agent, cacheKey);
-  }
+  // never sees them. addAgent skips duplicates on the same key.
+  mastra.addAgent(agent, cacheKey);
   agentCache.set(cacheKey, agent);
   return agent;
 };
