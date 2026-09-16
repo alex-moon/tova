@@ -21,11 +21,11 @@ const asCtx = (userId?: string) => {
 // `createTool` is the identity stub, so the tools keep their plain config
 // shape; pick the execute off it explicitly for direct invocation.
 const listExecute = (
-  listFilesTool as { execute: (args: unknown[], ctx: unknown) => Promise<unknown> }
+  listFilesTool as unknown as { execute: (args: unknown[], ctx: unknown) => Promise<unknown> }
 ).execute;
 const readExecute = (
   readFileTool as unknown as {
-    execute: (args: unknown[], ctx: unknown) => Promise<unknown>;
+    execute: (args: Record<string, unknown>, ctx: unknown) => Promise<unknown>;
   }
 ).execute;
 
@@ -40,11 +40,11 @@ const createAsset = (
     key: `${userId}/asset-${Math.random().toString(36).slice(2)}/${filename}`,
     contentType: 'text/plain',
     size: 123,
-    ...(extra.status ? { status: extra.status } : {}),
+    ...(extra.status ? { status: extra.status } : { status: 'ready' }),
     ...(extra.textExtracted !== undefined ? { textExtracted: extra.textExtracted } : {}),
   });
 
-const createUser = async (email: string) => User.create({ email, password: 'password123' });
+const createUser = async (email: string) => User.create({ email, passwordHash: 'password123' });
 
 describe('list_files tool (#58)', () => {
   it('requires a userId in the request context', async () => {
@@ -69,6 +69,7 @@ describe('list_files tool (#58)', () => {
         size: number;
         createdAt: string;
       }[];
+      more?: boolean;
     };
     expect(out.files.map((f) => f.id)).toEqual([second.id, first.id]);
     expect(out.files[1]).toMatchObject({
@@ -112,13 +113,13 @@ describe('list_files tool (#58)', () => {
 
 describe('read_file tool (#58)', () => {
   it('requires a userId in the request context', async () => {
-    expect(await readExecute([{ id: 'x' }], asCtx())).toEqual({ error: 'unavailable' });
+    expect(await readExecute({ id: 'x' }, asCtx())).toEqual({ error: 'unavailable' });
   });
 
   it('gracefully rejects a missing or malformed id', async () => {
     const user = await createUser('read-bad@example.com');
-    expect(await readExecute([{}], asCtx(user.id))).toEqual({ error: 'not_found' });
-    expect(await readExecute([{ id: 'not-an-objectid' }], asCtx(user.id))).toEqual({
+    expect(await readExecute({}, asCtx(user.id))).toEqual({ error: 'not_found' });
+    expect(await readExecute({ id: 'not-an-objectid' }, asCtx(user.id))).toEqual({
       error: 'not_found',
     });
   });
@@ -126,7 +127,7 @@ describe('read_file tool (#58)', () => {
   it('returns metadata plus extracted text for an owned ready asset', async () => {
     const user = await createUser('read-hit@example.com');
     const asset = await createAsset(user.id, 'notes.md', { textExtracted: '# heading' });
-    const out = (await readExecute([{ id: asset.id }], asCtx(user.id))) as {
+    const out = (await readExecute({ id: asset.id }, asCtx(user.id))) as {
       file: { id: string; filename: string; contentType: string; size: number; createdAt: string };
       content: string;
       hasText: boolean;
@@ -146,14 +147,14 @@ describe('read_file tool (#58)', () => {
     const user = await createUser('read-trunc@example.com');
     const big = 'x'.repeat(13_000);
     const asset = await createAsset(user.id, 'big.csv', { textExtracted: big });
-    const out = (await readExecute([{ id: asset.id }], asCtx(user.id))) as { content: string };
+    const out = (await readExecute({ id: asset.id }, asCtx(user.id))) as { content: string };
     expect(out.content).toBe(truncateForPrompt(big));
   });
 
   it('degrades honestly when no text was extracted', async () => {
     const user = await createUser('read-null@example.com');
     const asset = await createAsset(user.id, 'photo.png', { textExtracted: null });
-    const out = (await readExecute([{ id: asset.id }], asCtx(user.id))) as {
+    const out = (await readExecute({ id: asset.id }, asCtx(user.id))) as {
       file: { filename: string };
       content: string | null;
       hasText: boolean;
@@ -173,8 +174,8 @@ describe('read_file tool (#58)', () => {
       status: 'pending',
       textExtracted: null,
     });
-    expect(await readExecute([{ id: theirs.id }], asCtx(user.id))).toEqual({ error: 'not_found' });
-    expect(await readExecute([{ id: notReady.id }], asCtx(user.id))).toEqual({
+    expect(await readExecute({ id: theirs.id }, asCtx(user.id))).toEqual({ error: 'not_found' });
+    expect(await readExecute({ id: notReady.id }, asCtx(user.id))).toEqual({
       error: 'not_found',
     });
   });
