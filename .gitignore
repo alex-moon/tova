@@ -24,6 +24,4 @@ yarn-error.log*
 # Agent iteration logs
 /logs/
 /playwright-report/
-/.iteration
 
-/.iteration
