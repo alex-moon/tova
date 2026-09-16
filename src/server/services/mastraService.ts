@@ -7,6 +7,9 @@ import { buildTracingOptions } from '@mastra/observability';
 import { LangSmithExporter, withLangsmithMetadata } from '@mastra/langsmith';
 import { createTool } from '@mastra/core/tools';
 import { z } from 'zod';
+import mongoose from 'mongoose';
+import { Asset } from '../models/Asset';
+import { truncateForPrompt } from './textExtraction';
 import {
   CompletionOptions,
   LlmConnector,
@@ -221,6 +224,124 @@ export const webSearchTool = createTool({
 });
 
 /*
+ * Asset-library tools (issue #58). Per-user scoping comes from the request
+ * context (never closed over — agents are memoised per provider/model/mode);
+ * a missing userId degrades to an explicit `unavailable` result instead of
+ * throwing, mirroring `web_search`. Only `ready` assets are exposed, and the
+ * ownership filter makes cross-user probes indistinguishable from "not
+ * found". The `read_file` tool serves the stored light extraction only —
+ * textExtracted null means non-extractable or empty at confirm time, so no
+ * Spaces round-trip happens inside a tool.
+ */
+const assetFileFrom = (asset: {
+  _id: mongoose.Types.ObjectId;
+  filename: string;
+  contentType: string;
+  size: number;
+  createdAt?: Date;
+}) => ({
+  id: asset._id.toString(),
+  filename: asset.filename,
+  // filename carries the extension hint, but the explicit MIME type keeps
+  // the model honest about what a file actually is.
+  contentType: asset.contentType,
+  size: asset.size,
+  createdAt: (asset.createdAt ?? new Date()).toISOString(),
+});
+
+export const listFilesTool = createTool({
+  id: 'list_files',
+  description:
+    'List the files in the calling user’s asset library (uploaded documents/text ' +
+    'files), newest first, with metadata (filename, type, size, upload date). ' +
+    "Call it when the user refers to their files, assets, or library; call it " +
+    'first whenever the user wants anything from the library.',
+  inputSchema: z.object({}),
+  outputSchema: z.object({
+    files: z.array(
+      z.object({
+        id: z.string(),
+        filename: z.string(),
+        contentType: z.string(),
+        size: z.number(),
+        createdAt: z.string().describe('Upload time as an ISO 8601 UTC timestamp'),
+      }),
+    ),
+    more: z.boolean().optional().describe('True when the list was truncated at 20'),
+    error: z.string().optional(),
+  }),
+  execute: async (_input, { requestContext }) => {
+    const userId = requestContext.get('userId') as string | undefined;
+    if (!userId) return { files: [], error: 'unavailable' };
+    try {
+      // 21 rows: 20 returned, the 21st only feeds the `more` flag.
+      const rows = await Asset.find({ userId, status: 'ready' })
+        .sort({ _id: -1 })
+        .limit(21)
+        .select('filename contentType size createdAt');
+      const hasMore = rows.length > 20;
+      return {
+        files: rows.slice(0, 20).map((r) => assetFileFrom(r)),
+        ...(hasMore ? { more: true } : {}),
+      };
+    } catch {
+      return { files: [], error: 'unavailable' };
+    }
+  },
+});
+
+export const readFileTool = createTool({
+  id: 'read_file',
+  description:
+    'Read a file from the calling user’s asset library by its id (from `list_files`), ' +
+    'returning its metadata (filename, type, size, upload date) and extracted text ' +
+    'content when any exists.',
+  inputSchema: z.object({ id: z.string().min(1) }),
+  outputSchema: z.object({
+    file: z
+      .object({
+        id: z.string(),
+        filename: z.string(),
+        contentType: z.string(),
+        size: z.number(),
+        createdAt: z.string().describe('Upload time as an ISO 8601 UTC timestamp'),
+      })
+      .optional(),
+    content: z.string().nullable().optional(),
+    hasText: z.boolean().optional(),
+    note: z.string().optional(),
+    error: z.string().optional(),
+  }),
+  execute: async ({ id }, { requestContext }) => {
+    const userId = requestContext.get('userId') as string | undefined;
+    if (!userId) return { error: 'unavailable' };
+    if (!id || !mongoose.isValidObjectId(id)) {
+      return { error: 'not_found' };
+    }
+    try {
+      const asset = await Asset.findOne({ _id: id, userId, status: 'ready' }).select(
+        'filename contentType size createdAt textExtracted',
+      );
+      if (!asset) return { error: 'not_found' };
+      const file = assetFileFrom(asset);
+      if (asset.textExtracted == null) {
+        return {
+          file,
+          content: null,
+          hasText: false,
+          note:
+            'No readable text could be extracted from this file (it is likely a ' +
+            'binary type such as an image); use the attach flow to include it in the chat.',
+        };
+      }
+      return { file, content: truncateForPrompt(asset.textExtracted), hasText: true };
+    } catch {
+      return { error: 'unavailable' };
+    }
+  },
+});
+
+/*
  * Built-in clock tool (issue #52): deterministic, zero-dependency, no
  * external calls. It answers "what's the date/time" without a web-search
  * round trip. No user timezone is stored anywhere (#50 model), so the
@@ -249,7 +370,10 @@ const TOOL_INSTRUCTIONS =
   'tool instead of guessing; it reports UTC only, do not convert to local time. ' +
   'Write the query as focused keywords. When search results arrive, answer with ' +
   'terse markdown links ([title](url)) for the claims you used; answer from your ' +
-  'own knowledge when no search is needed.';
+  'own knowledge when no search is needed. When the user refers to their files, ' +
+  'assets, or library, call the `list_files` tool to see what they have; call ' +
+  '`read_file` with a file id from that list before quoting any file contents, ' +
+  'and never invent file contents you have not read.';
 
 /*
  * Agents are memoised per provider/model (creation is stateful — Mastra
@@ -293,6 +417,8 @@ const agentFor = (provider: LlmProvider, model: string, tools?: boolean): Agent 
             // such dependency (#52).
             ...(hasSearchKey() ? { web_search: webSearchTool } : {}),
             current_datetime: currentDatetimeTool,
+            list_files: listFilesTool,
+            read_file: readFileTool,
           },
         }
       : {}),

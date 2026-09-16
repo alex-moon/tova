@@ -96,7 +96,13 @@ const collectSourcesInto = (
 // provider-neutral: any tool name flows through; only the label for
 // first-party `web_search` is hard-known here.
 const toolLabelFrom = (name: string): string =>
-  name === 'web_search' ? 'Searched the web' : name || 'Tool run';
+  name === 'web_search'
+    ? 'Searched the web'
+    : name === 'list_files'
+      ? 'Listed your files'
+      : name === 'read_file'
+        ? 'Read a file'
+        : name || 'Tool run';
 
 const toolCallEvent = (call: NonNullable<NeutralStreamChunk['toolCall']>) => ({
   phase: 'call' as const,
