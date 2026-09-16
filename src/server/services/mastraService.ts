@@ -28,6 +28,7 @@ import { webSearch } from './webSearchService';
  * project from `LANGCHAIN_PROJECT` — see `.env.example`.
  */
 const langsmithKey = process.env.LANGSMITH_API_KEY ?? process.env.LANGCHAIN_API_KEY;
+const projectName = process.env.LANGSMITH_PROJECT ?? process.env.LANGCHAIN_PROJECT;
 
 // Mastra docs: storage is required for tracing even when exporting
 // externally. Application data stays in MongoDB; `InMemoryStore` only
@@ -40,7 +41,9 @@ export const mastra = new Mastra({
           configs: {
             default: {
               serviceName: 'tova',
-              exporters: [new LangSmithExporter({ apiKey: langsmithKey, projectName: 'tova-dev' })],
+              exporters: [
+                new LangSmithExporter({ apiKey: langsmithKey, projectName: projectName }),
+              ],
             },
           },
         }),
@@ -281,6 +284,14 @@ const agentFor = (provider: LlmProvider, model: string, tools?: boolean): Agent 
         }
       : {}),
   });
+  // Register with the singleton so the call context carries observability;
+  // unregistered agents generate without spans and LangSmithExporter
+  // never sees them. addAgent skips duplicates on the same key. The hook
+  // check keeps test doubles (which lack Mastra's internal hooks, and run
+  // with observability unconfigured) out of the registration path.
+  if (typeof (agent as { __registerMastra?: unknown }).__registerMastra === 'function') {
+    mastra.addAgent(agent, cacheKey);
+  }
   agentCache.set(cacheKey, agent);
   return agent;
 };
