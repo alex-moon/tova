@@ -30,6 +30,13 @@ export interface CompletionOptions {
   provider?: LlmProvider;
   model: string;
   messages: { role: 'system' | 'user' | 'assistant'; content: string }[];
+  /*
+   * Calling user id for this turn (set by the chat routes). Rides into
+   * Mastra's request context (mastraService's `callOptionsFrom`) so
+   * built-in tools can scope their execution per user (#58) without
+   * baking user data into memoised agent instances.
+   */
+  userId?: string;
   temperature?: number;
   max_tokens?: number;
   /*

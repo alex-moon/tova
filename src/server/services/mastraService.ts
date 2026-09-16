@@ -1,5 +1,6 @@
 import { Agent } from '@mastra/core/agent';
 import { Mastra } from '@mastra/core';
+import { RequestContext } from '@mastra/core/request-context';
 import { InMemoryStore } from '@mastra/core/storage';
 import { Observability } from '@mastra/observability';
 import { buildTracingOptions } from '@mastra/observability';
@@ -156,13 +157,25 @@ const modelSettingsFrom = (options: CompletionOptions) => ({
  * as before #16. Since #52 the tools-mode, not the Brave key, drives this:
  * the key-free `current_datetime` keeps tools attached for key-less
  * deployments too.
+ *
+ * Since #58 the caller's userId rides into Mastra's request context (a
+ * fresh `RequestContext` per call, never per agent — agents are memoised
+ * per provider/model/mode so per-user state cannot live on them). Tool
+ * `execute` receives this context as its second argument and reads
+ * `requestContext.get('userId')` to scope per-user work (e.g. asset
+ * library lookups).
  */
-const callOptionsFrom = (options: CompletionOptions, mode: ToolsMode = 'full') => ({
-  ...(options.abortSignal ? { abortSignal: options.abortSignal } : {}),
-  maxSteps: mode === 'full' ? 4 : 1,
-  modelSettings: modelSettingsFrom(options),
-  ...traceOptionsFrom(options.trace),
-});
+const callOptionsFrom = (options: CompletionOptions, mode: ToolsMode = 'full') => {
+  const requestContext = new RequestContext();
+  if (options.userId !== undefined) requestContext.set('userId', options.userId);
+  return {
+    ...(options.abortSignal ? { abortSignal: options.abortSignal } : {}),
+    maxSteps: mode === 'full' ? 4 : 1,
+    modelSettings: modelSettingsFrom(options),
+    ...traceOptionsFrom(options.trace),
+    requestContext,
+  };
+};
 
 /*
  * Trace attach: plain metadata/tags ride directly on the call, the

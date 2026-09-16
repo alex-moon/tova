@@ -8,4 +8,11 @@
 
 export class Mastra {
   constructor(public readonly config: unknown) {}
+
+  /*
+   * mastraService registers every constructed agent via `mastra.addAgent`
+   * (observability since #5). The stub only needs the call to succeed —
+   * the agent behaviour itself lives behind the mocked agent module.
+   */
+  addAgent(): void {}
 }

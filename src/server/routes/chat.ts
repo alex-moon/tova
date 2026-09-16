@@ -274,6 +274,7 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
       messages,
       model: routingResult.model,
       provider: routingResult.provider,
+      userId,
       abortSignal: abortController.signal,
     });
 
@@ -413,6 +414,7 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
         messages,
         model: routingResult.model,
         provider: routingResult.provider,
+        userId,
         abortSignal: abortController.signal,
       });
 
