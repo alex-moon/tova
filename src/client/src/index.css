@@ -92,31 +92,11 @@
   color-scheme: dark;
 }
 
-@media (prefers-color-scheme: dark) {
-  html:not(.light, .dark) {
-    --c-bg: #211c1a;
-    --c-text: #ece5df;
-    --c-sidebar-bg: #191513;
-    --c-primary: #d9714f;
-    --c-primary-hover: #e8835f;
-    --c-primary-foreground: #2a1510;
-    --c-ring: #d9714f;
-    --c-border: #3b332f;
-    --c-accent: #332b27;
-    --c-accent-foreground: #e8a58f;
-    --c-muted: #2a2422;
-    --c-muted-foreground: #a8a29e;
-    --c-destructive: #e06a5f;
-    --c-destructive-foreground: #fff8f4;
-    --c-error: #e06a5f;
-    --c-success: #5cab77;
-    --c-warning: #e2a44a;
-    --c-info: #5b9cc9;
-    --c-msg-user: var(--c-accent);
-    --c-msg-assistant: var(--c-bg);
-    color-scheme: dark;
-  }
-}
+/* No prefers-color-scheme fallback here: default order (issue #53) is resolved
+ * in the inline <head> script in src/client/index.html (twin of theme.ts),
+ * which always sets exactly one class — explicit preference beats system
+ * preference, and the default is light.
+ */
 
 body {
   font-family: 'Roboto Variable', 'Roboto', ui-sans-serif, system-ui, sans-serif;

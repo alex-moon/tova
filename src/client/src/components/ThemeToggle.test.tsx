@@ -15,30 +15,15 @@ const load = async () => {
   return mod.default;
 };
 
-describe('ThemeToggle (issue #41 resolver)', () => {
+describe('ThemeToggle', () => {
   beforeEach(() => {
     localStorage.clear();
+    localStorage.removeItem(STORAGE_KEY);
+    document.cookie = `${STORAGE_KEY}=;path=/;max-age=0`;
     document.documentElement.className = '';
   });
 
   afterEach(cleanup);
-
-  it('sets no class on a fresh load with no stored choice', async () => {
-    mockPrefersDark(true);
-    const ThemeToggle = await load();
-    render(<ThemeToggle />);
-    expect(document.documentElement).not.toHaveClass('dark');
-    expect(document.documentElement).not.toHaveClass('light');
-  });
-
-  it('keeps an explicit light choice when the system prefers dark', async () => {
-    localStorage.setItem(STORAGE_KEY, 'light');
-    mockPrefersDark(true);
-    const ThemeToggle = await load();
-    render(<ThemeToggle />);
-    expect(document.documentElement).toHaveClass('light');
-    expect(document.documentElement).not.toHaveClass('dark');
-  });
 
   it('toggles from system dark to explicit light and back to dark', async () => {
     mockPrefersDark(true);
@@ -54,5 +39,52 @@ describe('ThemeToggle (issue #41 resolver)', () => {
     expect(document.documentElement).toHaveClass('dark');
     expect(document.documentElement).not.toHaveClass('light');
     expect(screen.getByRole('button')).toHaveAttribute('aria-label', 'Switch to light mode');
+  });
+
+  it('keeps an explicit light choice when the system prefers dark', async () => {
+    localStorage.setItem(STORAGE_KEY, 'light');
+    mockPrefersDark(true);
+    const ThemeToggle = await load();
+    render(<ThemeToggle />);
+    expect(document.documentElement).toHaveClass('light');
+    expect(document.documentElement).not.toHaveClass('dark');
+  });
+
+  it('keeps the dark class set at first paint when the system prefers dark (no stored choice)', async () => {
+    // Regression: with the CSS system fallback removed, dropping both classes
+    // after mount flipped dark-system users to light mid-session.
+    mockPrefersDark(true);
+    const ThemeToggle = await load();
+    render(<ThemeToggle />);
+    expect(document.documentElement).toHaveClass('dark');
+    expect(document.documentElement).not.toHaveClass('light');
+  });
+
+  it('shows light when the system prefers light and nothing is stored', async () => {
+    mockPrefersDark(false);
+    const ThemeToggle = await load();
+    render(<ThemeToggle />);
+    expect(document.documentElement).toHaveClass('light');
+    expect(document.documentElement).not.toHaveClass('dark');
+  });
+
+  it('honors the cookie mirror over the system preference after mount', async () => {
+    // Pre-auth page-load case: inline script resolves from the cookie; the
+    // toggle must not undo it.
+    document.cookie = `${STORAGE_KEY}=light;path=/`;
+    mockPrefersDark(true);
+    const ThemeToggle = await load();
+    render(<ThemeToggle />);
+    expect(document.documentElement).toHaveClass('light');
+    expect(document.documentElement).not.toHaveClass('dark');
+  });
+
+  it('persists the choice to both localStorage and the cookie on toggle', async () => {
+    mockPrefersDark(false);
+    const ThemeToggle = await load();
+    render(<ThemeToggle />);
+    fireEvent.click(screen.getByRole('button'));
+    expect(document.cookie).toContain(`${STORAGE_KEY}=dark`);
+    expect(localStorage.getItem(STORAGE_KEY)).toBe('dark');
   });
 });
