@@ -8,4 +8,10 @@
 
 export class Mastra {
   constructor(public readonly config: unknown) {}
+  /**
+   * Matches the real signature used in mastraService.ts (agent registered
+   * under an explicit key). No-op here — the stub only needs to resolve
+   * module loading; suites exercise the agent boundary with their own mocks.
+   */
+  addAgent(_agent: unknown, _key?: string): void {}
 }
