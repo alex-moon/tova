@@ -10,6 +10,41 @@
     <meta name="theme-color" content="#c2410c" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Tova</title>
+    <script>
+      // Standalone twin: src/client/src/theme.ts (keep in sync). Runs before
+      // the bundle to set the theme class on <html> and avoid a flash of the
+      // wrong theme. Precedence: cookie -> localStorage -> prefers-color-scheme
+      // -> light (no-op, :root is light).
+      (() => {
+        var cookie = document.cookie
+          .split(';')
+          .map(function (part) {
+            return part.trim();
+          })
+          .find(function (part) {
+            return part.indexOf('tova-theme=') === 0;
+          });
+        var value = cookie ? cookie.split('=')[1] : null;
+        if (value !== 'light' && value !== 'dark') {
+          try {
+            value = localStorage.getItem('tova-theme');
+          } catch (e) {
+            value = null;
+          }
+        }
+        if (value !== 'light' && value !== 'dark') {
+          value =
+            window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches
+              ? 'dark'
+              : 'light';
+        }
+        if (value === 'dark') {
+          document.documentElement.classList.add('dark');
+        } else {
+          document.documentElement.classList.add('light');
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

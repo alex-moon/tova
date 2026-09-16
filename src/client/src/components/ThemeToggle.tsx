@@ -1,44 +1,18 @@
 import React, { useEffect, useState } from 'react';
 import { Moon, Sun } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-
-const STORAGE_KEY = 'tova-theme';
-
-type Theme = 'light' | 'dark';
-
-const systemPrefersDark =
-  typeof window !== 'undefined' &&
-  typeof window.matchMedia === 'function' &&
-  window.matchMedia('(prefers-color-scheme: dark)').matches;
-
-const applyTheme = (theme: Theme | null) => {
-  if (typeof document === 'undefined') return;
-  const root = document.documentElement;
-  if (theme === null) {
-    // No explicit choice: clear both classes so the system-preference
-    // fallback CSS (html:not(.light, .dark)) applies.
-    root.classList.remove('light', 'dark');
-    return;
-  }
-  root.classList.toggle('dark', theme === 'dark');
-  root.classList.toggle('light', theme === 'light');
-};
+import { applyTheme, persistTheme, resolveTheme, type Theme } from '@/theme';
 
 const ThemeToggle: React.FC = () => {
-  const [theme, setTheme] = useState<Theme | null>(() => {
-    if (typeof localStorage === 'undefined') return null;
-    const stored = localStorage.getItem(STORAGE_KEY);
-    return stored === 'light' || stored === 'dark' ? stored : null;
-  });
+  const [theme, setTheme] = useState<Theme>(resolveTheme);
 
   useEffect(() => {
     applyTheme(theme);
   }, [theme]);
 
   const toggle = () => {
-    const current = theme === null ? (systemPrefersDark ? 'dark' : 'light') : theme;
-    const next: Theme = current === 'dark' ? 'light' : 'dark';
-    localStorage.setItem(STORAGE_KEY, next);
+    const next: Theme = theme === 'dark' ? 'light' : 'dark';
+    persistTheme(next);
     setTheme(next);
   };
 
@@ -46,14 +20,10 @@ const ThemeToggle: React.FC = () => {
     <Button
       variant="ghost"
       size="icon"
-      aria-label={
-        theme === 'dark' || (theme === null && systemPrefersDark)
-          ? 'Switch to light mode'
-          : 'Switch to dark mode'
-      }
+      aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
       onClick={toggle}
     >
-      {theme === 'dark' || (theme === null && systemPrefersDark) ? <Sun /> : <Moon />}
+      {theme === 'dark' ? <Sun /> : <Moon />}
     </Button>
   );
 };
