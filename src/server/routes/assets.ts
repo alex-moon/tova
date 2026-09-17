@@ -2,7 +2,12 @@ import express from 'express';
 import { isValidObjectId } from 'mongoose';
 import { Asset, type AssetDocument } from '../models/Asset';
 import { authenticate, AuthRequest } from '../middleware/auth';
-import { assetPresignSchema } from '../validation';
+import {
+  assetBulkConfirmSchema,
+  assetBulkPresignSchema,
+  assetPresignSchema,
+  MAX_BULK_TOTAL_SIZE,
+} from '../validation';
 import {
   deleteObject,
   getObjectBuffer,
@@ -113,7 +118,6 @@ const presignItemForUser = async (
   const uploadUrl = await presignPutUrl(key, 60, contentType);
   return { status: 'ok', uploadUrl, asset: safeAsset(asset) };
 };
-
 // POST /api/assets/presign — mints the upload URL; no bytes reach Express.
 router.post('/presign', authenticate, async (req: AuthRequest, res) => {
   try {
@@ -134,6 +138,71 @@ router.post('/presign', authenticate, async (req: AuthRequest, res) => {
     return res.status(201).json({ uploadUrl: result.uploadUrl, asset: result.asset });
   } catch (err) {
     console.error('Asset presign error:', err);
+    return res.status(500).json({ message: 'Error preparing upload' });
+  }
+});
+
+// Bulk upload (issue #68): many files via N normal singleton uploads, one
+// batched presign round-trip. Not a zip container — zip is never an accepted
+// upload format at any layer (see ALLOWED_CONTENT_TYPES above), and uploaded
+// archives are never read or unzipped anywhere.
+router.post('/bulk-presign', authenticate, async (req: AuthRequest, res) => {
+  try {
+    if (!isStorageConfigured()) {
+      return res.status(503).json({ message: 'File storage is not configured' });
+    }
+    // Coarse total-size guard on the unvalidated body: over the declared cap
+    // is a payload too big to bother validating (413), and the batch-shape
+    // checks below cover anything finer than that.
+    if (Array.isArray(req.body)) {
+      const rawTotal = req.body.reduce(
+        (sum, item) =>
+          sum + (typeof item?.size === 'number' && Number.isFinite(item.size) ? item.size : 0),
+        0,
+      );
+      if (rawTotal > MAX_BULK_TOTAL_SIZE) {
+        return res
+          .status(413)
+          .json({ message: 'Combined file size exceeds the bulk upload limit' });
+      }
+    }
+    const parsed = assetBulkPresignSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({
+        message: parsed.error.issues[0]?.message ?? 'Invalid bulk upload request',
+      });
+    }
+    const declaredTotal = parsed.data.reduce((sum, item) => sum + item.size, 0);
+    if (declaredTotal > MAX_BULK_TOTAL_SIZE) {
+      return res.status(413).json({ message: 'Combined file size exceeds the bulk upload limit' });
+    }
+
+    const results = [];
+    for (const item of parsed.data) {
+      try {
+        const result = await presignItemForUser(req.user?.id as string, item);
+        results.push(
+          result.status === 'ok'
+            ? {
+                status: 'ok',
+                filename: item.filename,
+                asset: result.asset,
+                uploadUrl: result.uploadUrl,
+              }
+            : { status: 'rejected', filename: item.filename, message: result.message },
+        );
+      } catch (err) {
+        console.error('Asset bulk presign item error:', err);
+        results.push({
+          status: 'rejected',
+          filename: item.filename,
+          message: 'Error preparing upload',
+        });
+      }
+    }
+    return res.status(201).json({ results });
+  } catch (err) {
+    console.error('Asset bulk presign error:', err);
     return res.status(500).json({ message: 'Error preparing upload' });
   }
 });
@@ -209,6 +278,50 @@ router.post('/:id/confirm', authenticate, async (req: AuthRequest, res) => {
     return res.json({ asset: result.asset });
   } catch (err) {
     console.error('Asset confirm error:', err);
+    return res.status(500).json({ message: 'Error confirming upload' });
+  }
+});
+
+// POST /api/assets/bulk-confirm — per-item confirm for a batch (issue #68).
+// Each id is looked up scoped to the caller: a foreign or unknown id is a
+// per-item "not found" row, never a route-level 404. Errors are per-item so
+// partial success stays visible per file; no transaction is possible across
+// Spaces PUTs anyway.
+router.post('/bulk-confirm', authenticate, async (req: AuthRequest, res) => {
+  try {
+    const parsed = assetBulkConfirmSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({
+        message: parsed.error.issues[0]?.message ?? 'Invalid bulk confirm request',
+      });
+    }
+
+    const results = [];
+    for (const { assetId } of parsed.data) {
+      if (!isValidObjectId(assetId)) {
+        results.push({ status: 'rejected', assetId, message: 'Asset not found' });
+        continue;
+      }
+      try {
+        const asset = await Asset.findOne({ _id: assetId, userId: req.user?.id });
+        if (!asset) {
+          results.push({ status: 'rejected', assetId, message: 'Asset not found' });
+          continue;
+        }
+        const result = await confirmAsset(asset);
+        results.push(
+          result.status === 'ok'
+            ? { status: 'ok', assetId, asset: result.asset }
+            : { status: 'rejected', assetId, message: result.message },
+        );
+      } catch (err) {
+        console.error('Asset bulk confirm item error:', err);
+        results.push({ status: 'rejected', assetId, message: 'Error confirming upload' });
+      }
+    }
+    return res.json({ results });
+  } catch (err) {
+    console.error('Asset bulk confirm error:', err);
     return res.status(500).json({ message: 'Error confirming upload' });
   }
 });

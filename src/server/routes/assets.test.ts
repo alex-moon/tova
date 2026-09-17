@@ -260,6 +260,318 @@ describe('Assets confirm', () => {
   });
 });
 
+describe('Assets bulk upload', () => {
+  beforeEach(async () => {
+    jest.resetAllMocks();
+    (isStorageConfigured as jest.Mock).mockReturnValue(true);
+    mockPresignPut.mockResolvedValue('https://signed.example.com/put');
+    cookieBulkUser = await registerUser('assets-bulk-user@example.com');
+  });
+
+  let cookieBulkUser = '';
+  const bulkPresignFor = (cookie: string, body: unknown) =>
+    request(app)
+      .post('/api/assets/bulk-presign')
+      .set('Cookie', [cookie])
+      .send(body as object);
+
+  const bulkConfirmFor = (cookie: string, body: unknown) =>
+    request(app)
+      .post('/api/assets/bulk-confirm')
+      .set('Cookie', [cookie])
+      .send(body as object);
+
+  const item = (filename: string, contentType = 'text/plain', size = 10) => ({
+    filename,
+    contentType,
+    size,
+  });
+
+  const bulkUserAssets = async () =>
+    Asset.find({ userId: (await User.findOne({ email: 'assets-bulk-user@example.com' }))?._id });
+
+  it('presigns a batch in one round-trip with per-item ok results', async () => {
+    const response = await bulkPresignFor(cookieBulkUser, [
+      item('a.txt'),
+      item('b.csv', 'text/csv', 20),
+    ]);
+
+    expect(response.status).toBe(201);
+    expect(response.body.results).toHaveLength(2);
+    for (const row of response.body.results) {
+      expect(row.status).toBe('ok');
+      expect(row.uploadUrl).toBe('https://signed.example.com/put');
+    }
+    expect(mockPresignPut).toHaveBeenCalledTimes(2);
+    expect(await bulkUserAssets()).toHaveLength(2);
+  });
+
+  it('returns per-item rejected rows while siblings stay ok', async () => {
+    const response = await bulkPresignFor(cookieBulkUser, [
+      item('good.txt'),
+      item('evil.exe', 'application/x-msdownload'),
+      item('toolarge.bin', 'text/plain', 15 * 1024 * 1024 + 1),
+    ]);
+
+    expect(response.status).toBe(201);
+    const results = response.body.results;
+    expect(results.map((r: { status: string }) => r.status)).toEqual([
+      'ok',
+      'rejected',
+      'rejected',
+    ]);
+    expect(results[1].message).toBe('File type is not allowed');
+    expect(results[2].message).toBe('File is too large (max 15 MB)');
+    expect(await Asset.findOne({ filename: 'evil.exe' })).toBeNull();
+    expect(await Asset.findOne({ filename: 'toolarge.bin' })).toBeNull();
+  });
+
+  // Pinned per #68's hard rule: zip is never an accepted upload format, even
+  // as one item inside a bulk batch. Nothing is created for it, and its
+  // siblings' presigns are unaffected.
+  it('rejects a zip item per-item in bulk and creates nothing for it', async () => {
+    const response = await bulkPresignFor(cookieBulkUser, [
+      item('ok.txt'),
+      item('archive.zip', 'application/zip'),
+      item('archive2.zip', 'application/x-zip-compressed'),
+    ]);
+
+    expect(response.status).toBe(201);
+    const results = response.body.results;
+    expect(results[0].status).toBe('ok');
+    expect(results[1]).toMatchObject({ status: 'rejected', message: 'File type is not allowed' });
+    expect(results[2].status).toBe('rejected');
+    expect(await Asset.countDocuments({ filename: { $in: ['archive.zip', 'archive2.zip'] } })).toBe(
+      0,
+    );
+  });
+
+  it('rejects batches over the 20-file cap with 400', async () => {
+    const body = Array.from({ length: 21 }, (_, i) => item(`f${i}.txt`));
+    const response = await bulkPresignFor(cookieBulkUser, body);
+
+    expect(response.status).toBe(400);
+    expect(mockPresignPut).not.toHaveBeenCalled();
+    expect(await bulkUserAssets()).toHaveLength(0);
+  });
+
+  it('rejects batches whose declared total exceeds 300 MB with 413', async () => {
+    const response = await bulkPresignFor(cookieBulkUser, [
+      item('a.txt', 'text/plain', 299 * 1024 * 1024),
+      item('b.txt', 'text/plain', 2 * 1024 * 1024),
+    ]);
+
+    expect(response.status).toBe(413);
+    expect(mockPresignPut).not.toHaveBeenCalled();
+  });
+
+  it('rejects empty and malformed batches with 400', async () => {
+    for (const body of [[], 'nope', [{}], [{ filename: 'x.txt', size: 5 }]]) {
+      const response = await bulkPresignFor(cookieBulkUser, body);
+      expect(response.status).toBe(400);
+    }
+    expect(await bulkUserAssets()).toHaveLength(0);
+  });
+
+  it('converts an unexpected per-item helper error into a rejected row', async () => {
+    mockPresignPut.mockRejectedValueOnce({ name: 'InternalError' });
+    const response = await bulkPresignFor(cookieBulkUser, [item('boom.txt'), item('fine.txt')]);
+
+    expect(response.status).toBe(201);
+    expect(response.body.results[0].status).toBe('rejected');
+    expect(response.body.results[1].status).toBe('ok');
+  });
+
+  it('confirms a batch with per-item results and marks all ready', async () => {
+    const assetIds = [];
+    for (const filename of ['one.txt', 'two.txt']) {
+      const presigned = (await presignFor(cookieBulkUser, item(filename))) as {
+        status: number;
+        body: { asset: { id: string } };
+      };
+      expect(presigned.status).toBe(201);
+      assetIds.push(presigned.body.asset.id);
+    }
+
+    mockHead.mockResolvedValue(headerForObject(11, 'text/plain'));
+    const response = await bulkConfirmFor(
+      cookieBulkUser,
+      assetIds.map((id) => ({ assetId: id })),
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.body.results.map((r: { status: string }) => r.status)).toEqual(['ok', 'ok']);
+    for (const id of assetIds) {
+      expect((await Asset.findById(id))?.status).toBe('ready');
+    }
+  });
+
+  it('reports per-item confirm outcomes without blocking siblings', async () => {
+    const okId = (
+      (await presignFor(cookieBulkUser, item('good.txt'))) as {
+        body: { asset: { id: string } };
+      }
+    ).body.asset.id;
+    const missingId = new Types.ObjectId().toString();
+
+    mockHead
+      .mockResolvedValueOnce(headerForObject(11, 'text/plain'))
+      .mockRejectedValueOnce({ name: 'NotFound' });
+    const brokenId = (
+      (await presignFor(cookieBulkUser, item('broken.txt'))) as {
+        body: { asset: { id: string } };
+      }
+    ).body.asset.id;
+
+    const response = await bulkConfirmFor(cookieBulkUser, [
+      { assetId: okId },
+      { assetId: missingId },
+      { assetId: brokenId },
+    ]);
+
+    expect(response.status).toBe(200);
+    const results = response.body.results;
+    expect(results[0].status).toBe('ok');
+    expect(results[0].asset.status).toBe('ready');
+    expect(results[1]).toMatchObject({
+      status: 'rejected',
+      assetId: missingId,
+      message: 'Asset not found',
+    });
+    expect(results[2]).toMatchObject({
+      status: 'rejected',
+      assetId: brokenId,
+      message: 'Upload was not found in storage',
+    });
+    expect((await Asset.findById(brokenId))?.status).toBe('failed');
+  });
+
+  it('marks in-batch expired assets failed and reports them rejected per item', async () => {
+    const okId = (
+      (await presignFor(cookieBulkUser, item('fresh.txt'))) as {
+        body: { asset: { id: string } };
+      }
+    ).body.asset.id;
+    const user = await User.findOne({ email: 'assets-bulk-user@example.com' });
+    const stale = new Date(Date.now() - 2 * 60 * 60 * 1000);
+    const created = await Asset.collection.findOneAndUpdate(
+      { filename: 'stale-bulk' },
+      {
+        $set: {
+          userId: user?._id,
+          filename: 'stale-bulk',
+          key: 'stale/stale-bulk',
+          contentType: 'text/plain',
+          size: 10,
+          status: 'pending',
+          createdAt: stale,
+        },
+      },
+      { upsert: true, returnDocument: 'after' },
+    );
+    const staleId = created ? String(created._id) : '';
+
+    mockHead.mockResolvedValue(headerForObject(11, 'text/plain'));
+    const response = await bulkConfirmFor(cookieBulkUser, [
+      { assetId: staleId },
+      { assetId: okId },
+    ]);
+
+    expect(response.status).toBe(200);
+    expect(response.body.results[0]).toMatchObject({
+      status: 'rejected',
+      message: 'Upload window has expired',
+    });
+    expect((await Asset.findById(staleId))?.status).toBe('failed');
+    expect(response.body.results[1].status).toBe('ok');
+    expect(mockHead).toHaveBeenCalledTimes(1);
+  });
+
+  it('maps already-confirmed and size-invalid confirms into per-item rows', async () => {
+    const doubleId = (
+      (await presignFor(cookieBulkUser, item('double.txt'))) as {
+        body: { asset: { id: string } };
+      }
+    ).body.asset.id;
+    const sizeId = (
+      (await presignFor(cookieBulkUser, item('size.txt'))) as {
+        body: { asset: { id: string } };
+      }
+    ).body.asset.id;
+    await Asset.updateOne({ _id: doubleId }, { status: 'ready' });
+
+    mockHead.mockResolvedValue(headerForObject(15 * 1024 * 1024 + 1));
+    const response = await bulkConfirmFor(cookieBulkUser, [
+      { assetId: doubleId },
+      { assetId: sizeId },
+    ]);
+
+    expect(response.status).toBe(200);
+    expect(response.body.results[0]).toMatchObject({
+      status: 'rejected',
+      message: 'Asset was already confirmed',
+    });
+    expect(response.body.results[1]).toMatchObject({
+      status: 'rejected',
+      message: 'Stored file size is invalid',
+    });
+    expect((await Asset.findById(sizeId))?.status).toBe('failed');
+  });
+
+  it('keeps ownership isolation per item: a foreign assetId is a rejected row, not 404', async () => {
+    const cookieOther = await registerUser('assets-bulk-other@example.com');
+    const foreignId = await presignOk(cookieOther, 'secret.txt');
+    const ownId = (
+      (await presignFor(cookieBulkUser, item('mine.txt'))) as {
+        body: { asset: { id: string } };
+      }
+    ).body.asset.id;
+
+    mockHead.mockResolvedValue(headerForObject(11));
+    const response = await bulkConfirmFor(cookieBulkUser, [
+      { assetId: foreignId },
+      { assetId: ownId },
+    ]);
+
+    expect(response.status).toBe(200);
+    expect(response.body.results[0]).toMatchObject({
+      status: 'rejected',
+      message: 'Asset not found',
+    });
+    expect(response.body.results[1].status).toBe('ok');
+    expect((await Asset.findById(foreignId))?.status).toBe('pending');
+  });
+
+  it('rejects bulk confirm with malformed or oversized id arrays with 400', async () => {
+    for (const body of [
+      [],
+      'nope',
+      [{ assetId: '' }],
+      Array.from({ length: 21 }, () => ({ assetId: 'x' })),
+    ]) {
+      const response = await bulkConfirmFor(cookieBulkUser, body);
+      expect(response.status).toBe(400);
+    }
+  });
+
+  it('rejects guest bulk requests entirely', async () => {
+    expect(
+      (
+        await request(app)
+          .post('/api/assets/bulk-presign')
+          .send([item('x.txt')])
+      ).status,
+    ).toBe(401);
+    expect(
+      (
+        await request(app)
+          .post('/api/assets/bulk-confirm')
+          .send([{ assetId: 'x' }])
+      ).status,
+    ).toBe(401);
+  });
+});
+
 describe('Assets ownership isolation', () => {
   let cookieA: string;
   let cookieB: string;
