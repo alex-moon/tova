@@ -5,6 +5,10 @@ module.exports = {
     '^.+\\.tsx?$': ['ts-jest', { tsconfig: 'tsconfig.test.json' }],
   },
   testEnvironment: 'node',
+  // Silence all console output from tests: suites intentionally exercise
+  // error paths whose expected console.error/warn logging would otherwise
+  // pollute the test output.
+  silent: true,
   roots: ['<rootDir>/src/server'],
   testMatch: ['**/*.test.ts'],
   setupFilesAfterEnv: ['<rootDir>/src/server/test/setup.ts'],
