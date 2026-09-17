@@ -245,8 +245,13 @@ router.get('/bulk-download', authenticate, async (req: AuthRequest, res) => {
 
   try {
     const requested = parsed.data.id.filter((id) => isValidObjectId(id));
+    // Every id malformed would otherwise leave an id-less find — a whole-
+    // library download that bypasses the 50-id cap — so refuse instead.
+    if (requested.length === 0) {
+      return res.status(400).json({ message: 'No valid asset ids in selection' });
+    }
     const assets = await Asset.find({
-      ...(requested.length > 0 ? { _id: { $in: requested } } : {}),
+      _id: { $in: requested },
       userId: req.user?.id,
       status: 'ready',
     })

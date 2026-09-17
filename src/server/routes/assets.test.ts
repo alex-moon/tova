@@ -385,6 +385,19 @@ describe('Assets bulk download', () => {
     expect(response.body.message).toContain('50');
   });
 
+  it('ignores malformed ids instead of falling back to the whole library', async () => {
+    // Regression: filtering ids by isValidObjectId used to leave an empty
+    // $in set, turning the find into {userId, status:'ready'} — i.e. a
+    // download of the caller's entire library from `?id=garbage`.
+    await createReadyAsset('assets-bulk-a@example.com', 'owned.txt', 'x');
+    const response = await bulkRequest(cookieA, [
+      new Types.ObjectId().toHexString().slice(0, -1) + 'z',
+      'not-an-object-id',
+    ]);
+    expect(response.status).toBe(400);
+    expect(mockGetObjectStream).not.toHaveBeenCalled();
+  });
+
   it('returns 400 when no owned assets survive selection', async () => {
     const foreignId = await createReadyAsset('assets-bulk-b@example.com', 'secret.txt', 'x');
     // Owned-by-nobody + foreign id: nothing belongs to the caller.
