@@ -148,6 +148,8 @@ const uploadBatch = async (
   // One bulk-confirm per batch for only the PUT-succeeded files — PUT-failed
   // files are never confirmed (their rows are already errors). Results are
   // matched back by assetId, not row order.
+  if (!putSucceeded.length) return;
+
   try {
     const res = await axios.post<{
       results: Array<

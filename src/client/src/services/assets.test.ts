@@ -300,4 +300,12 @@ describe('AssetService.uploadMany', () => {
     expect(confirmBodies).toHaveLength(0);
     expect(FakeXHR.sent).toHaveLength(0);
   });
+
+  it('sends no bulk-confirm when every PUT of a batch fails', async () => {
+    stubXhr();
+    const results = await run([mk('a.txt'), mk('b.txt')], () => 500);
+
+    expect(results.every((r) => r.error === 'The upload to storage failed')).toBe(true);
+    expect(confirmBodies).toHaveLength(0);
+  });
 });
