@@ -13,6 +13,7 @@ import {
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import AssetService, { type AssetSummary } from '@/services/assets';
+import { useConfirmDelete } from '../hooks/useConfirmDelete';
 
 const MAX_ASSET_SIZE = 15 * 1024 * 1024;
 
@@ -94,19 +95,23 @@ const AssetLibrary: React.FC<AssetLibraryProps> = ({ onClose, onPickAsset }) => 
     }
   }, []);
 
-  const handleDelete = async (asset: AssetSummary) => {
-    if (!window.confirm(`Delete "${asset.filename}"? This cannot be undone.`)) return;
-    setDeletingId(asset.id);
+  const handleDelete = async (assetId: string) => {
+    setDeletingId(assetId);
     try {
-      await AssetService.delete(asset.id);
-      setAssets((prev) => prev.filter((a) => a.id !== asset.id));
-      toast.success(`Deleted "${asset.filename}"`);
+      await AssetService.delete(assetId);
+      setAssets((prev) => prev.filter((a) => a.id !== assetId));
+      const deleted = assets.find((a) => a.id === assetId);
+      toast.success(`Deleted "${deleted?.filename ?? 'file'}"`);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Delete failed');
     } finally {
       setDeletingId(null);
     }
   };
+
+  const { armedId, arm, onYes, onAlways, onNo } = useConfirmDelete('file', (id) => {
+    void handleDelete(id);
+  });
 
   const handleDownload = async (asset: AssetSummary) => {
     try {
@@ -161,56 +166,98 @@ const AssetLibrary: React.FC<AssetLibraryProps> = ({ onClose, onPickAsset }) => 
           ) : (
             <>
               <ul className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                {assets.map((asset) => (
-                  <li
-                    key={asset.id}
-                    className="flex items-center gap-3 rounded-lg border border-border bg-msg-assistant px-3 py-2.5"
-                  >
-                    <IconFor contentType={asset.contentType} filename={asset.filename} />
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate text-sm">{asset.filename}</span>
-                      <span className="block text-xs text-muted-foreground">
-                        {formatSize(asset.size)} · {new Date(asset.createdAt).toLocaleDateString()}
-                      </span>
-                    </span>
-                    {onPickAsset && (
+                {assets.map((asset) =>
+                  armedId === asset.id ? (
+                    <li
+                      key={asset.id}
+                      data-testid={`confirm-delete-file-${asset.id}`}
+                      className="flex items-center gap-1 rounded-lg border border-destructive bg-destructive/10 px-3 py-2.5 text-sm text-destructive"
+                    >
+                      <span className="min-w-0 flex-1 truncate">Sure? Irreversible.</span>
                       <button
                         type="button"
-                        title={
-                          asset.status === 'ready'
-                            ? 'Attach to chat'
-                            : 'This file is not ready to attach'
-                        }
-                        aria-label={`Attach ${asset.filename} to chat`}
-                        disabled={asset.status !== 'ready' || deletingId === asset.id}
-                        data-testid="asset-attach"
-                        onClick={() => onPickAsset(asset)}
-                        className="shrink-0 rounded p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+                        data-testid="confirm-yes"
+                        aria-label="Yes, delete file"
+                        autoFocus
+                        disabled={deletingId === asset.id}
+                        onClick={onYes}
+                        className="shrink-0 rounded-md px-2 py-1 text-xs font-medium hover:bg-destructive hover:text-destructive-foreground disabled:opacity-50"
                       >
-                        <Paperclip className="size-4" />
+                        Yes
                       </button>
-                    )}
-                    <button
-                      type="button"
-                      title="Download"
-                      aria-label={`Download ${asset.filename}`}
-                      onClick={() => void handleDownload(asset)}
-                      className="shrink-0 rounded p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                      <button
+                        type="button"
+                        data-testid="confirm-always"
+                        aria-label="Always delete files without asking"
+                        disabled={deletingId === asset.id}
+                        onClick={() => void onAlways()}
+                        className="shrink-0 rounded-md px-2 py-1 text-xs font-medium hover:bg-destructive hover:text-destructive-foreground disabled:opacity-50"
+                      >
+                        Always
+                      </button>
+                      <button
+                        type="button"
+                        data-testid="confirm-no"
+                        aria-label="No, keep the file"
+                        disabled={deletingId === asset.id}
+                        onClick={onNo}
+                        className="shrink-0 rounded-md px-2 py-1 text-xs font-medium hover:bg-destructive hover:text-destructive-foreground disabled:opacity-50"
+                      >
+                        No
+                      </button>
+                    </li>
+                  ) : (
+                    <li
+                      key={asset.id}
+                      className="flex items-center gap-3 rounded-lg border border-border bg-msg-assistant px-3 py-2.5"
                     >
-                      <span className="text-xs underline">Get</span>
-                    </button>
-                    <button
-                      type="button"
-                      title="Delete"
-                      aria-label={`Delete ${asset.filename}`}
-                      disabled={deletingId === asset.id}
-                      onClick={() => void handleDelete(asset)}
-                      className="shrink-0 rounded p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-destructive disabled:opacity-50"
-                    >
-                      <Trash2 className="size-4" />
-                    </button>
-                  </li>
-                ))}
+                      <IconFor contentType={asset.contentType} filename={asset.filename} />
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-sm">{asset.filename}</span>
+                        <span className="block text-xs text-muted-foreground">
+                          {formatSize(asset.size)} ·{' '}
+                          {new Date(asset.createdAt).toLocaleDateString()}
+                        </span>
+                      </span>
+                      {onPickAsset && (
+                        <button
+                          type="button"
+                          title={
+                            asset.status === 'ready'
+                              ? 'Attach to chat'
+                              : 'This file is not ready to attach'
+                          }
+                          aria-label={`Attach ${asset.filename} to chat`}
+                          disabled={asset.status !== 'ready' || deletingId === asset.id}
+                          data-testid="asset-attach"
+                          onClick={() => onPickAsset(asset)}
+                          className="shrink-0 rounded p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          <Paperclip className="size-4" />
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        title="Download"
+                        aria-label={`Download ${asset.filename}`}
+                        onClick={() => void handleDownload(asset)}
+                        className="shrink-0 rounded p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                      >
+                        <span className="text-xs underline">Get</span>
+                      </button>
+                      <button
+                        type="button"
+                        title="Delete"
+                        aria-label={`Delete ${asset.filename}`}
+                        disabled={deletingId === asset.id}
+                        onClick={() => arm(asset.id)}
+                        className="shrink-0 rounded p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-destructive disabled:opacity-50"
+                      >
+                        <Trash2 className="size-4" />
+                      </button>
+                    </li>
+                  ),
+                )}
               </ul>
               {nextCursor && (
                 <button

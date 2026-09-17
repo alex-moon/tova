@@ -55,6 +55,7 @@ const AuthService = {
     preferredName?: string;
     customInstructions?: string;
     theme?: string;
+    confirmDeletes?: { chat?: boolean; file?: boolean };
   }): Promise<AuthUser> {
     try {
       const res = await axios.patch<{ user: AuthUser }>('/api/profile', patch);
