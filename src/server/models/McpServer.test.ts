@@ -71,4 +71,51 @@ describe('McpServer model', () => {
     });
     await expect(doc.validate()).rejects.toThrow();
   });
+
+  it('rejects non-https, unparsable, and hostname-less urls', async () => {
+    for (const badUrl of [
+      'http://mcp.example.com/mcp',
+      'not a url at all',
+      'https://',
+      'file:///etc/passwd',
+    ]) {
+      const doc = new McpServer({
+        scope: 'user',
+        userId: new mongoose.Types.ObjectId(),
+        name: 'bad-url',
+        url: badUrl,
+      });
+      await expect(doc.validate()).rejects.toThrow(/valid https URL/u);
+    }
+  });
+
+  it('accepts a valid https url', async () => {
+    const doc = new McpServer({
+      scope: 'user',
+      userId: new mongoose.Types.ObjectId(),
+      name: 'good',
+      url: 'https://mcp.example.com/mcp?x=1',
+      headers: { iv: 'a', tag: 'b', ciphertext: 'c' },
+      headersConfigured: true,
+    });
+    await expect(doc.validate()).resolves.toBeUndefined();
+  });
+
+  it('requires userId on user scope and forbids it on platform scope', async () => {
+    await expect(
+      new McpServer({
+        scope: 'user',
+        name: 'ownerless',
+        url: 'https://mcp.example.com',
+      }).validate(),
+    ).rejects.toThrow(/ownership mismatch/u);
+    await expect(
+      new McpServer({
+        scope: 'platform',
+        userId: new mongoose.Types.ObjectId(),
+        name: 'owned-platform',
+        url: 'https://mcp.example.com',
+      }).validate(),
+    ).rejects.toThrow(/ownership mismatch/u);
+  });
 });

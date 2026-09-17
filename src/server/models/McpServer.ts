@@ -22,6 +22,20 @@ const mcpServerSchema = new mongoose.Schema(
       type: String,
       required: true,
       trim: true,
+      // SSRF guard (issue #36): MCP client connects are outbound HTTP; only
+      // https URLs are accepted. The API route validates too, but the model
+      // must not let a bad URL through via any other write path.
+      validate: {
+        validator: (value: string) => {
+          try {
+            const parsed = new URL(value);
+            return parsed.protocol === 'https:' && !!parsed.hostname;
+          } catch {
+            return false;
+          }
+        },
+        message: 'MCP server url must be a valid https URL',
+      },
     },
     // AES-256-GCM envelope (src/server/services/crypto.ts). Secret material at
     // rest is only these three fields; the toJSON transform below strips the
@@ -64,6 +78,14 @@ const mcpServerSchema = new mongoose.Schema(
     timestamps: true,
   },
 );
+
+// A user-scope server must carry its owner; platform servers must be ownerless.
+const validateScopeOwnership = function (this: { scope?: string; userId?: unknown }): boolean {
+  if (this.scope === 'user') return !!this.userId;
+  if (this.scope === 'platform') return this.userId == null;
+  return false;
+};
+mcpServerSchema.path('userId').validate(validateScopeOwnership, 'userId ownership mismatch');
 
 mcpServerSchema.index({ scope: 1, name: 1 });
 mcpServerSchema.index(
