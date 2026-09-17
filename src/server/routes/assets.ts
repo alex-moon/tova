@@ -9,7 +9,6 @@ import {
   assetPresignSchema,
 } from '../validation';
 import {
-  deleteObject,
   getObjectBuffer,
   getObjectStream,
   headObject,
@@ -349,10 +348,9 @@ router.get('/:id/url', authenticate, async (req: AuthRequest, res) => {
 });
 
 // DELETE /api/assets/bulk-delete — batch delete of owned assets with the
-// same repeated `?id=` contract as bulk download. Objects are removed before
-// the docs (mirroring the single delete); any storage failure aborts with a
-// 502 and no doc deletion, so the operation either converges or can be
-// retried cleanly.
+// same repeated `?id=` contract as bulk download. Doc-only for now: Spaces
+// objects are left resident (decided #69 review), so a later soft-delete /
+// restore can flip this to an archive without data loss.
 router.delete('/bulk-delete', authenticate, async (req: AuthRequest, res) => {
   const ids = req.query.id;
   const parsed = assetBulkDeleteQuerySchema.safeParse({ id: ids });
@@ -367,25 +365,12 @@ router.delete('/bulk-delete', authenticate, async (req: AuthRequest, res) => {
     if (requested.length === 0) {
       return res.status(400).json({ message: 'No valid asset ids in selection' });
     }
-    const assets = await Asset.find({
+    const result = await Asset.deleteMany({
       _id: { $in: requested },
       userId: req.user?.id,
     });
-    if (assets.length === 0) {
-      return res.status(404).json({ message: 'Asset not found' });
-    }
-
-    for (const asset of assets) {
-      try {
-        await deleteObject(asset.key);
-      } catch (err) {
-        console.error('Asset bulk delete object error:', err);
-        return res.status(502).json({ message: 'Error deleting from storage' });
-      }
-    }
-    const result = await Asset.deleteMany({ _id: { $in: assets.map((a) => a._id) } });
     if (result.deletedCount === 0) {
-      return res.status(500).json({ message: 'Error deleting assets' });
+      return res.status(404).json({ message: 'Asset not found' });
     }
     return res.json({ success: true, deleted: result.deletedCount });
   } catch (err) {
@@ -394,19 +379,14 @@ router.delete('/bulk-delete', authenticate, async (req: AuthRequest, res) => {
   }
 });
 
-// DELETE /api/assets/:id — object first, then the doc; a missing object is
-// still a successful delete so the operation converges.
+// DELETE /api/assets/:id — doc-only delete; the Spaces object stays resident
+// (decided #69 review) so nothing is lost if a restore feature arrives. A
+// missing object is therefore not a concern for the delete path itself.
 router.delete('/:id', authenticate, async (req: AuthRequest, res) => {
   try {
     const asset = await ownedAsset(req);
     if (!asset) {
       return res.status(404).json({ message: 'Asset not found' });
-    }
-    try {
-      await deleteObject(asset.key);
-    } catch (err) {
-      console.error('Asset object delete error:', err);
-      return res.status(502).json({ message: 'Error deleting from storage' });
     }
     const deleted = await Asset.findByIdAndDelete(asset._id);
     if (!deleted) {

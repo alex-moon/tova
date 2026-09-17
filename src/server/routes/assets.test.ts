@@ -299,18 +299,19 @@ describe('Assets ownership isolation', () => {
     expect((await Asset.findById(assetId))?.status).toBe('pending');
   });
 
-  it('prevents user B from deleting user A asset and the object survives', async () => {
+  it('prevents user B from deleting user A asset', async () => {
     const response = await request(app).delete(`/api/assets/${assetId}`).set('Cookie', [cookieB]);
     expect(response.status).toBe(404);
     expect(mockDeleteObject).not.toHaveBeenCalled();
     expect(await Asset.findById(assetId)).not.toBeNull();
   });
 
-  it('propagates a storage error as a 502 and keeps the doc', async () => {
-    mockDeleteObject.mockRejectedValue({ name: 'InternalError' });
+  it('deletes the doc without touching storage', async () => {
     const response = await request(app).delete(`/api/assets/${assetId}`).set('Cookie', [cookieA]);
-    expect(response.status).toBe(502);
-    expect(await Asset.findById(assetId)).not.toBeNull();
+    expect(response.status).toBe(200);
+    expect(await Asset.findById(assetId)).toBeNull();
+    // Decided #69 review: Spaces objects stay resident, so nothing deletes.
+    expect(mockDeleteObject).not.toHaveBeenCalled();
   });
 
   it('rejects guest requests entirely', async () => {
