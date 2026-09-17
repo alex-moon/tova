@@ -34,8 +34,6 @@ type Routing = Awaited<ReturnType<typeof routeQuery>>;
 
 // The error-path tests intentionally break the mocked classifier; keep that
 // expected fallback error out of the test output.
-// The error-path tests intentionally break the mocked classifier; keep that
-// expected fallback error out of the test output.
 let consoleErrorSpy: jest.SpyInstance;
 
 beforeEach(() => {
