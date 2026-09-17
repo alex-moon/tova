@@ -1,10 +1,10 @@
 import { describe, expect, it, vi, afterEach } from 'vitest';
 import { render, screen, cleanup, fireEvent, waitFor } from '@testing-library/react';
 import AssetLibrary from './AssetLibrary';
+import type { AssetSummary, BulkUploadFileResult } from '../services/assets';
 import { AuthContext } from '../context/AuthContext';
 import type { User } from '../context/AuthContext';
 import { toast } from 'sonner';
-import type { AssetSummary } from '../services/assets';
 
 vi.mock('sonner', () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
 
@@ -15,6 +15,7 @@ vi.mock('../services/assets', async (importOriginal) => {
     default: {
       list: vi.fn(),
       upload: vi.fn(),
+      uploadMany: vi.fn(),
       downloadUrl: vi.fn(),
       delete: vi.fn(),
       bulkDownloadUrl: vi.fn(() => '/api/assets/bulk-download'),
@@ -198,6 +199,68 @@ describe('AssetLibrary — batch delete (issue #69 × #59)', () => {
 
     expect(screen.getByRole('checkbox', { name: 'Select wip.bin' })).toBeDisabled();
     expect(screen.queryByTestId('asset-bulk-delete')).not.toBeInTheDocument();
+  });
+});
+describe('AssetLibrary — bulk upload (issue #68)', () => {
+  afterEach(cleanup);
+  vi.mocked(AssetService.list).mockResolvedValue({ assets: [], nextCursor: null });
+  vi.mocked(AssetService.uploadMany).mockReset();
+
+  const row = (over: Partial<BulkUploadFileResult> = {}, name = 'x.txt'): BulkUploadFileResult => ({
+    file: new File(['x'], name),
+    ...over,
+  });
+  const uploadBy =
+    (results: BulkUploadFileResult[]) =>
+    (_files: File[] | FileList, onProgress?: (i: number, pct: number) => void) => {
+      results.forEach((r, i) => r.asset && onProgress?.(i, 100));
+      return Promise.resolve(results);
+    };
+
+  const fileByName = (name: string) => Object.assign(new File(['x'], name), {});
+
+  it('renders the hidden input with multiple', () => {
+    renderLibrary();
+    expect(screen.getByTestId('asset-input')).toHaveAttribute('multiple');
+  });
+
+  it('shows per-file rows: successes list in the grid, errors keep their message', async () => {
+    vi.mocked(AssetService.uploadMany).mockImplementation(
+      uploadBy([
+        row({ asset: asset({ id: 'a-ok', filename: 'ok.txt' }) }, 'ok.txt'),
+        row({ error: 'File type is not allowed' }, 'bad.exe'),
+      ]),
+    );
+    renderLibrary();
+    fireEvent.change(screen.getByTestId('asset-input'), {
+      target: { files: [fileByName('ok.txt'), fileByName('bad.exe')] },
+    });
+    await screen.findByTestId('upload-rows');
+    expect(screen.getByText('File type is not allowed')).toBeInTheDocument();
+    expect(screen.getByTestId('upload-row-0')).toHaveTextContent('Uploaded');
+    expect(screen.getByTestId('upload-row-1')).toHaveTextContent('File type is not allowed');
+    // 'ok.txt' appears twice once the success lands in the grid: upload row + listing.
+    expect(await screen.findAllByText('ok.txt')).toHaveLength(2);
+    expect(vi.mocked(AssetService.uploadMany).mock.calls[0][1]).toBeTypeOf('function');
+  });
+
+  it('renders progress for in-flight uploads', async () => {
+    let settle: (rows: BulkUploadFileResult[]) => void = () => {};
+    vi.mocked(AssetService.uploadMany).mockImplementation(
+      (_files: File[] | FileList, onProgress?: (i: number, pct: number) => void) =>
+        new Promise((res) => {
+          onProgress?.(0, 40);
+          settle = res;
+        }),
+    );
+    renderLibrary();
+    fireEvent.change(screen.getByTestId('asset-input'), {
+      target: { files: [fileByName('a.txt')] },
+    });
+    await screen.findByText('Uploading 40%');
+    settle([row({ error: 'Behind upload' }, 'a.txt')]);
+    await screen.findByTestId('upload-row-0');
+    expect(screen.getByTestId('upload-row-0')).toHaveTextContent('Behind upload');
   });
 });
 

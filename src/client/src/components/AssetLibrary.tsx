@@ -15,8 +15,6 @@ import { Button } from '@/components/ui/button';
 import AssetService, { type AssetSummary } from '@/services/assets';
 import { useConfirmDelete } from '../hooks/useConfirmDelete';
 
-const MAX_ASSET_SIZE = 15 * 1024 * 1024;
-
 const formatSize = (bytes: number): string => {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
@@ -52,7 +50,14 @@ const AssetLibrary: React.FC<AssetLibraryProps> = ({ onClose, onPickAsset }) => 
   const [assets, setAssets] = useState<AssetSummary[]>([]);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [uploadingName, setUploadingName] = useState<string | null>(null);
+  const [uploadRows, setUploadRows] = useState<
+    Array<{
+      name: string;
+      status: 'uploading' | 'done' | 'error';
+      progress: number;
+      message?: string;
+    }>
+  >([]);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [bulkDownloading, setBulkDownloading] = useState(false);
@@ -78,24 +83,38 @@ const AssetLibrary: React.FC<AssetLibraryProps> = ({ onClose, onPickAsset }) => 
     void load();
   }, [load]);
 
+  // Issue #68 bulk upload: feed every selected file through uploadMany and
+  // expose per-file rows (progress on upload, message on error) plus an
+  // aggregate outcome. Partial failure keeps the successes; per-file errors
+  // resolve from the service rather than throwing, so this reports either way.
   const handleFiles = useCallback(async (files: FileList | null) => {
     if (!files?.length) return;
-    for (const file of Array.from(files)) {
-      if (file.size > MAX_ASSET_SIZE) {
-        toast.error(`"${file.name}" is too large (max 15 MB)`);
-        continue;
+    const list = Array.from(files);
+    setUploadRows(list.map((file) => ({ name: file.name, status: 'uploading', progress: 0 })));
+    const results = await AssetService.uploadMany(list, (index, pct) => {
+      setUploadRows((prev) =>
+        prev.map((row, i) => (i === index ? { ...row, progress: pct } : row)),
+      );
+    });
+    const uploaded: AssetSummary[] = [];
+    const rows = results.map((result, i) => {
+      const name = list[i].name;
+      if (result.asset) {
+        uploaded.push(result.asset);
+        return { name, status: 'done' as const, progress: 100 };
       }
-      setUploadingName(file.name);
-      try {
-        const asset = await AssetService.upload(file);
-        setAssets((prev) => [asset, ...prev]);
-        toast.success(`Uploaded "${file.name}"`);
-      } catch (err) {
-        toast.error(err instanceof Error ? err.message : 'Upload failed');
-      } finally {
-        setUploadingName(null);
-      }
-    }
+      return {
+        name,
+        status: 'error' as const,
+        progress: 100,
+        message: result.error ?? 'Upload failed',
+      };
+    });
+    setUploadRows(rows);
+    if (uploaded.length) setAssets((prev) => [...uploaded, ...prev]);
+    const summary = `Uploaded ${uploaded.length} of ${rows.length} files`;
+    if (uploaded.length === rows.length) toast.success(summary);
+    else toast.error(summary);
   }, []);
 
   const handleDelete = async (assetId: string) => {
@@ -424,26 +443,51 @@ const AssetLibrary: React.FC<AssetLibraryProps> = ({ onClose, onPickAsset }) => 
             className="flex flex-col items-center gap-1.5 rounded-lg border border-dashed border-border px-4 py-4 text-center text-sm text-muted-foreground transition-colors hover:border-primary hover:text-accent-foreground"
           >
             <Upload className="size-4" />
-            {uploadingName ? (
-              <p data-testid="asset-uploading">Uploading “{uploadingName}”…</p>
+            {uploadRows.length > 0 ? (
+              <ul className="w-full space-y-1" data-testid="upload-rows">
+                {uploadRows.map((row, i) => (
+                  <li key={`${row.name}-${i}`} className="flex flex-col gap-0.5 text-left">
+                    <span
+                      className="flex items-center justify-between gap-2 truncate text-xs"
+                      data-testid={`upload-row-${i}`}
+                    >
+                      <span className="truncate">{row.name}</span>
+                      <span
+                        className={
+                          row.status === 'error' ? 'text-destructive' : 'text-muted-foreground'
+                        }
+                      >
+                        {row.status === 'uploading' && `Uploading ${row.progress}%`}
+                        {row.status === 'done' && 'Uploaded'}
+                        {row.status === 'error' && (row.message ?? 'Upload failed')}
+                      </span>
+                    </span>
+                    {row.status === 'uploading' && (
+                      <progress max={100} value={row.progress} className="h-1 w-full" />
+                    )}
+                  </li>
+                ))}
+              </ul>
             ) : (
               <p>
-                Drag a file here, or{' '}
+                Drag files here, or{' '}
                 <button
                   type="button"
                   className="text-primary underline underline-offset-2 hover:text-primary-hover"
                   onClick={() => inputRef.current?.click()}
                 >
-                  choose a file
+                  choose files
                 </button>
               </p>
             )}
-            <span className="text-xs">Up to 15 MB · txt, md, csv, json, pdf, images</span>
+            <span className="text-xs">Up to 15 MB each · txt, md, csv, json, pdf, images</span>
             <input
               ref={inputRef}
               type="file"
               className="hidden"
               aria-hidden
+              multiple
+              data-testid="asset-input"
               onChange={(e) => {
                 void handleFiles(e.target.files);
                 e.target.value = '';

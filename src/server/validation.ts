@@ -95,6 +95,44 @@ export const assetBulkDeleteQuerySchema = z.object({
       .max(50, { message: 'At most 50 assets can be deleted at once' }),
   ),
 });
+// Bulk upload (issue #68): one batched presign/confirm round-trip for up to
+// MAX_BULK_FILES files, each item shaped exactly like a single-file presign.
+// Hard rule from the ticket: files arrive via N normal singleton uploads and
+// the direct-to-Spaces PUT flow — zip is never an accepted upload format at
+// any layer (ALLOWED_CONTENT_TYPES in routes/assets.ts excludes it), and
+// uploaded archives are never read or unzipped anywhere.
+//
+// These schemas shape the batch; per-item content-type/size policy lives in
+// the routes (validation.ts knows shapes, routes know policy). The total
+// declared size cap is a batch-shape guard here: one HTTP request must not
+// carry an unbounded array of sizes.
+export const MAX_BULK_FILES = 20;
+// 20 files x 15 MB nominal per-file cap.
+export const MAX_BULK_TOTAL_SIZE = 300 * 1024 * 1024;
+
+export const assetBulkPresignSchema = z
+  .array(assetPresignSchema, { message: 'Bulk upload payload must be an array of files' })
+  .min(1, { message: 'Bulk upload must include at least one file' })
+  .max(MAX_BULK_FILES, {
+    message: `Bulk upload is limited to ${MAX_BULK_FILES} files per batch`,
+  })
+  .refine((items) => items.reduce((sum, item) => sum + item.size, 0) <= MAX_BULK_TOTAL_SIZE, {
+    message: 'Combined file size exceeds the bulk upload limit',
+  });
+
+export const assetBulkConfirmSchema = z
+  .array(
+    z.object({
+      assetId: z
+        .string({ message: 'Asset id is required' })
+        .min(1, { message: 'Asset id is required' }),
+    }),
+    { message: 'Bulk confirm payload must be an array of asset ids' },
+  )
+  .min(1, { message: 'Bulk confirm must include at least one asset' })
+  .max(MAX_BULK_FILES, {
+    message: `Bulk confirm is limited to ${MAX_BULK_FILES} assets per batch`,
+  });
 
 export type LoginCredentials = z.infer<typeof loginSchema>;
 export type RegisterCredentials = z.infer<typeof registerSchema>;

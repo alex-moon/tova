@@ -4,9 +4,12 @@ import { isValidObjectId } from 'mongoose';
 import { Asset, type AssetDocument } from '../models/Asset';
 import { authenticate, AuthRequest } from '../middleware/auth';
 import {
+  assetBulkConfirmSchema,
   assetBulkDeleteQuerySchema,
   assetBulkDownloadQuerySchema,
+  assetBulkPresignSchema,
   assetPresignSchema,
+  MAX_BULK_TOTAL_SIZE,
 } from '../validation';
 import {
   getObjectBuffer,
@@ -37,6 +40,9 @@ const ALLOWED_CONTENT_TYPES = new Set([
   'image/gif',
   'image/webp',
 ]);
+//   'application/zip' is deliberately absent: zip is never an accepted upload
+//   format (issue #68 hard rule) — uploads are direct browser→Spaces PUTs of
+//   single files, and no upload path ever reads archive contents.
 
 // Presign + confirm headroom: pending assets older than this cannot be
 // confirmed, so stale rows never revive (plan honest-boundaries for #34).
@@ -108,6 +114,43 @@ const ownedAsset = async (req: AuthRequest): Promise<AssetDocument | null> => {
   return asset;
 };
 
+// Core of POST /presign (and, per #68, of the bulk presign per-item loop):
+// policy checks (type allowlist, size cap), then mint a pending Asset row and
+// presign its direct-to-Spaces PUT URL. Returns a typed rejection instead of
+// throwing so bulk can map one bad file to a per-item row without blocking
+// its siblings; the single route maps the same shape to a status code.
+type PresignItem = { filename: string; contentType: string; size: number };
+type PresignResult =
+  | { status: 'ok'; uploadUrl: string; asset: ReturnType<typeof safeAsset> }
+  | { status: 'rejected'; code: number; message: string };
+
+const presignItemForUser = async (
+  userId: string,
+  { filename, contentType, size }: PresignItem,
+): Promise<PresignResult> => {
+  if (!ALLOWED_CONTENT_TYPES.has(contentType)) {
+    return { status: 'rejected', code: 400, message: 'File type is not allowed' };
+  }
+  if (size > MAX_ASSET_SIZE) {
+    return { status: 'rejected', code: 413, message: 'File is too large (max 15 MB)' };
+  }
+
+  const asset = await Asset.create({
+    userId,
+    filename: sanitizeFilename(filename),
+    key: 'pending',
+    contentType,
+    size,
+    status: 'pending',
+  });
+
+  const key = `${userId}/${asset._id}/${sanitizeFilename(filename)}`;
+  asset.key = key;
+  await asset.save();
+
+  const uploadUrl = await presignPutUrl(key, 60, contentType);
+  return { status: 'ok', uploadUrl, asset: safeAsset(asset) };
+};
 // POST /api/assets/presign — mints the upload URL; no bytes reach Express.
 router.post('/presign', authenticate, async (req: AuthRequest, res) => {
   try {
@@ -120,36 +163,136 @@ router.post('/presign', authenticate, async (req: AuthRequest, res) => {
         message: parsed.error.issues[0]?.message ?? 'Invalid upload request',
       });
     }
-    const { filename, contentType, size } = parsed.data;
 
-    if (!ALLOWED_CONTENT_TYPES.has(contentType)) {
-      return res.status(400).json({ message: 'File type is not allowed' });
+    const result = await presignItemForUser(req.user?.id as string, parsed.data);
+    if (result.status === 'rejected') {
+      return res.status(result.code).json({ message: result.message });
     }
-    if (size > MAX_ASSET_SIZE) {
-      return res.status(413).json({ message: 'File is too large (max 15 MB)' });
-    }
-
-    const userId = req.user?.id as string;
-    const asset = await Asset.create({
-      userId,
-      filename: sanitizeFilename(filename),
-      key: 'pending',
-      contentType,
-      size,
-      status: 'pending',
-    });
-
-    const key = `${userId}/${asset._id}/${sanitizeFilename(filename)}`;
-    asset.key = key;
-    await asset.save();
-
-    const uploadUrl = await presignPutUrl(key, 60, contentType);
-    return res.status(201).json({ uploadUrl, asset: safeAsset(asset) });
+    return res.status(201).json({ uploadUrl: result.uploadUrl, asset: result.asset });
   } catch (err) {
     console.error('Asset presign error:', err);
     return res.status(500).json({ message: 'Error preparing upload' });
   }
 });
+
+// Bulk upload (issue #68): many files via N normal singleton uploads, one
+// batched presign round-trip. Not a zip container — zip is never an accepted
+// upload format at any layer (see ALLOWED_CONTENT_TYPES above), and uploaded
+// archives are never read or unzipped anywhere.
+router.post('/bulk-presign', authenticate, async (req: AuthRequest, res) => {
+  try {
+    if (!isStorageConfigured()) {
+      return res.status(503).json({ message: 'File storage is not configured' });
+    }
+    // Coarse total-size guard on the unvalidated body: over the declared cap
+    // is a payload too big to bother validating (413), and the batch-shape
+    // checks below cover anything finer than that.
+    if (Array.isArray(req.body)) {
+      const rawTotal = req.body.reduce(
+        (sum, item) =>
+          sum + (typeof item?.size === 'number' && Number.isFinite(item.size) ? item.size : 0),
+        0,
+      );
+      if (rawTotal > MAX_BULK_TOTAL_SIZE) {
+        return res
+          .status(413)
+          .json({ message: 'Combined file size exceeds the bulk upload limit' });
+      }
+    }
+    const parsed = assetBulkPresignSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({
+        message: parsed.error.issues[0]?.message ?? 'Invalid bulk upload request',
+      });
+    }
+    const declaredTotal = parsed.data.reduce((sum, item) => sum + item.size, 0);
+    if (declaredTotal > MAX_BULK_TOTAL_SIZE) {
+      return res.status(413).json({ message: 'Combined file size exceeds the bulk upload limit' });
+    }
+
+    const results = [];
+    for (const item of parsed.data) {
+      try {
+        const result = await presignItemForUser(req.user?.id as string, item);
+        results.push(
+          result.status === 'ok'
+            ? {
+                status: 'ok',
+                filename: item.filename,
+                asset: result.asset,
+                uploadUrl: result.uploadUrl,
+              }
+            : { status: 'rejected', filename: item.filename, message: result.message },
+        );
+      } catch (err) {
+        console.error('Asset bulk presign item error:', err);
+        results.push({
+          status: 'rejected',
+          filename: item.filename,
+          message: 'Error preparing upload',
+        });
+      }
+    }
+    return res.status(201).json({ results });
+  } catch (err) {
+    console.error('Asset bulk presign error:', err);
+    return res.status(500).json({ message: 'Error preparing upload' });
+  }
+});
+
+// Core of POST /:id/confirm (and, per #68, of the bulk confirm per-item
+// loop): assumes the asset row is already known to belong to the caller —
+// ownership is the caller's lookup (a foreign id must read as "not found",
+// never as an error row). Returns a typed rejection instead of throwing so
+// bulk can map per-item outcomes; the single route maps the same shape to a
+// status code.
+type ConfirmResult =
+  | { status: 'ok'; asset: ReturnType<typeof safeAsset> }
+  | { status: 'rejected'; code: number; message: string };
+
+const confirmAsset = async (asset: AssetDocument): Promise<ConfirmResult> => {
+  if (asset.status !== 'pending') {
+    return { status: 'rejected', code: 409, message: 'Asset was already confirmed' };
+  }
+  if (Date.now() - new Date(asset.createdAt).getTime() > CONFIRM_MAX_AGE_MS) {
+    asset.status = 'failed';
+    asset.failureReason = 'expired';
+    await asset.save();
+    return { status: 'rejected', code: 409, message: 'Upload window has expired' };
+  }
+
+  let head;
+  try {
+    head = await headObject(asset.key);
+  } catch (err) {
+    console.error('Asset confirm HEAD error:', err);
+    asset.status = 'failed';
+    asset.failureReason = 'upload-not-found';
+    await asset.save();
+    return { status: 'rejected', code: 409, message: 'Upload was not found in storage' };
+  }
+
+  if (head.size <= 0 || head.size > MAX_ASSET_SIZE) {
+    asset.status = 'failed';
+    asset.failureReason = 'size';
+    await asset.save();
+    return { status: 'rejected', code: 413, message: 'Stored file size is invalid' };
+  }
+
+  asset.size = head.size;
+  if (head.contentType) asset.contentType = head.contentType;
+
+  let text: string | null = null;
+  if (isExtractable(asset.filename) && head.size <= MAX_EXTRACT_BYTES) {
+    const buf = await getObjectBuffer(asset.key);
+    if (buf) text = truncateForPrompt(extractText(asset.filename, buf) ?? '');
+    if (text !== null) asset.textExtracted = text === '' ? null : text;
+  }
+
+  asset.status = 'ready';
+  await asset.save();
+  return { status: 'ok', asset: safeAsset(asset) };
+};
 
 // POST /api/assets/:id/confirm — browser has PUT the object directly to
 // Spaces; verify it really exists at the expected size, extract light text,
@@ -161,49 +304,57 @@ router.post('/:id/confirm', authenticate, async (req: AuthRequest, res) => {
     if (!asset) {
       return res.status(404).json({ message: 'Asset not found' });
     }
-    if (asset.status !== 'pending') {
-      return res.status(409).json({ message: 'Asset was already confirmed' });
+    const result = await confirmAsset(asset);
+    if (result.status === 'rejected') {
+      return res.status(result.code).json({ message: result.message });
     }
-    if (Date.now() - new Date(asset.createdAt).getTime() > CONFIRM_MAX_AGE_MS) {
-      asset.status = 'failed';
-      asset.failureReason = 'expired';
-      await asset.save();
-      return res.status(409).json({ message: 'Upload window has expired' });
-    }
-
-    let head;
-    try {
-      head = await headObject(asset.key);
-    } catch (err) {
-      console.error('Asset confirm HEAD error:', err);
-      asset.status = 'failed';
-      asset.failureReason = 'upload-not-found';
-      await asset.save();
-      return res.status(409).json({ message: 'Upload was not found in storage' });
-    }
-
-    if (head.size <= 0 || head.size > MAX_ASSET_SIZE) {
-      asset.status = 'failed';
-      asset.failureReason = 'size';
-      await asset.save();
-      return res.status(413).json({ message: 'Stored file size is invalid' });
-    }
-
-    asset.size = head.size;
-    if (head.contentType) asset.contentType = head.contentType;
-
-    let text: string | null = null;
-    if (isExtractable(asset.filename) && head.size <= MAX_EXTRACT_BYTES) {
-      const buf = await getObjectBuffer(asset.key);
-      if (buf) text = truncateForPrompt(extractText(asset.filename, buf) ?? '');
-      if (text !== null) asset.textExtracted = text === '' ? null : text;
-    }
-
-    asset.status = 'ready';
-    await asset.save();
-    return res.json({ asset: safeAsset(asset) });
+    return res.json({ asset: result.asset });
   } catch (err) {
     console.error('Asset confirm error:', err);
+    return res.status(500).json({ message: 'Error confirming upload' });
+  }
+});
+
+// POST /api/assets/bulk-confirm — per-item confirm for a batch (issue #68).
+// Each id is looked up scoped to the caller: a foreign or unknown id is a
+// per-item "not found" row, never a route-level 404. Errors are per-item so
+// partial success stays visible per file; no transaction is possible across
+// Spaces PUTs anyway.
+router.post('/bulk-confirm', authenticate, async (req: AuthRequest, res) => {
+  try {
+    const parsed = assetBulkConfirmSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({
+        message: parsed.error.issues[0]?.message ?? 'Invalid bulk confirm request',
+      });
+    }
+
+    const results = [];
+    for (const { assetId } of parsed.data) {
+      if (!isValidObjectId(assetId)) {
+        results.push({ status: 'rejected', assetId, message: 'Asset not found' });
+        continue;
+      }
+      try {
+        const asset = await Asset.findOne({ _id: assetId, userId: req.user?.id });
+        if (!asset) {
+          results.push({ status: 'rejected', assetId, message: 'Asset not found' });
+          continue;
+        }
+        const result = await confirmAsset(asset);
+        results.push(
+          result.status === 'ok'
+            ? { status: 'ok', assetId, asset: result.asset }
+            : { status: 'rejected', assetId, message: result.message },
+        );
+      } catch (err) {
+        console.error('Asset bulk confirm item error:', err);
+        results.push({ status: 'rejected', assetId, message: 'Error confirming upload' });
+      }
+    }
+    return res.json({ results });
+  } catch (err) {
+    console.error('Asset bulk confirm error:', err);
     return res.status(500).json({ message: 'Error confirming upload' });
   }
 });
