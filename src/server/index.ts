@@ -15,6 +15,8 @@ import { buildMongoUri } from './mongoUri';
 import { getJwtSecret } from './config/jwt';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
+import { startAssetJobPoller } from './services/assetJobService';
+import { processAssetConversionJob } from './services/assetJobProcessor';
 
 const DEFAULT_PORT = 5000;
 
@@ -107,6 +109,12 @@ export const startServer = async (): Promise<Server> => {
   void connectToDatabase().catch((err) => {
     console.error('MongoDB connection error:', err);
   });
+
+  // Issue #67: in-process conversion worker; no-op under test so route tests
+  // don't inherit background polling.
+  if (process.env.NODE_ENV !== 'test') {
+    startAssetJobPoller(processAssetConversionJob);
+  }
 
   return app.listen(port, () => {
     console.log(`Server is running on port ${port}`);

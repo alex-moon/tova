@@ -4,6 +4,7 @@ import { createApp } from '../index';
 import { User } from '../models/User';
 import { Asset } from '../models/Asset';
 import { isStorageConfigured } from '../services/storageService';
+import { AssetJob } from '../models/AssetJob';
 
 const mockPresignPut = jest.fn();
 const mockPresignGet = jest.fn();
@@ -235,6 +236,56 @@ describe('Assets confirm', () => {
     const confirm = await confirmFor(cookie, assetId);
 
     expect(confirm.status).toBe(409);
+  });
+});
+
+describe('Assets confirm markdown conversion queue (#67)', () => {
+  beforeEach(() => {
+    jest.resetAllMocks();
+    (isStorageConfigured as jest.Mock).mockReturnValue(true);
+  });
+
+  it('a convertible upload goes ready immediately and enqueues one conversion job', async () => {
+    const cookie = await registerUser('assets-convert-quote@example.com');
+    const assetId = await presignOk(cookie, 'contract.pdf', 'application/pdf', 5000);
+
+    mockHead.mockResolvedValue(headerForObject(5000, 'application/pdf'));
+    const confirm = await confirmFor(cookie, assetId);
+
+    expect(confirm.status).toBe(200);
+    expect(confirm.body.asset.status).toBe('ready');
+    expect(confirm.body.asset.markdownStatus).toBe('pending');
+    const stored = await Asset.findById(assetId);
+    expect(stored?.markdownStatus).toBe('pending');
+    expect(mockGetObjectBuffer).not.toHaveBeenCalled();
+    const job = await AssetJob.findOne({ assetId });
+    expect(job?.status).toBe('pending');
+  });
+
+  it('fast-path text assets do not enqueue a job', async () => {
+    const cookie = await registerUser('assets-fastpath@example.com');
+    const assetId = await presignOk(cookie, 'notes.txt', 'text/plain', 11);
+
+    mockHead.mockResolvedValue(headerForObject(11, 'text/plain'));
+    mockGetObjectBuffer.mockResolvedValue(Buffer.from('hello world'));
+    const confirm = await confirmFor(cookie, assetId);
+
+    expect(confirm.status).toBe(200);
+    expect(confirm.body.asset.markdownStatus).toBe('none');
+    expect(await AssetJob.countDocuments({ assetId })).toBe(0);
+  });
+
+  it('non-convertible binaries stay markdownStatus none with no job', async () => {
+    const cookie = await registerUser('assets-image@example.com');
+    const assetId = await presignOk(cookie, 'picture.png', 'image/png', 100);
+
+    mockHead.mockResolvedValue(headerForObject(100, 'image/png'));
+    const confirm = await confirmFor(cookie, assetId);
+
+    expect(confirm.status).toBe(200);
+    const stored = await Asset.findById(assetId);
+    expect(stored?.markdownStatus).toBe('none');
+    expect(await AssetJob.countDocuments({ assetId })).toBe(0);
   });
 });
 
