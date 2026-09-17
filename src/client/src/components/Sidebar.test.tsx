@@ -1,8 +1,13 @@
 import { describe, expect, it, vi, afterEach } from 'vitest';
-import { render, screen, cleanup, fireEvent } from '@testing-library/react';
+import { render, screen, cleanup, fireEvent, act } from '@testing-library/react';
 import Sidebar from './Sidebar';
 import { AuthContext } from '../context/AuthContext';
 import type { User } from '../context/AuthContext';
+
+const updateProfile = vi.fn();
+vi.mock('../services/auth', () => ({
+  default: { updateProfile: (...args: unknown[]) => updateProfile(...args) },
+}));
 
 const renderSidebar = (
   user: User | null,
@@ -122,6 +127,23 @@ describe('Sidebar — inline chat delete confirm (issue #59)', () => {
       },
     );
     fireEvent.click(screen.getByRole('button', { name: 'Delete chat: Chores' }));
+    expect(onDeleteSession).toHaveBeenCalledWith('s1');
+    expect(screen.queryByText('Sure? Irreversible.')).not.toBeInTheDocument();
+  });
+
+  it('Always patches the chat preference off then deletes', async () => {
+    vi.mocked(updateProfile).mockResolvedValue({
+      ...user,
+      confirmDeletes: { chat: false, file: true },
+    });
+    const onDeleteSession = vi.fn();
+    renderSidebar(user, { sessions, onDeleteSession });
+    fireEvent.click(screen.getByRole('button', { name: 'Delete chat: Chores' }));
+    expect(screen.getByText('Sure? Irreversible.')).toBeInTheDocument();
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('confirm-always'));
+    });
+    expect(updateProfile).toHaveBeenCalledWith({ confirmDeletes: { chat: false } });
     expect(onDeleteSession).toHaveBeenCalledWith('s1');
     expect(screen.queryByText('Sure? Irreversible.')).not.toBeInTheDocument();
   });

@@ -167,3 +167,42 @@ describe('ProfileModal theme choice (issue #53)', () => {
     expect(screen.getByTestId('theme-option-dark')).toHaveAttribute('aria-checked', 'true');
   });
 });
+
+describe('ProfileModal delete confirmations (issue #59)', () => {
+  beforeEach(() => {
+    updateProfile.mockReset();
+  });
+
+  afterEach(cleanup);
+
+  it('exposes both toggles, defaulting to on when the preference is absent', () => {
+    renderWithUser(user);
+    expect(screen.getByTestId('profile-confirm-delete-chat')).toBeChecked();
+    expect(screen.getByTestId('profile-confirm-delete-file')).toBeChecked();
+  });
+
+  it('reflects persisted preferences so they can be turned back on', () => {
+    renderWithUser({ ...user, confirmDeletes: { chat: false, file: true } });
+    expect(screen.getByTestId('profile-confirm-delete-chat')).not.toBeChecked();
+    expect(screen.getByTestId('profile-confirm-delete-file')).toBeChecked();
+  });
+
+  it('patches the granular preference when a toggle moved', async () => {
+    const next: User = { ...user, confirmDeletes: { chat: false, file: true } };
+    updateProfile.mockResolvedValue(next);
+    const { updateUser, onClose } = renderWithUser(user);
+
+    fireEvent.click(screen.getByTestId('profile-confirm-delete-chat'));
+    fireEvent.click(screen.getByTestId('profile-save'));
+
+    await waitFor(() =>
+      expect(updateProfile).toHaveBeenCalledWith({
+        preferredName: 'Al',
+        customInstructions: 'Be terse.',
+        confirmDeletes: { chat: false, file: true },
+      }),
+    );
+    await waitFor(() => expect(updateUser).toHaveBeenCalledWith(next));
+    await waitFor(() => expect(onClose).toHaveBeenCalled());
+  });
+});

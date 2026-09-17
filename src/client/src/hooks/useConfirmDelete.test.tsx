@@ -125,6 +125,29 @@ describe('useConfirmDelete (issue #59)', () => {
     expect(screen.getByTestId('armed')).toHaveTextContent('none');
   });
 
+  it('cancelling while the Always PATCH is in flight prevents the delete', async () => {
+    let resolvePatch!: (u: User) => void;
+    vi.mocked(AuthServiceMod.updateProfile).mockImplementation(
+      () =>
+        new Promise<User>((resolve) => {
+          resolvePatch = resolve;
+        }),
+    );
+    const deleteFn = vi.fn();
+    renderHarness({ target: 'chat', deleteFn, user: user() });
+    fireEvent.click(screen.getByRole('button', { name: 'arm' }));
+    // Fire Always but do not settle the PATCH yet.
+    const pending = act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'always' }));
+    });
+    // User reconsiders: the in-flight PATCH must not delete anyway.
+    fireEvent.click(screen.getByRole('button', { name: 'no' }));
+    resolvePatch(user({ chat: false, file: true }));
+    await pending;
+    expect(deleteFn).not.toHaveBeenCalled();
+    expect(screen.getByTestId('armed')).toHaveTextContent('none');
+  });
+
   it('always falls back to a plain delete when the PATCH fails', async () => {
     vi.mocked(AuthServiceMod.updateProfile).mockRejectedValue(new Error('offline'));
     const deleteFn = vi.fn();

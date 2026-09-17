@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import AuthService from '../services/auth';
 import { useAuth } from './useAuth';
 
@@ -22,53 +22,65 @@ export const useConfirmDelete = (
 ): ConfirmState => {
   const { user, updateUser } = useAuth();
   const [armedId, setArmedId] = useState<string | null>(null);
+  // Synchronous mirror of armedId: the async "Always" path must be able to
+  // tell whether the arm survived its in-flight PATCH. If the user hits No /
+  // Escape (or arms another row) while the preference call is pending, the
+  // cancellation must win and the delete must not fire.
+  const armedIdRef = useRef<string | null>(null);
+  const setArm = useCallback((id: string | null) => {
+    armedIdRef.current = id;
+    setArmedId(id);
+  }, []);
   const confirmEnabled = user?.confirmDeletes?.[target] ?? true;
 
   const arm = useCallback(
     (id: string) => {
       if (confirmEnabled) {
-        setArmedId(id);
+        setArm(id);
       } else {
         deleteFn(id);
       }
     },
-    [deleteFn, confirmEnabled],
+    [deleteFn, confirmEnabled, setArm],
   );
 
-  const reset = useCallback(() => setArmedId(null), []);
+  const reset = useCallback(() => setArm(null), [setArm]);
   const runDelete = useCallback(
     (id: string) => {
-      setArmedId(null);
+      setArm(null);
       deleteFn(id);
     },
-    [deleteFn],
+    [deleteFn, setArm],
   );
 
   const onYes = useCallback(() => {
-    if (armedId === null) return;
-    runDelete(armedId);
-  }, [armedId, runDelete]);
+    if (armedIdRef.current === null) return;
+    runDelete(armedIdRef.current);
+  }, [runDelete]);
 
   // "Always" persists the granular preference (confirm off for this target),
   // mirrors it into auth state, then deletes. If the preference PATCH fails
   // (offline blip), fall back to a plain delete so the row cannot strand in
   // confirm state.
   const onAlways = useCallback(async () => {
-    if (armedId === null) return;
-    const id = armedId;
+    const id = armedIdRef.current;
+    if (id === null) return;
     try {
       const updated = await AuthService.updateProfile({ confirmDeletes: { [target]: false } });
       updateUser(updated);
     } catch {
       // Fall through to the delete below.
     }
+    // Cancellation during the PATCH (No, Escape, another row armed) wins over
+    // the pending delete.
+    if (armedIdRef.current !== id) return;
     runDelete(id);
-  }, [armedId, target, updateUser, runDelete]);
+  }, [target, updateUser, runDelete]);
 
   useEffect(() => {
     if (armedId === null) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setArmedId(null);
+      if (e.key === 'Escape') setArm(null);
     };
     // Clicking anywhere outside the armed card (plan: "clicking elsewhere
     // restores the row") resets it without touching data. Another row's
@@ -78,7 +90,7 @@ export const useConfirmDelete = (
       if (!(e.target instanceof Element)) return;
       const element = e.target.closest('[data-testid^="confirm-delete-"]');
       if (element) return;
-      setArmedId(null);
+      setArm(null);
     };
     window.addEventListener('keydown', onKey);
     document.addEventListener('pointerdown', onPointerDown);
@@ -86,7 +98,7 @@ export const useConfirmDelete = (
       window.removeEventListener('keydown', onKey);
       document.removeEventListener('pointerdown', onPointerDown);
     };
-  }, [armedId]);
+  }, [armedId, setArm]);
 
   return { armedId, arm, onYes, onAlways, onNo: reset };
 };

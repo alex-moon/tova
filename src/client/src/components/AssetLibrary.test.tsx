@@ -1,10 +1,15 @@
 import { describe, expect, it, vi, afterEach } from 'vitest';
-import { render, screen, cleanup, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, cleanup, fireEvent, waitFor, act } from '@testing-library/react';
 import AssetLibrary from './AssetLibrary';
 import { AuthContext } from '../context/AuthContext';
 import type { User } from '../context/AuthContext';
 import { toast } from 'sonner';
 import type { AssetSummary } from '../services/assets';
+
+const updateProfile = vi.fn();
+vi.mock('../services/auth', () => ({
+  default: { updateProfile: (...args: unknown[]) => updateProfile(...args) },
+}));
 
 vi.mock('sonner', () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
 
@@ -159,5 +164,27 @@ describe('AssetLibrary — inline delete confirm (issue #59)', () => {
     await screen.findByText('notes.txt');
     fireEvent.click(screen.getByRole('button', { name: 'Delete notes.txt' }));
     await waitFor(() => expect(AssetService.delete).toHaveBeenCalledWith('a1'));
+  });
+
+  it('Always patches the file preference off then deletes', async () => {
+    vi.mocked(AssetService.list).mockResolvedValue({ assets: [asset()], nextCursor: null });
+    vi.mocked(AssetService.delete).mockResolvedValue(undefined);
+    updateProfile.mockResolvedValue({
+      id: '1',
+      email: 'a@b.c',
+      role: 'user',
+      permissions: [],
+      confirmDeletes: { chat: true, file: false },
+    } as User);
+    renderLibrary();
+    await screen.findByText('notes.txt');
+    fireEvent.click(screen.getByRole('button', { name: 'Delete notes.txt' }));
+    expect(screen.getByText('Sure? Irreversible.')).toBeInTheDocument();
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('confirm-always'));
+    });
+    expect(updateProfile).toHaveBeenCalledWith({ confirmDeletes: { file: false } });
+    expect(AssetService.delete).toHaveBeenCalledWith('a1');
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith('Deleted "notes.txt"'));
   });
 });
