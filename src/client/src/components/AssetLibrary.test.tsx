@@ -120,6 +120,9 @@ describe('AssetLibrary — inline delete confirm (issue #59)', () => {
     await screen.findByText('notes.txt');
     fireEvent.click(screen.getByRole('button', { name: 'Delete notes.txt' }));
     await screen.findByText('Sure? Irreversible.');
+    // Focus moves to Yes so keyboard/screen-reader users stay oriented when
+    // the card swaps in (focus would otherwise drop to <body>).
+    expect(screen.getByTestId('confirm-yes')).toHaveFocus();
     fireEvent.click(screen.getByTestId('confirm-yes'));
     await waitFor(() => expect(AssetService.delete).toHaveBeenCalledWith('a1'));
     expect(confirmSpy).not.toHaveBeenCalled();

@@ -95,6 +95,9 @@ describe('Sidebar — inline chat delete confirm (issue #59)', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Delete chat: Chores' }));
     expect(screen.getByText('Sure? Irreversible.')).toBeInTheDocument();
     expect(onDeleteSession).not.toHaveBeenCalled();
+    // Focus moves to Yes so keyboard/screen-reader users stay oriented when
+    // the row swaps to the armed card (focus would otherwise drop to <body>).
+    expect(screen.getByTestId('confirm-yes')).toHaveFocus();
     fireEvent.click(screen.getByTestId('confirm-yes'));
     expect(onDeleteSession).toHaveBeenCalledWith('s1');
     expect(screen.queryByText('Sure? Irreversible.')).not.toBeInTheDocument();

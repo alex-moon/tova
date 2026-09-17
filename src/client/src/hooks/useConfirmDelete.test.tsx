@@ -36,11 +36,17 @@ const Inner: React.FC<{ target: 'chat' | 'file'; deleteFn: (id: string) => void 
   deleteFn,
 }) => {
   const { armedId, arm, onYes, onAlways, onNo } = useConfirmDelete(target, deleteFn);
+  // Container mirrors the real armed card's data-testid so the hook's
+  // pointerdown `closest('[data-testid^="confirm-delete-"]')` guard is
+  // exercised through the same path the components use.
   return (
-    <div>
+    <div data-testid={armedId ? `confirm-delete-${target}-${armedId}` : 'unarmed'}>
       <div data-testid="armed">{armedId ?? 'none'}</div>
       <button type="button" onClick={() => arm('u1')}>
         arm
+      </button>
+      <button type="button" onClick={() => arm('u2')}>
+        arm-two
       </button>
       <button type="button" onClick={onYes}>
         yes
@@ -151,5 +157,38 @@ describe('useConfirmDelete (issue #59)', () => {
     fireEvent.keyDown(window, { key: 'Escape' });
     expect(screen.getByTestId('armed')).toHaveTextContent('none');
     expect(deleteFn).not.toHaveBeenCalled();
+  });
+
+  it('pointerdown outside the armed card disarms instead of deleting', () => {
+    const deleteFn = vi.fn();
+    renderHarness({ target: 'chat', deleteFn, user: user() });
+    fireEvent.click(screen.getByRole('button', { name: 'arm' }));
+    expect(screen.getByTestId('armed')).toHaveTextContent('u1');
+    fireEvent.pointerDown(document.body);
+    expect(screen.getByTestId('armed')).toHaveTextContent('none');
+    expect(deleteFn).not.toHaveBeenCalled();
+  });
+
+  it('pointerdown inside the armed card does not disarm', () => {
+    const deleteFn = vi.fn();
+    renderHarness({ target: 'file', deleteFn, user: user() });
+    fireEvent.click(screen.getByRole('button', { name: 'arm' }));
+    expect(screen.getByTestId('armed')).toHaveTextContent('u1');
+    fireEvent.pointerDown(screen.getByRole('button', { name: 'yes' }));
+    expect(screen.getByTestId('armed')).toHaveTextContent('u1');
+    fireEvent.click(screen.getByRole('button', { name: 'yes' }));
+    expect(deleteFn).toHaveBeenCalledWith('u1');
+  });
+
+  it('arming another row switches the armed id (single-armed invariant)', () => {
+    const deleteFn = vi.fn();
+    renderHarness({ target: 'chat', deleteFn, user: user() });
+    fireEvent.click(screen.getByRole('button', { name: 'arm' }));
+    fireEvent.click(screen.getByRole('button', { name: 'arm-two' }));
+    expect(screen.getByTestId('armed')).toHaveTextContent('u2');
+    expect(screen.getByTestId('confirm-delete-chat-u2')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'yes' }));
+    expect(deleteFn).toHaveBeenCalledWith('u2');
+    expect(deleteFn).not.toHaveBeenCalledWith('u1');
   });
 });

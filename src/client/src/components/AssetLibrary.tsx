@@ -178,6 +178,7 @@ const AssetLibrary: React.FC<AssetLibraryProps> = ({ onClose, onPickAsset }) => 
                         type="button"
                         data-testid="confirm-yes"
                         aria-label="Yes, delete file"
+                        autoFocus
                         disabled={deletingId === asset.id}
                         onClick={onYes}
                         className="shrink-0 rounded-md px-2 py-1 text-xs font-medium hover:bg-destructive hover:text-destructive-foreground disabled:opacity-50"

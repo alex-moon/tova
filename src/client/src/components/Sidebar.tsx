@@ -104,6 +104,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                   type="button"
                   data-testid="confirm-yes"
                   aria-label="Yes, delete chat"
+                  autoFocus
                   onClick={onYes}
                   className="rounded-md px-2 py-1 text-xs font-medium hover:bg-destructive hover:text-destructive-foreground"
                 >
