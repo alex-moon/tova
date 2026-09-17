@@ -1,6 +1,7 @@
 import { webSearch, type SearchResult } from './webSearchService';
+import { muteConsoleError } from '../test/muteConsole';
 
-const consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+const consoleErrorSpy = muteConsoleError();
 
 const realFetch = global.fetch;
 
