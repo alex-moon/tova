@@ -27,6 +27,18 @@ export class AssetError extends Error {
   }
 }
 
+// Mirrors the server's asset size policy and #68's bulk batch caps. Exported
+// so the library UI reuses the same numbers instead of duplicating them.
+export const MAX_ASSET_SIZE = 15 * 1024 * 1024;
+export const BULK_BATCH_SIZE = 20;
+const BULK_PUT_CONCURRENCY = 3;
+
+export interface BulkUploadFileResult {
+  file: File;
+  asset?: AssetSummary;
+  error?: string;
+}
+
 const toAssetError = (err: unknown): AssetError => {
   if (axios.isAxiosError(err)) {
     const message = (err.response?.data as { message?: string } | undefined)?.message;
@@ -62,6 +74,109 @@ const putUpload = (
     xhr.onerror = () => reject(new AssetError('The upload to storage failed'));
     xhr.send(file);
   });
+
+const contentTypeOf = (file: File) => file.type || 'application/octet-stream';
+
+// One chunk of `uploadMany`: one bulk-presign, a pool of direct PUTs, then
+// one bulk-confirm covering only the files whose PUT succeeded. Per-file
+// failures land in `results[index].error`; only a route-level failure of the
+// batch calls degrades every file of this chunk to an error row — nothing
+// ever throws (partial success stays visible even when a whole chunk fails).
+const uploadBatch = async (
+  batch: number[],
+  files: File[],
+  results: BulkUploadFileResult[],
+  onFileProgress?: (fileIndex: number, pct: number) => void,
+) => {
+  let okItems: { index: number; assetId: string; uploadUrl: string }[];
+  try {
+    const res = await axios.post<{
+      results: Array<
+        | { status: 'ok'; filename: string; asset: AssetSummary; uploadUrl: string }
+        | {
+            status: 'rejected';
+            filename: string;
+            message: string;
+          }
+      >;
+    }>(
+      '/api/assets/bulk-presign',
+      batch.map((i) => ({
+        filename: files[i].name,
+        contentType: contentTypeOf(files[i]),
+        size: files[i].size,
+      })),
+    );
+    okItems = [];
+    res.data.results.forEach((row, pos) => {
+      const index = batch[pos];
+      if (!row || row.status !== 'ok') {
+        results[index].error =
+          (row as { message?: string } | undefined)?.message ?? 'The file was rejected';
+      } else {
+        okItems.push({ index, assetId: row.asset.id, uploadUrl: row.uploadUrl });
+      }
+    });
+  } catch (err) {
+    const message = toAssetError(err).message;
+    for (const index of batch) results[index].error = message;
+    return;
+  }
+
+  // Worker pool of 3 over an index queue: bounded parallelism for the direct
+  // Spaces PUTs. Progress uses the caller's global file index so the UI can
+  // map callbacks to rows without batch knowledge.
+  const queue = [...okItems];
+  const putSucceeded: typeof okItems = [];
+  const worker = async () => {
+    for (let item = queue.shift(); item; item = queue.shift()) {
+      try {
+        await putUpload(
+          item.uploadUrl,
+          files[item.index],
+          contentTypeOf(files[item.index]),
+          (pct) => onFileProgress?.(item.index, pct),
+        );
+        putSucceeded.push(item);
+      } catch {
+        results[item.index].error = 'The upload to storage failed';
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(BULK_PUT_CONCURRENCY, queue.length) }, worker));
+
+  // One bulk-confirm per batch for only the PUT-succeeded files — PUT-failed
+  // files are never confirmed (their rows are already errors). Results are
+  // matched back by assetId, not row order.
+  try {
+    const res = await axios.post<{
+      results: Array<
+        | { status: 'ok'; assetId: string; asset: AssetSummary }
+        | {
+            status: 'rejected';
+            assetId: string | null;
+            message: string;
+          }
+      >;
+    }>(
+      '/api/assets/bulk-confirm',
+      putSucceeded.map((item) => ({ assetId: item.assetId })),
+    );
+    const byId = new Map(res.data.results.map((row) => [row.assetId ?? '', row] as const));
+    for (const item of putSucceeded) {
+      const row = byId.get(item.assetId);
+      if (row && row.status === 'ok') {
+        results[item.index].asset = row.asset;
+      } else {
+        results[item.index].error =
+          (row as { message?: string } | undefined)?.message ?? 'Error confirming upload';
+      }
+    }
+  } catch (err) {
+    const message = toAssetError(err).message;
+    for (const item of putSucceeded) results[item.index].error = message;
+  }
+};
 
 const AssetService = {
   async list(cursor?: string | null): Promise<AssetListPage> {
@@ -111,6 +226,44 @@ const AssetService = {
     } catch (err) {
       throw toAssetError(err);
     }
+  },
+
+  // Bulk upload (issue #68): many files via N normal singleton uploads — one
+  // bulk-presign and one bulk-confirm per chunk of at most BULK_BATCH_SIZE
+  // files, direct PUTs to Spaces in between with a worker pool of 3. Maps
+  // `FileList` → `File[]`, rejects oversized files locally (no API call),
+  // and resolves with one result row per file: `asset` for success, `error`
+  // otherwise. Per-file failures never throw; nothing here sends or accepts
+  // any archive container — bulk is just many normal uploads, and uploads are
+  // never zips.
+  async uploadMany(
+    files: File[] | FileList,
+    onFileProgress?: (fileIndex: number, pct: number) => void,
+  ): Promise<BulkUploadFileResult[]> {
+    const all = Array.from(files);
+    const results: BulkUploadFileResult[] = all.map((file) => ({ file: file as File }));
+
+    const pending: number[] = [];
+    for (let i = 0; i < all.length; i++) {
+      const file = all[i] as File;
+      if (file.size > MAX_ASSET_SIZE) {
+        results[i].error = `"${file.name}" is too large (max 15 MB)`;
+      } else {
+        pending.push(i);
+      }
+    }
+
+    // Chunks are processed sequentially: the server cap (MAX_BULK_FILES) is
+    // a pure-number change away, and our UI never exceeds it.
+    for (let start = 0; start < pending.length; start += BULK_BATCH_SIZE) {
+      await uploadBatch(
+        pending.slice(start, start + BULK_BATCH_SIZE),
+        all,
+        results,
+        onFileProgress,
+      );
+    }
+    return results;
   },
 };
 
