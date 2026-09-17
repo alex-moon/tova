@@ -85,6 +85,17 @@ const AssetService = {
       .join('&')}`;
   },
 
+  // Batch delete uses the same repeated `?id=` contract as bulk download.
+  async bulkDelete(assetIds: string[]): Promise<void> {
+    try {
+      await axios.delete(
+        `/api/assets/bulk-delete?${assetIds.map((id) => `id=${encodeURIComponent(id)}`).join('&')}`,
+      );
+    } catch (err) {
+      throw toAssetError(err);
+    }
+  },
+
   async delete(assetId: string): Promise<void> {
     try {
       await axios.delete(`/api/assets/${assetId}`);

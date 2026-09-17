@@ -62,6 +62,19 @@ const userSchema = new mongoose.Schema(
             enum: ['light', 'dark'],
             default: null,
           },
+          // Delete-confirmation preferences (issue #59): only `false` is ever
+          // written explicitly ("Always" or a Profile toggle); absent keys
+          // default to true, so legacy docs need no backfill.
+          confirmDeletes: {
+            type: new mongoose.Schema(
+              {
+                chat: { type: Boolean, default: true },
+                file: { type: Boolean, default: true },
+              },
+              { _id: false },
+            ),
+            default: null,
+          },
         },
         { _id: false },
       ),
@@ -110,6 +123,7 @@ export interface UserSettings {
   // explicit preference (issue #53). Marked optional so existing partial
   // literals (`{ customInstructions }`) keep typechecking.
   theme?: 'light' | 'dark';
+  confirmDeletes?: { chat: boolean; file: boolean } | null;
 }
 
 export interface UserLocation {

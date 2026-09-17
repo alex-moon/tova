@@ -34,6 +34,14 @@ export const profilePatchSchema = z.strictObject({
     .max(4000, { message: 'customInstructions must be 4000 characters or fewer' })
     .optional(),
   theme: z.enum(['light', 'dark'], { message: 'theme must be "light" or "dark"' }).optional(),
+  // Granular delete-confirmation prefs (issue #59). Strict sub-object: an
+  // unknown delete target is a 400, not a silently dropped key.
+  confirmDeletes: z
+    .strictObject({
+      chat: z.boolean().optional(),
+      file: z.boolean().optional(),
+    })
+    .optional(),
 });
 
 export const feedbackValueSchema = z.object({
@@ -71,6 +79,20 @@ export const assetBulkDownloadQuerySchema = z.object({
       })
       .min(1, { message: 'At least one asset id is required' })
       .max(50, { message: 'At most 50 assets can be downloaded at once' }),
+  ),
+});
+
+// DELETE /api/assets/bulk-delete shares the repeated `?id=` contract with
+// bulk download; messages are worded neutrally so both routes can use it.
+export const assetBulkDeleteQuerySchema = z.object({
+  id: z.preprocess(
+    (value) => (Array.isArray(value) ? value : [value]),
+    z
+      .array(z.string({ message: 'id is required' }).min(1, { message: 'id is required' }), {
+        message: 'id is required',
+      })
+      .min(1, { message: 'At least one asset id is required' })
+      .max(50, { message: 'At most 50 assets can be deleted at once' }),
   ),
 });
 

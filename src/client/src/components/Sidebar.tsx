@@ -6,6 +6,7 @@ import AssetLibrary from './AssetLibrary';
 import type { AssetSummary } from '@/services/assets';
 import { cn } from '@/lib/utils';
 import { useAuth } from '../hooks/useAuth';
+import { useConfirmDelete } from '../hooks/useConfirmDelete';
 
 const avatarInitial = (user: {
   name?: string;
@@ -52,6 +53,7 @@ const Sidebar: React.FC<SidebarProps> = ({
 }) => {
   const { user, logout } = useAuth();
   const [profileOpen, setProfileOpen] = useState(false);
+  const { armedId, arm, onYes, onAlways, onNo } = useConfirmDelete('chat', onDeleteSession);
 
   return (
     <>
@@ -90,29 +92,68 @@ const Sidebar: React.FC<SidebarProps> = ({
         </div>
         <div className="flex-1 overflow-y-auto px-4">
           <div className="py-2 text-sm text-muted-foreground">Previous Chats</div>
-          {sessions.map((session) => (
-            <div key={session._id} className="mb-1 flex items-center">
-              <button
-                className={cn(
-                  'min-w-0 flex-1 cursor-pointer truncate rounded-lg px-4 py-2 text-left text-sm transition-colors hover:bg-accent focus-visible:outline-2 focus-visible:outline-primary',
-                  activeSessionId === session._id && 'bg-accent font-medium text-accent-foreground',
-                )}
-                onClick={() => onSelectSession(session._id)}
+          {sessions.map((session) =>
+            armedId === session._id ? (
+              <div
+                key={session._id}
+                data-testid={`confirm-delete-chat-${session._id}`}
+                className="mb-1 flex items-center gap-1 rounded-lg border border-destructive bg-destructive/10 px-3 py-2 text-sm text-destructive"
               >
-                {session.title}
-              </button>
-              <Button
-                variant="ghost"
-                size="icon"
-                title="Delete chat"
-                aria-label={`Delete chat: ${session.title}`}
-                onClick={() => onDeleteSession(session._id)}
-                className="ml-1 h-8 w-8 shrink-0 text-muted-foreground hover:text-destructive"
-              >
-                <Trash2 />
-              </Button>
-            </div>
-          ))}
+                <span className="min-w-0 flex-1 truncate">Sure? Irreversible.</span>
+                <button
+                  type="button"
+                  data-testid="confirm-yes"
+                  aria-label="Yes, delete chat"
+                  autoFocus
+                  onClick={onYes}
+                  className="rounded-md px-2 py-1 text-xs font-medium hover:bg-destructive hover:text-destructive-foreground"
+                >
+                  Yes
+                </button>
+                <button
+                  type="button"
+                  data-testid="confirm-always"
+                  aria-label="Always delete without asking"
+                  onClick={() => void onAlways()}
+                  className="rounded-md px-2 py-1 text-xs font-medium hover:bg-destructive hover:text-destructive-foreground"
+                >
+                  Always
+                </button>
+                <button
+                  type="button"
+                  data-testid="confirm-no"
+                  aria-label="No, keep the chat"
+                  onClick={onNo}
+                  className="rounded-md px-2 py-1 text-xs font-medium hover:bg-destructive hover:text-destructive-foreground"
+                >
+                  No
+                </button>
+              </div>
+            ) : (
+              <div key={session._id} className="mb-1 flex items-center">
+                <button
+                  className={cn(
+                    'min-w-0 flex-1 cursor-pointer truncate rounded-lg px-4 py-2 text-left text-sm transition-colors hover:bg-accent focus-visible:outline-2 focus-visible:outline-primary',
+                    activeSessionId === session._id &&
+                      'bg-accent font-medium text-accent-foreground',
+                  )}
+                  onClick={() => onSelectSession(session._id)}
+                >
+                  {session.title}
+                </button>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  title="Delete chat"
+                  aria-label={`Delete chat: ${session.title}`}
+                  onClick={() => arm(session._id)}
+                  className="ml-1 h-8 w-8 shrink-0 text-muted-foreground hover:text-destructive"
+                >
+                  <Trash2 />
+                </Button>
+              </div>
+            ),
+          )}
         </div>
         <div className="flex items-center border-t border-border p-4 pb-[calc(1rem+env(safe-area-inset-bottom))]">
           <Button

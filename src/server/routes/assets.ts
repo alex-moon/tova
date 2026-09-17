@@ -3,7 +3,11 @@ import archiver from 'archiver';
 import { isValidObjectId } from 'mongoose';
 import { Asset, type AssetDocument } from '../models/Asset';
 import { authenticate, AuthRequest } from '../middleware/auth';
-import { assetBulkDownloadQuerySchema, assetPresignSchema } from '../validation';
+import {
+  assetBulkDeleteQuerySchema,
+  assetBulkDownloadQuerySchema,
+  assetPresignSchema,
+} from '../validation';
 import {
   deleteObject,
   getObjectBuffer,
@@ -341,6 +345,52 @@ router.get('/:id/url', authenticate, async (req: AuthRequest, res) => {
   } catch (err) {
     console.error('Asset url error:', err);
     return res.status(500).json({ message: 'Error signing download URL' });
+  }
+});
+
+// DELETE /api/assets/bulk-delete — batch delete of owned assets with the
+// same repeated `?id=` contract as bulk download. Objects are removed before
+// the docs (mirroring the single delete); any storage failure aborts with a
+// 502 and no doc deletion, so the operation either converges or can be
+// retried cleanly.
+router.delete('/bulk-delete', authenticate, async (req: AuthRequest, res) => {
+  const ids = req.query.id;
+  const parsed = assetBulkDeleteQuerySchema.safeParse({ id: ids });
+  if (!parsed.success) {
+    return res.status(400).json({
+      message: parsed.error.issues[0]?.message ?? 'Invalid bulk delete request',
+    });
+  }
+
+  try {
+    const requested = parsed.data.id.filter((id) => isValidObjectId(id));
+    if (requested.length === 0) {
+      return res.status(400).json({ message: 'No valid asset ids in selection' });
+    }
+    const assets = await Asset.find({
+      _id: { $in: requested },
+      userId: req.user?.id,
+    });
+    if (assets.length === 0) {
+      return res.status(404).json({ message: 'Asset not found' });
+    }
+
+    for (const asset of assets) {
+      try {
+        await deleteObject(asset.key);
+      } catch (err) {
+        console.error('Asset bulk delete object error:', err);
+        return res.status(502).json({ message: 'Error deleting from storage' });
+      }
+    }
+    const result = await Asset.deleteMany({ _id: { $in: assets.map((a) => a._id) } });
+    if (result.deletedCount === 0) {
+      return res.status(500).json({ message: 'Error deleting assets' });
+    }
+    return res.json({ success: true, deleted: result.deletedCount });
+  } catch (err) {
+    console.error('Asset bulk delete error:', err);
+    return res.status(500).json({ message: 'Error deleting assets' });
   }
 });
 

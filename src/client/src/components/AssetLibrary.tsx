@@ -13,6 +13,7 @@ import {
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import AssetService, { type AssetSummary } from '@/services/assets';
+import { useConfirmDelete } from '../hooks/useConfirmDelete';
 
 const MAX_ASSET_SIZE = 15 * 1024 * 1024;
 
@@ -55,6 +56,7 @@ const AssetLibrary: React.FC<AssetLibraryProps> = ({ onClose, onPickAsset }) => 
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [bulkDownloading, setBulkDownloading] = useState(false);
+  const [bulkDeleting, setBulkDeleting] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const load = useCallback(async () => {
@@ -96,19 +98,46 @@ const AssetLibrary: React.FC<AssetLibraryProps> = ({ onClose, onPickAsset }) => 
     }
   }, []);
 
-  const handleDelete = async (asset: AssetSummary) => {
-    if (!window.confirm(`Delete "${asset.filename}"? This cannot be undone.`)) return;
-    setDeletingId(asset.id);
+  const handleDelete = async (assetId: string) => {
+    setDeletingId(assetId);
     try {
-      await AssetService.delete(asset.id);
-      setAssets((prev) => prev.filter((a) => a.id !== asset.id));
-      toast.success(`Deleted "${asset.filename}"`);
+      await AssetService.delete(assetId);
+      setAssets((prev) => prev.filter((a) => a.id !== assetId));
+      setSelectedIds((prev) => {
+        if (!prev.has(assetId)) return prev;
+        const next = new Set(prev);
+        next.delete(assetId);
+        return next;
+      });
+      const deleted = assets.find((a) => a.id === assetId);
+      toast.success(`Deleted "${deleted?.filename ?? 'file'}"`);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Delete failed');
     } finally {
       setDeletingId(null);
     }
   };
+
+  const handleBulkDelete = async () => {
+    const ids = Array.from(selectedIds);
+    if (ids.length === 0) return;
+    setBulkDeleting(true);
+    try {
+      await AssetService.bulkDelete(ids);
+      setAssets((prev) => prev.filter((a) => !selectedIds.has(a.id)));
+      setSelectedIds(new Set());
+      toast.success(`Deleted ${ids.length} file${ids.length === 1 ? '' : 's'}`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Delete failed');
+    } finally {
+      setBulkDeleting(false);
+    }
+  };
+
+  const { armedId, arm, onYes, onAlways, onNo } = useConfirmDelete('file', (id) => {
+    if (id === 'bulk') void handleBulkDelete();
+    else void handleDelete(id);
+  });
 
   const handleDownload = async (asset: AssetSummary) => {
     try {
@@ -188,84 +217,186 @@ const AssetLibrary: React.FC<AssetLibraryProps> = ({ onClose, onPickAsset }) => 
             </p>
           ) : (
             <>
-              {selectedIds.size > 0 && (
-                <div className="mb-2 flex items-center justify-between gap-2">
-                  <span className="text-xs text-muted-foreground">{selectedIds.size} selected</span>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    disabled={bulkDownloading}
-                    data-testid="asset-bulk-download"
-                    onClick={() => void handleBulkDownload()}
+              {selectedIds.size > 0 &&
+                (armedId === 'bulk' ? (
+                  <div
+                    data-testid="confirm-delete-file-bulk"
+                    className="mb-2 flex items-center gap-1 rounded-lg border border-destructive bg-destructive/10 px-3 py-2.5 text-sm text-destructive"
                   >
-                    {bulkDownloading ? (
-                      <Loader2 className="size-4 animate-spin" />
-                    ) : (
-                      'Download selected'
-                    )}
-                  </Button>
-                </div>
-              )}
-              <ul className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                {assets.map((asset) => (
-                  <li
-                    key={asset.id}
-                    className="flex items-center gap-3 rounded-lg border border-border bg-msg-assistant px-3 py-2.5"
-                  >
-                    <input
-                      type="checkbox"
-                      aria-label={`Select ${asset.filename}`}
-                      disabled={asset.status !== 'ready'}
-                      checked={selectedIds.has(asset.id)}
-                      data-testid="asset-select"
-                      onChange={() => toggleSelected(asset)}
-                      className="size-4 shrink-0 cursor-pointer accent-primary disabled:cursor-not-allowed disabled:opacity-50"
-                    />
-                    <IconFor contentType={asset.contentType} filename={asset.filename} />
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate text-sm">{asset.filename}</span>
-                      <span className="block text-xs text-muted-foreground">
-                        {formatSize(asset.size)} · {new Date(asset.createdAt).toLocaleDateString()}
-                      </span>
+                    <span className="min-w-0 flex-1 truncate">
+                      Delete {selectedIds.size} selected? Irreversible.
                     </span>
-                    {onPickAsset && (
+                    <button
+                      type="button"
+                      data-testid="confirm-yes"
+                      aria-label="Yes, delete selected files"
+                      autoFocus
+                      disabled={bulkDeleting}
+                      onClick={onYes}
+                      className="shrink-0 rounded-md px-2 py-1 text-xs font-medium hover:bg-destructive hover:text-destructive-foreground disabled:opacity-50"
+                    >
+                      Yes
+                    </button>
+                    <button
+                      type="button"
+                      data-testid="confirm-always"
+                      aria-label="Always delete files without asking"
+                      disabled={bulkDeleting}
+                      onClick={() => void onAlways()}
+                      className="shrink-0 rounded-md px-2 py-1 text-xs font-medium hover:bg-destructive hover:text-destructive-foreground disabled:opacity-50"
+                    >
+                      Always
+                    </button>
+                    <button
+                      type="button"
+                      data-testid="confirm-no"
+                      aria-label="No, keep the files"
+                      disabled={bulkDeleting}
+                      onClick={onNo}
+                      className="shrink-0 rounded-md px-2 py-1 text-xs font-medium hover:bg-destructive hover:text-destructive-foreground disabled:opacity-50"
+                    >
+                      No
+                    </button>
+                  </div>
+                ) : (
+                  <div className="mb-2 flex items-center justify-between gap-2">
+                    <span className="text-xs text-muted-foreground">
+                      {selectedIds.size} selected
+                    </span>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        disabled={bulkDownloading}
+                        data-testid="asset-bulk-download"
+                        onClick={() => void handleBulkDownload()}
+                      >
+                        {bulkDownloading ? (
+                          <Loader2 className="size-4 animate-spin" />
+                        ) : (
+                          'Download selected'
+                        )}
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        disabled={bulkDeleting}
+                        data-testid="asset-bulk-delete"
+                        aria-label="Delete selected files"
+                        onClick={() => arm('bulk')}
+                        className="text-destructive hover:bg-destructive hover:text-destructive-foreground"
+                      >
+                        {bulkDeleting ? (
+                          <Loader2 className="size-4 animate-spin" />
+                        ) : (
+                          'Delete selected'
+                        )}
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+              <ul className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                {assets.map((asset) =>
+                  armedId === asset.id ? (
+                    <li
+                      key={asset.id}
+                      data-testid={`confirm-delete-file-${asset.id}`}
+                      className="flex items-center gap-1 rounded-lg border border-destructive bg-destructive/10 px-3 py-2.5 text-sm text-destructive"
+                    >
+                      <span className="min-w-0 flex-1 truncate">Sure? Irreversible.</span>
                       <button
                         type="button"
-                        title={
-                          asset.status === 'ready'
-                            ? 'Attach to chat'
-                            : 'This file is not ready to attach'
-                        }
-                        aria-label={`Attach ${asset.filename} to chat`}
-                        disabled={asset.status !== 'ready' || deletingId === asset.id}
-                        data-testid="asset-attach"
-                        onClick={() => onPickAsset(asset)}
-                        className="shrink-0 rounded p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+                        data-testid="confirm-yes"
+                        aria-label="Yes, delete file"
+                        autoFocus
+                        disabled={deletingId === asset.id}
+                        onClick={onYes}
+                        className="shrink-0 rounded-md px-2 py-1 text-xs font-medium hover:bg-destructive hover:text-destructive-foreground disabled:opacity-50"
                       >
-                        <Paperclip className="size-4" />
+                        Yes
                       </button>
-                    )}
-                    <button
-                      type="button"
-                      title="Download"
-                      aria-label={`Download ${asset.filename}`}
-                      onClick={() => void handleDownload(asset)}
-                      className="shrink-0 rounded p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                      <button
+                        type="button"
+                        data-testid="confirm-always"
+                        aria-label="Always delete files without asking"
+                        disabled={deletingId === asset.id}
+                        onClick={() => void onAlways()}
+                        className="shrink-0 rounded-md px-2 py-1 text-xs font-medium hover:bg-destructive hover:text-destructive-foreground disabled:opacity-50"
+                      >
+                        Always
+                      </button>
+                      <button
+                        type="button"
+                        data-testid="confirm-no"
+                        aria-label="No, keep the file"
+                        disabled={deletingId === asset.id}
+                        onClick={onNo}
+                        className="shrink-0 rounded-md px-2 py-1 text-xs font-medium hover:bg-destructive hover:text-destructive-foreground disabled:opacity-50"
+                      >
+                        No
+                      </button>
+                    </li>
+                  ) : (
+                    <li
+                      key={asset.id}
+                      className="flex items-center gap-3 rounded-lg border border-border bg-msg-assistant px-3 py-2.5"
                     >
-                      <span className="text-xs underline">Get</span>
-                    </button>
-                    <button
-                      type="button"
-                      title="Delete"
-                      aria-label={`Delete ${asset.filename}`}
-                      disabled={deletingId === asset.id}
-                      onClick={() => void handleDelete(asset)}
-                      className="shrink-0 rounded p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-destructive disabled:opacity-50"
-                    >
-                      <Trash2 className="size-4" />
-                    </button>
-                  </li>
-                ))}
+                      <input
+                        type="checkbox"
+                        aria-label={`Select ${asset.filename}`}
+                        disabled={asset.status !== 'ready'}
+                        checked={selectedIds.has(asset.id)}
+                        data-testid="asset-select"
+                        onChange={() => toggleSelected(asset)}
+                        className="size-4 shrink-0 cursor-pointer accent-primary disabled:cursor-not-allowed disabled:opacity-50"
+                      />
+                      <IconFor contentType={asset.contentType} filename={asset.filename} />
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-sm">{asset.filename}</span>
+                        <span className="block text-xs text-muted-foreground">
+                          {formatSize(asset.size)} ·{' '}
+                          {new Date(asset.createdAt).toLocaleDateString()}
+                        </span>
+                      </span>
+                      {onPickAsset && (
+                        <button
+                          type="button"
+                          title={
+                            asset.status === 'ready'
+                              ? 'Attach to chat'
+                              : 'This file is not ready to attach'
+                          }
+                          aria-label={`Attach ${asset.filename} to chat`}
+                          disabled={asset.status !== 'ready' || deletingId === asset.id}
+                          data-testid="asset-attach"
+                          onClick={() => onPickAsset(asset)}
+                          className="shrink-0 rounded p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          <Paperclip className="size-4" />
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        title="Download"
+                        aria-label={`Download ${asset.filename}`}
+                        onClick={() => void handleDownload(asset)}
+                        className="shrink-0 rounded p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                      >
+                        <span className="text-xs underline">Get</span>
+                      </button>
+                      <button
+                        type="button"
+                        title="Delete"
+                        aria-label={`Delete ${asset.filename}`}
+                        disabled={deletingId === asset.id}
+                        onClick={() => arm(asset.id)}
+                        className="shrink-0 rounded p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-destructive disabled:opacity-50"
+                      >
+                        <Trash2 className="size-4" />
+                      </button>
+                    </li>
+                  ),
+                )}
               </ul>
               {nextCursor && (
                 <button
