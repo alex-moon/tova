@@ -133,6 +133,30 @@ export const assetBulkConfirmSchema = z
   .max(MAX_BULK_FILES, {
     message: `Bulk confirm is limited to ${MAX_BULK_FILES} assets per batch`,
   });
+// POST /api/mcp-servers body (issue #36). Personal MCP servers only: the
+// route is authenticated and always writes scope:'user' owned by the caller.
+// https-only URLs keep the outbound connect surface (SSRF) off plain HTTP;
+// the header value is a raw "Header: value" spec the server stores encrypted.
+export const mcpServerCreateSchema = z.strictObject({
+  name: z
+    .string({ message: 'Name is required' })
+    .min(1, { message: 'Name is required' })
+    .max(60, { message: 'Name must be 60 characters or fewer' }),
+  url: z
+    .string({ message: 'URL is required' })
+    .trim()
+    .url({ message: 'URL must be a valid URL' })
+    .refine((value) => value.startsWith('https://'), {
+      message: 'URL must be an https URL',
+    }),
+  authHeader: z
+    .string({ message: 'authHeader must be a string' })
+    .max(4000, { message: 'authHeader is too long' })
+    .regex(/^[A-Za-z0-9-]+:\s?.+$/, {
+      message: 'authHeader must look like "Header-Name: value"',
+    })
+    .optional(),
+});
 
 export type LoginCredentials = z.infer<typeof loginSchema>;
 export type RegisterCredentials = z.infer<typeof registerSchema>;

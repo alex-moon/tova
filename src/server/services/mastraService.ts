@@ -10,6 +10,7 @@ import { z } from 'zod';
 import mongoose from 'mongoose';
 import { Asset } from '../models/Asset';
 import { truncateForPrompt } from './textExtraction';
+import { mcpToolsetsForUser } from './mcpService';
 import {
   CompletionOptions,
   LlmConnector,
@@ -168,6 +169,18 @@ const modelSettingsFrom = (options: CompletionOptions) => ({
  * `requestContext.get('userId')` to scope per-user work (e.g. asset
  * library lookups).
  */
+/*
+ * MCP toolsets (#36): when the caller is a user, resolve platform + personal
+ * MCP servers into per-call toolsets (resolutions are cached with a short
+ * TTL inside mcpService). Empty result -> no `toolsets` key forwarded at
+ * all, so a user with zero MCP servers gets the exact pre-#36 call shape.
+ */
+const mcpToolsetsFrom = async (options: CompletionOptions) => {
+  if (!options.userId) return {};
+  const toolsets = await mcpToolsetsForUser(options.userId);
+  return Object.keys(toolsets).length ? { toolsets } : {};
+};
+
 const callOptionsFrom = (options: CompletionOptions, mode: ToolsMode = 'full') => {
   const requestContext = new RequestContext();
   if (options.userId !== undefined) requestContext.set('userId', options.userId);
@@ -444,7 +457,10 @@ const buildConnector = (provider: LlmProvider): LlmConnector => {
     createCompletion: async (options: CompletionOptions): Promise<NeutralCompletion> => {
       const result = await agentFor(provider, options.model).generate(
         asMessageList(options.messages),
-        callOptionsFrom(options, defaultMode),
+        {
+          ...callOptionsFrom(options, defaultMode),
+          ...(await mcpToolsetsFrom(options)),
+        },
       );
       // Tool executions (issue #16): FullOutput.toolResults carries every
       // executed call with its structured result; surfaced so callers can
@@ -461,7 +477,10 @@ const buildConnector = (provider: LlmProvider): LlmConnector => {
     createStreamingCompletion: async (options: CompletionOptions): Promise<NeutralChunkStream> => {
       const result = await agentFor(provider, options.model).stream(
         asMessageList(options.messages),
-        callOptionsFrom(options, defaultMode),
+        {
+          ...callOptionsFrom(options, defaultMode),
+          ...(await mcpToolsetsFrom(options)),
+        },
       );
       return toNeutralStream(result.fullStream);
     },
