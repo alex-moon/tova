@@ -77,12 +77,16 @@ router.patch('/', authenticate, async (req: AuthRequest, res) => {
       }
       const confirmDeletesPatch = parsed.data.confirmDeletes;
       if (confirmDeletesPatch !== undefined) {
-        // Merge into the subdoc so per-key PATCHes ({ chat: false }) leave the
-        // other key at its schema default (true). A fresh subdoc needs no
-        // literal keys: Mongoose applies defaults on read/save (#59).
+        // Merge per key: a single-key PATCH ({ chat: false }) must leave the
+        // other key's *persisted* value intact — forcing it to the schema
+        // default (true) would silently re-enable confirmations the user
+        // already turned off with "Always" (issue #59). Only when the key has
+        // never been written do we fall back to the default (true), which
+        // needs no backfill.
+        const existing = settings.confirmDeletes;
         settings.confirmDeletes = {
-          chat: confirmDeletesPatch.chat ?? true,
-          file: confirmDeletesPatch.file ?? true,
+          chat: confirmDeletesPatch.chat ?? existing?.chat ?? true,
+          file: confirmDeletesPatch.file ?? existing?.file ?? true,
         };
       }
     }

@@ -58,14 +58,7 @@ export const useConfirmDelete = (
     const id = armedId;
     try {
       const updated = await AuthService.updateProfile({ confirmDeletes: { [target]: false } });
-      updateUser({
-        ...updated,
-        confirmDeletes: {
-          chat: updated.confirmDeletes?.chat ?? true,
-          file: updated.confirmDeletes?.file ?? true,
-          ...(target === 'chat' ? { chat: false } : { file: false }),
-        },
-      });
+      updateUser(updated);
     } catch {
       // Fall through to the delete below.
     }
@@ -77,8 +70,22 @@ export const useConfirmDelete = (
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') setArmedId(null);
     };
+    // Clicking anywhere outside the armed card (plan: "clicking elsewhere
+    // restores the row") resets it without touching data. Another row's
+    // trash click first lands here (reset), then arms the new row — so the
+    // single-armed invariant holds.
+    const onPointerDown = (e: PointerEvent) => {
+      if (!(e.target instanceof Element)) return;
+      const element = e.target.closest('[data-testid^="confirm-delete-"]');
+      if (element) return;
+      setArmedId(null);
+    };
     window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
+    document.addEventListener('pointerdown', onPointerDown);
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      document.removeEventListener('pointerdown', onPointerDown);
+    };
   }, [armedId]);
 
   return { armedId, arm, onYes, onAlways, onNo: reset };
