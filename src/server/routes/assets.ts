@@ -62,6 +62,9 @@ const safeAsset = (asset: AssetDocument): unknown => ({
   // owner ask) — the extracted text itself stays server-side, never a
   // client-rendered payload.
   hasText: Boolean(asset.textExtracted),
+  // Issue #67: conversion lifecycle for the library UI badge; no markdown
+  // text ever reaches the client.
+  markdownStatus: asset.markdownStatus,
   createdAt: asset.createdAt,
 });
 

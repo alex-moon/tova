@@ -27,6 +27,7 @@ type AssetDoc = {
   contentType: string;
   size: number;
   textExtracted?: string | null;
+  markdownExtracted?: string | null;
 };
 
 // Asset attach (issue #34): resolves the attached asset for a turn — 'none'
@@ -59,7 +60,9 @@ const appendAssetBlock = (
       filename: asset.filename,
       contentType: asset.contentType,
       size: asset.size,
-      textExtracted: asset.textExtracted,
+      // Issue #67: markdown conversion is the fallback source when no fast-
+      // path extraction exists (txt/md/csv keep winning).
+      textExtracted: asset.textExtracted ?? asset.markdownExtracted ?? null,
     });
   }
 };

@@ -32,7 +32,11 @@ const readExecute = (
 const createAsset = (
   userId: string,
   filename: string,
-  extra: { status?: string; textExtracted?: string | null } = {},
+  extra: {
+    status?: string;
+    textExtracted?: string | null;
+    markdownExtracted?: string | null;
+  } = {},
 ) =>
   Asset.create({
     userId,
@@ -42,6 +46,9 @@ const createAsset = (
     size: 123,
     ...(extra.status ? { status: extra.status } : { status: 'ready' }),
     ...(extra.textExtracted !== undefined ? { textExtracted: extra.textExtracted } : {}),
+    ...(extra.markdownExtracted !== undefined
+      ? { markdownExtracted: extra.markdownExtracted }
+      : {}),
   });
 
 const createUser = async (email: string) => User.create({ email, passwordHash: 'password123' });
@@ -164,6 +171,30 @@ describe('read_file tool (#58)', () => {
     expect(out.content).toBeNull();
     expect(out.hasText).toBe(false);
     expect(out.note).toContain('No readable text');
+  });
+
+  it('falls back to converted markdown when no text was extracted (#67)', async () => {
+    const user = await createUser('read-markdown@example.com');
+    const asset = await createAsset(user.id, 'report.pdf', {
+      textExtracted: null,
+      markdownExtracted: '# converted heading',
+    });
+    const out = (await readExecute({ id: asset.id }, asCtx(user.id))) as {
+      content: string;
+      hasText: boolean;
+    };
+    expect(out.content).toBe('# converted heading');
+    expect(out.hasText).toBe(true);
+  });
+
+  it('prefers textExtracted over markdownExtracted when both exist', async () => {
+    const user = await createUser('read-both@example.com');
+    const asset = await createAsset(user.id, 'notes.md', {
+      textExtracted: 'fast text',
+      markdownExtracted: '# markdown text',
+    });
+    const out = (await readExecute({ id: asset.id }, asCtx(user.id))) as { content: string };
+    expect(out.content).toBe('fast text');
   });
 
   it('does not leak other users’ assets or non-ready ones', async () => {
