@@ -76,6 +76,26 @@ const AssetService = {
     return res.data.url;
   },
 
+  // Issue #69: bulk download is a plain GET with a repeatable `id` query
+  // param; the browser grabs the streamed zip (cookies ride along), so no
+  // axios call is needed — just the URL for an anchor download.
+  bulkDownloadUrl(assetIds: string[]): string {
+    return `/api/assets/bulk-download?${assetIds
+      .map((id) => `id=${encodeURIComponent(id)}`)
+      .join('&')}`;
+  },
+
+  // Batch delete uses the same repeated `?id=` contract as bulk download.
+  async bulkDelete(assetIds: string[]): Promise<void> {
+    try {
+      await axios.delete(
+        `/api/assets/bulk-delete?${assetIds.map((id) => `id=${encodeURIComponent(id)}`).join('&')}`,
+      );
+    } catch (err) {
+      throw toAssetError(err);
+    }
+  },
+
   async delete(assetId: string): Promise<void> {
     try {
       await axios.delete(`/api/assets/${assetId}`);

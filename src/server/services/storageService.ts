@@ -1,3 +1,4 @@
+import type { Readable } from 'stream';
 import {
   DeleteObjectCommand,
   GetObjectCommand,
@@ -62,6 +63,14 @@ export interface HeadObjectInfo {
 export const headObject = async (key: string): Promise<HeadObjectInfo> => {
   const result = await getClient().send(new HeadObjectCommand({ Bucket: bucket(), Key: key }));
   return { size: result.ContentLength ?? 0, contentType: result.ContentType };
+};
+
+// Streams an object back for server-side piping (e.g. #69 bulk zip
+// download). Unlike getObjectBuffer there is no size cap: callers decide
+// what is safe to stream. Returns the raw Body stream.
+export const getObjectStream = async (key: string): Promise<Readable | null> => {
+  const result = await getClient().send(new GetObjectCommand({ Bucket: bucket(), Key: key }));
+  return (result.Body ?? null) as Readable | null;
 };
 
 // Buffers an object for light text extraction at confirm time (issue #34).

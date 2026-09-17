@@ -1,5 +1,7 @@
 import request from 'supertest';
 import { Types } from 'mongoose';
+import { Readable } from 'stream';
+import AdmZip from 'adm-zip';
 import { createApp } from '../index';
 import { User } from '../models/User';
 import { Asset } from '../models/Asset';
@@ -9,6 +11,7 @@ const mockPresignPut = jest.fn();
 const mockPresignGet = jest.fn();
 const mockHead = jest.fn();
 const mockGetObjectBuffer = jest.fn();
+const mockGetObjectStream = jest.fn();
 const mockDeleteObject = jest.fn();
 
 jest.mock('../services/storageService', () => ({
@@ -17,6 +20,7 @@ jest.mock('../services/storageService', () => ({
   presignGetUrl: (...args: unknown[]) => mockPresignGet(...args),
   headObject: (...args: unknown[]) => mockHead(...args),
   getObjectBuffer: (...args: unknown[]) => mockGetObjectBuffer(...args),
+  getObjectStream: (...args: unknown[]) => mockGetObjectStream(...args),
   deleteObject: (...args: unknown[]) => mockDeleteObject(...args),
 }));
 
@@ -295,21 +299,184 @@ describe('Assets ownership isolation', () => {
     expect((await Asset.findById(assetId))?.status).toBe('pending');
   });
 
-  it('prevents user B from deleting user A asset and the object survives', async () => {
+  it('prevents user B from deleting user A asset', async () => {
     const response = await request(app).delete(`/api/assets/${assetId}`).set('Cookie', [cookieB]);
     expect(response.status).toBe(404);
     expect(mockDeleteObject).not.toHaveBeenCalled();
     expect(await Asset.findById(assetId)).not.toBeNull();
   });
 
-  it('propagates a storage error as a 502 and keeps the doc', async () => {
-    mockDeleteObject.mockRejectedValue({ name: 'InternalError' });
+  it('deletes the doc without touching storage', async () => {
     const response = await request(app).delete(`/api/assets/${assetId}`).set('Cookie', [cookieA]);
-    expect(response.status).toBe(502);
-    expect(await Asset.findById(assetId)).not.toBeNull();
+    expect(response.status).toBe(200);
+    expect(await Asset.findById(assetId)).toBeNull();
+    // Decided #69 review: Spaces objects stay resident, so nothing deletes.
+    expect(mockDeleteObject).not.toHaveBeenCalled();
   });
 
   it('rejects guest requests entirely', async () => {
     expect((await request(app).get('/api/assets')).status).toBe(401);
+  });
+});
+
+describe('Assets bulk download', () => {
+  let cookieA: string;
+
+  const createReadyAsset = async (
+    ownerEmail: string,
+    filename: string,
+    content: string,
+    size = content.length,
+  ): Promise<string> => {
+    const user = await User.findOne({ email: ownerEmail });
+    const id = new Types.ObjectId();
+    await Asset.create({
+      _id: id,
+      userId: user?._id,
+      filename,
+      key: `${String(user?._id)}/${String(id)}/${filename}`,
+      contentType: 'text/plain',
+      size,
+      status: 'ready',
+    });
+    return String(id);
+  };
+
+  const bulkRequest = (cookie: string, ids: string[]) =>
+    request(app)
+      .get(`/api/assets/bulk-download?${ids.map((id) => `id=${id}`).join('&')}`)
+      .set('Cookie', [cookie]);
+
+  const requestZip = async (cookie: string, ids: string[]) => {
+    const response = await request(app)
+      .get(`/api/assets/bulk-download?${ids.map((id) => `id=${id}`).join('&')}`)
+      .set('Cookie', [cookie])
+      .buffer(true)
+      .parse((res, callback) => {
+        const chunks: Buffer[] = [];
+        res.on('data', (chunk: Buffer) => chunks.push(chunk));
+        res.on('end', () => callback(null, Buffer.concat(chunks)));
+      });
+    return response;
+  };
+
+  beforeEach(async () => {
+    // The suite-wide beforeEach wipes collections between tests, so users
+    // (and their assets) must be created per test, not in beforeAll.
+    cookieA = await registerUser('assets-bulk-a@example.com');
+    await registerUser('assets-bulk-b@example.com');
+  });
+
+  beforeEach(() => {
+    jest.resetAllMocks();
+    (isStorageConfigured as jest.Mock).mockReturnValue(true);
+    mockDeleteObject.mockResolvedValue(true);
+    mockPresignGet.mockResolvedValue('https://signed.example.com/get');
+  });
+
+  it('rejects a missing id parameter', async () => {
+    const response = await request(app).get('/api/assets/bulk-download').set('Cookie', [cookieA]);
+    expect(response.status).toBe(400);
+  });
+
+  it('rejects more than 50 ids', async () => {
+    const ids = Array.from({ length: 51 }, () => String(new Types.ObjectId()));
+    const response = await bulkRequest(cookieA, ids);
+    expect(response.status).toBe(400);
+    expect(response.body.message).toContain('50');
+  });
+
+  it('ignores malformed ids instead of falling back to the whole library', async () => {
+    // Regression: filtering ids by isValidObjectId used to leave an empty
+    // $in set, turning the find into {userId, status:'ready'} — i.e. a
+    // download of the caller's entire library from `?id=garbage`.
+    await createReadyAsset('assets-bulk-a@example.com', 'owned.txt', 'x');
+    const response = await bulkRequest(cookieA, [
+      new Types.ObjectId().toHexString().slice(0, -1) + 'z',
+      'not-an-object-id',
+    ]);
+    expect(response.status).toBe(400);
+    expect(mockGetObjectStream).not.toHaveBeenCalled();
+  });
+
+  it('returns 400 when no owned assets survive selection', async () => {
+    const foreignId = await createReadyAsset('assets-bulk-b@example.com', 'secret.txt', 'x');
+    // Owned-by-nobody + foreign id: nothing belongs to the caller.
+    const response = await bulkRequest(cookieA, [String(new Types.ObjectId()), foreignId]);
+    expect(response.status).toBe(400);
+    expect(mockGetObjectStream).not.toHaveBeenCalled();
+  });
+
+  it('skips assets that are not ready', async () => {
+    const pendingId = await createReadyAsset('assets-bulk-a@example.com', 'later.txt', 'x');
+    await Asset.updateOne({ _id: pendingId }, { status: 'pending' });
+    const response = await bulkRequest(cookieA, [pendingId]);
+    expect(response.status).toBe(400);
+  });
+
+  it('rejects selections whose stored sizes exceed the 500 MB cap', async () => {
+    const hugeId = await createReadyAsset(
+      'assets-bulk-a@example.com',
+      'huge.bin',
+      'x',
+      500 * 1024 * 1024 + 1,
+    );
+    const response = await bulkRequest(cookieA, [hugeId]);
+    expect(response.status).toBe(413);
+    expect(mockGetObjectStream).not.toHaveBeenCalled();
+  });
+
+  it('streams only owned assets into a valid zip with content matching storage', async () => {
+    const assetA = await createReadyAsset('assets-bulk-a@example.com', 'first.txt', 'alpha');
+    const assetB = await createReadyAsset('assets-bulk-b@example.com', 'second.txt', 'bravo');
+    mockGetObjectStream.mockImplementation(async () => Readable.from(Buffer.from('alpha')));
+
+    const response = await requestZip(cookieA, [assetA, assetB]);
+    expect(response.status).toBe(200);
+    expect(response.headers['content-type']).toContain('application/zip');
+    expect(response.headers['content-disposition']).toMatch(
+      /^attachment; filename="assets-.*\.zip"$/,
+    );
+
+    const zip = new AdmZip(response.body);
+    const entries = zip.getEntries();
+    expect(entries.length).toBe(1);
+    expect(entries[0]?.entryName).toBe('first.txt');
+    expect(entries[0]?.getData().toString()).toBe('alpha');
+
+    // Only the owned stream was read.
+    const keys = mockGetObjectStream.mock.calls.map((call) => call[0] as string);
+    expect(keys).toHaveLength(1);
+    expect(keys[0]).toContain(`${assetA}/first.txt`);
+  });
+
+  it('disambiguates duplicate filenames as name (2).ext', async () => {
+    const asset1 = await createReadyAsset('assets-bulk-a@example.com', 'dup.txt', 'one');
+    const asset2 = await createReadyAsset('assets-bulk-a@example.com', 'dup.txt', 'two');
+    const asset3 = await createReadyAsset('assets-bulk-a@example.com', 'dup.txt', 'three');
+    const contentById = new Map([
+      [asset1, 'one'],
+      [asset2, 'two'],
+      [asset3, 'three'],
+    ]);
+    mockGetObjectStream.mockImplementation(async (key: string) => {
+      const assetId = key.split('/')[1] ?? '';
+      return Readable.from(Buffer.from(contentById.get(assetId) ?? ''));
+    });
+
+    const response = await requestZip(cookieA, [asset1, asset2, asset3]);
+    expect(response.status).toBe(200);
+    const names = new AdmZip(response.body)
+      .getEntries()
+      .map((entry) => entry.entryName)
+      .sort();
+    expect(names).toEqual(['dup (2).txt', 'dup (3).txt', 'dup.txt']);
+  });
+
+  it('propagates a storage stream failure as a 502 before headers are sent', async () => {
+    const assetId = await createReadyAsset('assets-bulk-a@example.com', 'broken.txt', 'x');
+    mockGetObjectStream.mockRejectedValue({ name: 'InternalError' });
+    const response = await bulkRequest(cookieA, [assetId]);
+    expect(response.status).toBe(502);
   });
 });

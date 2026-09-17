@@ -17,6 +17,8 @@ vi.mock('../services/assets', async (importOriginal) => {
       upload: vi.fn(),
       downloadUrl: vi.fn(),
       delete: vi.fn(),
+      bulkDownloadUrl: vi.fn(() => '/api/assets/bulk-download'),
+      bulkDelete: vi.fn(),
     },
   };
 });
@@ -104,6 +106,98 @@ describe('AssetLibrary — regression cover (issue #34)', () => {
     renderLibrary();
     await waitFor(() => expect(screen.getByText('notes.txt')).toBeInTheDocument());
     expect(screen.queryByTestId('asset-loading')).not.toBeInTheDocument();
+  });
+});
+
+describe('AssetLibrary — bulk download (issue #69)', () => {
+  afterEach(cleanup);
+  const clickSpy = vi
+    .spyOn(HTMLAnchorElement.prototype, 'click')
+    .mockImplementation(() => undefined);
+
+  it('shows "Download selected" only for ready assets and builds the id query', async () => {
+    vi.mocked(AssetService.list).mockResolvedValue({
+      assets: [asset(), asset({ id: 'a2', filename: 'wip.bin', status: 'pending' })],
+      nextCursor: null,
+    });
+    renderLibrary();
+    await screen.findByText('wip.bin');
+
+    expect(screen.queryByTestId('asset-bulk-download')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Select notes.txt' }));
+    expect(screen.getByTestId('asset-bulk-download')).toBeInTheDocument();
+
+    const pending = screen.getByRole('checkbox', { name: 'Select wip.bin' });
+    expect(pending).toBeDisabled();
+
+    fireEvent.click(screen.getByTestId('asset-bulk-download'));
+    await waitFor(() =>
+      expect(vi.mocked(AssetService.bulkDownloadUrl)).toHaveBeenCalledWith(['a1']),
+    );
+    expect(clickSpy).toHaveBeenCalled();
+  });
+
+  it('toggles selection off and hides the action at zero selected', async () => {
+    vi.mocked(AssetService.list).mockResolvedValue({
+      assets: [asset()],
+      nextCursor: null,
+    });
+    renderLibrary();
+    await screen.findByText('notes.txt');
+
+    const checkbox = screen.getByRole('checkbox', { name: 'Select notes.txt' });
+    fireEvent.click(checkbox);
+    expect(screen.getByTestId('asset-bulk-download')).toBeInTheDocument();
+    fireEvent.click(checkbox);
+    expect(screen.queryByTestId('asset-bulk-download')).not.toBeInTheDocument();
+  });
+});
+
+describe('AssetLibrary — batch delete (issue #69 × #59)', () => {
+  afterEach(cleanup);
+
+  it('arms an inline confirm strip and deletes the selection with Yes', async () => {
+    vi.mocked(AssetService.list).mockResolvedValue({
+      assets: [asset(), asset({ id: 'a2', filename: 'wip.bin', status: 'pending' })],
+      nextCursor: null,
+    });
+    vi.mocked(AssetService.bulkDelete).mockResolvedValue(undefined);
+    renderLibrary();
+    await screen.findByText('notes.txt');
+
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Select notes.txt' }));
+    fireEvent.click(screen.getByTestId('asset-bulk-delete'));
+    await screen.findByText('Delete 1 selected? Irreversible.');
+    expect(screen.getByTestId('confirm-yes')).toHaveFocus();
+    fireEvent.click(screen.getByTestId('confirm-yes'));
+    await waitFor(() => expect(AssetService.bulkDelete).toHaveBeenCalledWith(['a1']));
+    await waitFor(() => expect(screen.queryByText(/Delete 1 selected/)).not.toBeInTheDocument());
+    expect(screen.queryByText('notes.txt')).not.toBeInTheDocument();
+  });
+
+  it('confirm off preference deletes the selection immediately', async () => {
+    vi.mocked(AssetService.list).mockResolvedValue({ assets: [asset()], nextCursor: null });
+    vi.mocked(AssetService.bulkDelete).mockResolvedValue(undefined);
+    renderLibrary({ user: { confirmDeletes: { chat: true, file: false } } });
+    await screen.findByText('notes.txt');
+
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Select notes.txt' }));
+    fireEvent.click(screen.getByTestId('asset-bulk-delete'));
+    await waitFor(() => expect(AssetService.bulkDelete).toHaveBeenCalledWith(['a1']));
+  });
+
+  it('shows the bulk bar only for ready assets and clears selection after delete', async () => {
+    vi.mocked(AssetService.list).mockResolvedValue({
+      assets: [asset(), asset({ id: 'a2', filename: 'wip.bin', status: 'pending' })],
+      nextCursor: null,
+    });
+    vi.mocked(AssetService.bulkDelete).mockResolvedValue(undefined);
+    renderLibrary();
+    await screen.findByText('wip.bin');
+
+    expect(screen.getByRole('checkbox', { name: 'Select wip.bin' })).toBeDisabled();
+    expect(screen.queryByTestId('asset-bulk-delete')).not.toBeInTheDocument();
   });
 });
 
