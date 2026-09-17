@@ -39,7 +39,10 @@ export type HeaderEnvelope = { iv: string; tag: string; ciphertext: string };
 export function encryptHeader(value: string): HeaderEnvelope {
   const key = loadKey();
   const iv = crypto.randomBytes(IV_BYTES);
-  const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
+  // authTagLength pinned at construction, not just getAuthTag(): the
+  // decrypter must reject shorter-than-16-byte tags rather than accept them
+  // (semgrep gcm-no-tag-length).
+  const cipher = crypto.createCipheriv('aes-256-gcm', key, iv, { authTagLength: 16 });
   const ciphertext = Buffer.concat([cipher.update(value, 'utf8'), cipher.final()]);
   return {
     iv: iv.toString('base64'),
@@ -51,7 +54,7 @@ export function encryptHeader(value: string): HeaderEnvelope {
 export function decryptHeader(envelope: HeaderEnvelope): string {
   const key = loadKey();
   const { iv, tag, ciphertext } = decodeEnvelope(envelope);
-  const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv);
+  const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv, { authTagLength: 16 });
   decipher.setAuthTag(tag);
   return Buffer.concat([decipher.update(ciphertext), decipher.final()]).toString('utf8');
 }

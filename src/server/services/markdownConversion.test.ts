@@ -23,7 +23,11 @@ jest.mock('./storageService', () => ({
 // (mammoth for docx, pdf-parse for pdf, turndown for html) plus the failure
 // and cap paths of the conversion service.
 
-const fixture = (file: string): Buffer => readFileSync(path.join(__dirname, 'fixtures', file));
+// Hardcoded fixture names only (typed strings — a test has no user input),
+// joined with a template so no unbounded value feeds path.join().
+const FIXTURE_DIR = path.join(__dirname, 'fixtures');
+const fixture = (file: 'sample.pdf' | 'sample.docx' | 'sample.html'): Buffer =>
+  readFileSync(`${FIXTURE_DIR}/${file}`);
 
 describe('isConvertible (#67)', () => {
   it('accepts the v1 toolchain extensions and rejects the rest', () => {
