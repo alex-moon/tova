@@ -97,6 +97,8 @@ mcpServerSchema.index(
 );
 
 mcpServerSchema.set('toJSON', {
+  virtuals: true,
+  versionKey: false,
   transform: (_doc, ret) => {
     delete ret.headers;
     return ret;

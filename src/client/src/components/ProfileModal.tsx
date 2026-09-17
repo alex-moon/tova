@@ -6,6 +6,7 @@ import type { Theme } from '@/theme';
 import AuthService, { AuthError } from '../services/auth';
 import { persistTheme, resolveTheme } from '../theme';
 import { useAuth } from '../hooks/useAuth';
+import McpServersSection from './McpServersSection';
 
 interface ProfileModalProps {
   onClose: () => void;
@@ -125,6 +126,7 @@ const ProfileModal: React.FC<ProfileModalProps> = ({ onClose }) => {
               className="w-full rounded-lg border border-border bg-transparent px-3 py-1 text-base outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/30"
             />
           </label>
+          <McpServersSection />
         </div>
         {error && (
           <div
