@@ -43,7 +43,11 @@ router.patch('/', authenticate, async (req: AuthRequest, res) => {
         : '';
       user.preferredName = cleaned ? cleaned : null;
     }
-    if ('customInstructions' in parsed.data || parsed.data.theme !== undefined) {
+    if (
+      'customInstructions' in parsed.data ||
+      parsed.data.theme !== undefined ||
+      parsed.data.confirmDeletes !== undefined
+    ) {
       if (!user.settings) {
         // Mongoose applies the schema default (null) for any field omitted
         // from the literal, so a fresh settings doc needs no explicit theme.
@@ -70,6 +74,16 @@ router.patch('/', authenticate, async (req: AuthRequest, res) => {
         // UI offers Light/Dark, absence (undefined/null) means "no explicit
         // choice" and the client follows system preference then light.
         settings.theme = themePatch;
+      }
+      const confirmDeletesPatch = parsed.data.confirmDeletes;
+      if (confirmDeletesPatch !== undefined) {
+        // Merge into the subdoc so per-key PATCHes ({ chat: false }) leave the
+        // other key at its schema default (true). A fresh subdoc needs no
+        // literal keys: Mongoose applies defaults on read/save (#59).
+        settings.confirmDeletes = {
+          chat: confirmDeletesPatch.chat ?? true,
+          file: confirmDeletesPatch.file ?? true,
+        };
       }
     }
 

@@ -51,6 +51,7 @@ export interface AuthUser {
   preferredName?: string;
   customInstructions?: string;
   theme?: 'light' | 'dark';
+  confirmDeletes?: { chat: boolean; file: boolean };
   location?: AuthUserLocation;
 }
 

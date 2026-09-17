@@ -4,8 +4,15 @@ import Sidebar from './Sidebar';
 import { AuthContext } from '../context/AuthContext';
 import type { User } from '../context/AuthContext';
 
-const renderSidebar = (user: User | null) => {
+const renderSidebar = (
+  user: User | null,
+  opts: {
+    sessions?: { _id: string; title: string }[];
+    onDeleteSession?: (id: string) => void;
+  } = {},
+) => {
   const onClose = vi.fn();
+  const onDeleteSession = opts.onDeleteSession ?? vi.fn();
   const result = render(
     <AuthContext.Provider
       value={{
@@ -18,19 +25,19 @@ const renderSidebar = (user: User | null) => {
       }}
     >
       <Sidebar
-        sessions={[]}
+        sessions={opts.sessions ?? []}
         activeSessionId={null}
         open
         onSelectSession={vi.fn()}
         onNewChat={vi.fn()}
-        onDeleteSession={vi.fn()}
+        onDeleteSession={onDeleteSession}
         onClose={onClose}
         showFiles={false}
         onToggleFiles={vi.fn()}
       />
     </AuthContext.Provider>,
   );
-  return { onClose, container: result.container };
+  return { onClose, container: result.container, onDeleteSession };
 };
 
 describe('Sidebar footer avatar (issue #35)', () => {
@@ -66,5 +73,53 @@ describe('Sidebar footer avatar (issue #35)', () => {
     renderSidebar(user);
     fireEvent.click(screen.getByRole('button', { name: 'Open profile' }));
     expect(screen.getByTestId('profile-modal')).toBeInTheDocument();
+  });
+});
+
+describe('Sidebar — inline chat delete confirm (issue #59)', () => {
+  afterEach(cleanup);
+
+  const user: User = {
+    id: '1',
+    email: 'a@b.c',
+    role: 'user',
+    permissions: [],
+  };
+
+  const sessions = [{ _id: 's1', title: 'Chores' }];
+
+  it('arms the row on trash click and deletes on Yes', () => {
+    const onDeleteSession = vi.fn();
+    renderSidebar(user, { sessions, onDeleteSession });
+    expect(screen.queryByText('Sure? Irreversible.')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Delete chat: Chores' }));
+    expect(screen.getByText('Sure? Irreversible.')).toBeInTheDocument();
+    expect(onDeleteSession).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByTestId('confirm-yes'));
+    expect(onDeleteSession).toHaveBeenCalledWith('s1');
+    expect(screen.queryByText('Sure? Irreversible.')).not.toBeInTheDocument();
+  });
+
+  it('No cancels without deleting', () => {
+    const onDeleteSession = vi.fn();
+    renderSidebar(user, { sessions, onDeleteSession });
+    fireEvent.click(screen.getByRole('button', { name: 'Delete chat: Chores' }));
+    fireEvent.click(screen.getByTestId('confirm-no'));
+    expect(screen.queryByText('Sure? Irreversible.')).not.toBeInTheDocument();
+    expect(onDeleteSession).not.toHaveBeenCalled();
+  });
+
+  it('deletes immediately when the chat confirm preference is off', () => {
+    const onDeleteSession = vi.fn();
+    renderSidebar(
+      { ...user, confirmDeletes: { chat: false, file: true } },
+      {
+        sessions,
+        onDeleteSession,
+      },
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Delete chat: Chores' }));
+    expect(onDeleteSession).toHaveBeenCalledWith('s1');
+    expect(screen.queryByText('Sure? Irreversible.')).not.toBeInTheDocument();
   });
 });

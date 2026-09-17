@@ -1,7 +1,12 @@
 import { describe, expect, it, vi, afterEach } from 'vitest';
 import { render, screen, cleanup, fireEvent, waitFor } from '@testing-library/react';
 import AssetLibrary from './AssetLibrary';
+import { AuthContext } from '../context/AuthContext';
+import type { User } from '../context/AuthContext';
+import { toast } from 'sonner';
 import type { AssetSummary } from '../services/assets';
+
+vi.mock('sonner', () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
 
 vi.mock('../services/assets', async (importOriginal) => {
   const original = await importOriginal<typeof import('../services/assets')>();
@@ -30,8 +35,28 @@ const asset = (over: Partial<AssetSummary> = {}): AssetSummary => ({
 });
 
 const renderLibrary = (
-  props: { onClose?: () => void; onPickAsset?: (a: AssetSummary) => void } = {},
-) => render(<AssetLibrary onClose={props.onClose ?? vi.fn()} onPickAsset={props.onPickAsset} />);
+  props: {
+    onClose?: () => void;
+    onPickAsset?: (a: AssetSummary) => void;
+    user?: Partial<User>;
+  } = {},
+) => {
+  const user: User = { id: '1', email: 'a@b.c', role: 'user', permissions: [], ...props.user };
+  return render(
+    <AuthContext.Provider
+      value={{
+        user,
+        loading: false,
+        login: vi.fn(),
+        register: vi.fn(),
+        logout: vi.fn(),
+        updateUser: vi.fn(),
+      }}
+    >
+      <AssetLibrary onClose={props.onClose ?? vi.fn()} onPickAsset={props.onPickAsset} />
+    </AuthContext.Provider>,
+  );
+};
 
 describe('AssetLibrary — attach to chat (issue #51)', () => {
   afterEach(cleanup);
@@ -79,5 +104,57 @@ describe('AssetLibrary — regression cover (issue #34)', () => {
     renderLibrary();
     await waitFor(() => expect(screen.getByText('notes.txt')).toBeInTheDocument());
     expect(screen.queryByTestId('asset-loading')).not.toBeInTheDocument();
+  });
+});
+
+describe('AssetLibrary — inline delete confirm (issue #59)', () => {
+  afterEach(cleanup);
+  vi.mocked(AssetService.list).mockResolvedValue({ assets: [], nextCursor: null });
+
+  it('never opens a blocking browser dialog', async () => {
+    vi.mocked(AssetService.list).mockResolvedValue({ assets: [asset()], nextCursor: null });
+    vi.mocked(AssetService.delete).mockResolvedValue(undefined);
+    const confirmSpy = vi.spyOn(window, 'confirm');
+    const alertSpy = vi.spyOn(window, 'alert');
+    renderLibrary();
+    await screen.findByText('notes.txt');
+    fireEvent.click(screen.getByRole('button', { name: 'Delete notes.txt' }));
+    await screen.findByText('Sure? Irreversible.');
+    fireEvent.click(screen.getByTestId('confirm-yes'));
+    await waitFor(() => expect(AssetService.delete).toHaveBeenCalledWith('a1'));
+    expect(confirmSpy).not.toHaveBeenCalled();
+    expect(alertSpy).not.toHaveBeenCalled();
+  });
+
+  it('arm → no keeps the file and closes the strip', async () => {
+    vi.mocked(AssetService.list).mockResolvedValue({ assets: [asset()], nextCursor: null });
+    renderLibrary();
+    await screen.findByText('notes.txt');
+    fireEvent.click(screen.getByRole('button', { name: 'Delete notes.txt' }));
+    await screen.findByText('Sure? Irreversible.');
+    fireEvent.click(screen.getByTestId('confirm-no'));
+    await waitFor(() => expect(screen.queryByText('Sure? Irreversible.')).not.toBeInTheDocument());
+    expect(AssetService.delete).not.toHaveBeenCalled();
+  });
+
+  it('arm → yes deletes the file', async () => {
+    vi.mocked(AssetService.list).mockResolvedValue({ assets: [asset()], nextCursor: null });
+    vi.mocked(AssetService.delete).mockResolvedValue(undefined);
+    renderLibrary();
+    await screen.findByText('notes.txt');
+    fireEvent.click(screen.getByRole('button', { name: 'Delete notes.txt' }));
+    await screen.findByText('Sure? Irreversible.');
+    fireEvent.click(screen.getByTestId('confirm-yes'));
+    await waitFor(() => expect(AssetService.delete).toHaveBeenCalledWith('a1'));
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith('Deleted "notes.txt"'));
+  });
+
+  it('deletes immediately when the chat-level preference is off', async () => {
+    vi.mocked(AssetService.list).mockResolvedValue({ assets: [asset()], nextCursor: null });
+    vi.mocked(AssetService.delete).mockResolvedValue(undefined);
+    renderLibrary({ user: { confirmDeletes: { chat: true, file: false } } });
+    await screen.findByText('notes.txt');
+    fireEvent.click(screen.getByRole('button', { name: 'Delete notes.txt' }));
+    await waitFor(() => expect(AssetService.delete).toHaveBeenCalledWith('a1'));
   });
 });

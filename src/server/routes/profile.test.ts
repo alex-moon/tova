@@ -204,6 +204,46 @@ describe('PATCH /api/profile (issue #35)', () => {
     expect(user.settings?.theme ?? null).toBeNull();
   });
 
+  it('saves granular delete-confirmation prefs and round-trips them (issue #59)', async () => {
+    const { app, cookie } = await registerUser('patch-delete-confirm@example.com');
+
+    // Grandular single-key patch: the untouched key holds the doc default (true).
+    const res = await patchProfile(app, cookie, { confirmDeletes: { chat: false } });
+    expect(res.status).toBe(200);
+    expect(res.body.user.confirmDeletes).toEqual({ chat: false, file: true });
+
+    const me = await request(app).get('/api/auth/me').set('Cookie', cookie);
+    expect(me.body.user.confirmDeletes).toEqual({ chat: false, file: true });
+
+    const persisted = await User.findOne({ email: 'patch-delete-confirm@example.com' }).lean();
+    expect(persisted?.settings?.confirmDeletes).toEqual({ chat: false, file: true });
+
+    // Turning it back on.
+    const on = await patchProfile(app, cookie, { confirmDeletes: { chat: true, file: false } });
+    expect(on.body.user.confirmDeletes).toEqual({ chat: true, file: false });
+  });
+
+  it('leaves confirmDeletes untouched when absent from the body (issue #59)', async () => {
+    const { app, cookie } = await registerUser('patch-delete-confirm-partial@example.com');
+    await patchProfile(app, cookie, { confirmDeletes: { file: false } });
+
+    const res = await patchProfile(app, cookie, { preferredName: 'Alex' });
+    expect(res.status).toBe(200);
+    expect(res.body.user.confirmDeletes).toEqual({ chat: true, file: false });
+  });
+
+  it('rejects bad confirmDeletes payloads with 400 (issue #59)', async () => {
+    const { app, cookie } = await registerUser('patch-delete-confirm-invalid@example.com');
+
+    for (const bad of ['yes', 42, null, true, { other: false }, { chat: 'no' }]) {
+      const res = await patchProfile(app, cookie, { confirmDeletes: bad });
+      expect(res.status).toBe(400);
+    }
+
+    const user = await getUser('patch-delete-confirm-invalid@example.com');
+    expect(user.settings?.confirmDeletes ?? null).toBeNull();
+  });
+
   it('rejects unauthenticated requests with 401', async () => {
     const app = createApp();
     const res = await request(app).patch('/api/profile').send({ preferredName: 'Alex' });
