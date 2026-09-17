@@ -11,6 +11,7 @@ const mockPresignGet = jest.fn();
 const mockHead = jest.fn();
 const mockGetObjectBuffer = jest.fn();
 const mockDeleteObject = jest.fn();
+const mockEnqueueAssetJob = jest.fn();
 
 jest.mock('../services/storageService', () => ({
   isStorageConfigured: jest.fn().mockReturnValue(true),
@@ -20,6 +21,17 @@ jest.mock('../services/storageService', () => ({
   getObjectBuffer: (...args: unknown[]) => mockGetObjectBuffer(...args),
   deleteObject: (...args: unknown[]) => mockDeleteObject(...args),
 }));
+
+// Route the enqueue through a mock so the confirm tests can simulate an
+// enqueue failure; by default it forwards to the real implementation.
+jest.mock('../services/assetJobService', () => {
+  const actual = jest.requireActual('../services/assetJobService');
+  return {
+    ...actual,
+    enqueueAssetJob: (assetId: unknown) => mockEnqueueAssetJob(assetId),
+  };
+});
+const actualAssetJobService = jest.requireActual('../services/assetJobService');
 
 jest.mock('../services/titleService', () => ({
   generateChatTitle: jest.fn().mockResolvedValue('Hello'),
@@ -243,6 +255,10 @@ describe('Assets confirm markdown conversion queue (#67)', () => {
   beforeEach(() => {
     jest.resetAllMocks();
     (isStorageConfigured as jest.Mock).mockReturnValue(true);
+    // Forward by default; only the enqueue-failure test overrides this.
+    mockEnqueueAssetJob.mockImplementation((assetId: unknown) =>
+      actualAssetJobService.enqueueAssetJob(assetId),
+    );
   });
 
   it('a convertible upload goes ready immediately and enqueues one conversion job', async () => {
@@ -284,6 +300,21 @@ describe('Assets confirm markdown conversion queue (#67)', () => {
 
     expect(confirm.status).toBe(200);
     const stored = await Asset.findById(assetId);
+    expect(stored?.markdownStatus).toBe('none');
+    expect(await AssetJob.countDocuments({ assetId })).toBe(0);
+  });
+
+  it('a failed enqueue downgrades the asset to none instead of a stuck pending (#67)', async () => {
+    mockEnqueueAssetJob.mockRejectedValueOnce(new Error('enqueue blip'));
+    const cookie = await registerUser('assets-enqueue-fail@example.com');
+    const assetId = await presignOk(cookie, 'doc.pdf', 'application/pdf', 100);
+
+    mockHead.mockResolvedValue(headerForObject(100, 'application/pdf'));
+    const confirm = await confirmFor(cookie, assetId);
+
+    expect(confirm.status).toBe(200);
+    const stored = await Asset.findById(assetId);
+    expect(stored?.status).toBe('ready');
     expect(stored?.markdownStatus).toBe('none');
     expect(await AssetJob.countDocuments({ assetId })).toBe(0);
   });

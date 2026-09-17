@@ -180,7 +180,21 @@ router.post('/:id/confirm', authenticate, async (req: AuthRequest, res) => {
     if (text === null && isConvertible(asset.filename)) {
       asset.markdownStatus = 'pending';
       asset.markdownFailureReason = null;
-      await asset.save().then(() => enqueueAssetJob(asset._id));
+      await asset.save();
+      // Enqueue is best-effort: the asset is confirmed and the binary is
+      // fine, so a failed enqueue must not 500 the confirm. Reverting to
+      // 'none' avoids a forever-'pending' badge on an asset no poller will
+      // ever claim a job for; the failure is logged for diagnosis.
+      try {
+        await enqueueAssetJob(asset._id);
+      } catch (enqueueErr) {
+        asset.markdownStatus = 'none';
+        console.error('Asset conversion enqueue error:', enqueueErr);
+        await Asset.updateOne(
+          { _id: asset._id, markdownStatus: 'pending' },
+          { $set: { markdownStatus: 'none' } },
+        );
+      }
       return res.json({ asset: safeAsset(asset) });
     }
     await asset.save();
