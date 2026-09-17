@@ -5,10 +5,12 @@ import {
   MAX_JOB_ATTEMPTS,
   claimNextAssetJob,
   enqueueAssetJob,
+  requeueStaleAssetJobs,
   runAssetJobTick,
   startAssetJobPoller,
   stopAssetJobPoller,
 } from './assetJobService';
+import { STALE_PROCESSING_MS } from './assetJobService';
 import type { AssetJobDocument } from '../models/AssetJob';
 
 // Issue #67: Mongo-backed conversion queue running against the shared
@@ -113,6 +115,57 @@ describe('runAssetJobTick (#67)', () => {
     const updated = await Asset.findById(asset.id);
     expect(updated?.markdownStatus).toBe('failed');
     expect(updated?.markdownFailureReason).toBe('converter exploded');
+  });
+});
+
+describe('stale `processing` requeue (#67, plan Open Question C)', () => {
+  const strandJob = async (assetId: string, ageMs: number): Promise<AssetJobDocument> => {
+    await enqueueAssetJob(assetId);
+    const claimed = await claimNextAssetJob();
+    expect(claimed?.status).toBe('processing');
+    if (ageMs > 0) {
+      // Backdate updatedAt past the staleness cutoff. Bypass mongoose so the
+      // timestamps plugin cannot rewrite the supplied value.
+      await AssetJob.collection.updateOne(
+        { _id: claimed?._id },
+        { $set: { updatedAt: new Date(Date.now() - ageMs) } },
+      );
+    }
+    return claimed as AssetJobDocument;
+  };
+
+  it('requeues only processing jobs older than the cutoff', async () => {
+    const fresh = await createAssetDoc('stale-fresh');
+    await strandJob(fresh.id, 0);
+    const stale = await createAssetDoc('stale-old');
+    await strandJob(stale.id, STALE_PROCESSING_MS + 1000);
+
+    expect(await requeueStaleAssetJobs()).toBe(1);
+    const freshJob = await latestJobFor(fresh.id);
+    expect(freshJob?.status).toBe('processing');
+    const staleJob = await latestJobFor(stale.id);
+    expect(staleJob?.status).toBe('pending');
+    // The sweep does not charge an attempt.
+    expect(staleJob?.attempts).toBe(1);
+  });
+
+  it('a stranded processing job self-heals on the next poller start', async () => {
+    const asset = await createAssetDoc('stale-heal');
+    await strandJob(asset.id, STALE_PROCESSING_MS + 1000);
+    // Enqueue alone is a no-op while the stranded row is "live".
+    await enqueueAssetJob(asset.id);
+    const processor = jest.fn().mockResolvedValue(undefined);
+    // Short-lived poller start (real bootstrap hook): the fire-and-forget
+    // requeue flips the stranded row to pending, the poller then claims and
+    // completes it. A 'processing' row is not claimable, so the only way the
+    // processor can run is via the requeue.
+    startAssetJobPoller(processor, 10);
+    await new Promise((r) => setTimeout(r, 60));
+    stopAssetJobPoller();
+    await new Promise((r) => setTimeout(r, 60));
+    expect(processor).toHaveBeenCalledTimes(1);
+    const healed = await latestJobFor(asset.id);
+    expect(healed?.status).toBe('done');
   });
 });
 

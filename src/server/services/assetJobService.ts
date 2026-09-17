@@ -86,11 +86,30 @@ let timer: ReturnType<typeof setInterval> | null = null;
 
 let busy = false;
 
+// A server crash mid-job leaves a `processing` row stranded forever, which
+// also blocks enqueueAssetJob (a live-status job is reused). At poller start
+// such jobs older than STALE_PROCESSING_MS are requeued as `pending` so a
+// restart self-heals; updatedAt (bumped by the claim and by timestamps) is
+// the staleness clock. Attempts are not incremented — the sweep does not
+// count against the retry cap because the processor never observed the loss.
+export const STALE_PROCESSING_MS = 5 * 60 * 1000;
+
+export const requeueStaleAssetJobs = async (
+  maxAgeMs: number = STALE_PROCESSING_MS,
+): Promise<number> => {
+  const result = await AssetJob.updateMany(
+    { status: 'processing', updatedAt: { $lt: new Date(Date.now() - maxAgeMs) } },
+    { $set: { status: 'pending' } },
+  );
+  return result.modifiedCount ?? 0;
+};
+
 export const startAssetJobPoller = (
   processor: AssetJobProcessor,
   intervalMs = POLL_INTERVAL_MS,
 ): ReturnType<typeof setInterval> => {
   if (timer) return timer;
+  void requeueStaleAssetJobs().catch(() => undefined);
   timer = setInterval(() => {
     // One job per tick; skip ticks while the previous processor run is still
     // in flight so slow conversions don't stack up queries.
