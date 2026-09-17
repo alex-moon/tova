@@ -53,6 +53,8 @@ const AssetLibrary: React.FC<AssetLibraryProps> = ({ onClose, onPickAsset }) => 
   const [loading, setLoading] = useState(true);
   const [uploadingName, setUploadingName] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [bulkDownloading, setBulkDownloading] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const load = useCallback(async () => {
@@ -117,6 +119,32 @@ const AssetLibrary: React.FC<AssetLibraryProps> = ({ onClose, onPickAsset }) => 
     }
   };
 
+  const handleBulkDownload = async () => {
+    const ids = Array.from(selectedIds);
+    if (ids.length === 0) return;
+    setBulkDownloading(true);
+    try {
+      const url = AssetService.bulkDownloadUrl(ids);
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.setAttribute('download', '');
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+    } finally {
+      setBulkDownloading(false);
+    }
+  };
+
+  const toggleSelected = (asset: AssetSummary) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(asset.id)) next.delete(asset.id);
+      else next.add(asset.id);
+      return next;
+    });
+  };
+
   const onDrop = (e: React.DragEvent) => {
     e.preventDefault();
     void handleFiles(e.dataTransfer.files);
@@ -160,12 +188,39 @@ const AssetLibrary: React.FC<AssetLibraryProps> = ({ onClose, onPickAsset }) => 
             </p>
           ) : (
             <>
+              {selectedIds.size > 0 && (
+                <div className="mb-2 flex items-center justify-between gap-2">
+                  <span className="text-xs text-muted-foreground">{selectedIds.size} selected</span>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={bulkDownloading}
+                    data-testid="asset-bulk-download"
+                    onClick={() => void handleBulkDownload()}
+                  >
+                    {bulkDownloading ? (
+                      <Loader2 className="size-4 animate-spin" />
+                    ) : (
+                      'Download selected'
+                    )}
+                  </Button>
+                </div>
+              )}
               <ul className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                 {assets.map((asset) => (
                   <li
                     key={asset.id}
                     className="flex items-center gap-3 rounded-lg border border-border bg-msg-assistant px-3 py-2.5"
                   >
+                    <input
+                      type="checkbox"
+                      aria-label={`Select ${asset.filename}`}
+                      disabled={asset.status !== 'ready'}
+                      checked={selectedIds.has(asset.id)}
+                      data-testid="asset-select"
+                      onChange={() => toggleSelected(asset)}
+                      className="size-4 shrink-0 cursor-pointer accent-primary disabled:cursor-not-allowed disabled:opacity-50"
+                    />
                     <IconFor contentType={asset.contentType} filename={asset.filename} />
                     <span className="min-w-0 flex-1">
                       <span className="block truncate text-sm">{asset.filename}</span>

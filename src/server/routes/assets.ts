@@ -1,11 +1,13 @@
 import express from 'express';
+import archiver from 'archiver';
 import { isValidObjectId } from 'mongoose';
 import { Asset, type AssetDocument } from '../models/Asset';
 import { authenticate, AuthRequest } from '../middleware/auth';
-import { assetPresignSchema } from '../validation';
+import { assetBulkDownloadQuerySchema, assetPresignSchema } from '../validation';
 import {
   deleteObject,
   getObjectBuffer,
+  getObjectStream,
   headObject,
   isStorageConfigured,
   presignGetUrl,
@@ -41,6 +43,36 @@ const CONFIRM_MAX_AGE_MS = 60 * 60 * 1000;
 const MAX_EXTRACT_BYTES = 1_000_000;
 
 const LIST_PAGE_SIZE = 20;
+
+// Bulk zip limits (#69): file count comes from the query schema cap; the
+// stored-size cap is the real limiter given the 15 MB per-file presign cap.
+const BULK_MAX_TOTAL_SIZE = 500 * 1024 * 1024;
+
+// Bulk-download entry names come from stored Asset.filename (sanitized at
+// presign), with a defensive second pass here. Collisions get `name (2).ext`.
+const sanitizeZipEntryName = (filename: string): string => {
+  const cleaned = filename
+    .split('')
+    .filter((char) => char.charCodeAt(0) >= 0x20 && char !== '\u007f')
+    .join('')
+    .replace(/[/\\]/g, '_')
+    .trim();
+  return cleaned || 'unnamed.bin';
+};
+
+const dedupeEntryNames = (filenames: string[]): string[] => {
+  const counts = new Map<string, number>();
+  return filenames.map((filename) => {
+    const name = sanitizeZipEntryName(filename);
+    const seen = counts.get(name) ?? 0;
+    counts.set(name, seen + 1);
+    if (seen === 0) return name;
+    const dot = name.lastIndexOf('.');
+    const base = dot > 0 ? name.slice(0, dot) : name;
+    const ext = dot > 0 ? name.slice(dot) : '';
+    return `${base} (${seen + 1})${ext}`;
+  });
+};
 
 // Filenames become the last path segment of the object key: no path
 // separators, control chars or whitespace-only names.
@@ -195,6 +227,97 @@ router.get('/', authenticate, async (req: AuthRequest, res) => {
   } catch (err) {
     console.error('Asset list error:', err);
     return res.status(500).json({ message: 'Error listing assets' });
+  }
+});
+
+// GET /api/assets/bulk-download — server-generated zip of owned assets
+// (issue #69). Streams each stored object from Spaces into `archiver` —
+// never buffered in memory. NOTE: any future generic `GET /:id` route must
+// be registered *after* this one so `bulk-download` is not swallowed.
+router.get('/bulk-download', authenticate, async (req: AuthRequest, res) => {
+  const ids = req.query.id;
+  const parsed = assetBulkDownloadQuerySchema.safeParse({ id: ids });
+  if (!parsed.success) {
+    return res.status(400).json({
+      message: parsed.error.issues[0]?.message ?? 'Invalid bulk download request',
+    });
+  }
+
+  try {
+    const requested = parsed.data.id.filter((id) => isValidObjectId(id));
+    const assets = await Asset.find({
+      ...(requested.length > 0 ? { _id: { $in: requested } } : {}),
+      userId: req.user?.id,
+      status: 'ready',
+    })
+      .select('filename key size')
+      .lean();
+
+    if (assets.length === 0) {
+      return res.status(400).json({ message: 'No downloadable assets in selection' });
+    }
+    const totalSize = assets.reduce((sum, asset) => sum + (asset.size ?? 0), 0);
+    if (totalSize > BULK_MAX_TOTAL_SIZE) {
+      return res.status(413).json({ message: 'Selected assets exceed the 500 MB archive limit' });
+    }
+
+    const entryNames = dedupeEntryNames(assets.map((asset) => asset.filename));
+
+    const archive = archiver('zip', { zlib: { level: 6 } });
+    archive.on('warning', (err: archiver.ArchiverError) => console.error('Archive warning:', err));
+
+    // Headers are not written until the first byte of zip data flushes; the
+    // first streamed object is therefore fetched before any header, so a
+    // storage failure on the very first asset can still return clean JSON.
+    let started = false;
+    const startResponse = () => {
+      if (started) return;
+      started = true;
+      archive.on('error', (err: archiver.ArchiverError) => {
+        console.error('Archive error:', err);
+        res.destroy();
+      });
+      // Client gave up / connection dropped: stop feeding the zip.
+      res.on('close', () => archive.abort());
+      res.type('application/zip');
+      res.setHeader(
+        'Content-Disposition',
+        `attachment; filename="assets-${new Date().toISOString().replace(/[:T]/g, '-').slice(0, 19)}.zip"`,
+      );
+      archive.pipe(res);
+    };
+
+    for (let i = 0; i < assets.length; i += 1) {
+      const asset = assets[i]!;
+      try {
+        const body = await getObjectStream(asset.key);
+        if (!body) {
+          startResponse();
+          archive.append('', { name: `${entryNames[i]}.missing` });
+          continue;
+        }
+        startResponse();
+        archive.append(body, { name: entryNames[i]! });
+      } catch (err) {
+        console.error('Asset bulk download stream error:', err);
+        archive.abort();
+        if (started && res.headersSent) {
+          // Mid-stream: browsers will see a truncated zip (accepted
+          // limitation — see #69 plan, OQ4).
+          res.destroy();
+          return;
+        }
+        return res.status(502).json({ message: 'Error retrieving assets from storage' });
+      }
+    }
+    await archive.finalize();
+  } catch (err) {
+    console.error('Asset bulk download error:', err);
+    if (!res.headersSent) {
+      return res.status(500).json({ message: 'Error building download archive' });
+    }
+    // Headers already sent mid-stream: browsers will see a truncated zip.
+    res.destroy();
   }
 });
 

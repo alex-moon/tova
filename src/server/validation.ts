@@ -58,5 +58,21 @@ export const assetPresignSchema = z.object({
     .positive({ message: 'Size must be positive' }),
 });
 
+// GET /api/assets/bulk-download query (issue #69). Express 5's default query
+// parser returns an array for repeated `?id=` params but a scalar string for
+// a single one — preprocess both into an array. Explicit id list only for
+// v1; 50 entries is the per-archive cap.
+export const assetBulkDownloadQuerySchema = z.object({
+  id: z.preprocess(
+    (value) => (Array.isArray(value) ? value : [value]),
+    z
+      .array(z.string({ message: 'id is required' }).min(1, { message: 'id is required' }), {
+        message: 'id is required',
+      })
+      .min(1, { message: 'At least one asset id is required' })
+      .max(50, { message: 'At most 50 assets can be downloaded at once' }),
+  ),
+});
+
 export type LoginCredentials = z.infer<typeof loginSchema>;
 export type RegisterCredentials = z.infer<typeof registerSchema>;
