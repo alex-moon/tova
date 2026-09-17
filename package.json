@@ -19,7 +19,7 @@
     "deploy": "bash scripts/deploy.sh",
     "db:migrate": "tsx migrations/index.ts up",
     "db:migrate:down": "tsx migrations/index.ts down --last",
-    "test": "jest --runInBand",
+    "test": "NODE_OPTIONS=--experimental-vm-modules jest --runInBand",
     "lint": "eslint src migrations --ext .ts,.tsx",
     "lint:fix": "npm run lint -- --fix",
     "fix": "npm run lint:fix && npm run format",
@@ -51,8 +51,11 @@
     "helmet": "^8.3.0",
     "http-proxy-middleware": "^3.0.5",
     "jsonwebtoken": "^9.0.2",
+    "mammoth": "^1.12.3",
     "mongo-migrate-ts": "^2.0.0",
     "mongoose": "^8.18.0",
+    "pdf-parse": "^2.4.5",
+    "turndown": "^7.2.4",
     "zod": "^4.6.4"
   },
   "devDependencies": {
@@ -64,6 +67,7 @@
     "@types/jsonwebtoken": "^9.0.10",
     "@types/node": "^24.1.0",
     "@types/supertest": "^6.0.3",
+    "@types/turndown": "^5.0.6",
     "@typescript-eslint/eslint-plugin": "^8.69.0",
     "@typescript-eslint/parser": "^8.69.0",
     "adm-zip": "^0.6.1",

@@ -140,6 +140,37 @@ describe('Chat attach-to-message (issue #34)', () => {
     expect(last.content).toContain('FILE CONTENTS');
   });
 
+  it('falls back to converted markdown when there is no fast-path text (#67)', async () => {
+    const email = 'attach-markdown@example.com';
+    const cookies = await registerUser(email);
+    const user = await User.findOne({ email });
+    const id = new Types.ObjectId();
+    await Asset.create({
+      _id: id,
+      userId: user?._id,
+      filename: 'report.pdf',
+      key: `k/${String(id)}/report.pdf`,
+      contentType: 'application/pdf',
+      size: 12,
+      status: 'ready',
+      textExtracted: null,
+      markdownExtracted: '# converted report',
+    });
+
+    const response = await streamMessage(cookies, {
+      content: 'summarize my pdf',
+      assetId: String(id),
+    });
+    expect(response.status).toBe(200);
+    const [callOptions] = mockAgentStream.mock.calls[0] as [
+      { messages: { role: string; content: string }[] },
+      unknown,
+    ];
+    expect(callOptions.messages[callOptions.messages.length - 1].content).toContain(
+      'converted report',
+    );
+  });
+
   it('rejects an attached asset owned by another user', async () => {
     const email = 'attach-foreign@example.com';
     const cookies = await registerUser(email);

@@ -320,11 +320,14 @@ export const readFileTool = createTool({
     }
     try {
       const asset = await Asset.findOne({ _id: id, userId, status: 'ready' }).select(
-        'filename contentType size createdAt textExtracted',
+        'filename contentType size createdAt textExtracted markdownExtracted',
       );
       if (!asset) return { error: 'not_found' };
       const file = assetFileFrom(asset);
-      if (asset.textExtracted == null) {
+      // Issue #67: markdown conversion is the fallback content source when
+      // the fast extraction did not produce text (pdf/docx/html).
+      const text = asset.textExtracted ?? asset.markdownExtracted;
+      if (text == null) {
         return {
           file,
           content: null,
@@ -334,7 +337,7 @@ export const readFileTool = createTool({
             'binary type such as an image); use the attach flow to include it in the chat.',
         };
       }
-      return { file, content: truncateForPrompt(asset.textExtracted), hasText: true };
+      return { file, content: truncateForPrompt(text), hasText: true };
     } catch {
       return { error: 'unavailable' };
     }

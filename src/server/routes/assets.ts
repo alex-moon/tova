@@ -20,6 +20,8 @@ import {
   presignPutUrl,
 } from '../services/storageService';
 import { extractText, isExtractable, truncateForPrompt } from '../services/textExtraction';
+import { enqueueAssetJob } from '../services/assetJobService';
+import { isConvertible } from '../services/markdownConversion';
 
 const router = express.Router();
 
@@ -35,6 +37,9 @@ const ALLOWED_CONTENT_TYPES = new Set([
   'text/csv',
   'application/json',
   'application/pdf',
+  // Issue #67: convertible document formats reach the markdown pipeline.
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'text/html',
   'image/png',
   'image/jpeg',
   'image/gif',
@@ -103,6 +108,9 @@ const safeAsset = (asset: AssetDocument): unknown => ({
   // owner ask) — the extracted text itself stays server-side, never a
   // client-rendered payload.
   hasText: Boolean(asset.textExtracted),
+  // Issue #67: conversion lifecycle for the library UI badge; no markdown
+  // text ever reaches the client.
+  markdownStatus: asset.markdownStatus,
   createdAt: asset.createdAt,
 });
 
@@ -290,6 +298,30 @@ const confirmAsset = async (asset: AssetDocument): Promise<ConfirmResult> => {
   }
 
   asset.status = 'ready';
+  // Issue #67: fast-path extraction won, nothing to convert. Otherwise
+  // queue a background conversion job — the response latency of /confirm
+  // stays low, conversion retries under the job cap, and a failed
+  // conversion never fails the asset (the binary is fine).
+  if (text === null && isConvertible(asset.filename)) {
+    asset.markdownStatus = 'pending';
+    asset.markdownFailureReason = null;
+    await asset.save();
+    // Enqueue is best-effort: the asset is confirmed and the binary is
+    // fine, so a failed enqueue must not 500 the confirm. Reverting to
+    // 'none' avoids a forever-'pending' badge on an asset no poller will
+    // ever claim a job for; the failure is logged for diagnosis.
+    try {
+      await enqueueAssetJob(asset._id);
+    } catch (enqueueErr) {
+      asset.markdownStatus = 'none';
+      console.error('Asset conversion enqueue error:', enqueueErr);
+      await Asset.updateOne(
+        { _id: asset._id, markdownStatus: 'pending' },
+        { $set: { markdownStatus: 'none' } },
+      );
+    }
+    return { status: 'ok', asset: safeAsset(asset) };
+  }
   await asset.save();
   return { status: 'ok', asset: safeAsset(asset) };
 };

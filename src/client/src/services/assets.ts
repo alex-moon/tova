@@ -12,6 +12,9 @@ export interface AssetSummary {
   status: string;
   // No extracted text server-side — Tova can read the filename only.
   hasText: boolean;
+  // Issue #67: markdown conversion lifecycle ('none'|'pending'|'ready'|'failed');
+  // the markdown text itself stays server-side.
+  markdownStatus?: string;
   createdAt: string;
 }
 

@@ -30,6 +30,26 @@ const assetSchema = new mongoose.Schema(
       type: String,
       default: null,
     },
+    // Markdown conversion (issue #67): document uploads (pdf, docx, html)
+    // get converted by the asset-job worker and the markdown is stored here,
+    // capped at MAX_MARKDOWN_CHARS. Distinct from textExtracted so the fast
+    // extraction path (txt/md/csv) keeps its semantics; `markdownStatus`
+    // tracks the conversion lifecycle so the library UI can show pending /
+    // ready / failed states without ever shipping the markdown text itself
+    // to the client.
+    markdownExtracted: {
+      type: String,
+      default: null,
+    },
+    markdownStatus: {
+      type: String,
+      enum: ['none', 'pending', 'ready', 'failed'],
+      default: 'none',
+    },
+    markdownFailureReason: {
+      type: String,
+      default: null,
+    },
     status: {
       type: String,
       enum: ['pending', 'ready', 'failed'],
@@ -48,6 +68,10 @@ const assetSchema = new mongoose.Schema(
 
 // Cursor-paged per-user listing (`{ userId, _id }` ascending).
 assetSchema.index({ userId: 1, _id: 1 });
+
+// Issue #67: future search queries over converted markdown; not exercised by
+// this ticket's read paths.
+assetSchema.index({ markdownExtracted: 1 });
 
 export type AssetDocument = mongoose.HydratedDocument<mongoose.InferSchemaType<typeof assetSchema>>;
 
