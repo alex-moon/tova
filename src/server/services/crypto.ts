@@ -26,7 +26,10 @@ const resolveKey = (): Buffer => {
 
 export const encryptEnvelope = (plaintext: string): EncryptedEnvelope => {
   const iv = crypto.randomBytes(12);
-  const cipher = crypto.createCipheriv('aes-256-gcm', resolveKey(), iv);
+  // authTagLength pinned at construction, not just getAuthTag(): the
+  // decrypter must reject shorter-than-16-byte tags rather than accept them
+  // (semgrep gcm-no-tag-length).
+  const cipher = crypto.createCipheriv('aes-256-gcm', resolveKey(), iv, { authTagLength: 16 });
   const ciphertext = Buffer.concat([cipher.update(plaintext, 'utf8'), cipher.final()]);
   return {
     iv: iv.toString('base64'),
@@ -40,6 +43,7 @@ export const decryptEnvelope = (envelope: EncryptedEnvelope): string => {
     'aes-256-gcm',
     resolveKey(),
     Buffer.from(envelope.iv, 'base64'),
+    { authTagLength: 16 },
   );
   decipher.setAuthTag(Buffer.from(envelope.tag, 'base64'));
   return Buffer.concat([
