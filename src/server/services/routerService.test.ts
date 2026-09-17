@@ -1,6 +1,7 @@
 import { pickModelRef, routeQuery } from './routerService';
 import { ModelRef } from './modelConfigService';
 import { FitWeight } from './modelMetricsStatsService';
+import { muteConsoleError } from '../test/muteConsole';
 
 const groqSmall: ModelRef = { provider: 'groq', model: 'test-small-model' };
 const groqSmallAlt: ModelRef = { provider: 'groq', model: 'test-small-model-2' };
@@ -33,7 +34,17 @@ type Routing = Awaited<ReturnType<typeof routeQuery>>;
 
 // The error-path tests intentionally break the mocked classifier; keep that
 // expected fallback error out of the test output.
-const consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+// The error-path tests intentionally break the mocked classifier; keep that
+// expected fallback error out of the test output.
+let consoleErrorSpy: jest.SpyInstance;
+
+beforeEach(() => {
+  consoleErrorSpy = muteConsoleError();
+});
+
+afterEach(() => {
+  jest.restoreAllMocks();
+});
 
 const classifyAs = (content: string, error = false) => {
   mockGenerate.mockReset();

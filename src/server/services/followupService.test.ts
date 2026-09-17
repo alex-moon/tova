@@ -1,4 +1,5 @@
 import { generateFollowups, parseSuggestions } from './followupService';
+import { muteConsoleError } from '../test/muteConsole';
 
 /*
  * Issue #41: follow-up generation must go through the tool-free completion
@@ -113,7 +114,7 @@ describe('generateFollowups', () => {
   beforeEach(() => {
     mockCreateToolFree.mockReset();
     mockCreateCompletion.mockReset();
-    jest.spyOn(console, 'error').mockImplementation(() => {});
+    muteConsoleError();
   });
   afterEach(() => {
     jest.restoreAllMocks();

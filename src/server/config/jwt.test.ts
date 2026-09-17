@@ -1,4 +1,5 @@
 import { getJwtSecret, JWT_SECRET_ENV_VAR } from './jwt';
+import { muteConsoleWarn } from '../test/muteConsole';
 
 describe('getJwtSecret', () => {
   const ORIGINAL_ENV = process.env;
@@ -29,7 +30,7 @@ describe('getJwtSecret', () => {
 
   it('warns once and falls back when not production and JWT_SECRET is missing', () => {
     process.env.NODE_ENV = 'test';
-    const warnSpy = jest.spyOn(console, 'warn').mockImplementation();
+    const warnSpy = muteConsoleWarn();
     expect(getJwtSecret()).toBe('fallback_secret');
     expect(getJwtSecret()).toBe('fallback_secret');
     expect(warnSpy).toHaveBeenCalledTimes(1);

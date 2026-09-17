@@ -1,5 +1,6 @@
 import { ProviderRouting } from '../models/ProviderRouting';
 import { listByTier, type ModelRef } from './modelConfigService';
+import { muteConsoleError } from '../test/muteConsole';
 
 const TIER_ENV_VARS = {
   small: 'ROUTER_SMALL_MODEL',
@@ -41,7 +42,7 @@ describe('Model Config Service', () => {
       const insertSpy = jest
         .spyOn(ProviderRouting, 'updateOne')
         .mockRejectedValue(new Error('db down'));
-      const consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+      const consoleErrorSpy = muteConsoleError();
       try {
         expect(await listByTier('small')).toEqual([
           { provider: 'groq', model: 'env-fallback-model' },
@@ -71,7 +72,7 @@ describe('Model Config Service', () => {
       const findSpy = jest.spyOn(ProviderRouting, 'find').mockImplementation(() => {
         throw new Error('db down');
       });
-      const consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+      const consoleErrorSpy = muteConsoleError();
       try {
         expect(await listByTier('small')).toEqual([
           { provider: 'groq', model: 'env-fallback-model' },

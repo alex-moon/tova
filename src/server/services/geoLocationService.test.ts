@@ -7,7 +7,9 @@ import {
 } from './geoLocationService';
 import { UserDocument } from '../models/User';
 
-const consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+import { muteConsoleError } from '../test/muteConsole';
+
+const consoleErrorSpy = muteConsoleError();
 
 const realFetch = global.fetch;
 const realNow = Date.now;
