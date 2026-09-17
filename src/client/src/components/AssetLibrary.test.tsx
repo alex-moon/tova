@@ -5,7 +5,6 @@ import type { AssetSummary, BulkUploadFileResult } from '../services/assets';
 import { AuthContext } from '../context/AuthContext';
 import type { User } from '../context/AuthContext';
 import { toast } from 'sonner';
-import type { AssetSummary } from '../services/assets';
 
 vi.mock('sonner', () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
 
@@ -169,6 +168,9 @@ describe('AssetLibrary — bulk upload (issue #68)', () => {
     settle([row({ error: 'Behind upload' }, 'a.txt')]);
     await screen.findByTestId('upload-row-0');
     expect(screen.getByTestId('upload-row-0')).toHaveTextContent('Behind upload');
+  });
+});
+
 describe('AssetLibrary — inline delete confirm (issue #59)', () => {
   afterEach(cleanup);
   vi.mocked(AssetService.list).mockResolvedValue({ assets: [], nextCursor: null });
