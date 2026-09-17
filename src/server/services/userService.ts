@@ -17,6 +17,7 @@ export const toAuthUser = (user: UserDocument): AuthUser => {
   if (user.settings?.customInstructions)
     payload.customInstructions = user.settings.customInstructions;
   if (user.settings?.theme) payload.theme = user.settings.theme;
+  if (user.settings?.confirmDeletes) payload.confirmDeletes = user.settings.confirmDeletes;
   // Country-level geolocation (#50) rides only once resolved; no timestamp
   // is exposed — route consumers never need it and the "remove my location"
   // follow-up can pick it up if it turns out to want it.

@@ -47,6 +47,11 @@ const ProfileModal: React.FC<ProfileModalProps> = ({ onClose }) => {
   const [preferredName, setPreferredName] = useState(user?.preferredName ?? '');
   const [customInstructions, setCustomInstructions] = useState(user?.customInstructions ?? '');
   const [theme, setTheme] = useState<Theme>(initialTheme);
+  const initialConfirmDeletes = {
+    chat: user?.confirmDeletes?.chat ?? true,
+    file: user?.confirmDeletes?.file ?? true,
+  };
+  const [confirmDeletes, setConfirmDeletes] = useState(initialConfirmDeletes);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -64,6 +69,12 @@ const ProfileModal: React.FC<ProfileModalProps> = ({ onClose }) => {
         // Only patched when the choice actually moved, so a plain profile
         // edit cannot silently pin the device's theme onto the account.
         ...(theme !== initialTheme ? { theme } : {}),
+        // Only patched when a toggle moved, so an unrelated profile edit
+        // cannot touch delete-confirmation prefs (issue #59).
+        ...(confirmDeletes.chat !== initialConfirmDeletes.chat ||
+        confirmDeletes.file !== initialConfirmDeletes.file
+          ? { confirmDeletes }
+          : {}),
       });
       // The saved choice rides the mirror immediately so pre-auth pages and
       // reloads paint it without waiting on the profile round-trip.
@@ -125,6 +136,22 @@ const ProfileModal: React.FC<ProfileModalProps> = ({ onClose }) => {
               className="w-full rounded-lg border border-border bg-transparent px-3 py-1 text-base outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/30"
             />
           </label>
+          <fieldset className="text-sm">
+            <legend className="mb-1 block">Delete confirmations</legend>
+            {(['chat', 'file'] as const).map((target) => (
+              <label key={target} className="mt-1 flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  data-testid={`profile-confirm-delete-${target}`}
+                  checked={confirmDeletes[target]}
+                  onChange={(e) =>
+                    setConfirmDeletes((prev) => ({ ...prev, [target]: e.target.checked }))
+                  }
+                />
+                Ask before deleting {target === 'chat' ? 'chats' : 'files'}
+              </label>
+            ))}
+          </fieldset>
         </div>
         {error && (
           <div

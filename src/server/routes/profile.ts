@@ -43,7 +43,11 @@ router.patch('/', authenticate, async (req: AuthRequest, res) => {
         : '';
       user.preferredName = cleaned ? cleaned : null;
     }
-    if ('customInstructions' in parsed.data || parsed.data.theme !== undefined) {
+    if (
+      'customInstructions' in parsed.data ||
+      parsed.data.theme !== undefined ||
+      parsed.data.confirmDeletes !== undefined
+    ) {
       if (!user.settings) {
         // Mongoose applies the schema default (null) for any field omitted
         // from the literal, so a fresh settings doc needs no explicit theme.
@@ -70,6 +74,20 @@ router.patch('/', authenticate, async (req: AuthRequest, res) => {
         // UI offers Light/Dark, absence (undefined/null) means "no explicit
         // choice" and the client follows system preference then light.
         settings.theme = themePatch;
+      }
+      const confirmDeletesPatch = parsed.data.confirmDeletes;
+      if (confirmDeletesPatch !== undefined) {
+        // Merge per key: a single-key PATCH ({ chat: false }) must leave the
+        // other key's *persisted* value intact — forcing it to the schema
+        // default (true) would silently re-enable confirmations the user
+        // already turned off with "Always" (issue #59). Only when the key has
+        // never been written do we fall back to the default (true), which
+        // needs no backfill.
+        const existing = settings.confirmDeletes;
+        settings.confirmDeletes = {
+          chat: confirmDeletesPatch.chat ?? existing?.chat ?? true,
+          file: confirmDeletesPatch.file ?? existing?.file ?? true,
+        };
       }
     }
 
