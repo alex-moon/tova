@@ -2,6 +2,14 @@ import mongoose from 'mongoose';
 import { McpServer } from './McpServer';
 
 describe('McpServer model', () => {
+  beforeAll(async () => {
+    // Mongoose builds indexes asynchronously on connect; under CI load the
+    // unique partial index on (scope, userId, url) may not exist yet when the
+    // first write lands. Await the build explicitly so the duplicate-key
+    // expectation is deterministic.
+    await McpServer.init();
+  });
+
   it('strips the headers envelope from toJSON output', async () => {
     const doc = new McpServer({
       scope: 'user',
