@@ -240,6 +240,30 @@ const sanitizeToolsetKey = (name: string): string =>
   `mcp_${name.replace(/[^a-zA-Z0-9_]+/g, '_').slice(0, 40)}`;
 
 /*
+ * MCP tool budget (#77 root cause 2). Attaching a full MCP server's tools to
+ * every chat request inflates the prompt by an unbounded number of tokens —
+ * the GitHub MCP server tests against carries far more than fits under a
+ * free-tier 8000 TPM limit — which turned every chat turn into a Groq 413.
+ * The budget caps what user MCP toolsets may add to *each* request, measured
+ * as an estimate (serialized description + input schema at ~4 chars/token).
+ * Tools attach in order until the budget is spent; tools that do not fit are
+ * logged and dropped, and chat continues degraded, never failed.
+ */
+const toolTokenBudget = (): number => {
+  const parsed = Number.parseInt(process.env.MCP_TOOL_BUDGET_TOKENS ?? '1500', 10);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : 1500;
+};
+const CHARS_PER_TOKEN = 4;
+
+const estimateToolTokens = (toolInfo: McpToolInfo): number =>
+  Math.ceil(
+    Buffer.byteLength(
+      JSON.stringify({ description: toolInfo.description, inputSchema: toolInfo.inputSchema }),
+      'utf8',
+    ) / CHARS_PER_TOKEN,
+  );
+
+/*
  * Per-user toolset resolution: platform servers plus the calling user's own.
  * Connections happen in parallel with a bounded connect timeout so a first
  * chat after adding N servers stays within that bound, never N× it. Any
@@ -278,12 +302,27 @@ export const mcpToolsetsForUser = async (
       }),
     );
     const toolsets: Record<string, Record<string, ReturnType<typeof createTool>>> = {};
+    let budgetRemaining = toolTokenBudget();
+    let droppedTools = 0;
     for (const entry of live) {
       if (!entry) continue;
       const setKey = sanitizeToolsetKey(entry.server.name);
       const tools: Record<string, ReturnType<typeof createTool>> = {};
+      const toolCount = entry.tools.length;
+      let acceptedInServer = 0;
       for (const toolInfo of entry.tools) {
         if (tools[toolInfo.name]) continue;
+        if (entry.server.scope === 'user') {
+          // Budget applies to user-raised toolsets only; platform toolsets
+          // are curated by the deployment itself.
+          const cost = estimateToolTokens(toolInfo);
+          if (budgetRemaining - cost < 0) {
+            droppedTools += toolCount - acceptedInServer;
+            break;
+          }
+          budgetRemaining -= cost;
+          acceptedInServer += 1;
+        }
         tools[toolInfo.name] = createTool({
           id: `${setKey}/${toolInfo.name}`,
           description: toolInfo.description || `Tool ${toolInfo.name} from an MCP server`,
@@ -309,13 +348,29 @@ export const mcpToolsetsForUser = async (
           },
         });
       }
-      toolsets[setKey] = tools;
+      if (Object.keys(tools).length) toolsets[setKey] = tools;
+    }
+    if (droppedTools > 0) {
+      console.warn(
+        `MCP tool budget (${toolTokenBudget()} est. tokens): dropped ${droppedTools} user tool` +
+          `${droppedTools === 1 ? '' : 's'} from this turn's chat request`,
+      );
     }
     return toolsets;
   })();
 
+  // Cache hygiene: a rejection must not outlive the TTL it was stored for.
+  // The no-op catch keeps an unawaited cached promise silent; dropping the
+  // entry on failure makes the next turn rebuild instead of re-serving a
+  // poisoned entry until it expires.
   serversCache.set(cacheKey, { expiresAt: now + SERVERS_CACHE_TTL_MS, promise });
-  return promise;
+  promise.catch(() => undefined);
+  try {
+    return await promise;
+  } catch (error) {
+    if (serversCache.get(cacheKey)?.promise === promise) serversCache.delete(cacheKey);
+    throw error;
+  }
 };
 
 export const clearMcpCachesForTests = (): void => {

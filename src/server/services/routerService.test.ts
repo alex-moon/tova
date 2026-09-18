@@ -166,6 +166,17 @@ describe('Router Service', () => {
       expect(messages[0].role).toBe('user');
       expect(messages[0].content).toMatch(/simple|complex/i);
     });
+
+    it('#77: builds the classifier from a tool-free agent', async () => {
+      classifyAs('simple');
+      await routeQueryWithCfg('Give me investment advice');
+      const ctorArgs = mockAgentCtor.mock.calls[mockAgentCtor.mock.calls.length - 1] as unknown[];
+      const ctorCall = (ctorArgs?.[0] ?? {}) as { model: string; tools?: unknown };
+      // The guard model rejects tool-carrying requests, so the agent must be
+      // constructed without any `tools` argument at all.
+      expect('tools' in ctorCall).toBe(false);
+      expect(ctorCall.model).toBe('groq/test-guard-model');
+    });
   });
 
   describe('ε-random tier pools (#4 task 7)', () => {

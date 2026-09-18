@@ -44,13 +44,15 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
   const authToken = parsed.data.authToken?.trim();
   const headers = authToken ? { Authorization: `Bearer ${authToken}` } : undefined;
   try {
+    let tools;
     try {
-      await listMcpServerTools(url, headers);
+      // One handshake total (#77): the first call's result is reused below
+      // instead of triggering a second connection round-trip.
+      tools = await listMcpServerTools(url, headers);
     } catch (err) {
       const message = err instanceof Error ? err.message : 'MCP handshake failed';
       return res.status(422).json({ message: `MCP server is not reachable: ${message}` });
     }
-    const tools = await listMcpServerTools(url, headers);
     const doc = new McpServer({
       scope: 'user',
       userId: req.user?.id,

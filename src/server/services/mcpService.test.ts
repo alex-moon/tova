@@ -139,7 +139,42 @@ describe('mcpService', () => {
     expect((Client as unknown as jest.Mock).mock.calls.length).toBe(afterFirst);
   });
 
-  it('degrades persistent call failures to a descriptive error result', async () => {
+  it('does not serve a rejected cached resolution on the next turn', async () => {
+    await McpServer.create({
+      scope: 'platform',
+      name: 'platform-tools',
+      url: 'https://mcp.example.com/mcp',
+    });
+    const findSpy = jest.spyOn(McpServer, 'find').mockRejectedValueOnce(new Error('mongo down'));
+    await expect(mcpToolsetsForUser(USER_ID)).rejects.toThrow('mongo down');
+    // Within the same TTL window a fresh resolution must be rebuilt, not
+    // served from the poisoned cache entry.
+    const toolsets = await mcpToolsetsForUser(USER_ID);
+    expect(Object.keys(toolsets)).toEqual(['mcp_platform_tools']);
+    findSpy.mockRestore();
+  });
+
+  it('rebuilds after concurrent callers share one rejected resolution', async () => {
+    await McpServer.create({
+      scope: 'platform',
+      name: 'platform-tools',
+      url: 'https://mcp.example.com/mcp',
+    });
+    const findSpy = jest.spyOn(McpServer, 'find').mockRejectedValueOnce(new Error('mongo down'));
+    // Two turns racing inside one TTL window share the stored promise, so
+    // both observe the rejection; the poisoned entry must nevertheless be
+    // gone once either caller's cleanup runs.
+    await Promise.allSettled([mcpToolsetsForUser(USER_ID), mcpToolsetsForUser(USER_ID)]).then(
+      (results) => {
+        expect(results.every((r) => r.status === 'rejected')).toBe(true);
+      },
+    );
+    const toolsets = await mcpToolsetsForUser(USER_ID);
+    expect(Object.keys(toolsets)).toEqual(['mcp_platform_tools']);
+    findSpy.mockRestore();
+  });
+
+  it('degrades persistent call failures to an unavailable result', async () => {
     await McpServer.create({
       scope: 'platform',
       name: 'platform-tools',
@@ -231,6 +266,69 @@ describe('mcpService', () => {
     const ctx = { requestContext: new RequestContext() };
     await weather.execute({ q: 'x' }, ctx);
     expect(toolIsFailed(ctx, 'mcp_platform_tools/weather')).toBe(false);
+  });
+});
+
+describe('#77 MCP tool budget (user-scope toolsets)', () => {
+  afterEach(() => {
+    delete process.env.MCP_TOOL_BUDGET_TOKENS;
+  });
+
+  it('#77: drops user tools beyond the token budget, attaches what fits', async () => {
+    process.env.MCP_TOOL_BUDGET_TOKENS = '10';
+    // A GitHub-MCP-shaped tool: description long enough to exceed 10 est.
+    // tokens (deserializeJSON → description 56 chars, + boilerplate).
+    await McpServer.create({
+      scope: 'user',
+      userId: USER_ID,
+      name: 'github',
+      url: 'https://github.example.com/mcp',
+    });
+    mockListTools.mockResolvedValue({
+      tools: [
+        {
+          name: 'create_issue',
+          description: 'Create a new issue in a GitHub repository'.repeat(3),
+          inputSchema: { type: 'object', properties: { number: { type: 'string' } } },
+        },
+        { name: 'tiny', description: 'x', inputSchema: {} },
+      ],
+    });
+    const toolsets = await mcpToolsetsForUser(USER_ID);
+    expect(toolsets).toEqual({});
+  });
+
+  it('#77: attaches user tools that fit and skips the oversized ones', async () => {
+    process.env.MCP_TOOL_BUDGET_TOKENS = '200';
+    await McpServer.create({
+      scope: 'user',
+      userId: USER_ID,
+      name: 'mixed',
+      url: 'https://mixed.example.com/mcp',
+    });
+    const hugeSchema = { type: 'object', properties: { blob: { type: 'string' } } };
+    mockListTools.mockResolvedValue({
+      tools: [
+        { name: 'small', description: 'Small tool', inputSchema: { type: 'object' } },
+        { name: 'huge', description: 'h'.repeat(4000), inputSchema: hugeSchema },
+      ],
+    });
+    const toolsets = await mcpToolsetsForUser(USER_ID);
+    expect(Object.keys(toolsets.mcp_mixed)).toEqual(['small']);
+  });
+
+  it('#77: platform toolsets stay out of the user budget', async () => {
+    process.env.MCP_TOOL_BUDGET_TOKENS = '0';
+    await McpServer.create({
+      scope: 'platform',
+      name: 'platform-tools',
+      url: 'https://mcp.example.com/mcp',
+    });
+    const toolsets = await mcpToolsetsForUser(USER_ID);
+    expect(Object.keys(toolsets.mcp_platform_tools)).toEqual([
+      'weather',
+      'surf_board.shaper.build',
+    ]);
   });
 });
 
