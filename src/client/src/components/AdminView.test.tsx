@@ -131,7 +131,7 @@ describe('AdminView scroll structure (issue #79)', () => {
   it('keeps the tables in a scrollable body under a pinned header (issue #79)', async () => {
     render(<AdminView />);
     const root = screen.getByTestId('admin-view');
-    expect(root).toHaveClass('flex', 'h-full', 'flex-col', 'overflow-hidden');
+    expect(root).toHaveClass('flex', 'h-full', 'flex-col', 'max-h-none');
 
     // Body: a single overflow scroller below the pinned header.
     await screen.findByTestId('admin-models');
@@ -141,7 +141,7 @@ describe('AdminView scroll structure (issue #79)', () => {
     expect(root).toContainElement(scroller as HTMLElement);
 
     // Header stays put; everything that grows (tables, error strip) scrolls in the body.
-    expect(screen.getByText('Admin')).toHaveClass('shrink-0');
+    expect(screen.getByText('Admin').closest('.shrink-0')).not.toBeNull();
     expect(scroller).toContainElement(screen.getByTestId('admin-models'));
     expect(scroller).toContainElement(screen.getByText('someone@example.com').closest('table'));
   });

@@ -2,6 +2,12 @@ import mongoose from 'mongoose';
 import { McpServer } from './McpServer';
 
 describe('McpServer model', () => {
+  beforeAll(async () => {
+    // Index builds race these inserts; force the unique index now so the
+    // duplicate-key assertion is deterministic.
+    await McpServer.syncIndexes();
+  });
+
   it('strips the headers envelope from toJSON output', async () => {
     const doc = new McpServer({
       scope: 'user',
