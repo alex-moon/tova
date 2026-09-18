@@ -34,6 +34,14 @@ export const profilePatchSchema = z.strictObject({
     .max(4000, { message: 'customInstructions must be 4000 characters or fewer' })
     .optional(),
   theme: z.enum(['light', 'dark'], { message: 'theme must be "light" or "dark"' }).optional(),
+  // Startup-chat preference (issue #96): what the chat view shows on first
+  // open — the most recent chat (product default, also what null means) or a
+  // blank new chat.
+  startupChat: z
+    .enum(['recent', 'new'], {
+      message: 'startupChat must be "recent" or "new"',
+    })
+    .optional(),
   // Granular delete-confirmation prefs (issue #59). Strict sub-object: an
   // unknown delete target is a 400, not a silently dropped key.
   confirmDeletes: z

@@ -244,6 +244,54 @@ describe('PATCH /api/profile (issue #35)', () => {
     expect(user.settings?.confirmDeletes ?? null).toBeNull();
   });
 
+  it('saves a startupChat preference and reports it on PATCH and /me, omitted when unset (issue #96)', async () => {
+    const { app, cookie } = await registerUser('patch-startup@example.com');
+
+    // Before any save the field is absent from the wire payload (same
+    // convention as theme).
+    const before = await request(app).get('/api/auth/me').set('Cookie', cookie);
+    expect(before.body.user).not.toHaveProperty('startupChat');
+
+    const res = await patchProfile(app, cookie, { startupChat: 'new' });
+    expect(res.status).toBe(200);
+    expect(res.body.user.startupChat).toBe('new');
+
+    const me = await request(app).get('/api/auth/me').set('Cookie', cookie);
+    expect(me.body.user).toEqual(res.body.user);
+
+    const user = await getUser('patch-startup@example.com');
+    expect(user.settings?.startupChat).toBe('new');
+
+    // Switching is a normal PATCH; other settings survive.
+    await patchProfile(app, cookie, { customInstructions: 'Be terse.' });
+    const switchRes = await patchProfile(app, cookie, { startupChat: 'recent' });
+    expect(switchRes.body.user.startupChat).toBe('recent');
+    expect(switchRes.body.user.customInstructions).toBe('Be terse.');
+  });
+
+  it('leaves startupChat untouched when absent from the body (issue #96)', async () => {
+    const { app, cookie } = await registerUser('patch-startup-partial@example.com');
+    await patchProfile(app, cookie, { startupChat: 'new' });
+
+    const res = await patchProfile(app, cookie, { preferredName: 'Alex' });
+    expect(res.status).toBe(200);
+    expect(res.body.user.startupChat).toBe('new');
+  });
+
+  it('rejects invalid startupChat values with 400 (issue #96)', async () => {
+    const { app, cookie } = await registerUser('patch-startup-invalid@example.com');
+
+    for (const bad of ['old', 'NEW', '', null, 42]) {
+      const res = await patchProfile(app, cookie, { startupChat: bad });
+      expect(res.status).toBe(400);
+    }
+
+    // Unset on a fresh user: settings stays null (lazily created), so a
+    // rejected body must never have materialized a preference.
+    const user = await getUser('patch-startup-invalid@example.com');
+    expect(user.settings?.startupChat ?? null).toBeNull();
+  });
+
   it('rejects unauthenticated requests with 401', async () => {
     const app = createApp();
     const res = await request(app).patch('/api/profile').send({ preferredName: 'Alex' });

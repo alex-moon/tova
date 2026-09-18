@@ -69,6 +69,10 @@ function App() {
     markdownStatus?: string;
   } | null>(null);
   const streamingRef = useRef(false);
+  // Startup-chat preference (issue #96): 'recent' re-opens the newest session
+  // once per mount; the ref guard keeps later refetches (after send, delete)
+  // from ever overriding a user-selected or new session.
+  const startupSessionRef = useRef(false);
 
   const fetchSessions = useCallback(async () => {
     try {
@@ -97,6 +101,17 @@ function App() {
       fetchSessions();
     }
   }, [user, fetchSessions]);
+
+  useEffect(() => {
+    if (startupSessionRef.current || sessions.length === 0) return;
+    startupSessionRef.current = true;
+    // 'new' starts with a blank composer; 'recent' (the default when unset)
+    // opens the newest session once sessions have loaded.
+    if ((user?.startupChat ?? 'recent') === 'recent') {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setActiveSessionId(sessions[0]._id);
+    }
+  }, [sessions, user]);
 
   useEffect(() => {
     if (activeSessionId) {
