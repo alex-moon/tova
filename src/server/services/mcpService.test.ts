@@ -332,12 +332,12 @@ describe('#77 MCP tool budget (user-scope toolsets)', () => {
   });
 });
 
-describe('#77 MCP tool budget (user-scope toolsets)', () => {
+describe('#77 MCP tool budget edge cases (user-scope toolsets)', () => {
   afterEach(() => {
     delete process.env.MCP_TOOL_BUDGET_TOKENS;
   });
 
-  it('#77: drops user tools beyond the token budget, attaches what fits', async () => {
+  it('#77: drops every user tool when the budget is too small for even one', async () => {
     process.env.MCP_TOOL_BUDGET_TOKENS = '10';
     // A GitHub-MCP-shaped tool: description long enough to exceed 10 est.
     // tokens (deserializeJSON → description 56 chars, + boilerplate).
