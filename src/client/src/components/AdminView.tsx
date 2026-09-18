@@ -110,7 +110,7 @@ const AdminView = () => {
         <div data-testid="admin-scroller" className="min-h-0 flex-1 overflow-y-auto">
           {activeSection === 'users' && (
             <section data-testid="admin-users-section">
-              <div className="min-w-fit overflow-x-auto rounded-xl border border-border bg-card">
+              <div className="overflow-x-auto rounded-xl border border-border bg-card">
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b border-border text-left text-muted-foreground">
@@ -171,7 +171,7 @@ const AdminView = () => {
               </p>
               <div
                 data-testid="admin-models"
-                className="mt-4 min-w-fit overflow-x-auto rounded-xl border border-border bg-card"
+                className="mt-4 overflow-x-auto rounded-xl border border-border bg-card"
               >
                 <table className="w-full text-sm">
                   <thead>

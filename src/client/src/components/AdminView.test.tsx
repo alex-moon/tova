@@ -152,6 +152,19 @@ describe('AdminView layout (issue #91)', () => {
     expect(screen.queryByTestId('admin-users-section')).not.toBeInTheDocument();
   });
 
+  it('scrolls in the body element only, and turns horizontal scroll over to the table cards', async () => {
+    render(<AdminView />);
+    const view = await screen.findByTestId('admin-view');
+    expect(view.className).not.toContain('overflow-y-auto');
+    const scroller = screen.getByTestId('admin-scroller');
+    expect(scroller.className).toContain('overflow-y-auto');
+    expect(scroller.className).toContain('min-h-0');
+    const card = scroller.querySelector('.overflow-x-auto');
+    expect(card).not.toBeNull();
+    expect(card!.className).not.toContain('min-w-fit');
+    expect(scroller.contains(card as Element)).toBe(true);
+  });
+
   it('marks the active tab with aria-current', async () => {
     render(<AdminView />);
     await screen.findByTestId('admin-users-section');
