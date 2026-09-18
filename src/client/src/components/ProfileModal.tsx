@@ -94,7 +94,7 @@ const ProfileModal: React.FC<ProfileModalProps> = ({ onClose }) => {
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
       data-testid="profile-modal"
     >
-      <div className="w-full max-w-md rounded-xl border border-border bg-card p-6 shadow-lg">
+      <div className="max-h-[85dvh] w-full max-w-md overflow-y-auto rounded-xl border border-border bg-card p-6 shadow-lg">
         <div className="mb-4 flex items-center justify-between">
           <h2 className="font-heading text-xl font-semibold">Profile</h2>
           <Button variant="ghost" size="icon" aria-label="Close profile" onClick={onClose}>
