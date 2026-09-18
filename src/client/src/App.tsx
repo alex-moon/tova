@@ -66,6 +66,7 @@ function App() {
     id: string;
     filename: string;
     hasText: boolean;
+    markdownStatus?: string;
   } | null>(null);
   const streamingRef = useRef(false);
 
@@ -344,7 +345,12 @@ function App() {
             showFiles={showFiles}
             onToggleFiles={setShowFiles}
             onPickAsset={(asset) => {
-              setPickedAsset({ id: asset.id, filename: asset.filename, hasText: asset.hasText });
+              setPickedAsset({
+                id: asset.id,
+                filename: asset.filename,
+                hasText: asset.hasText,
+                markdownStatus: asset.markdownStatus,
+              });
               setShowFiles(false);
               setSidebarOpen(false);
             }}

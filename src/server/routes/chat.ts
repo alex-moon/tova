@@ -114,6 +114,25 @@ const toolCallEvent = (call: NonNullable<NeutralStreamChunk['toolCall']>) => ({
   ...(typeof call.args?.query === 'string' && call.args.query ? { query: call.args.query } : {}),
 });
 
+/*
+ * Stream error surfacing (#77): the generic message hides whether the
+ * failure is actionable. A 413 / "Request too large" from the provider is a
+ * prompt-size problem — user-connected MCP toolsets (#77) are the most
+ * likely cause — so the surfaced message says so instead of the blank
+ * 'Error streaming from model'.
+ */
+export const streamingErrorMessage = (err: unknown): string => {
+  const message = err instanceof Error ? err.message : '';
+  const statusCode = (err as { statusCode?: unknown } | null | undefined)?.statusCode;
+  if (statusCode === 413 || /Request too large/.test(message)) {
+    return (
+      'Request too large for this deployment’s current rate limit — connected MCP servers ' +
+      'may have added many tools to the request. Try again shortly or remove MCP servers in settings.'
+    );
+  }
+  return 'Error streaming from model';
+};
+
 const domainsFrom = (urls: string[]): string[] => {
   const hosts = new Set<string>();
   for (const url of urls) {
@@ -446,7 +465,7 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
       }
     } catch (err) {
       console.error('Groq streaming error:', err);
-      sendEvent('error', { message: 'Error streaming from model' });
+      sendEvent('error', { message: streamingErrorMessage(err) });
       sendEvent('done', { complete: false });
       res.end();
       return;

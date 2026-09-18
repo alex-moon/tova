@@ -1,4 +1,5 @@
 import request from 'supertest';
+import { streamingErrorMessage } from './chat';
 import { createApp } from '../index';
 import { Message } from '../models/Message';
 import { User } from '../models/User';
@@ -450,5 +451,20 @@ describe('Chat route prompt metrics', () => {
       });
       expect(userMessage?.metrics?.sessionMessageIndex).toBe(turn * 2);
     }
+  });
+});
+
+describe('streamingErrorMessage (#77)', () => {
+  it('maps 413 / request-too-large errors to an actionable MCP-rate-limit message', () => {
+    expect(streamingErrorMessage({ statusCode: 413 })).toMatch(/MCP servers/);
+    expect(
+      streamingErrorMessage(new Error('Request too large for model `openai/gpt-oss-120b` on TPM')),
+    ).toMatch(/MCP servers/);
+  });
+
+  it('keeps the generic message for everything else', () => {
+    expect(streamingErrorMessage(new Error('boom'))).toBe('Error streaming from model');
+    expect(streamingErrorMessage(null)).toBe('Error streaming from model');
+    expect(streamingErrorMessage({ statusCode: 429 })).toBe('Error streaming from model');
   });
 });

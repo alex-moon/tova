@@ -26,7 +26,12 @@ interface ChatWindowProps {
   isLoading: boolean;
   onOpenSidebar: () => void;
   onFeedback?: (messageId: string, value: 'up' | 'down' | null) => void;
-  incomingAsset?: { id: string; filename: string; hasText: boolean } | null;
+  incomingAsset?: {
+    id: string;
+    filename: string;
+    hasText: boolean;
+    markdownStatus?: string;
+  } | null;
   onPickedConsumed?: () => void;
 }
 
@@ -283,6 +288,15 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
   const toastNoText = () =>
     toast.info('No text could be extracted from this file type — Tova will see the filename only.');
 
+  // Issue #83: a pending conversion is a legitimate wait state, not a
+  // textless file — word it as such instead of firing the false-negative
+  // no-text toast. Only reached when `hasText` is already false.
+  const toastForAsset = (markdownStatus?: string) => {
+    if (markdownStatus === 'pending')
+      toast.info('Still extracting text — try attaching again shortly.');
+    else toastNoText();
+  };
+
   const handleScroll = () => {
     const el = scrollRef.current;
     if (!el) return;
@@ -353,7 +367,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
     try {
       const asset = await AssetService.upload(file);
       setAttachment({ id: asset.id, filename: asset.filename });
-      if (!asset.hasText) toastNoText();
+      if (!asset.hasText) toastForAsset(asset.markdownStatus);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Upload failed');
     } finally {
@@ -371,7 +385,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
     if (!uploading) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setAttachment({ id: incomingAsset.id, filename: incomingAsset.filename });
-      if (!incomingAsset.hasText) toastNoText();
+      if (!incomingAsset.hasText) toastForAsset(incomingAsset.markdownStatus);
     }
     onPickedConsumed?.();
     // eslint-disable-next-line react-hooks/exhaustive-deps

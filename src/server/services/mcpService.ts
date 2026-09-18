@@ -8,6 +8,13 @@ import { z } from 'zod';
 import type { McpServerDocument } from '../models/McpServer';
 import { McpServer } from '../models/McpServer';
 import { decryptEnvelope } from './crypto';
+import {
+  degradedToolError,
+  markToolFailed,
+  reasonFrom,
+  toolDegradeReason,
+  toolIsFailed,
+} from './toolDegrade';
 
 /*
  * MCP client bridge (issue #36). Connects to platform and user-configured
@@ -172,14 +179,21 @@ export const listMcpServerTools = async (
 /*
  * Call an MCP tool through a (possibly cached) client. One failed call
  * triggers a single fresh handshake + retry; persistent failure degrades to
- * an `unavailable` result so a dead server can never hang or fail a turn.
+ * a descriptive `error` result (#82, issue wording) so a dead server can
+ * never hang or fail a turn, and the model is told the tool was tried and
+ * failed — not left to guess between "unavailable tool" and "empty result".
  */
 export const callMcpTool = async (
   url: string,
   headers: Record<string, string> | undefined,
   toolName: string,
   args: unknown,
+  // #82: display name used in the model-facing degraded text. The toolset
+  // wrapper (the only production caller) passes the qualified tool id so a
+  // degraded retry-short-circuit and a degraded live failure read identically.
+  displayName?: string,
 ): Promise<unknown> => {
+  let lastError: unknown;
   const resolveClient = async (): Promise<Client> => {
     const key = connectionCacheKey(url, headers);
     const cached = connectionCache.get(key);
@@ -209,15 +223,45 @@ export const callMcpTool = async (
         CallToolResultSchema,
         { timeout: CALL_TIMEOUT_MS },
       );
-    } catch {
-      // fall through to retry / degraded result
+    } catch (error) {
+      lastError = error; // fall through to retry / degraded result
     }
   }
-  return { error: 'unavailable' };
+  // The `reason` field (also #82) carries the original failure reason so the
+  // toolset wrapper can remember it for short-circuited retries; `error`
+  // stays the complete model-facing degraded text.
+  return {
+    error: degradedToolError(displayName || toolName, reasonFrom(lastError)),
+    reason: reasonFrom(lastError),
+  };
 };
 
 const sanitizeToolsetKey = (name: string): string =>
   `mcp_${name.replace(/[^a-zA-Z0-9_]+/g, '_').slice(0, 40)}`;
+
+/*
+ * MCP tool budget (#77 root cause 2). Attaching a full MCP server's tools to
+ * every chat request inflates the prompt by an unbounded number of tokens —
+ * the GitHub MCP server tests against carries far more than fits under a
+ * free-tier 8000 TPM limit — which turned every chat turn into a Groq 413.
+ * The budget caps what user MCP toolsets may add to *each* request, measured
+ * as an estimate (serialized description + input schema at ~4 chars/token).
+ * Tools attach in order until the budget is spent; tools that do not fit are
+ * logged and dropped, and chat continues degraded, never failed.
+ */
+const toolTokenBudget = (): number => {
+  const parsed = Number.parseInt(process.env.MCP_TOOL_BUDGET_TOKENS ?? '1500', 10);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : 1500;
+};
+const CHARS_PER_TOKEN = 4;
+
+const estimateToolTokens = (toolInfo: McpToolInfo): number =>
+  Math.ceil(
+    Buffer.byteLength(
+      JSON.stringify({ description: toolInfo.description, inputSchema: toolInfo.inputSchema }),
+      'utf8',
+    ) / CHARS_PER_TOKEN,
+  );
 
 /*
  * Per-user toolset resolution: platform servers plus the calling user's own.
@@ -258,32 +302,75 @@ export const mcpToolsetsForUser = async (
       }),
     );
     const toolsets: Record<string, Record<string, ReturnType<typeof createTool>>> = {};
+    let budgetRemaining = toolTokenBudget();
+    let droppedTools = 0;
     for (const entry of live) {
       if (!entry) continue;
       const setKey = sanitizeToolsetKey(entry.server.name);
       const tools: Record<string, ReturnType<typeof createTool>> = {};
+      const toolCount = entry.tools.length;
+      let acceptedInServer = 0;
       for (const toolInfo of entry.tools) {
         if (tools[toolInfo.name]) continue;
+        if (entry.server.scope === 'user') {
+          // Budget applies to user-raised toolsets only; platform toolsets
+          // are curated by the deployment itself.
+          const cost = estimateToolTokens(toolInfo);
+          if (budgetRemaining - cost < 0) {
+            droppedTools += toolCount - acceptedInServer;
+            break;
+          }
+          budgetRemaining -= cost;
+          acceptedInServer += 1;
+        }
         tools[toolInfo.name] = createTool({
           id: `${setKey}/${toolInfo.name}`,
           description: toolInfo.description || `Tool ${toolInfo.name} from an MCP server`,
           inputSchema: zodFromJsonSchema(toolInfo.inputSchema),
-          execute: async (inputData) =>
-            (await callMcpTool(
+          // #82: the wrapper short-circuits when this same tool already
+          // failed earlier in the completion (no second handshake), and
+          // marks it failed when callMcpTool itself degrades — a retried
+          // dead tool then skips both handshakes on the next step.
+          execute: async (inputData, ctx) => {
+            const toolId = `${setKey}/${toolInfo.name}`;
+            if (toolIsFailed(ctx, toolId))
+              return { error: degradedToolError(toolId, toolDegradeReason(ctx, toolId)) };
+            const { reason, ...visible } = (await callMcpTool(
               entry.server.url,
               entry.headers,
               toolInfo.name,
               inputData,
-            )) as Record<string, unknown>,
+              toolId,
+            )) as Record<string, unknown>;
+            if (typeof visible?.error === 'string')
+              markToolFailed(ctx, toolId, typeof reason === 'string' ? reason : undefined);
+            return visible;
+          },
         });
       }
-      toolsets[setKey] = tools;
+      if (Object.keys(tools).length) toolsets[setKey] = tools;
+    }
+    if (droppedTools > 0) {
+      console.warn(
+        `MCP tool budget (${toolTokenBudget()} est. tokens): dropped ${droppedTools} user tool` +
+          `${droppedTools === 1 ? '' : 's'} from this turn's chat request`,
+      );
     }
     return toolsets;
   })();
 
+  // Cache hygiene: a rejection must not outlive the TTL it was stored for.
+  // The no-op catch keeps an unawaited cached promise silent; dropping the
+  // entry on failure makes the next turn rebuild instead of re-serving a
+  // poisoned entry until it expires.
   serversCache.set(cacheKey, { expiresAt: now + SERVERS_CACHE_TTL_MS, promise });
-  return promise;
+  promise.catch(() => undefined);
+  try {
+    return await promise;
+  } catch (error) {
+    if (serversCache.get(cacheKey)?.promise === promise) serversCache.delete(cacheKey);
+    throw error;
+  }
 };
 
 export const clearMcpCachesForTests = (): void => {

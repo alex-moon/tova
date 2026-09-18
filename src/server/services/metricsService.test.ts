@@ -10,6 +10,8 @@ jest.mock('@mastra/core/agent', () => {
   };
 });
 
+const mockAgentCtor = jest.requireMock('@mastra/core/agent').Agent as jest.Mock;
+
 describe('metricsService', () => {
   beforeEach(() => {
     mockGenerate.mockReset();
@@ -133,6 +135,16 @@ describe('metricsService', () => {
         llm: parseLlmFlags(null),
         skipReason: 'error',
       });
+    });
+
+    it('#77: builds the classifier from a tool-free agent', async () => {
+      mockGenerate.mockResolvedValueOnce({ text: 'definitely emotional, very technical' });
+      await classifyPromptDimensions('hello');
+      const ctorArgs = mockAgentCtor.mock.calls[mockAgentCtor.mock.calls.length - 1] as unknown[];
+      const ctorCall = (ctorArgs?.[0] ?? {}) as { model: string; tools?: unknown };
+      // Tool-rejecting guard models (#41/#77): no `tools` argument at all.
+      expect('tools' in ctorCall).toBe(false);
+      expect(ctorCall.model).toBe('groq/allam-2-7b');
     });
 
     it('reports skipReason parse when the response shape is unexpected', async () => {

@@ -156,6 +156,29 @@ describe('ProfileModal theme choice (issue #53)', () => {
     );
   });
 
+  it('keeps the body in a scrollable region inside a height-capped panel (issue #79)', () => {
+    renderWithUser(avatarUser);
+
+    const overlay = screen.getByTestId('profile-modal');
+    expect(overlay).toHaveClass('p-4');
+
+    // Panel: height-capped flex column, so the body can scroll instead of clipping.
+    const name = screen.getByTestId('profile-name');
+    const panel = name.closest('.max-h-\\[85dvh\\]');
+    expect(panel).not.toBeNull();
+    expect(panel).toHaveClass('flex', 'flex-col');
+
+    // Body: overflow scroller between the pinned header and the pinned footer.
+    const scroller = name.closest('.overflow-y-auto');
+    expect(scroller).not.toBeNull();
+    expect(scroller).toHaveClass('flex-1');
+    expect(panel!.contains(scroller)).toBe(true);
+    expect(scroller).toContainElement(screen.getByTestId('profile-save'));
+    expect(screen.getByLabelText(/close profile/i)).toBe(
+      panel!.querySelector('.shrink-0')?.querySelector('button'),
+    );
+  });
+
   it('marks the active choice via aria-checked', () => {
     renderWithUser(user);
 

@@ -18,6 +18,10 @@ import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import { startAssetJobPoller } from './services/assetJobService';
 import { processAssetConversionJob } from './services/assetJobProcessor';
+import { attachConsoleCapture } from './services/logService';
+import { requestLog } from './middleware/requestLog';
+
+attachConsoleCapture();
 
 const DEFAULT_PORT = 5000;
 
@@ -70,6 +74,7 @@ export const createApp = (): Express => {
   app.use(globalLimiter);
   app.use(express.json({ limit: '1mb' }));
   app.use(cookieParser());
+  app.use(requestLog);
 
   app.use('/api/auth', authLimiter, authRoutes);
   app.use('/api/chat', chatRoutes);

@@ -3,6 +3,7 @@ import { createApp } from '../index';
 import { User } from '../models/User';
 import { ProviderRouting } from '../models/ProviderRouting';
 import { ModelMetricStat } from '../models/ModelMetricStat';
+import { clearLogs, pushLog } from '../services/logService';
 
 const cookieOf = (res: request.Response) => {
   const cookie = res.headers['set-cookie'];
@@ -265,5 +266,127 @@ describe('admin routes', () => {
       expect(large).toMatchObject({ provider: 'groq', tiers: ['large', 'guard'] });
       expect(large?.stats).toEqual([{ band: 'short|prose', up: 3, down: 1 }]);
     });
+  });
+});
+
+describe('admin logs endpoint (issue #76)', () => {
+  const adminCookieOf = async (app: ReturnType<typeof createApp>) => {
+    await request(app)
+      .post('/api/auth/register')
+      .send({ email: 'logsadmin@example.com', password: 'password123' });
+    await User.updateOne({ email: 'logsadmin@example.com' }, { role: 'admin' });
+    const res = await request(app)
+      .post('/api/auth/login')
+      .send({ email: 'logsadmin@example.com', password: 'password123' });
+    return Array.isArray(res.headers['set-cookie'])
+      ? res.headers['set-cookie']
+      : [res.headers['set-cookie']];
+  };
+
+  beforeEach(() => {
+    clearLogs();
+  });
+
+  it('is admin-only', async () => {
+    const app = createApp();
+    const nonAdmin = await request(app)
+      .post('/api/auth/register')
+      .send({ email: 'logsplain@example.com', password: 'password123' })
+      .then((res) =>
+        Array.isArray(res.headers['set-cookie'])
+          ? res.headers['set-cookie']
+          : [res.headers['set-cookie']],
+      );
+
+    const unauth = await request(app).get('/api/admin/logs');
+    expect(unauth.status).toBe(401);
+
+    const forbidden = await request(app).get('/api/admin/logs').set('Cookie', nonAdmin);
+    expect(forbidden.status).toBe(403);
+    expect(forbidden.body.message).toBe('Forbidden');
+  });
+
+  it('rejects an unknown level with 400', async () => {
+    const app = createApp();
+    const cookie = await adminCookieOf(app);
+    const res = await request(app).get('/api/admin/logs?level=bogus').set('Cookie', cookie);
+    expect(res.status).toBe(400);
+    expect(res.body.message).toMatch(/level/);
+  });
+
+  it('filters by level and q, paginates by cursor, and ignores garbage cursor/limit', async () => {
+    const app = createApp();
+    const cookie = await adminCookieOf(app);
+    const seed = pushLog('info', 'noise alpha');
+    const warn = pushLog('warn', 'needle alert');
+    const boom = pushLog('error', 'alpha boom');
+
+    const filtered = await request(app).get('/api/admin/logs?q=alpha').set('Cookie', cookie);
+    expect(filtered.status).toBe(200);
+    expect(filtered.body.logs.map((l: { msg: string }) => l.msg)).toEqual([
+      'noise alpha',
+      'alpha boom',
+    ]);
+    expect(filtered.body.nextCursor).toBe(boom.id);
+
+    const level = await request(app)
+      .get('/api/admin/logs?level=warn&cursor=' + seed.id)
+      .set('Cookie', cookie);
+    expect(level.body.logs.map((l: { msg: string }) => l.msg)).toEqual(['needle alert']);
+
+    const fromSecond = await request(app)
+      .get('/api/admin/logs?cursor=' + warn.id)
+      .set('Cookie', cookie);
+    const msgAfterWarn = fromSecond.body.logs.map((l: { msg: string }) => l.msg);
+    expect(msgAfterWarn).toContain('alpha boom');
+    expect(msgAfterWarn).not.toContain('needle alert');
+
+    const empty = await request(app).get('/api/admin/logs?cursor=999999').set('Cookie', cookie);
+    expect(empty.body.logs).toEqual([]);
+    expect(empty.body.nextCursor).toBe(999999);
+
+    // garbage pagination values fall back to defaults rather than 500-ing
+    const garbage = await request(app)
+      .get('/api/admin/logs?cursor=nope&limit=nope')
+      .set('Cookie', cookie);
+    expect(garbage.status).toBe(200);
+    expect(garbage.body.logs.map((l: { msg: string }) => l.msg)).toContain('alpha boom');
+  });
+
+  it('honours valid limits and clamps oversized ones to the sane range', async () => {
+    const app = createApp();
+    const cookie = await adminCookieOf(app);
+    pushLog('info', 'one');
+    pushLog('warn', 'two');
+
+    const limited = await request(app).get('/api/admin/logs?limit=1').set('Cookie', cookie);
+    expect(limited.body.logs).toHaveLength(1);
+    // >=400 request lines land as warn, so level filtering spans sources
+    const warnOnly = await request(app).get('/api/admin/logs?level=warn').set('Cookie', cookie);
+    expect(warnOnly.body.logs.map((l: { msg: string }) => l.msg)).toContain('two');
+
+    const oversized = await request(app)
+      .get('/api/admin/logs?limit=99999999')
+      .set('Cookie', cookie);
+    expect(oversized.status).toBe(200);
+    expect(oversized.body.logs.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('returns logs with cursor pagination shape', async () => {
+    const app = createApp();
+    const cookie = await adminCookieOf(app);
+    const first = await request(app).get('/api/admin/logs').set('Cookie', cookie);
+    expect(first.status).toBe(200);
+    expect(first.body).toHaveProperty('logs');
+    expect(first.body).toHaveProperty('nextCursor');
+    expect(Array.isArray(first.body.logs)).toBe(true);
+    if (first.body.logs.length > 0) {
+      const entry = first.body.logs[0];
+      expect(typeof entry.id).toBe('number');
+      expect(typeof entry.ts).toBe('string');
+      expect(['info', 'warn', 'error']).toContain(entry.level);
+      expect(typeof entry.msg).toBe('string');
+    }
+    expect(Number(first.body.nextCursor)).toBeGreaterThanOrEqual(0);
   });
 });
