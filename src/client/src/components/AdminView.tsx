@@ -16,6 +16,7 @@ const AdminView = () => {
   const [logs, setLogs] = useState<AdminLogEntry[]>([]);
   const cursorRef = useRef(0);
   const [error, setError] = useState<string | null>(null);
+  const [activeSection, setActiveSection] = useState<'users' | 'models' | 'logs'>('users');
 
   // Issue #76: incremental polling via the monotonic log cursor. A filter
   // change resets the cursor because the server filters by level/text, so
@@ -108,158 +109,208 @@ const AdminView = () => {
     return () => clearInterval(timer);
   }, [loadLogs, logLevel, logQuery]);
 
+  const sectionContent: { id: 'users' | 'models' | 'logs'; label: string }[] = [
+    { id: 'users', label: 'Users' },
+    { id: 'models', label: 'Models' },
+    { id: 'logs', label: 'Logs' },
+  ];
+
   return (
     <div
       data-testid="admin-view"
-      className="flex h-full w-full flex-col gap-6 overflow-y-auto bg-background p-6 text-foreground"
+      className="flex h-full w-full flex-col bg-background text-foreground"
     >
-      <h2 className="font-heading text-xl font-semibold">Admin</h2>
-      {!users && !error && <p className="text-sm text-muted-foreground">Loading users...</p>}
-      {error && (
-        <div
-          data-testid="admin-error"
-          className="rounded-lg border border-destructive bg-destructive/10 p-3 text-sm text-destructive"
-        >
-          {error}
-        </div>
-      )}
-      <div className="overflow-x-auto rounded-xl border border-border bg-card">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b border-border text-left text-muted-foreground">
-              <th className="px-4 py-3 font-medium">Email</th>
-              <th className="px-4 py-3 font-medium">Role</th>
-              <th className="px-4 py-3 font-medium">Google</th>
-              <th className="px-4 py-3 font-medium">Permissions</th>
-              <th className="px-4 py-3" />
-            </tr>
-          </thead>
-          <tbody>
-            {users?.map((user) => (
-              <tr key={user.id} className="border-b border-border last:border-b-0">
-                <td className="px-4 py-3">{user.email}</td>
-                <td className="px-4 py-3" data-testid={`role-${user.email}`}>
-                  {user.role}
-                </td>
-                <td className="px-4 py-3 text-muted-foreground">{user.hasGoogle ? 'yes' : 'no'}</td>
-                <td className="px-4 py-3">
-                  {KNOWN_PERMISSIONS.map((permission) => (
-                    <label key={permission} className="mr-4 inline-flex items-center gap-1.5">
-                      <input
-                        type="checkbox"
-                        data-testid={`perm-${permission}-${user.email}`}
-                        checked={user.permissions.includes(permission)}
-                        onChange={() => togglePermission(user, permission)}
-                      />
-                      {permission}
-                    </label>
-                  ))}
-                </td>
-                <td className="px-4 py-3">
-                  <button
-                    data-testid={`toggle-role-${user.email}`}
-                    onClick={() => toggleRole(user)}
-                    className="rounded-lg border border-border px-3 py-1.5 text-sm transition-colors hover:bg-accent hover:text-accent-foreground"
-                  >
-                    {user.role === 'admin' ? 'Demote' : 'Promote'}
-                  </button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      <h3 className="font-heading text-lg font-semibold">Models</h3>
-      <p className="-mt-4 text-xs text-muted-foreground">
-        Read-only (issue #33) — routing bands and feedback tallies.
-      </p>
-      <div
-        data-testid="admin-models"
-        className="overflow-x-auto rounded-xl border border-border bg-card"
-      >
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b border-border text-left text-muted-foreground">
-              <th className="px-4 py-3 font-medium">Model</th>
-              <th className="px-4 py-3 font-medium">Provider</th>
-              <th className="px-4 py-3 font-medium">Bands</th>
-              <th className="px-4 py-3 font-medium">Feedback</th>
-            </tr>
-          </thead>
-          <tbody>
-            {models?.map((model) => (
-              <tr key={model.id} className="border-b border-border last:border-b-0">
-                <td className="px-4 py-3" data-testid={`admin-model-${model.id}`}>
-                  {model.model}
-                </td>
-                <td className="px-4 py-3 text-muted-foreground">{model.provider}</td>
-                <td className="px-4 py-3">{model.tiers.join(', ')}</td>
-                <td className="px-4 py-3 text-muted-foreground">
-                  {model.stats.length === 0
-                    ? '—'
-                    : model.stats.map((s) => `${s.band}: ${s.up}↑ ${s.down}↓`).join(' · ')}
-                </td>
-              </tr>
-            ))}
-            {models?.length === 0 && (
-              <tr>
-                <td className="px-4 py-3 text-muted-foreground" colSpan={4}>
-                  No models configured.
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
-      <h3 className="font-heading text-lg font-semibold">Logs</h3>
-      <p className="-mt-4 text-xs text-muted-foreground">
-        Live server log tail (issue #76) — filters the admin API's in-memory buffer.
-      </p>
-      <div className="flex flex-wrap items-center gap-3">
-        {LOG_LEVELS.map((level) => (
-          <label key={level} className="inline-flex items-center gap-1.5 text-sm">
-            <input
-              type="radio"
-              name="log-level"
-              data-testid={`log-level-${level}`}
-              checked={logLevel === level}
-              onChange={() => setLogLevel(level)}
-            />
-            {level}
-          </label>
-        ))}
-        <input
-          data-testid="log-search"
-          value={logQuery}
-          onChange={(e) => setLogQuery(e.target.value)}
-          placeholder="Filter messages…"
-          className="ml-auto rounded-lg border border-border bg-card px-3 py-1.5 text-sm"
-        />
-      </div>
-      <div
-        data-testid="admin-logs"
-        className="max-h-80 overflow-y-auto rounded-xl border border-border bg-card"
-      >
-        {logs.length === 0 && (
-          <p className="px-4 py-3 text-sm text-muted-foreground">No log entries.</p>
+      <div className="shrink-0 px-6 pt-6">
+        <h2 className="font-heading text-xl font-semibold">Admin</h2>
+        {!users && !error && <p className="mt-3 text-sm text-muted-foreground">Loading users...</p>}
+        {error && (
+          <div
+            data-testid="admin-error"
+            className="mt-3 rounded-lg border border-destructive bg-destructive/10 p-3 text-sm text-destructive"
+          >
+            {error}
+          </div>
         )}
-        {logs.map((log) => (
-          <div key={log.id} className="border-b border-border px-4 py-2 font-mono text-xs">
-            <span className="mr-2 text-muted-foreground">{log.ts}</span>
-            <span
-              className={`mr-2 font-semibold ${
-                log.level === 'error'
-                  ? 'text-destructive'
-                  : log.level === 'warn'
-                    ? 'text-yellow-500'
-                    : 'text-foreground'
+      </div>
+      <div className="flex min-h-0 flex-1 flex-col gap-4 px-6 py-6 lg:flex-row">
+        <nav
+          data-testid="admin-nav"
+          className="flex shrink-0 gap-2 lg:flex-col"
+          aria-label="Admin sections"
+        >
+          {sectionContent.map((section) => (
+            <button
+              key={section.id}
+              data-testid={`admin-tab-${section.id}`}
+              onClick={() => setActiveSection(section.id)}
+              aria-current={activeSection === section.id ? 'page' : undefined}
+              className={`rounded-lg border px-3 py-1.5 text-sm transition-colors ${
+                activeSection === section.id
+                  ? 'border-primary bg-primary text-primary-foreground'
+                  : 'border-border hover:bg-accent hover:text-accent-foreground'
               }`}
             >
-              {log.level}
-            </span>
-            <span>{log.msg}</span>
-          </div>
-        ))}
+              {section.label}
+            </button>
+          ))}
+        </nav>
+        <div data-testid="admin-scroller" className="min-h-0 flex-1 overflow-y-auto">
+          {activeSection === 'users' && (
+            <section data-testid="admin-users-section">
+              <div className="overflow-x-auto rounded-xl border border-border bg-card">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-border text-left text-muted-foreground">
+                      <th className="px-4 py-3 font-medium">Email</th>
+                      <th className="px-4 py-3 font-medium">Role</th>
+                      <th className="px-4 py-3 font-medium">Google</th>
+                      <th className="px-4 py-3 font-medium">Permissions</th>
+                      <th className="px-4 py-3" />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {users?.map((user) => (
+                      <tr key={user.id} className="border-b border-border last:border-b-0">
+                        <td className="px-4 py-3">{user.email}</td>
+                        <td className="px-4 py-3" data-testid={`role-${user.email}`}>
+                          {user.role}
+                        </td>
+                        <td className="px-4 py-3 text-muted-foreground">
+                          {user.hasGoogle ? 'yes' : 'no'}
+                        </td>
+                        <td className="px-4 py-3">
+                          {KNOWN_PERMISSIONS.map((permission) => (
+                            <label
+                              key={permission}
+                              className="mr-4 inline-flex items-center gap-1.5"
+                            >
+                              <input
+                                type="checkbox"
+                                data-testid={`perm-${permission}-${user.email}`}
+                                checked={user.permissions.includes(permission)}
+                                onChange={() => togglePermission(user, permission)}
+                              />
+                              {permission}
+                            </label>
+                          ))}
+                        </td>
+                        <td className="px-4 py-3">
+                          <button
+                            data-testid={`toggle-role-${user.email}`}
+                            onClick={() => toggleRole(user)}
+                            className="rounded-lg border border-border px-3 py-1.5 text-sm transition-colors hover:bg-accent hover:text-accent-foreground"
+                          >
+                            {user.role === 'admin' ? 'Demote' : 'Promote'}
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          )}
+          {activeSection === 'models' && (
+            <section data-testid="admin-models-section">
+              <h3 className="font-heading text-lg font-semibold">Models</h3>
+              <p className="text-xs text-muted-foreground">
+                Read-only (issue #33) — routing bands and feedback tallies.
+              </p>
+              <div
+                data-testid="admin-models"
+                className="mt-4 overflow-x-auto rounded-xl border border-border bg-card"
+              >
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-border text-left text-muted-foreground">
+                      <th className="px-4 py-3 font-medium">Model</th>
+                      <th className="px-4 py-3 font-medium">Provider</th>
+                      <th className="px-4 py-3 font-medium">Bands</th>
+                      <th className="px-4 py-3 font-medium">Feedback</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {models?.map((model) => (
+                      <tr key={model.id} className="border-b border-border last:border-b-0">
+                        <td className="px-4 py-3" data-testid={`admin-model-${model.id}`}>
+                          {model.model}
+                        </td>
+                        <td className="px-4 py-3 text-muted-foreground">{model.provider}</td>
+                        <td className="px-4 py-3">{model.tiers.join(', ')}</td>
+                        <td className="px-4 py-3 text-muted-foreground">
+                          {model.stats.length === 0
+                            ? '—'
+                            : model.stats.map((s) => `${s.band}: ${s.up}↑ ${s.down}↓`).join(' · ')}
+                        </td>
+                      </tr>
+                    ))}
+                    {models?.length === 0 && (
+                      <tr>
+                        <td className="px-4 py-3 text-muted-foreground" colSpan={4}>
+                          No models configured.
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          )}
+          {activeSection === 'logs' && (
+            <section data-testid="admin-logs-section">
+              <h3 className="font-heading text-lg font-semibold">Logs</h3>
+              <p className="-mt-4 text-xs text-muted-foreground">
+                Live server log tail (issue #76) — filters the admin API's in-memory buffer.
+              </p>
+              <div className="mt-4 flex flex-wrap items-center gap-3">
+                {LOG_LEVELS.map((level) => (
+                  <label key={level} className="inline-flex items-center gap-1.5 text-sm">
+                    <input
+                      type="radio"
+                      name="log-level"
+                      data-testid={`log-level-${level}`}
+                      checked={logLevel === level}
+                      onChange={() => setLogLevel(level)}
+                    />
+                    {level}
+                  </label>
+                ))}
+                <input
+                  data-testid="log-search"
+                  value={logQuery}
+                  onChange={(e) => setLogQuery(e.target.value)}
+                  placeholder="Filter messages…"
+                  className="ml-auto rounded-lg border border-border bg-card px-3 py-1.5 text-sm"
+                />
+              </div>
+              <div
+                data-testid="admin-logs"
+                className="mt-4 max-h-80 overflow-y-auto rounded-xl border border-border bg-card"
+              >
+                {logs.length === 0 && (
+                  <p className="px-4 py-3 text-sm text-muted-foreground">No log entries.</p>
+                )}
+                {logs.map((log) => (
+                  <div key={log.id} className="border-b border-border px-4 py-2 font-mono text-xs">
+                    <span className="mr-2 text-muted-foreground">{log.ts}</span>
+                    <span
+                      className={`mr-2 font-semibold ${
+                        log.level === 'error'
+                          ? 'text-destructive'
+                          : log.level === 'warn'
+                            ? 'text-yellow-500'
+                            : 'text-foreground'
+                      }`}
+                    >
+                      {log.level}
+                    </span>
+                    <span>{log.msg}</span>
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
+        </div>
       </div>
     </div>
   );
