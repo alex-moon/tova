@@ -55,6 +55,13 @@ const assetSchema = new mongoose.Schema(
       enum: ['pending', 'ready', 'failed'],
       default: 'pending',
     },
+    // Issue #66: provenance. Legacy docs predate this field; Mongoose
+    // applies the default at read time, so no backfill is needed.
+    origin: {
+      type: String,
+      enum: ['user-upload', 'system-generated'],
+      default: 'user-upload',
+    },
     // Populated only when status is 'failed' (HEAD miss, oversize, stale).
     failureReason: {
       type: String,
