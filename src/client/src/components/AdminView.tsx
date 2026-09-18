@@ -120,6 +120,12 @@ const AdminView = () => {
     { id: 'logs', label: 'Logs' },
   ];
 
+  const sectionContent: { id: 'users' | 'models' | 'logs'; label: string }[] = [
+    { id: 'users', label: 'Users' },
+    { id: 'models', label: 'Models' },
+    { id: 'logs', label: 'Logs' },
+  ];
+
   return (
     <div
       data-testid="admin-view"
