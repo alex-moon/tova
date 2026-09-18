@@ -62,6 +62,13 @@ const userSchema = new mongoose.Schema(
             enum: ['light', 'dark'],
             default: null,
           },
+          // Startup-chat preference (issue #96): null = no explicit choice;
+          // the client starts from the most recent chat then.
+          startupChat: {
+            type: String,
+            enum: ['recent', 'new'],
+            default: null,
+          },
           // Delete-confirmation preferences (issue #59): only `false` is ever
           // written explicitly ("Always" or a Profile toggle); absent keys
           // default to true, so legacy docs need no backfill.
@@ -123,6 +130,7 @@ export interface UserSettings {
   // explicit preference (issue #53). Marked optional so existing partial
   // literals (`{ customInstructions }`) keep typechecking.
   theme?: 'light' | 'dark';
+  startupChat?: 'recent' | 'new';
   confirmDeletes?: { chat: boolean; file: boolean } | null;
 }
 

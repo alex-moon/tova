@@ -66,6 +66,7 @@ export interface AuthUser {
   preferredName?: string;
   customInstructions?: string;
   theme?: 'light' | 'dark';
+  startupChat?: 'recent' | 'new';
   confirmDeletes?: { chat: boolean; file: boolean };
   location?: AuthUserLocation;
 }
