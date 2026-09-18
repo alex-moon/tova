@@ -19,23 +19,31 @@ interface DegradeContextShape {
   };
 }
 
-const failureSetOn = (ctx: unknown): Set<string> | undefined => {
+const failureMapOn = (ctx: unknown): Map<string, string> | undefined => {
   const requestContext = (ctx as DegradeContextShape | null | undefined)?.requestContext;
   if (typeof requestContext?.get !== 'function' || typeof requestContext?.set !== 'function')
     return undefined;
   const existing = requestContext.get(TOOL_FAILURES_KEY);
-  if (existing instanceof Set) return existing as Set<string>;
-  const fresh = new Set<string>();
+  if (existing instanceof Map) return existing as Map<string, string>;
+  const fresh = new Map<string, string>();
   requestContext.set(TOOL_FAILURES_KEY, fresh);
   return fresh;
 };
 
-export const markToolFailed = (ctx: unknown, toolId: string): void => {
-  failureSetOn(ctx)?.add(toolId);
+// Mark a tool failed for this completion. The optional reason is remembered
+// so a short-circuited retry reports the original failure, not a placeholder.
+export const markToolFailed = (ctx: unknown, toolId: string, reason?: string): void => {
+  const map = failureMapOn(ctx);
+  if (!map) return;
+  // Re-marking keeps the recorded reason: the first failure is the honest one.
+  if (!map.has(toolId)) map.set(toolId, reason || 'reason unknown');
 };
 
 export const toolIsFailed = (ctx: unknown, toolId: string): boolean =>
-  failureSetOn(ctx)?.has(toolId) ?? false;
+  failureMapOn(ctx)?.has(toolId) ?? false;
+
+export const toolDegradeReason = (ctx: unknown, toolId: string): string =>
+  failureMapOn(ctx)?.get(toolId) || 'reason unknown';
 
 // Bound any error to a short, single-line, human-readable reason. Errors
 // can carry long multi-line payloads (HTTP dumps, stack fragments); the

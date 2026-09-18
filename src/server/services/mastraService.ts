@@ -11,7 +11,13 @@ import mongoose from 'mongoose';
 import { Asset } from '../models/Asset';
 import { truncateForPrompt } from './textExtraction';
 import { mcpToolsetsForUser } from './mcpService';
-import { degradedToolError, markToolFailed, reasonFrom, toolIsFailed } from './toolDegrade';
+import {
+  degradedToolError,
+  markToolFailed,
+  reasonFrom,
+  toolDegradeReason,
+  toolIsFailed,
+} from './toolDegrade';
 import {
   CompletionOptions,
   LlmConnector,
@@ -241,11 +247,14 @@ export const webSearchTool = createTool({
     // #82: a web_search that already failed earlier in this completion
     // short-circuits to the degraded result without another Brave call.
     if (toolIsFailed(ctx, 'web_search'))
-      return { results: [], error: degradedToolError('web_search') };
+      return {
+        results: [],
+        error: degradedToolError('web_search', toolDegradeReason(ctx, 'web_search')),
+      };
     try {
       return { results: await webSearch(query) };
     } catch (error) {
-      markToolFailed(ctx, 'web_search');
+      markToolFailed(ctx, 'web_search', reasonFrom(error));
       return { results: [], error: degradedToolError('web_search', reasonFrom(error)) };
     }
   },

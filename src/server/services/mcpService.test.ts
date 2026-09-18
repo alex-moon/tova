@@ -1,3 +1,4 @@
+import { RequestContext } from '@mastra/core/request-context';
 import { McpServer } from '../models/McpServer';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import {
@@ -6,6 +7,7 @@ import {
   mcpToolsetsForUser,
   zodFromJsonSchema,
 } from './mcpService';
+import { toolIsFailed } from './toolDegrade';
 
 const LIST_TOOLS_RESULT = {
   tools: [
@@ -179,6 +181,56 @@ describe('mcpService', () => {
     // Truncated: the tail of the 1200-char message never appears.
     expect(result.error).not.toContain('HTTP 500');
     expect((result.error as string).length).toBeLessThan(500);
+  });
+
+  it('short-circuits a retried tool within one completion (#82): no second handshake', async () => {
+    await McpServer.create({
+      scope: 'platform',
+      name: 'platform-tools',
+      url: 'https://mcp.example.com/mcp',
+    });
+    const toolsets = await mcpToolsetsForUser(USER_ID);
+    mockConnect.mockRejectedValue(new Error('boom'));
+    mockCallTool.mockRejectedValue(new Error('boom'));
+    const weather = toolsets.mcp_platform_tools.weather as unknown as {
+      execute: (input: unknown, ctx: unknown) => Promise<Record<string, unknown>>;
+    };
+    const requestContext = new RequestContext();
+    const ctx = { requestContext };
+    // First attempt: full path — cached-client call, retry on a fresh
+    // connection, then the degraded result and the mark.
+    const first = (await weather.execute({ q: 'x' }, ctx)) as { error?: string };
+    expect(first.error).toContain('mcp_platform_tools/weather');
+    expect(first.error).toContain('boom');
+    expect(toolIsFailed(ctx, 'mcp_platform_tools/weather')).toBe(true);
+    const callsAfterFirst = mockCallTool.mock.calls.length; // includes the retry
+    // Retry inside the same completion skips callMcpTool entirely.
+    const second = await weather.execute({ q: 'y' }, ctx);
+    expect(mockCallTool.mock.calls.length).toBe(callsAfterFirst);
+    expect(second).toEqual(first);
+    // A fresh RequestContext (a new completion) is not blocked: it goes
+    // through callMcpTool again and degrades the same way.
+    const retry = (await weather.execute({ q: 'z' }, { requestContext: new RequestContext() })) as {
+      error?: string;
+    };
+    expect(retry.error).toContain('mcp_platform_tools/weather');
+    expect(retry.error).toContain('boom');
+  });
+
+  it('does not mark a tool failed when it succeeds', async () => {
+    await McpServer.create({
+      scope: 'platform',
+      name: 'platform-tools',
+      url: 'https://mcp.example.com/mcp',
+    });
+    const toolsets = await mcpToolsetsForUser(USER_ID);
+    mockCallTool.mockResolvedValue({ content: [{ text: 'sunny' }] });
+    const weather = toolsets.mcp_platform_tools.weather as unknown as {
+      execute: (input: unknown, ctx: unknown) => Promise<Record<string, unknown>>;
+    };
+    const ctx = { requestContext: new RequestContext() };
+    await weather.execute({ q: 'x' }, ctx);
+    expect(toolIsFailed(ctx, 'mcp_platform_tools/weather')).toBe(false);
   });
 });
 

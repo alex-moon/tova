@@ -1,6 +1,12 @@
 import { RequestContext } from '@mastra/core/request-context';
 import { webSearchTool } from './mastraService';
-import { degradedToolError, markToolFailed, reasonFrom, toolIsFailed } from './toolDegrade';
+import {
+  degradedToolError,
+  markToolFailed,
+  reasonFrom,
+  toolDegradeReason,
+  toolIsFailed,
+} from './toolDegrade';
 import { muteConsoleError } from '../test/muteConsole';
 
 jest.mock('./webSearchService', () => ({
@@ -45,12 +51,20 @@ describe('toolDegrade helpers (#82)', () => {
     expect(toolIsFailed({ requestContext: new RequestContext() }, 'x')).toBe(false);
   });
 
-  it('marks twice idempotently via the lazily-created shared set', () => {
+  it('marks twice idempotently via the lazily-created shared map', () => {
     const ctx = asCtx();
-    markToolFailed(ctx, 'a');
-    markToolFailed(ctx, 'a');
-    const set = ctx.requestContext.get('toolFailures') as Set<string>;
-    expect([...set]).toEqual(['a']);
+    markToolFailed(ctx, 'a', 'boom');
+    markToolFailed(ctx, 'a'); // re-marking keeps the earliest (first) reason
+    const map = ctx.requestContext.get('toolFailures') as Map<string, string>;
+    expect([...map.entries()]).toEqual([['a', 'boom']]);
+  });
+
+  it('reports the remembered reason on a short-circuited retry', () => {
+    const ctx = asCtx();
+    markToolFailed(ctx, 'web_search', 'offline');
+    expect(toolIsFailed(ctx, 'web_search')).toBe(true);
+    expect(toolDegradeReason(ctx, 'web_search')).toBe('offline');
+    expect(toolDegradeReason(ctx, 'other')).toBe('reason unknown');
   });
 
   it('builds the model-facing degraded text with reason and instruction', () => {

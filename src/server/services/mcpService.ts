@@ -8,7 +8,13 @@ import { z } from 'zod';
 import type { McpServerDocument } from '../models/McpServer';
 import { McpServer } from '../models/McpServer';
 import { decryptEnvelope } from './crypto';
-import { degradedToolError, markToolFailed, reasonFrom, toolIsFailed } from './toolDegrade';
+import {
+  degradedToolError,
+  markToolFailed,
+  reasonFrom,
+  toolDegradeReason,
+  toolIsFailed,
+} from './toolDegrade';
 
 /*
  * MCP client bridge (issue #36). Connects to platform and user-configured
@@ -182,6 +188,10 @@ export const callMcpTool = async (
   headers: Record<string, string> | undefined,
   toolName: string,
   args: unknown,
+  // #82: display name used in the model-facing degraded text. The toolset
+  // wrapper (the only production caller) passes the qualified tool id so a
+  // degraded retry-short-circuit and a degraded live failure read identically.
+  displayName?: string,
 ): Promise<unknown> => {
   let lastError: unknown;
   const resolveClient = async (): Promise<Client> => {
@@ -217,7 +227,13 @@ export const callMcpTool = async (
       lastError = error; // fall through to retry / degraded result
     }
   }
-  return { error: degradedToolError(toolName, reasonFrom(lastError)) };
+  // The `reason` field (also #82) carries the original failure reason so the
+  // toolset wrapper can remember it for short-circuited retries; `error`
+  // stays the complete model-facing degraded text.
+  return {
+    error: degradedToolError(displayName || toolName, reasonFrom(lastError)),
+    reason: reasonFrom(lastError),
+  };
 };
 
 const sanitizeToolsetKey = (name: string): string =>
@@ -278,15 +294,18 @@ export const mcpToolsetsForUser = async (
           // dead tool then skips both handshakes on the next step.
           execute: async (inputData, ctx) => {
             const toolId = `${setKey}/${toolInfo.name}`;
-            if (toolIsFailed(ctx, toolId)) return { error: degradedToolError(toolId) };
-            const result = (await callMcpTool(
+            if (toolIsFailed(ctx, toolId))
+              return { error: degradedToolError(toolId, toolDegradeReason(ctx, toolId)) };
+            const { reason, ...visible } = (await callMcpTool(
               entry.server.url,
               entry.headers,
               toolInfo.name,
               inputData,
+              toolId,
             )) as Record<string, unknown>;
-            if (typeof result?.error === 'string') markToolFailed(ctx, toolId);
-            return result;
+            if (typeof visible?.error === 'string')
+              markToolFailed(ctx, toolId, typeof reason === 'string' ? reason : undefined);
+            return visible;
           },
         });
       }
