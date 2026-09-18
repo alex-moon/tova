@@ -152,6 +152,26 @@ describe('mcpService', () => {
     findSpy.mockRestore();
   });
 
+  it('rebuilds after concurrent callers share one rejected resolution', async () => {
+    await McpServer.create({
+      scope: 'platform',
+      name: 'platform-tools',
+      url: 'https://mcp.example.com/mcp',
+    });
+    const findSpy = jest.spyOn(McpServer, 'find').mockRejectedValueOnce(new Error('mongo down'));
+    // Two turns racing inside one TTL window share the stored promise, so
+    // both observe the rejection; the poisoned entry must nevertheless be
+    // gone once either caller's cleanup runs.
+    await Promise.allSettled([mcpToolsetsForUser(USER_ID), mcpToolsetsForUser(USER_ID)]).then(
+      (results) => {
+        expect(results.every((r) => r.status === 'rejected')).toBe(true);
+      },
+    );
+    const toolsets = await mcpToolsetsForUser(USER_ID);
+    expect(Object.keys(toolsets)).toEqual(['mcp_platform_tools']);
+    findSpy.mockRestore();
+  });
+
   it('degrades persistent call failures to an unavailable result', async () => {
     await McpServer.create({
       scope: 'platform',
