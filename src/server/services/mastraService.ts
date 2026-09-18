@@ -12,6 +12,13 @@ import { Asset } from '../models/Asset';
 import { truncateForPrompt } from './textExtraction';
 import { mcpToolsetsForUser } from './mcpService';
 import {
+  degradedToolError,
+  markToolFailed,
+  reasonFrom,
+  toolDegradeReason,
+  toolIsFailed,
+} from './toolDegrade';
+import {
   CompletionOptions,
   LlmConnector,
   LlmProvider,
@@ -20,6 +27,8 @@ import {
   TraceContext,
 } from './llmTypes';
 import { webSearch } from './webSearchService';
+import { createSystemAsset } from './systemAssetService';
+import { isStorageConfigured } from './storageService';
 
 /*
  * LangSmith tracing (issue #5), via the official Mastra plugin
@@ -232,8 +241,25 @@ export const webSearchTool = createTool({
   inputSchema: z.object({ query: z.string().min(1).describe('Web search query') }),
   outputSchema: z.object({
     results: z.array(z.object({ title: z.string(), snippet: z.string(), url: z.string() })),
+    // #82: optional — only set when the search itself failed (never for a
+    // genuinely-empty search), so the model can tell the failure apart.
+    error: z.string().optional(),
   }),
-  execute: async ({ query }) => ({ results: await webSearch(query) }),
+  execute: async ({ query }, ctx) => {
+    // #82: a web_search that already failed earlier in this completion
+    // short-circuits to the degraded result without another Brave call.
+    if (toolIsFailed(ctx, 'web_search'))
+      return {
+        results: [],
+        error: degradedToolError('web_search', toolDegradeReason(ctx, 'web_search')),
+      };
+    try {
+      return { results: await webSearch(query) };
+    } catch (error) {
+      markToolFailed(ctx, 'web_search', reasonFrom(error));
+      return { results: [], error: degradedToolError('web_search', reasonFrom(error)) };
+    }
+  },
 });
 
 /*
@@ -283,8 +309,14 @@ export const listFilesTool = createTool({
     more: z.boolean().optional().describe('True when the list was truncated at 20'),
     error: z.string().optional(),
   }),
-  execute: async (_input, { requestContext }) => {
-    const userId = requestContext.get('userId') as string | undefined;
+  execute: async (_input, ctx) => {
+    // #82: retry-within-completion short-circuit for a previously failed call.
+    if (toolIsFailed(ctx, 'list_files'))
+      return {
+        files: [],
+        error: degradedToolError('list_files', toolDegradeReason(ctx, 'list_files')),
+      };
+    const userId = ctx.requestContext.get('userId') as string | undefined;
     if (!userId) return { files: [], error: 'unavailable' };
     try {
       // 21 rows: 20 returned, the 21st only feeds the `more` flag.
@@ -297,8 +329,9 @@ export const listFilesTool = createTool({
         files: rows.slice(0, 20).map((r) => assetFileFrom(r)),
         ...(hasMore ? { more: true } : {}),
       };
-    } catch {
-      return { files: [], error: 'unavailable' };
+    } catch (error) {
+      markToolFailed(ctx, 'list_files', reasonFrom(error));
+      return { files: [], error: degradedToolError('list_files', reasonFrom(error)) };
     }
   },
 });
@@ -325,8 +358,11 @@ export const readFileTool = createTool({
     note: z.string().optional(),
     error: z.string().optional(),
   }),
-  execute: async ({ id }, { requestContext }) => {
-    const userId = requestContext.get('userId') as string | undefined;
+  execute: async ({ id }, ctx) => {
+    // #82: retry-within-completion short-circuit for a previously failed call.
+    if (toolIsFailed(ctx, 'read_file'))
+      return { error: degradedToolError('read_file', toolDegradeReason(ctx, 'read_file')) };
+    const userId = ctx.requestContext.get('userId') as string | undefined;
     if (!userId) return { error: 'unavailable' };
     if (!id || !mongoose.isValidObjectId(id)) {
       return { error: 'not_found' };
@@ -351,11 +387,79 @@ export const readFileTool = createTool({
         };
       }
       return { file, content: truncateForPrompt(text), hasText: true };
-    } catch {
-      return { error: 'unavailable' };
+    } catch (error) {
+      markToolFailed(ctx, 'read_file', reasonFrom(error));
+      return { error: degradedToolError('read_file', reasonFrom(error)) };
     }
   },
 });
+
+/*
+ * generate_file tool (issue #66): the agent can create a NEW markdown file
+ * in the calling user's asset library out of its own output (notes,
+ * summaries, drafts — nothing to do with chat history). Bytes are pushed
+ * server-side (no presign round-trip); the file appears in list_files /
+ * read_file and the library immediately, indistinguishable from an upload.
+ * Errors map to the same typed variants as the other asset tools.
+ */
+export const generateFileTool = createTool({
+  id: 'generate_file',
+  description:
+    'Create a NEW markdown file in the calling user’s asset library, saved from your ' +
+    'own output (notes, summaries, drafts). Use it when the user asks to save, ' +
+    'generate or create a file/note/document. Content must be markdown text.',
+  inputSchema: z.object({
+    filename: z.string().min(1).describe('File name for the library, e.g. meeting-notes.md'),
+    content: z.string().min(1).describe('Full markdown content of the file'),
+  }),
+  outputSchema: z.object({
+    file: z
+      .object({
+        id: z.string(),
+        filename: z.string(),
+        contentType: z.string(),
+        size: z.number(),
+        createdAt: z.string().describe('Creation time as an ISO 8601 UTC timestamp'),
+      })
+      .optional(),
+    error: z.string().optional(),
+  }),
+  execute: ({ filename, content }, { requestContext }) =>
+    generateFileExecute(filename, content, requestContext),
+});
+
+const generateFileExecute = async (
+  filename: string,
+  content: string,
+  requestContext: { get: (key: string) => unknown },
+): Promise<{
+  file?: { id: string; filename: string; contentType: string; size: number; createdAt: string };
+  error?: string;
+}> => {
+  const userId = requestContext.get('userId') as string | undefined;
+  if (!userId) return { error: 'unavailable' };
+  if (!isStorageConfigured()) return { error: 'unavailable' };
+  try {
+    const result = await createSystemAsset(
+      userId,
+      filename,
+      Buffer.from(content, 'utf8'),
+      'text/markdown',
+    );
+    if (!result.ok) return { error: result.code };
+    return {
+      file: {
+        id: result.fileId,
+        filename: result.filename,
+        contentType: 'text/markdown',
+        size: result.size,
+        createdAt: result.createdAt.toISOString(),
+      },
+    };
+  } catch {
+    return { error: 'unavailable' };
+  }
+};
 
 /*
  * Built-in clock tool (issue #52): deterministic, zero-dependency, no
@@ -389,7 +493,10 @@ const TOOL_INSTRUCTIONS =
   'own knowledge when no search is needed. When the user refers to their files, ' +
   'assets, or library, call the `list_files` tool to see what they have; call ' +
   '`read_file` with a file id from that list before quoting any file contents, ' +
-  'and never invent file contents you have not read.';
+  'and never invent file contents you have not read. When the user asks you to ' +
+  'save, generate or create a new file, note or document, call `generate_file` ' +
+  'with a filename (ending in .md) and the full markdown content; the file then ' +
+  'appears in their library and in `list_files` output.';
 
 /*
  * Agents are memoised per provider/model (creation is stateful — Mastra
@@ -435,6 +542,7 @@ const agentFor = (provider: LlmProvider, model: string, tools?: boolean): Agent 
             current_datetime: currentDatetimeTool,
             list_files: listFilesTool,
             read_file: readFileTool,
+            generate_file: generateFileTool,
           },
         }
       : {}),

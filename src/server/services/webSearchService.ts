@@ -7,9 +7,11 @@ export interface SearchResult {
   url: string;
 }
 
-// Returns [] when the tool is unavailable or the search fails: callers treat
-// an empty list as "tool unavailable" and the chat turn must never fail
-// because of the search provider.
+// Throws when the search call itself fails (HTTP error, network, bad JSON)
+// so the caller — the `web_search` tool wrapper — can perform the graceful
+// degradation (#82). A missing key or blank query is not a failure: those
+// return [] as "no results". The chat turn must never fail because of the
+// search provider; that guarantee now lives in the tool wrapper.
 export const webSearch = async (query: string): Promise<SearchResult[]> => {
   // Canonical name per owner decision on issue #16 is BRAVE_SEARCH_API_KEY;
   // BRAVE_API_KEY is still accepted (read first) for forward compatibility
@@ -44,7 +46,12 @@ export const webSearch = async (query: string): Promise<SearchResult[]> => {
       ];
     });
   } catch (err) {
+    // Rethrow (#82): the tool wrapper (not this service) performs the
+    // graceful degradation — marking the tool failed and degrading to an
+    // empty result with a descriptive error — so the turn still never
+    // fails, but distinguishable from a genuinely-empty search.
     console.error('Web search error:', err);
-    return [];
+    const message = err instanceof Error ? err.message : String(err);
+    throw new Error(message || 'Brave search failed');
   }
 };

@@ -22,32 +22,9 @@ import {
 import { extractText, isExtractable, truncateForPrompt } from '../services/textExtraction';
 import { enqueueAssetJob } from '../services/assetJobService';
 import { isConvertible } from '../services/markdownConversion';
+import { ALLOWED_CONTENT_TYPES, MAX_ASSET_SIZE, sanitizeFilename } from '../services/assetLimits';
 
 const router = express.Router();
-
-const MAX_ASSET_SIZE = 15 * 1024 * 1024;
-
-// Allowlist enforced at presign time; the browser PUTs with this same
-// Content-Type because the presigned URL stores it (Spaces rejects a PUT
-// whose Content-Type doesn't match the signature).
-const ALLOWED_CONTENT_TYPES = new Set([
-  'text/plain',
-  'text/markdown',
-  'text/x-markdown',
-  'text/csv',
-  'application/json',
-  'application/pdf',
-  // Issue #67: convertible document formats reach the markdown pipeline.
-  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-  'text/html',
-  'image/png',
-  'image/jpeg',
-  'image/gif',
-  'image/webp',
-]);
-//   'application/zip' is deliberately absent: zip is never an accepted upload
-//   format (issue #68 hard rule) — uploads are direct browser→Spaces PUTs of
-//   single files, and no upload path ever reads archive contents.
 
 // Presign + confirm headroom: pending assets older than this cannot be
 // confirmed, so stale rows never revive (plan honest-boundaries for #34).
@@ -88,15 +65,9 @@ const dedupeEntryNames = (filenames: string[]): string[] => {
   });
 };
 
-// Filenames become the last path segment of the object key: no path
-// separators, control chars or whitespace-only names.
-const sanitizeFilename = (filename: string): string =>
-  filename
-    .split('')
-    .filter((char) => char.charCodeAt(0) >= 0x20 && char !== '\u007f')
-    .join('')
-    .replace(/[/\\]/g, '_')
-    .trim();
+// Filenames become the last path segment of the object key: shared
+// sanitizer imported from services/assetLimits (issue #66); the defensive
+// zip-entry variant above is separate on purpose.
 
 const safeAsset = (asset: AssetDocument): unknown => ({
   id: String(asset._id),
@@ -107,10 +78,16 @@ const safeAsset = (asset: AssetDocument): unknown => ({
   // lets the UI tell the user when no text could be extracted (issue #34
   // owner ask) — the extracted text itself stays server-side, never a
   // client-rendered payload.
-  hasText: Boolean(asset.textExtracted),
+  // Issue #83: markdown conversion output counts as text — align with the
+  // chat read path (textExtracted ?? markdownExtracted) so library picks of
+  // converted PDFs don't report a false "no text extracted".
+  hasText: Boolean(asset.textExtracted ?? asset.markdownExtracted),
   // Issue #67: conversion lifecycle for the library UI badge; no markdown
   // text ever reaches the client.
   markdownStatus: asset.markdownStatus,
+  // Issue #83: surface the worker's last failure reason for the failed-card
+  // tooltip (metadata only — no markdown text content).
+  markdownFailureReason: asset.markdownFailureReason ?? null,
   createdAt: asset.createdAt,
 });
 

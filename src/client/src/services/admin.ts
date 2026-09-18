@@ -1,5 +1,5 @@
 import axios from 'axios';
-import type { AdminModel, AdminUser } from '../types/admin';
+import type { AdminModel, AdminUser, AdminLogsPayload } from '../types/admin';
 
 // Normalised admin failure: message comes from the server response when one
 // arrived, otherwise the call's fallback. Views catch AdminError and read
@@ -64,4 +64,23 @@ const listModels = async (): Promise<AdminModel[]> => {
 
 const AdminModelsService = { listModels };
 
-export { AdminModelsService };
+export interface ListLogsParams {
+  level?: 'info' | 'warn' | 'error';
+  q?: string;
+  cursor?: number;
+}
+
+// Read-only log tail (issue #76): `cursor` from a previous response returns
+// only newer entries so polling stays incremental.
+const listLogs = async (params: ListLogsParams = {}): Promise<AdminLogsPayload> => {
+  try {
+    const res = await axios.get<AdminLogsPayload>('/api/admin/logs', { params });
+    return res.data;
+  } catch (err) {
+    throw toAdminError(err, 'Failed to load logs.');
+  }
+};
+
+const AdminLogsService = { listLogs };
+
+export { AdminModelsService, AdminLogsService };

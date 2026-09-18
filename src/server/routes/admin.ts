@@ -5,6 +5,7 @@ import { authenticate, requireRole, AuthRequest } from '../middleware/auth';
 import { AdminUser } from '../../shared/contracts';
 import { ProviderRouting } from '../models/ProviderRouting';
 import { ModelMetricStat } from '../models/ModelMetricStat';
+import { getLogs, LogLevel } from '../services/logService';
 
 const router = express.Router();
 
@@ -94,6 +95,23 @@ router.get('/models', ...adminGuard, async (_req, res) => {
   } catch (_err) {
     res.status(500).json({ message: 'Error listing models' });
   }
+});
+
+// Issue #76: read-only tail of the in-memory log buffer for the admin
+// logs view / API consumers. Supports incremental polling via cursor.
+router.get('/logs', ...adminGuard, (req, res) => {
+  const level = req.query.level as LogLevel | undefined;
+  if (level !== undefined && !['info', 'warn', 'error'].includes(level)) {
+    return res.status(400).json({ message: "level must be 'info', 'warn' or 'error'" });
+  }
+  const rawLimit = Number(req.query.limit);
+  const limit =
+    Number.isInteger(rawLimit) && rawLimit > 0 && rawLimit <= 1000 ? rawLimit : undefined;
+  const rawCursor = Number(req.query.cursor);
+  const cursor = Number.isInteger(rawCursor) && rawCursor >= 0 ? rawCursor : undefined;
+  const q = typeof req.query.q === 'string' ? req.query.q : undefined;
+  const { logs, nextCursor } = getLogs({ level, q, cursor, limit });
+  res.json({ logs, nextCursor });
 });
 
 router.put('/users/:id/permissions', ...adminGuard, async (req, res) => {

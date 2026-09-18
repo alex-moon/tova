@@ -41,7 +41,7 @@ describe('POST /api/mcp-servers (issue #36)', () => {
     const res = await request(app).post('/api/mcp-servers').set('Cookie', cookie).send({
       name: 'my-tools',
       url: 'https://mcp.example.com/mcp',
-      authHeader: 'Authorization: Bearer sekrit',
+      authToken: 'sekrit',
     });
 
     expect(res.status).toBe(201);
@@ -81,7 +81,7 @@ describe('POST /api/mcp-servers (issue #36)', () => {
     expect(res.body.message).toMatch(/not reachable.*ECONNREFUSED/u);
   });
 
-  it('rejects non-https URLs and bad header specs', async () => {
+  it('rejects non-https URLs and old-style header payloads', async () => {
     const { app, cookie } = await registerUser('mcp-bad@example.com');
 
     const httpRes = await request(app)
@@ -90,6 +90,8 @@ describe('POST /api/mcp-servers (issue #36)', () => {
       .send({ name: 'x', url: 'http://mcp.example.com/mcp' });
     expect(httpRes.status).toBe(400);
 
+    // issue #80: 'authHeader' payloads are no longer a valid key — a raw
+    // token must be submitted as 'authToken' instead.
     const headerRes = await request(app)
       .post('/api/mcp-servers')
       .set('Cookie', cookie)
@@ -110,13 +112,14 @@ describe('POST /api/mcp-servers (issue #36)', () => {
     const res = await request(app).post('/api/mcp-servers').set('Cookie', cookie).send({
       name: 'enc',
       url: 'https://enc.example.com/mcp',
-      authHeader: 'X-Api-Key: hunter2',
+      // tokens may legally contain colons; the schema no longer splits on one
+      authToken: 'hunter2:extra',
     });
     expect(res.status).toBe(201);
 
     const raw = await request(app).get('/api/mcp-servers').set('Cookie', cookie);
     expect(JSON.stringify(raw.body)).not.toContain('hunter2');
-    expect(JSON.stringify(raw.body)).not.toContain('X-Api-Key');
+    expect(JSON.stringify(raw.body)).not.toContain('Bearer');
 
     const created = raw.body.servers.find((s: { name: string }) => s.name === 'enc');
     expect(created.headersConfigured).toBe(true);

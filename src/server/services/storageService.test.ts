@@ -29,6 +29,37 @@ describe('storageService', () => {
 
   it('rejects operations when unconfigured instead of crashing', async () => {
     await expect(deleteObject('x')).rejects.toThrow(/not configured/);
+    await expect(putObject('x', Buffer.alloc(1))).rejects.toThrow(/not configured/);
+  });
+
+  describe('putObject (#66)', () => {
+    beforeEach(() => {
+      mockSend.mockReset();
+    });
+
+    it('sends Bucket/Key/ContentType/Body to the configured client', async () => {
+      process.env.DO_SPACES_KEY = 'k';
+      process.env.DO_SPACES_SECRET = 's';
+      process.env.DO_SPACES_BUCKET = 'tova';
+      mockSend.mockResolvedValue({});
+      const body = Buffer.from('# hello');
+      await putObject('u/1/notes.md', body, 'text/markdown');
+      expect(mockSend).toHaveBeenCalledTimes(1);
+      expect(PutObjectCommand).toHaveBeenCalledWith({
+        Bucket: 'tova',
+        Key: 'u/1/notes.md',
+        ContentType: 'text/markdown',
+        Body: body,
+      });
+    });
+
+    it('propagates client failures to the caller (#66)', async () => {
+      process.env.DO_SPACES_KEY = 'k';
+      process.env.DO_SPACES_SECRET = 's';
+      process.env.DO_SPACES_BUCKET = 'tova';
+      mockSend.mockRejectedValue(new Error('Spaces down'));
+      await expect(putObject('u/1/notes.md', Buffer.alloc(1))).rejects.toThrow('Spaces down');
+    });
   });
 
   describe('deleteObject convergence', () => {
@@ -64,7 +95,10 @@ describe('storageService', () => {
   });
 });
 
-import { deleteObject, isStorageConfigured } from './storageService';
+import { deleteObject, isStorageConfigured, putObject } from './storageService';
+
+// Commands are jest.fn()s, so inputs are asserted via the constructor mocks.
+import { PutObjectCommand } from '@aws-sdk/client-s3';
 
 // The DeleteObjectCommand shape is swappable at this boundary: the mocked
 // client routes every send() through a single shared mock.

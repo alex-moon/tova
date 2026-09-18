@@ -7,6 +7,9 @@ beforeAll(async () => {
   mongo = await MongoMemoryServer.create();
   const uri = mongo.getUri();
   await mongoose.connect(uri);
+  // Mongoose builds schema indexes asynchronously; await them so uniqueness
+  // and other index-backed guarantees are ready for every test.
+  await mongoose.connection.syncIndexes();
 });
 
 afterAll(async () => {

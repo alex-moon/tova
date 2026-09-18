@@ -11,17 +11,11 @@ const router = express.Router();
 /*
  * Personal MCP server registry (issue #36). Only user-scope documents exist
  * for the caller here; platform servers are surfaced read-only in GET so the
- * UI can render one list. Auth header values are stored as an encrypted
- * envelope and never echoed: toJSON on the model strips `headers`, and the
- * list/handshake paths never put them in a response.
+ * UI can render one list. Auth is submitted as a raw token (issue #80) and
+ * stored as a single encrypted `Authorization: Bearer <token>` header, never
+ * echoed: toJSON on the model strips `headers`, and the list/handshake paths
+ * never put them in a response.
  */
-
-const parseHeaderSpec = (raw: string): Record<string, string> => {
-  const colon = raw.indexOf(':');
-  const name = raw.slice(0, colon).trim();
-  const value = raw.slice(colon + 1).trim();
-  return { [name]: value };
-};
 
 const serialize = (doc: { toJSON: () => Record<string, unknown> }) => doc.toJSON();
 
@@ -47,7 +41,8 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
     return res.status(400).json({ message: parsed.error.issues[0]?.message ?? 'Invalid payload' });
   }
   const { name, url } = parsed.data;
-  const headers = parsed.data.authHeader ? parseHeaderSpec(parsed.data.authHeader) : undefined;
+  const authToken = parsed.data.authToken?.trim();
+  const headers = authToken ? { Authorization: `Bearer ${authToken}` } : undefined;
   try {
     let tools;
     try {

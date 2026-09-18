@@ -276,6 +276,34 @@ describe('Composer library-pick (issue #51)', () => {
     expect(toast.info).not.toHaveBeenCalled();
   });
 
+  // Issue #83: pending conversion is a wait state, not a textless file.
+  it('shows the extracting toast (not the no-text toast) for a pending pick', () => {
+    renderChat([], false, {
+      incomingAsset: {
+        id: 'a9',
+        filename: 'doc.pdf',
+        hasText: false,
+        markdownStatus: 'pending',
+      },
+      onPickedConsumed: vi.fn(),
+    });
+    expect(toast.info).toHaveBeenCalledWith('Still extracting text — try attaching again shortly.');
+    expect(toast.info).not.toHaveBeenCalledWith(NO_TEXT_TOAST);
+  });
+
+  it('still fires the no-text toast for failed and none conversions', () => {
+    renderChat([], false, {
+      incomingAsset: {
+        id: 'a9',
+        filename: 'doc.pdf',
+        hasText: false,
+        markdownStatus: 'failed',
+      },
+      onPickedConsumed: vi.fn(),
+    });
+    expect(toast.info).toHaveBeenCalledWith(NO_TEXT_TOAST);
+  });
+
   it('does not fire without a pick (no regression to the picker flow)', () => {
     const onPickedConsumed = vi.fn();
     renderChat([base()], false, { onPickedConsumed });
