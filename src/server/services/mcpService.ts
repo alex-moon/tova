@@ -282,8 +282,18 @@ export const mcpToolsetsForUser = async (
     return toolsets;
   })();
 
+  // Cache hygiene: a rejection must not outlive the TTL it was stored for.
+  // The no-op catch keeps an unawaited cached promise silent; dropping the
+  // entry on failure makes the next turn rebuild instead of re-serving a
+  // poisoned entry until it expires.
   serversCache.set(cacheKey, { expiresAt: now + SERVERS_CACHE_TTL_MS, promise });
-  return promise;
+  promise.catch(() => undefined);
+  try {
+    return await promise;
+  } catch (error) {
+    if (serversCache.get(cacheKey)?.promise === promise) serversCache.delete(cacheKey);
+    throw error;
+  }
 };
 
 export const clearMcpCachesForTests = (): void => {

@@ -137,6 +137,21 @@ describe('mcpService', () => {
     expect((Client as unknown as jest.Mock).mock.calls.length).toBe(afterFirst);
   });
 
+  it('does not serve a rejected cached resolution on the next turn', async () => {
+    await McpServer.create({
+      scope: 'platform',
+      name: 'platform-tools',
+      url: 'https://mcp.example.com/mcp',
+    });
+    const findSpy = jest.spyOn(McpServer, 'find').mockRejectedValueOnce(new Error('mongo down'));
+    await expect(mcpToolsetsForUser(USER_ID)).rejects.toThrow('mongo down');
+    // Within the same TTL window a fresh resolution must be rebuilt, not
+    // served from the poisoned cache entry.
+    const toolsets = await mcpToolsetsForUser(USER_ID);
+    expect(Object.keys(toolsets)).toEqual(['mcp_platform_tools']);
+    findSpy.mockRestore();
+  });
+
   it('degrades persistent call failures to an unavailable result', async () => {
     await McpServer.create({
       scope: 'platform',
