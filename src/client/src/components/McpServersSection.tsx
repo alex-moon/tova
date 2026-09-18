@@ -5,10 +5,12 @@ import McpServerService, { type McpServerInfo } from '../services/mcp';
 import { McpError } from '../types/mcp';
 
 /*
- * Personal MCP servers settings section (issue #36). Platform servers show
- * read-only; personal ones can be added (with a live add-time handshake) and
- * removed here. Auth header values are never sent back from the API, so the
- * list only shows whether one is configured.
+ * Personal MCP servers settings section (issues #36, #80). Platform servers
+ * show read-only; personal ones can be added (with a live add-time handshake)
+ * and removed here. Auth is submitted as a raw token and the server wraps it
+ * in an encrypted Authorization header, never echoed, so the list only shows
+ * whether one is configured. The tool-name list is collapsed behind a toggle
+ * by default since servers can expose dozens of tools.
  */
 
 const statusDotColor = (status: string): string =>
@@ -18,9 +20,10 @@ const McpServersSection: React.FC = () => {
   const [servers, setServers] = useState<McpServerInfo[] | null>(null);
   const [name, setName] = useState('');
   const [url, setUrl] = useState('');
-  const [authHeader, setAuthHeader] = useState('');
+  const [authToken, setAuthToken] = useState('');
   const [pendingAdd, setPendingAdd] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [expandedTools, setExpandedTools] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
     let alive = true;
@@ -40,15 +43,15 @@ const McpServersSection: React.FC = () => {
     setPendingAdd(true);
     setError(null);
     try {
-      const trimmedHeader = authHeader.trim();
+      const trimmedToken = authToken.trim();
       const created = await McpServerService.add({
         name: name.trim(),
         url: url.trim(),
-        ...(trimmedHeader ? { authHeader: trimmedHeader } : {}),
+        ...(trimmedToken ? { authToken: trimmedToken } : {}),
       });
       setName('');
       setUrl('');
-      setAuthHeader('');
+      setAuthToken('');
       setServers((prev) => [...(prev ?? []), created]);
     } catch (err) {
       if (err instanceof McpError) setError(err.message);
@@ -116,9 +119,28 @@ const McpServersSection: React.FC = () => {
                   )}
                 </div>
                 <p className="truncate text-xs text-muted-foreground">{server.url}</p>
-                <p className="text-xs text-muted-foreground">
-                  {server.tools.length ? server.tools.map((t) => t.name).join(', ') : 'No tools'}
-                </p>
+                {server.tools.length ? (
+                  <div>
+                    <button
+                      type="button"
+                      aria-expanded={Boolean(expandedTools[server.id])}
+                      data-testid={`mcp-show-scopes-${server.name}`}
+                      onClick={() =>
+                        setExpandedTools((prev) => ({ ...prev, [server.id]: !prev[server.id] }))
+                      }
+                      className="text-xs text-muted-foreground underline hover:text-foreground"
+                    >
+                      {expandedTools[server.id] ? 'hide scopes' : `${server.tools.length} scopes`}
+                    </button>
+                    {expandedTools[server.id] && (
+                      <p className="text-xs text-muted-foreground break-words">
+                        {server.tools.map((t) => t.name).join(', ')}
+                      </p>
+                    )}
+                  </div>
+                ) : (
+                  <p className="text-xs text-muted-foreground">No tools</p>
+                )}
               </div>
               <div className="shrink-0">
                 {server.scope === 'user' && (
@@ -159,13 +181,14 @@ const McpServersSection: React.FC = () => {
           />
         </label>
         <label className="block text-xs">
-          <span className="mb-1 block">Auth header (optional, encrypted at rest)</span>
+          <span className="mb-1 block">Auth token (optional, encrypted at rest)</span>
           <Input
-            value={authHeader}
-            onChange={(e) => setAuthHeader(e.target.value)}
+            type="password"
+            value={authToken}
+            onChange={(e) => setAuthToken(e.target.value)}
             maxLength={4000}
-            data-testid="mcp-add-auth-header"
-            placeholder="Authorization: Bearer token"
+            data-testid="mcp-add-auth-token"
+            placeholder="token"
             autoComplete="off"
           />
         </label>

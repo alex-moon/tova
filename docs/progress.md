@@ -50,6 +50,20 @@ per `docs/workflow.md`.
    (new collection, optional `Message.assetId`; indexes from the schema).
    `npm run ci` green.
 
+9. **#80 — MCP setup: token-only auth + collapsible scope list (in progress).**
+   Add flow asks for a raw `authToken` instead of a full
+   `Authorization: Bearer …` header: the schema field is now `authToken`
+   (`mcpServerCreateSchema`, strictObject so old `authHeader` payloads are
+   rejected) and the server wraps it as `{ Authorization: 'Bearer <token>' }`
+   into the same encrypted headers envelope — storage shape, model, and
+   `mcpService` are unchanged. UI input is a password-type token field
+   (`mcp-add-auth-token`); the per-server tool list is collapsed to an
+   "N scopes" toggle (`mcp-show-scopes-<name>`, aria-expanded) that expands
+   to the full tool-name list. Crypto cleanup (dead `encryptHeader` pair)
+   still pending in this pass. Rationale kept for the PR: bcrypt (one-way)
+   cannot replace the encryption — tokens must be replayed verbatim in
+   request headers.
+
 ## Delivery History (summary)
 
 1. **Plan 001 — Reconcile root tooling and doc status.** Aligned the documented workflow, root tooling, and runnable entry points.
