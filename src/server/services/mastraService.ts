@@ -310,7 +310,10 @@ export const listFilesTool = createTool({
   execute: async (_input, ctx) => {
     // #82: retry-within-completion short-circuit for a previously failed call.
     if (toolIsFailed(ctx, 'list_files'))
-      return { files: [], error: degradedToolError('list_files') };
+      return {
+        files: [],
+        error: degradedToolError('list_files', toolDegradeReason(ctx, 'list_files')),
+      };
     const userId = ctx.requestContext.get('userId') as string | undefined;
     if (!userId) return { files: [], error: 'unavailable' };
     try {
@@ -324,9 +327,9 @@ export const listFilesTool = createTool({
         files: rows.slice(0, 20).map((r) => assetFileFrom(r)),
         ...(hasMore ? { more: true } : {}),
       };
-    } catch {
-      markToolFailed(ctx, 'list_files');
-      return { files: [], error: degradedToolError('list_files') };
+    } catch (error) {
+      markToolFailed(ctx, 'list_files', reasonFrom(error));
+      return { files: [], error: degradedToolError('list_files', reasonFrom(error)) };
     }
   },
 });
@@ -355,7 +358,8 @@ export const readFileTool = createTool({
   }),
   execute: async ({ id }, ctx) => {
     // #82: retry-within-completion short-circuit for a previously failed call.
-    if (toolIsFailed(ctx, 'read_file')) return { error: degradedToolError('read_file') };
+    if (toolIsFailed(ctx, 'read_file'))
+      return { error: degradedToolError('read_file', toolDegradeReason(ctx, 'read_file')) };
     const userId = ctx.requestContext.get('userId') as string | undefined;
     if (!userId) return { error: 'unavailable' };
     if (!id || !mongoose.isValidObjectId(id)) {
@@ -381,9 +385,9 @@ export const readFileTool = createTool({
         };
       }
       return { file, content: truncateForPrompt(text), hasText: true };
-    } catch {
-      markToolFailed(ctx, 'read_file');
-      return { error: degradedToolError('read_file') };
+    } catch (error) {
+      markToolFailed(ctx, 'read_file', reasonFrom(error));
+      return { error: degradedToolError('read_file', reasonFrom(error)) };
     }
   },
 });
