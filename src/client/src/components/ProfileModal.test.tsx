@@ -172,7 +172,7 @@ describe('ProfileModal theme choice (issue #53)', () => {
     const scroller = name.closest('.overflow-y-auto');
     expect(scroller).not.toBeNull();
     expect(scroller).toHaveClass('flex-1');
-    expect(panel).toContainElement(scroller);
+    expect(panel!.contains(scroller)).toBe(true);
     expect(scroller).toContainElement(screen.getByTestId('profile-save'));
     expect(screen.getByLabelText(/close profile/i)).toBe(
       panel!.querySelector('.shrink-0')?.querySelector('button'),
