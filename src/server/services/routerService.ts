@@ -1,6 +1,6 @@
 import { inferenceService } from './inferenceService';
 import { LlmProvider } from './llmTypes';
-import { listByTier, ModelRef } from './modelConfigService';
+import { completionsPoolFor, ModelRef } from './modelConfigService';
 import { FitWeight, getFitWeight } from './modelMetricsStatsService';
 
 /*
@@ -115,11 +115,22 @@ export const pickModelRef = (
 
 /*
  * Fetch both tier pools up front (they resolve from the DB config so the
- * pools are authoritative once seeded). The guard-model choice is not part
- * of the pools: the classifier call stays env-bound.
+ * pools are authoritative once seeded). Pools are resolved with the
+ * required capabilities of the completion path (#94): completions always
+ * carry tools, so rows flagged `tools: false` are excluded. If that leaves a
+ * pool empty, `pickModelRef` throws — no silent Groq fallback: the env
+ * fallback in `modelConfigService` only applies to unusable/empty DB tiers
+ * and now names DeepInfra models only.
+ *
+ * The guard-model choice is not part of the pools: the classifier call stays
+ * env-bound to a Groq small model (#94) — aux tasks only, tool-free by
+ * construction of `createToolFreeCompletion`.
  */
 const defaultConfig = async (): Promise<RouterConfig> => {
-  const [small, large] = await Promise.all([listByTier('small'), listByTier('large')]);
+  const [small, large] = await Promise.all([
+    completionsPoolFor('small'),
+    completionsPoolFor('large'),
+  ]);
   return {
     small,
     large,
