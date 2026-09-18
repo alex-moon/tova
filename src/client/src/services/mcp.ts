@@ -22,7 +22,7 @@ export interface McpServerInfo {
 export interface McpServerAddInput {
   name: string;
   url: string;
-  authHeader?: string;
+  authToken?: string;
 }
 
 const toMcpError = (err: unknown, fallback: string): McpError => {
