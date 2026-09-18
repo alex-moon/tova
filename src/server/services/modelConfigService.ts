@@ -18,6 +18,9 @@ export interface ModelRef {
 interface SeedEntry extends ModelRef {
   tier: ModelTier;
   eligible: boolean;
+  tools?: boolean;
+  vision?: boolean;
+  contextLength?: number;
 }
 
 // Single source of truth for the env var and its default per tier, shared by
@@ -37,16 +40,22 @@ const SEED_ENTRIES = (): SeedEntry[] => [
   { provider: 'groq', model: envModel(DEFAULT_MODEL_ENV.small), tier: 'small', eligible: true },
   { provider: 'groq', model: envModel(DEFAULT_MODEL_ENV.large), tier: 'large', eligible: true },
   { provider: 'groq', model: envModel(DEFAULT_MODEL_ENV.guard), tier: 'guard', eligible: true },
-  { provider: 'deepinfra', model: 'google/gemma-3-4b-it', tier: 'small', eligible: true },
+  {
+    provider: 'deepinfra',
+    model: 'google/gemma-3-4b-it',
+    tier: 'small',
+    eligible: true,
+    vision: true,
+  },
   { provider: 'deepinfra', model: 'Qwen/Qwen2.5-72B-Instruct', tier: 'large', eligible: true },
 ];
 
 const ensureSeed = async (): Promise<void> => {
   await Promise.all(
-    SEED_ENTRIES().map(({ provider, model, tier, eligible }) =>
+    SEED_ENTRIES().map(({ provider, model, tier, eligible, ...capabilities }) =>
       ProviderRouting.updateOne(
         { provider, model, tier },
-        { $setOnInsert: { eligible } },
+        { $setOnInsert: { eligible, ...capabilities } },
         {
           upsert: true,
         },

@@ -85,6 +85,32 @@ describe('Model Config Service', () => {
     });
   });
 
+  describe('capabilities', () => {
+    it('persists capability flags on first seed', async () => {
+      await listByTier('small');
+      const gemma = await ProviderRouting.findOne({ model: 'google/gemma-3-4b-it' }).lean<{
+        vision?: boolean;
+        tools?: boolean;
+      }>();
+      expect(gemma).toMatchObject({ tools: true, vision: true });
+    });
+
+    it('re-seeding never clobbers stored capabilities (dirty $setOnInsert)', async () => {
+      await listByTier('small');
+      await ProviderRouting.updateOne(
+        { model: 'google/gemma-3-4b-it' },
+        { vision: false, contextLength: 999 },
+      );
+      await listByTier('small');
+      await listByTier('large');
+      const gemma = await ProviderRouting.findOne({ model: 'google/gemma-3-4b-it' }).lean<{
+        vision?: boolean;
+        contextLength?: number;
+      }>();
+      expect(gemma).toMatchObject({ vision: false, contextLength: 999 });
+    });
+  });
+
   describe('eligible filtering', () => {
     it('excludes ineligible entries from listByTier', async () => {
       await listByTier('small');
