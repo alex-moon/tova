@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, waitFor, fireEvent, cleanup } from '@testing-library/react';
+import { act, render, screen, waitFor, fireEvent, cleanup } from '@testing-library/react';
 import AdminView from './AdminView';
 import { AdminError } from '../services/admin';
 import type { AdminLogEntry, AdminUser } from '../types/admin';
@@ -194,6 +194,29 @@ describe('AdminView logs section (issue #76)', () => {
     ts: '2026-09-18T12:00:00.000Z',
     level: 'warn',
     msg: 'GET /api/chat -> 404 (12ms)',
+  });
+
+  it('does not mount the logs section or poll logs while it is not active', async () => {
+    vi.useFakeTimers();
+    render(<AdminView />);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(7000); // two poll intervals
+      await vi.runAllTimersAsync();
+    });
+    expect(screen.queryByTestId('admin-logs-section')).not.toBeInTheDocument();
+    expect(listLogs).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByTestId('admin-tab-logs'));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(screen.getByTestId('admin-logs-section')).toBeInTheDocument();
+    expect(listLogs).toHaveBeenCalledTimes(1);
+    const pollCalls = listLogs.mock.calls.length;
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(6500); // two poll intervals while active
+    });
+    expect(listLogs.mock.calls.length).toBeGreaterThan(pollCalls);
+    vi.useRealTimers();
   });
 
   it('renders log entries returned by the logs API', async () => {

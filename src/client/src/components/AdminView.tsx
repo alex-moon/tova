@@ -98,16 +98,21 @@ const AdminView = () => {
     loadModels();
   }, [loadUsers, loadModels]);
 
+  // Issue #91: logs fetches and the poll timer only run while the Logs
+  // section is visible — an every-3s poll against a hidden tab wastes API
+  // calls and eventually trips rate limiting.
   useEffect(() => {
+    if (activeSection !== 'logs') return;
     loadLogs({ level: logLevel === 'all' ? undefined : logLevel, q: logQuery, reset: true });
-  }, [loadLogs, logLevel, logQuery]);
+  }, [loadLogs, logLevel, logQuery, activeSection]);
 
   useEffect(() => {
+    if (activeSection !== 'logs') return;
     const timer = setInterval(() => {
       loadLogs({ level: logLevel === 'all' ? undefined : logLevel, q: logQuery });
     }, POLL_INTERVAL_MS);
     return () => clearInterval(timer);
-  }, [loadLogs, logLevel, logQuery]);
+  }, [loadLogs, logLevel, logQuery, activeSection]);
 
   const sectionContent: { id: 'users' | 'models' | 'logs'; label: string }[] = [
     { id: 'users', label: 'Users' },
