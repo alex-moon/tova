@@ -30,6 +30,21 @@ export interface AdminModel {
   stats: { band: string; up: number; down: number }[];
 }
 
+// One in-memory log buffer row, GET /api/admin/logs (issue #76). `id` is a
+// monotonic cursor the client passes back for incremental polling.
+export interface AdminLogEntry {
+  id: number;
+  ts: string;
+  level: 'info' | 'warn' | 'error';
+  msg: string;
+}
+
+// Response of GET /api/admin/logs (issue #76).
+export interface AdminLogsPayload {
+  logs: AdminLogEntry[];
+  nextCursor: number;
+}
+
 // `location` is the coarse country-level geolocation (issue #50): only the
 // country name and 2-letter code are exposed, and only once resolved.
 export interface AuthUserLocation {

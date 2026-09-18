@@ -2,12 +2,13 @@ import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, waitFor, fireEvent, cleanup } from '@testing-library/react';
 import AdminView from './AdminView';
 import { AdminError } from '../services/admin';
-import type { AdminUser } from '../types/admin';
+import type { AdminLogEntry, AdminUser } from '../types/admin';
 
 const listUsers = vi.fn();
 const updatePermissions = vi.fn();
 const updateRole = vi.fn();
 const listModels = vi.fn();
+const listLogs = vi.fn();
 
 vi.mock('../services/admin', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../services/admin')>();
@@ -19,6 +20,7 @@ vi.mock('../services/admin', async (importOriginal) => {
       updateRole: (...args: unknown[]) => updateRole(...args),
     },
     AdminModelsService: { listModels: (...args: unknown[]) => listModels(...args) },
+    AdminLogsService: { listLogs: (...args: unknown[]) => listLogs(...args) },
   };
 });
 
@@ -117,5 +119,57 @@ describe('AdminView models table (issue #33)', () => {
     listModels.mockResolvedValue([]);
     render(<AdminView />);
     expect(await screen.findByText('No models configured.')).toBeInTheDocument();
+  });
+});
+
+describe('AdminView logs section (issue #76)', () => {
+  afterEach(cleanup);
+
+  beforeEach(() => {
+    listUsers.mockReset().mockResolvedValue([admin()]);
+    listModels.mockReset().mockResolvedValue([]);
+    updatePermissions.mockReset().mockResolvedValue(admin());
+    updateRole.mockReset().mockResolvedValue(admin());
+    listLogs.mockReset().mockResolvedValue({ logs: [], nextCursor: 0 });
+  });
+
+  const log = (): AdminLogEntry => ({
+    id: 1,
+    ts: '2026-09-18T12:00:00.000Z',
+    level: 'warn',
+    msg: 'GET /api/chat -> 404 (12ms)',
+  });
+
+  it('renders log entries returned by the logs API', async () => {
+    listLogs.mockResolvedValue({ logs: [log()], nextCursor: 1 });
+    render(<AdminView />);
+    expect(await screen.findByTestId('admin-logs')).toBeInTheDocument();
+    expect(screen.getByTestId('admin-logs')).toHaveTextContent('GET /api/chat -> 404 (12ms)');
+    expect(listLogs).toHaveBeenCalledWith({ level: undefined, q: '', cursor: 0 });
+  });
+
+  it('shows an empty state when the buffer has no matching entries', async () => {
+    render(<AdminView />);
+    expect(await screen.findByText('No log entries.')).toBeInTheDocument();
+  });
+
+  it('re-fetches with the selected level filter and resets the cursor', async () => {
+    render(<AdminView />);
+    await screen.findByTestId('admin-logs');
+    listLogs.mockClear();
+    fireEvent.click(screen.getByTestId('log-level-error'));
+    await waitFor(() =>
+      expect(listLogs).toHaveBeenCalledWith({ level: 'error', q: '', cursor: 0 }),
+    );
+  });
+
+  it('re-fetches with the text filter', async () => {
+    render(<AdminView />);
+    await screen.findByTestId('admin-logs');
+    listLogs.mockClear();
+    fireEvent.change(screen.getByTestId('log-search'), { target: { value: '/api/chat' } });
+    await waitFor(() =>
+      expect(listLogs).toHaveBeenCalledWith({ level: undefined, q: '/api/chat', cursor: 0 }),
+    );
   });
 });
