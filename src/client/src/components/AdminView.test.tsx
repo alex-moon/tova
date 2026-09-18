@@ -119,3 +119,39 @@ describe('AdminView models table (issue #33)', () => {
     expect(await screen.findByText('No models configured.')).toBeInTheDocument();
   });
 });
+
+describe('AdminView scroll structure (issue #79)', () => {
+  afterEach(cleanup);
+
+  beforeEach(() => {
+    listUsers.mockResolvedValue([admin()]);
+    listModels.mockResolvedValue([]);
+  });
+
+  it('keeps the tables in a scrollable body under a pinned header (issue #79)', async () => {
+    render(<AdminView />);
+    const root = screen.getByTestId('admin-view');
+    expect(root).toHaveClass('flex', 'h-full', 'flex-col', 'overflow-hidden');
+
+    // Body: a single overflow scroller below the pinned header.
+    await screen.findByTestId('admin-models');
+    const scroller = root.querySelector('.overflow-y-auto');
+    expect(scroller).not.toBeNull();
+    expect(scroller).toHaveClass('flex-1');
+    expect(root).toContainElement(scroller as HTMLElement);
+
+    // Header stays put; everything that grows (tables, error strip) scrolls in the body.
+    expect(screen.getByText('Admin')).toHaveClass('shrink-0');
+    expect(scroller).toContainElement(screen.getByTestId('admin-models'));
+    expect(scroller).toContainElement(screen.getByText('someone@example.com').closest('table'));
+  });
+
+  it('keeps the error strip inside the scroller so it is reachable when content is long', async () => {
+    updateRole.mockRejectedValue(new AdminError('Failed to update role.'));
+    render(<AdminView />);
+    fireEvent.click(await screen.findByTestId('toggle-role-someone@example.com'));
+    const scroller = (await screen.findByTestId('admin-error')).closest('.overflow-y-auto');
+    expect(scroller).not.toBeNull();
+    expect(scroller).toHaveClass('flex-1');
+  });
+});
