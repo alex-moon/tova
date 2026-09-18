@@ -190,3 +190,62 @@ describe('ProfileModal theme choice (issue #53)', () => {
     expect(screen.getByTestId('theme-option-dark')).toHaveAttribute('aria-checked', 'true');
   });
 });
+
+describe('ProfileModal startup choice (issue #96)', () => {
+  beforeEach(() => {
+    updateProfile.mockReset();
+  });
+
+  afterEach(cleanup);
+
+  it('seeds "recent" when the user never saved a choice and omits an unchanged one', async () => {
+    updateProfile.mockResolvedValue(user);
+    renderWithUser(user);
+
+    expect(screen.getByTestId('startup-chat-option-recent')).toHaveAttribute(
+      'aria-checked',
+      'true',
+    );
+
+    fireEvent.click(screen.getByTestId('profile-save'));
+    await waitFor(() => expect(updateProfile).toHaveBeenCalled());
+    expect(updateProfile).toHaveBeenLastCalledWith({
+      preferredName: 'Al',
+      customInstructions: 'Be terse.',
+    });
+  });
+
+  it('patches startupChat when it moves and keeps unrelated edits out of it', async () => {
+    updateProfile.mockResolvedValue(user);
+    renderWithUser({ ...user, startupChat: 'new' });
+
+    // Seeded to 'new'; saving without touching it must not patch the key.
+    fireEvent.click(screen.getByTestId('profile-save'));
+    await waitFor(() => expect(updateProfile).toHaveBeenCalled());
+    expect(updateProfile).toHaveBeenLastCalledWith({
+      preferredName: 'Al',
+      customInstructions: 'Be terse.',
+    });
+
+    fireEvent.click(screen.getByTestId('startup-chat-option-recent'));
+    fireEvent.click(screen.getByTestId('profile-save'));
+    await waitFor(() =>
+      expect(updateProfile).toHaveBeenLastCalledWith({
+        preferredName: 'Al',
+        customInstructions: 'Be terse.',
+        startupChat: 'recent',
+      }),
+    );
+  });
+
+  it('marks the active choice via aria-checked', () => {
+    renderWithUser(user);
+
+    fireEvent.click(screen.getByTestId('startup-chat-option-new'));
+    expect(screen.getByTestId('startup-chat-option-recent')).toHaveAttribute(
+      'aria-checked',
+      'false',
+    );
+    expect(screen.getByTestId('startup-chat-option-new')).toHaveAttribute('aria-checked', 'true');
+  });
+});

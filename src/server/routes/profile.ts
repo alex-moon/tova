@@ -46,6 +46,7 @@ router.patch('/', authenticate, async (req: AuthRequest, res) => {
     if (
       'customInstructions' in parsed.data ||
       parsed.data.theme !== undefined ||
+      parsed.data.startupChat !== undefined ||
       parsed.data.confirmDeletes !== undefined
     ) {
       if (!user.settings) {
@@ -74,6 +75,13 @@ router.patch('/', authenticate, async (req: AuthRequest, res) => {
         // UI offers Light/Dark, absence (undefined/null) means "no explicit
         // choice" and the client follows system preference then light.
         settings.theme = themePatch;
+      }
+      const startupChatPatch = parsed.data.startupChat;
+      if (startupChatPatch !== undefined) {
+        // Enum-validated in profilePatchSchema; no clearing endpoint — null
+        // (absent) means "no explicit choice", resolved client-side to the
+        // product default ('recent', issue #96).
+        settings.startupChat = startupChatPatch;
       }
       const confirmDeletesPatch = parsed.data.confirmDeletes;
       if (confirmDeletesPatch !== undefined) {
