@@ -64,6 +64,11 @@ per `docs/workflow.md`.
    Rationale kept for the PR: bcrypt (one-way)
    cannot replace the encryption — tokens must be replayed verbatim in
    request headers.
+   Add flow also gained a collapsed "show suggestions" block: a curated
+   popular-MCP-servers list (remote HTTP endpoints only, mirroring the
+   community awesome-mcp-servers catalog) with lucide icons; clicking one
+   prefills name/URL in the add form (`mcp-show-suggestions`,
+   `mcp-suggestion-<n>`).
 
 ## Delivery History (summary)
 

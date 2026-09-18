@@ -10,8 +10,11 @@ import { McpError } from '../types/mcp';
  * and removed here. Auth is submitted as a raw token and the server wraps it
  * in an encrypted Authorization header, never echoed, so the list only shows
  * whether one is configured. The tool-name list is collapsed behind a toggle
- * by default since servers can expose dozens of tools.
+ * by default since servers can expose dozens of tools, and the same pattern is
+ * used for the curated popular-servers suggestions (issue #80), which prefill
+ * the add form on click.
  */
+import { MCP_SUGGESTIONS } from './mcpSuggestions';
 
 const statusDotColor = (status: string): string =>
   status === 'connected' ? 'bg-green-500' : status === 'unreachable' ? 'bg-red-500' : 'bg-gray-400';
@@ -24,6 +27,7 @@ const McpServersSection: React.FC = () => {
   const [pendingAdd, setPendingAdd] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [expandedTools, setExpandedTools] = useState<Record<string, boolean>>({});
+  const [showSuggestions, setShowSuggestions] = useState(false);
 
   useEffect(() => {
     let alive = true;
@@ -73,6 +77,11 @@ const McpServersSection: React.FC = () => {
   };
 
   const canAdd = name.trim().length > 0 && url.trim().length > 0 && !pendingAdd;
+
+  const prefill = (suggestion: (typeof MCP_SUGGESTIONS)[number]) => {
+    if (name.trim().length === 0) setName(suggestion.name);
+    setUrl(suggestion.url);
+  };
 
   return (
     <div data-testid="mcp-servers-section" className="border-t border-border pt-4">
@@ -159,6 +168,40 @@ const McpServersSection: React.FC = () => {
         </ul>
       )}
 
+      <div className="mt-3">
+        <button
+          type="button"
+          aria-expanded={showSuggestions}
+          data-testid="mcp-show-suggestions"
+          onClick={() => setShowSuggestions((prev) => !prev)}
+          className="text-xs text-muted-foreground underline hover:text-foreground"
+        >
+          show suggestions
+        </button>
+        {showSuggestions && (
+          <ul className="mt-2 grid gap-1">
+            {MCP_SUGGESTIONS.map((suggestion, index) => (
+              <li key={suggestion.name}>
+                <button
+                  type="button"
+                  data-testid={`mcp-suggestion-${index}`}
+                  onClick={() => prefill(suggestion)}
+                  className="flex w-full items-center gap-2 rounded-lg border border-border p-2 text-left hover:bg-muted"
+                >
+                  <suggestion.icon className="h-4 w-4 shrink-0" aria-hidden="true" />
+                  <span className="min-w-0">
+                    <span className="block truncate text-xs font-medium">{suggestion.name}</span>
+                    <span className="block truncate text-[10px] text-muted-foreground">
+                      {suggestion.description}
+                    </span>
+                  </span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+
       <div className="mt-3 space-y-2">
         <label className="block text-xs">
           <span className="mb-1 block">Name of your MCP server</span>
@@ -181,7 +224,7 @@ const McpServersSection: React.FC = () => {
           />
         </label>
         <label className="block text-xs">
-          <span className="mb-1 block">Auth token (optional, encrypted at rest)</span>
+          <span className="mb-1 block">Auth token</span>
           <Input
             type="password"
             value={authToken}

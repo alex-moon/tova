@@ -2,6 +2,7 @@ import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, cleanup, waitFor } from '@testing-library/react';
 import McpServersSection from './McpServersSection';
 import type { McpServerInfo } from '../services/mcp';
+import { MCP_SUGGESTIONS } from './mcpSuggestions';
 
 const list = vi.fn();
 const add = vi.fn();
@@ -74,5 +75,21 @@ describe('McpServersSection (issues #36, #80)', () => {
     expect(screen.getByText('weather, forecast')).toBeInTheDocument();
     expect(toggle).toHaveAttribute('aria-expanded', 'true');
     expect(toggle).toHaveTextContent('hide scopes');
+  });
+
+  it('hides suggestions by default and prefills the add form on click', async () => {
+    render(<McpServersSection />);
+    await screen.findByTestId(`mcp-server-${server.name}`);
+
+    expect(screen.queryByTestId('mcp-suggestion-0')).not.toBeInTheDocument();
+
+    const suggestionsToggle = screen.getByTestId('mcp-show-suggestions');
+    expect(suggestionsToggle).toHaveAttribute('aria-expanded', 'false');
+    fireEvent.click(suggestionsToggle);
+    expect(suggestionsToggle).toHaveAttribute('aria-expanded', 'true');
+
+    fireEvent.click(screen.getByTestId('mcp-suggestion-0'));
+    expect(screen.getByTestId('mcp-add-name')).toHaveValue(MCP_SUGGESTIONS[0].name);
+    expect(screen.getByTestId('mcp-add-url')).toHaveValue(MCP_SUGGESTIONS[0].url);
   });
 });
