@@ -28,3 +28,36 @@ checked at three levels: patch-id (`git cherry`), blob identity
 - `/.iteration` added to main `.gitignore` (was carried on 7 of the 8 audited branches).
 
 No follow-up tickets needed; the audit is a one-off.
+
+# Branch cleanup (2026-09-18, issue #98)
+
+Second pass over the branches orphaned after the 2026-09-18 merge wave
+(#84–#97). Method: each branch's post-merge commits were cherry-picked onto a
+fresh `feat/98-branch-cleanup` cut from current `main`; only commits that
+survive as a real change are "content main lacks". `git cherry` alone is
+unreliable here because the squash merges break patch-ids.
+
+## Deleted
+
+| Branch                         | Ticket | Evidence                                                                                                                                                    |
+| ------------------------------ | ------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `feat/66-allow-writing`        | #66    | Last commit (`f576cd6` critic, 09:52) predates squash `f1dbbc3` (10:13) — `diff squash..tip` is empty; every surviving hunk is stale pre-#82 code           |
+| `feat/69-bulk-download`        | #69    | Last commit (`a86583a`, Sep 17 20:49) predates squash `dd4b6a` (20:57); `diff squash..tip` is empty                                                         |
+| `feat/76-logging-view`         | #76    | Critic (`0c9689b`) + review fix (`feaa8bc`) predate squash `052a46a` (16:45); cherry-pick of the fix conflicts only with main's newer #91 AdminView rewrite |
+| `feat/80-mcp-setup`            | #80    | 3-way merge-tree vs current `main` yields a zero diff — fully superseded                                                                                    |
+| `feat/82-graceful-degradation` | #82    | Last commit is a merge commit into the squash (`25a46b4` 15:43 → squash `2e79e08` 15:50); critic commit only removes #66 tests that exist on main           |
+| `feat/83-file-processing`      | #83    | Last commit (`b804a22` 16:28) predates squash `f75228fa` (16:43); 3-way merge-tree vs main yields a zero diff                                               |
+| `feat/91-admin-view`           | #91    | Last commit (`1a103ed` 22:31) predates squash `fe9c52d` (22:50); content identical                                                                          |
+
+## Preserved onto `feat/98-branch-cleanup`
+
+| From                  | What                                                                                                                                                | Evidence                                                                                                                   |
+| --------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `feat/77-mcp-errors`  | 63 lines of `mcpService.test.ts` hardening tests (critic `f27afe2`/`8cc60a9` postdate the 20:05 squash)                                             | 3-way merge-tree: clean, only these deltas vs main                                                                         |
+| `feat/79-profile-tab` | `ScrollablePanel` shared component + `ProfileModal` refactor + tests (fix `f906287` postdates squash `2a36a6b`); shared panel is groundwork for #95 | Kept: ScrollablePanel.tsx/.test.tsx, ProfileModal.tsx; dropped: stale AdminView/McpServer test hunks superseded by #91/#97 |
+| `feat/49-bug-sweep`   | `docs/spaces-cors.md` + `e2e/assets.spec.ts` (PR #57 closed unmerged; both still absent from main)                                                  | Only branch-unique files worth keeping per both audit passes                                                               |
+
+`feat/96-start-from` is excluded from this pass — PR #99 is open against main.
+
+Verification: `npm run ci` fully green on `feat/98-branch-cleanup`
+(459 server tests, 128 client tests, both builds).
