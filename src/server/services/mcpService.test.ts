@@ -332,6 +332,69 @@ describe('#77 MCP tool budget (user-scope toolsets)', () => {
   });
 });
 
+describe('#77 MCP tool budget (user-scope toolsets)', () => {
+  afterEach(() => {
+    delete process.env.MCP_TOOL_BUDGET_TOKENS;
+  });
+
+  it('#77: drops user tools beyond the token budget, attaches what fits', async () => {
+    process.env.MCP_TOOL_BUDGET_TOKENS = '10';
+    // A GitHub-MCP-shaped tool: description long enough to exceed 10 est.
+    // tokens (deserializeJSON → description 56 chars, + boilerplate).
+    await McpServer.create({
+      scope: 'user',
+      userId: USER_ID,
+      name: 'github',
+      url: 'https://github.example.com/mcp',
+    });
+    mockListTools.mockResolvedValue({
+      tools: [
+        {
+          name: 'create_issue',
+          description: 'Create a new issue in a GitHub repository'.repeat(3),
+          inputSchema: { type: 'object', properties: { number: { type: 'string' } } },
+        },
+        { name: 'tiny', description: 'x', inputSchema: {} },
+      ],
+    });
+    const toolsets = await mcpToolsetsForUser(USER_ID);
+    expect(toolsets).toEqual({});
+  });
+
+  it('#77: attaches user tools that fit and skips the oversized ones', async () => {
+    process.env.MCP_TOOL_BUDGET_TOKENS = '200';
+    await McpServer.create({
+      scope: 'user',
+      userId: USER_ID,
+      name: 'mixed',
+      url: 'https://mixed.example.com/mcp',
+    });
+    const hugeSchema = { type: 'object', properties: { blob: { type: 'string' } } };
+    mockListTools.mockResolvedValue({
+      tools: [
+        { name: 'small', description: 'Small tool', inputSchema: { type: 'object' } },
+        { name: 'huge', description: 'h'.repeat(4000), inputSchema: hugeSchema },
+      ],
+    });
+    const toolsets = await mcpToolsetsForUser(USER_ID);
+    expect(Object.keys(toolsets.mcp_mixed)).toEqual(['small']);
+  });
+
+  it('#77: platform toolsets stay out of the user budget', async () => {
+    process.env.MCP_TOOL_BUDGET_TOKENS = '0';
+    await McpServer.create({
+      scope: 'platform',
+      name: 'platform-tools',
+      url: 'https://mcp.example.com/mcp',
+    });
+    const toolsets = await mcpToolsetsForUser(USER_ID);
+    expect(Object.keys(toolsets.mcp_platform_tools)).toEqual([
+      'weather',
+      'surf_board.shaper.build',
+    ]);
+  });
+});
+
 describe('zodFromJsonSchema', () => {
   it('maps required and optional object properties', () => {
     const schema = zodFromJsonSchema({
