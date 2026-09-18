@@ -3,6 +3,7 @@ import { createApp } from '../index';
 import { User } from '../models/User';
 import { ProviderRouting } from '../models/ProviderRouting';
 import { ModelMetricStat } from '../models/ModelMetricStat';
+import { clearLogs } from '../services/logService';
 
 const cookieOf = (res: request.Response) => {
   const cookie = res.headers['set-cookie'];
@@ -265,5 +266,69 @@ describe('admin routes', () => {
       expect(large).toMatchObject({ provider: 'groq', tiers: ['large', 'guard'] });
       expect(large?.stats).toEqual([{ band: 'short|prose', up: 3, down: 1 }]);
     });
+  });
+});
+
+describe('admin logs endpoint (issue #76)', () => {
+  const adminCookieOf = async (app: ReturnType<typeof createApp>) => {
+    await request(app)
+      .post('/api/auth/register')
+      .send({ email: 'logsadmin@example.com', password: 'password123' });
+    await User.updateOne({ email: 'logsadmin@example.com' }, { role: 'admin' });
+    const res = await request(app)
+      .post('/api/auth/login')
+      .send({ email: 'logsadmin@example.com', password: 'password123' });
+    return Array.isArray(res.headers['set-cookie'])
+      ? res.headers['set-cookie']
+      : [res.headers['set-cookie']];
+  };
+
+  beforeEach(() => {
+    clearLogs();
+  });
+
+  it('is admin-only', async () => {
+    const app = createApp();
+    const nonAdmin = await request(app)
+      .post('/api/auth/register')
+      .send({ email: 'logsplain@example.com', password: 'password123' })
+      .then((res) =>
+        Array.isArray(res.headers['set-cookie'])
+          ? res.headers['set-cookie']
+          : [res.headers['set-cookie']],
+      );
+
+    const unauth = await request(app).get('/api/admin/logs');
+    expect(unauth.status).toBe(401);
+
+    const forbidden = await request(app).get('/api/admin/logs').set('Cookie', nonAdmin);
+    expect(forbidden.status).toBe(403);
+    expect(forbidden.body.message).toBe('Forbidden');
+  });
+
+  it('rejects an unknown level with 400', async () => {
+    const app = createApp();
+    const cookie = await adminCookieOf(app);
+    const res = await request(app).get('/api/admin/logs?level=bogus').set('Cookie', cookie);
+    expect(res.status).toBe(400);
+    expect(res.body.message).toMatch(/level/);
+  });
+
+  it('returns logs with cursor pagination shape', async () => {
+    const app = createApp();
+    const cookie = await adminCookieOf(app);
+    const first = await request(app).get('/api/admin/logs').set('Cookie', cookie);
+    expect(first.status).toBe(200);
+    expect(first.body).toHaveProperty('logs');
+    expect(first.body).toHaveProperty('nextCursor');
+    expect(Array.isArray(first.body.logs)).toBe(true);
+    if (first.body.logs.length > 0) {
+      const entry = first.body.logs[0];
+      expect(typeof entry.id).toBe('number');
+      expect(typeof entry.ts).toBe('string');
+      expect(['info', 'warn', 'error']).toContain(entry.level);
+      expect(typeof entry.msg).toBe('string');
+    }
+    expect(Number(first.body.nextCursor)).toBeGreaterThanOrEqual(0);
   });
 });
