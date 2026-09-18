@@ -15,6 +15,8 @@ export interface AssetSummary {
   // Issue #67: markdown conversion lifecycle ('none'|'pending'|'ready'|'failed');
   // the markdown text itself stays server-side.
   markdownStatus?: string;
+  // Issue #83: worker's last failure reason for the failed-card tooltip.
+  markdownFailureReason?: string | null;
   createdAt: string;
 }
 
