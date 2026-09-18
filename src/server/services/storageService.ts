@@ -52,6 +52,15 @@ export const presignPutUrl = async (
     { expiresIn },
   );
 
+// Direct server-side PUT (issue #66): system-generated files are written by
+// the server itself, so no presigned-URL round-trip is needed. Throws on
+// failure like the other direct commands.
+export const putObject = async (key: string, body: Buffer, contentType?: string): Promise<void> => {
+  await getClient().send(
+    new PutObjectCommand({ Bucket: bucket(), Key: key, ContentType: contentType, Body: body }),
+  );
+};
+
 export const presignGetUrl = async (key: string, expiresIn = 300): Promise<string> =>
   getSignedUrl(getClient(), new GetObjectCommand({ Bucket: bucket(), Key: key }), { expiresIn });
 

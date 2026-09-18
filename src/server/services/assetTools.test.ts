@@ -2,9 +2,23 @@ import { RequestContext } from '@mastra/core/request-context';
 import { Asset } from '../models/Asset';
 import { User } from '../models/User';
 import { Types } from 'mongoose';
-import { listFilesTool, readFileTool } from './mastraService';
+import { generateFileTool, listFilesTool, readFileTool } from './mastraService';
 import { toolIsFailed } from './toolDegrade';
 import { truncateForPrompt } from './textExtraction';
+
+jest.mock('./storageService', () => ({
+  isStorageConfigured: jest.fn(),
+  putObject: jest.fn(),
+  // list_files/read_file never touch storageService; keep the mock surface
+  // complete so unrelated import-time references resolve.
+  presignPutUrl: jest.fn(),
+  presignGetUrl: jest.fn(),
+}));
+
+const storageMocks = jest.requireMock('./storageService') as {
+  isStorageConfigured: jest.Mock;
+  putObject: jest.Mock;
+};
 
 /*
  * Tool-level tests for the #58 asset-library tools. The jest module mappers
@@ -28,6 +42,14 @@ const listExecute = (
 const readExecute = (
   readFileTool as unknown as {
     execute: (args: Record<string, unknown>, ctx: unknown) => Promise<unknown>;
+  }
+).execute;
+const generateExecute = (
+  generateFileTool as unknown as {
+    execute: (
+      args: Record<string, unknown>,
+      ctx: unknown,
+    ) => Promise<{ file?: unknown; error?: string }>;
   }
 ).execute;
 
@@ -54,6 +76,84 @@ const createAsset = (
   });
 
 const createUser = async (email: string) => User.create({ email, passwordHash: 'password123' });
+
+describe('generate_file tool (#66)', () => {
+  const good = { filename: 'notes.md', content: '# meeting notes' };
+
+  beforeEach(() => {
+    storageMocks.isStorageConfigured.mockReset().mockReturnValue(true);
+    storageMocks.putObject.mockReset().mockResolvedValue(undefined);
+  });
+
+  it('requires a userId in the request context', async () => {
+    expect(await generateExecute(good, asCtx())).toEqual({ error: 'unavailable' });
+  });
+
+  it('degrades to unavailable when storage is unconfigured', async () => {
+    storageMocks.isStorageConfigured.mockReturnValue(false);
+    const user = await createUser('generate-unconfigured@example.com');
+    expect(await generateExecute(good, asCtx(user.id))).toEqual({ error: 'unavailable' });
+    expect(await Asset.countDocuments()).toBe(0);
+  });
+
+  it('saves a ready system-generated markdown asset the model can read back', async () => {
+    const user = await createUser('generate-happy@example.com');
+    const out = (await generateExecute(good, asCtx(user.id))) as {
+      file?: { id: string; filename: string; contentType: string; size: number };
+      error?: string;
+    };
+    expect(out.error).toBeUndefined();
+    expect(out.file).toMatchObject({
+      filename: 'notes.md',
+      contentType: 'text/markdown',
+      size: '# meeting notes'.length,
+    });
+    expect(storageMocks.putObject).toHaveBeenCalledWith(
+      `${user.id}/${out.file?.id}/notes.md`,
+      Buffer.from(good.content, 'utf8'),
+      'text/markdown',
+    );
+    const stored = await Asset.findById(out.file?.id);
+    expect(stored).toMatchObject({
+      status: 'ready',
+      origin: 'system-generated',
+      textExtracted: good.content,
+    });
+    // Round-trip: the just-generated file is immediately listable and
+    // readable by the same tools (#66 plan risk note).
+    const listed = (await listExecute([], asCtx(user.id))) as { files: { id: string }[] };
+    expect(listed.files.map((f) => f.id)).toContain(out.file?.id);
+    const read = (await readExecute({ id: out.file?.id }, asCtx(user.id))) as {
+      content?: string;
+      hasText?: boolean;
+    };
+    expect(read.content).toBe(good.content);
+    expect(read.hasText).toBe(true);
+  });
+
+  it('maps validation failures to typed errors without storage calls', async () => {
+    const user = await createUser('generate-invalid@example.com');
+    expect((await generateExecute({ ...good, filename: '  ' }, asCtx(user.id))).error).toBe(
+      'invalid',
+    );
+    const limit = 15 * 1024 * 1024 + 1;
+    expect(
+      (await generateExecute({ ...good, content: 'x'.repeat(limit) }, asCtx(user.id))).error,
+    ).toBe('too_large');
+    expect(storageMocks.putObject).not.toHaveBeenCalled();
+    expect(await Asset.countDocuments()).toBe(0);
+  });
+
+  it('maps storage failures to unavailable', async () => {
+    const user = await createUser('generate-fail@example.com');
+    storageMocks.putObject.mockRejectedValue(new Error('Spaces down'));
+    const out = await generateExecute(good, asCtx(user.id));
+    expect(out.error).toBe('unavailable');
+    // The failed doc must be visible/failed, ready for the failed list.
+    const stored = await Asset.findOne({ userId: user.id });
+    expect(stored).toMatchObject({ status: 'failed', failureReason: 'storage-error' });
+  });
+});
 
 describe('list_files tool (#58)', () => {
   it('requires a userId in the request context', async () => {

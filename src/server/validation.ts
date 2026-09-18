@@ -136,7 +136,8 @@ export const assetBulkConfirmSchema = z
 // POST /api/mcp-servers body (issue #36). Personal MCP servers only: the
 // route is authenticated and always writes scope:'user' owned by the caller.
 // https-only URLs keep the outbound connect surface (SSRF) off plain HTTP;
-// the header value is a raw "Header: value" spec the server stores encrypted.
+// auth is submitted as a raw token (issue #80) — the server wraps it in
+// `Authorization: Bearer <token>` and stores that single header encrypted.
 export const mcpServerCreateSchema = z.strictObject({
   name: z
     .string({ message: 'Name is required' })
@@ -149,12 +150,9 @@ export const mcpServerCreateSchema = z.strictObject({
     .refine((value) => value.startsWith('https://'), {
       message: 'URL must be an https URL',
     }),
-  authHeader: z
-    .string({ message: 'authHeader must be a string' })
-    .max(4000, { message: 'authHeader is too long' })
-    .regex(/^[A-Za-z0-9-]+:\s?.+$/, {
-      message: 'authHeader must look like "Header-Name: value"',
-    })
+  authToken: z
+    .string({ message: 'authToken must be a string' })
+    .max(4000, { message: 'authToken is too long' })
     .optional(),
 });
 
