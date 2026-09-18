@@ -106,7 +106,8 @@ describe('AdminView models table (issue #33)', () => {
     ]);
     render(<AdminView />);
     expect(await screen.findByTestId('admin-view')).toBeInTheDocument();
-    expect(screen.getByTestId('admin-models')).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('admin-tab-models'));
+    expect(await screen.findByTestId('admin-models')).toBeInTheDocument();
     expect(screen.getByTestId('admin-model-groq/test-large')).toHaveTextContent('test-large');
     expect(screen.getByTestId('admin-models')).toHaveTextContent('large, guard');
     expect(screen.getByTestId('admin-models')).toHaveTextContent('short|prose: 3↑ 1↓');
@@ -116,6 +117,48 @@ describe('AdminView models table (issue #33)', () => {
   it('shows an empty state when no models are configured', async () => {
     listModels.mockResolvedValue([]);
     render(<AdminView />);
+    fireEvent.click(await screen.findByTestId('admin-tab-models'));
     expect(await screen.findByText('No models configured.')).toBeInTheDocument();
+  });
+});
+
+describe('AdminView layout (issue #91)', () => {
+  afterEach(cleanup);
+
+  beforeEach(() => {
+    listUsers.mockReset().mockResolvedValue([admin()]);
+    listModels.mockReset().mockResolvedValue([]);
+    updatePermissions.mockReset();
+    updateRole.mockReset();
+  });
+
+  it('keeps the header and nav outside the scroller, with the users table inside it', async () => {
+    render(<AdminView />);
+    const view = await screen.findByTestId('admin-view');
+    const scroller = screen.getByTestId('admin-scroller');
+    const usersSection = await screen.findByTestId('admin-users-section');
+    expect(view.contains(usersSection)).toBe(true);
+    expect(scroller.contains(usersSection)).toBe(true);
+    expect(screen.getByTestId('admin-nav').isSameNode(scroller)).toBe(false);
+    expect(screen.getByText('Admin').isSameNode(scroller)).toBe(false);
+  });
+
+  it('shows only the Users section by default and switches to Models on tab click', async () => {
+    render(<AdminView />);
+    await screen.findByTestId('admin-users-section');
+    expect(screen.queryByTestId('admin-models-section')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('admin-tab-models'));
+    expect(await screen.findByTestId('admin-models-section')).toBeInTheDocument();
+    expect(screen.queryByTestId('admin-users-section')).not.toBeInTheDocument();
+  });
+
+  it('marks the active tab with aria-current', async () => {
+    render(<AdminView />);
+    await screen.findByTestId('admin-users-section');
+    expect(screen.getByTestId('admin-tab-users')).toHaveAttribute('aria-current', 'page');
+    expect(screen.getByTestId('admin-tab-models')).not.toHaveAttribute('aria-current');
+    fireEvent.click(screen.getByTestId('admin-tab-models'));
+    expect(screen.getByTestId('admin-tab-models')).toHaveAttribute('aria-current', 'page');
+    expect(screen.getByTestId('admin-tab-users')).not.toHaveAttribute('aria-current');
   });
 });
