@@ -3,7 +3,7 @@ import { createApp } from '../index';
 import { User } from '../models/User';
 import { ProviderRouting } from '../models/ProviderRouting';
 import { ModelMetricStat } from '../models/ModelMetricStat';
-import { clearLogs } from '../services/logService';
+import { clearLogs, pushLog } from '../services/logService';
 
 const cookieOf = (res: request.Response) => {
   const cookie = res.headers['set-cookie'];
@@ -312,6 +312,64 @@ describe('admin logs endpoint (issue #76)', () => {
     const res = await request(app).get('/api/admin/logs?level=bogus').set('Cookie', cookie);
     expect(res.status).toBe(400);
     expect(res.body.message).toMatch(/level/);
+  });
+
+  it('filters by level and q, paginates by cursor, and ignores garbage cursor/limit', async () => {
+    const app = createApp();
+    const cookie = await adminCookieOf(app);
+    const seed = pushLog('info', 'noise alpha');
+    const warn = pushLog('warn', 'needle alert');
+    const boom = pushLog('error', 'alpha boom');
+
+    const filtered = await request(app).get('/api/admin/logs?q=alpha').set('Cookie', cookie);
+    expect(filtered.status).toBe(200);
+    expect(filtered.body.logs.map((l: { msg: string }) => l.msg)).toEqual([
+      'noise alpha',
+      'alpha boom',
+    ]);
+    expect(filtered.body.nextCursor).toBe(boom.id);
+
+    const level = await request(app)
+      .get('/api/admin/logs?level=warn&cursor=' + seed.id)
+      .set('Cookie', cookie);
+    expect(level.body.logs.map((l: { msg: string }) => l.msg)).toEqual(['needle alert']);
+
+    const fromSecond = await request(app)
+      .get('/api/admin/logs?cursor=' + warn.id)
+      .set('Cookie', cookie);
+    const msgAfterWarn = fromSecond.body.logs.map((l: { msg: string }) => l.msg);
+    expect(msgAfterWarn).toContain('alpha boom');
+    expect(msgAfterWarn).not.toContain('needle alert');
+
+    const empty = await request(app).get('/api/admin/logs?cursor=999999').set('Cookie', cookie);
+    expect(empty.body.logs).toEqual([]);
+    expect(empty.body.nextCursor).toBe(999999);
+
+    // garbage pagination values fall back to defaults rather than 500-ing
+    const garbage = await request(app)
+      .get('/api/admin/logs?cursor=nope&limit=nope')
+      .set('Cookie', cookie);
+    expect(garbage.status).toBe(200);
+    expect(garbage.body.logs.map((l: { msg: string }) => l.msg)).toContain('alpha boom');
+  });
+
+  it('honours valid limits and clamps oversized ones to the sane range', async () => {
+    const app = createApp();
+    const cookie = await adminCookieOf(app);
+    pushLog('info', 'one');
+    pushLog('warn', 'two');
+
+    const limited = await request(app).get('/api/admin/logs?limit=1').set('Cookie', cookie);
+    expect(limited.body.logs).toHaveLength(1);
+    // >=400 request lines land as warn, so level filtering spans sources
+    const warnOnly = await request(app).get('/api/admin/logs?level=warn').set('Cookie', cookie);
+    expect(warnOnly.body.logs.map((l: { msg: string }) => l.msg)).toContain('two');
+
+    const oversized = await request(app)
+      .get('/api/admin/logs?limit=99999999')
+      .set('Cookie', cookie);
+    expect(oversized.status).toBe(200);
+    expect(oversized.body.logs.length).toBeGreaterThanOrEqual(2);
   });
 
   it('returns logs with cursor pagination shape', async () => {

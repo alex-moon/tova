@@ -32,9 +32,11 @@ describe('requestLog middleware', () => {
     const app = buildApp();
     await request(app).post('/ping');
     await request(app).get('/boom');
-    const msgs = getLogs().logs.map((l) => l.msg);
-    expect(msgs[0]).toMatch(/^POST \/ping -> 404/);
-    expect(msgs[1]).toMatch(/^GET \/boom -> 500/);
+    const { logs } = getLogs();
+    expect(logs[0].msg).toMatch(/^POST \/ping -> 404/);
+    expect(logs[1].msg).toMatch(/^GET \/boom -> 500/);
+    expect(logs[0].level).toBe('warn');
+    expect(logs[1].level).toBe('error');
   });
 
   it('does not record GET /api/admin/logs so polling cannot spam the buffer', async () => {

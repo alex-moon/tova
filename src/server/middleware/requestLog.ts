@@ -12,8 +12,10 @@ export const requestLog = (req: Request, res: Response, next: NextFunction) => {
   const start = process.hrtime.bigint();
   res.on('finish', () => {
     const ms = Number(process.hrtime.bigint() - start) / 1e6;
-    logger.info(
-      `${req.method} ${req.originalUrl.split('?')[0]} -> ${res.statusCode} (${Math.round(ms)}ms)`,
+    const status = res.statusCode;
+    const level = status >= 500 ? 'error' : status >= 400 ? 'warn' : 'info';
+    logger[level](
+      `${req.method} ${req.originalUrl.split('?')[0]} -> ${status} (${Math.round(ms)}ms)`,
     );
   });
   return next();
