@@ -137,7 +137,7 @@ describe('mcpService', () => {
     expect((Client as unknown as jest.Mock).mock.calls.length).toBe(afterFirst);
   });
 
-  it('degrades persistent call failures to an unavailable result', async () => {
+  it('degrades persistent call failures to a descriptive error result', async () => {
     await McpServer.create({
       scope: 'platform',
       name: 'platform-tools',
@@ -146,10 +146,39 @@ describe('mcpService', () => {
     await mcpToolsetsForUser(USER_ID);
     mockConnect.mockRejectedValue(new Error('boom'));
     mockCallTool.mockRejectedValue(new Error('boom'));
-    const result = await callMcpTool('https://mcp.example.com/mcp', undefined, 'weather', {
+    const result = (await callMcpTool('https://mcp.example.com/mcp', undefined, 'weather', {
       q: 'x',
-    });
-    expect(result).toEqual({ error: 'unavailable' });
+    })) as { error?: string };
+    // #82: the degraded payload names the tool, carries the failure reason,
+    // and tells the model to surface the failure — not the bare
+    // `{ error: 'unavailable' }` that the model could not distinguish from
+    // an empty result.
+    expect(result.error).toContain('weather');
+    expect(result.error).toContain('boom');
+    expect(result.error).toContain('tell the user');
+    expect(result.error).not.toBe('unavailable');
+  });
+
+  it('degrades with the fallback wording when the error has no usable message', async () => {
+    mockConnect.mockRejectedValue(new Error('   \n  '));
+    mockCallTool.mockRejectedValue(new Error(''));
+    const result = (await callMcpTool('https://mcp.example.com/mcp', undefined, 'q', {})) as {
+      error?: string;
+    };
+    expect(result.error).toContain('reason unknown');
+    expect(result.error).toContain('tell the user');
+  });
+
+  it('truncates overlong failure reasons', async () => {
+    mockConnect.mockRejectedValue(new Error(`${'x'.repeat(1200)} HTTP 500`));
+    mockCallTool.mockRejectedValue(new Error('x'));
+    const result = (await callMcpTool('https://mcp.example.com/mcp', undefined, 'q', {})) as {
+      error?: string;
+    };
+    expect(result.error).toContain('Tool q failed to run');
+    // Truncated: the tail of the 1200-char message never appears.
+    expect(result.error).not.toContain('HTTP 500');
+    expect((result.error as string).length).toBeLessThan(500);
   });
 });
 
