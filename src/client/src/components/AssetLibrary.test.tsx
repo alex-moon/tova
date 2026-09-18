@@ -369,6 +369,36 @@ describe('AssetLibrary — conversion feedback (issue #83)', () => {
     // Silent poll: the grid never went back to the loading placeholder.
     expect(screen.queryByTestId('asset-loading')).not.toBeInTheDocument();
   });
+
+  it('keeps polling silently and never toasts when a polled refetch fails', async () => {
+    const pending = asset({
+      id: 'a6',
+      filename: 'doc.pdf',
+      contentType: 'application/pdf',
+      markdownStatus: 'pending',
+      hasText: false,
+    });
+    vi.useFakeTimers();
+    vi.mocked(AssetService.list)
+      .mockReset()
+      .mockResolvedValueOnce({ assets: [pending], nextCursor: null })
+      .mockRejectedValue(new Error('network down'));
+    renderLibrary();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(screen.getByTestId('asset-extracting')).toBeInTheDocument();
+    // Transient list failures during the silent poll must not interrupt the
+    // user (no error toast, no loading flash) and must not stop the poll.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(9000);
+    });
+    vi.useRealTimers();
+    expect(screen.getByTestId('asset-extracting')).toBeInTheDocument();
+    expect(vi.mocked(AssetService.list)).toHaveBeenCalledTimes(4);
+    expect(vi.mocked(AssetService.list)).toHaveBeenLastCalledWith();
+    expect(toast.error).not.toHaveBeenCalled();
+  });
 });
 
 describe('AssetLibrary — inline delete confirm (issue #59)', () => {
