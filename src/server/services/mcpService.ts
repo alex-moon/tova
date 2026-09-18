@@ -8,6 +8,13 @@ import { z } from 'zod';
 import type { McpServerDocument } from '../models/McpServer';
 import { McpServer } from '../models/McpServer';
 import { decryptEnvelope } from './crypto';
+import {
+  degradedToolError,
+  markToolFailed,
+  reasonFrom,
+  toolDegradeReason,
+  toolIsFailed,
+} from './toolDegrade';
 
 /*
  * MCP client bridge (issue #36). Connects to platform and user-configured
@@ -172,14 +179,21 @@ export const listMcpServerTools = async (
 /*
  * Call an MCP tool through a (possibly cached) client. One failed call
  * triggers a single fresh handshake + retry; persistent failure degrades to
- * an `unavailable` result so a dead server can never hang or fail a turn.
+ * a descriptive `error` result (#82, issue wording) so a dead server can
+ * never hang or fail a turn, and the model is told the tool was tried and
+ * failed — not left to guess between "unavailable tool" and "empty result".
  */
 export const callMcpTool = async (
   url: string,
   headers: Record<string, string> | undefined,
   toolName: string,
   args: unknown,
+  // #82: display name used in the model-facing degraded text. The toolset
+  // wrapper (the only production caller) passes the qualified tool id so a
+  // degraded retry-short-circuit and a degraded live failure read identically.
+  displayName?: string,
 ): Promise<unknown> => {
+  let lastError: unknown;
   const resolveClient = async (): Promise<Client> => {
     const key = connectionCacheKey(url, headers);
     const cached = connectionCache.get(key);
@@ -209,11 +223,17 @@ export const callMcpTool = async (
         CallToolResultSchema,
         { timeout: CALL_TIMEOUT_MS },
       );
-    } catch {
-      // fall through to retry / degraded result
+    } catch (error) {
+      lastError = error; // fall through to retry / degraded result
     }
   }
-  return { error: 'unavailable' };
+  // The `reason` field (also #82) carries the original failure reason so the
+  // toolset wrapper can remember it for short-circuited retries; `error`
+  // stays the complete model-facing degraded text.
+  return {
+    error: degradedToolError(displayName || toolName, reasonFrom(lastError)),
+    reason: reasonFrom(lastError),
+  };
 };
 
 const sanitizeToolsetKey = (name: string): string =>
@@ -268,13 +288,25 @@ export const mcpToolsetsForUser = async (
           id: `${setKey}/${toolInfo.name}`,
           description: toolInfo.description || `Tool ${toolInfo.name} from an MCP server`,
           inputSchema: zodFromJsonSchema(toolInfo.inputSchema),
-          execute: async (inputData) =>
-            (await callMcpTool(
+          // #82: the wrapper short-circuits when this same tool already
+          // failed earlier in the completion (no second handshake), and
+          // marks it failed when callMcpTool itself degrades — a retried
+          // dead tool then skips both handshakes on the next step.
+          execute: async (inputData, ctx) => {
+            const toolId = `${setKey}/${toolInfo.name}`;
+            if (toolIsFailed(ctx, toolId))
+              return { error: degradedToolError(toolId, toolDegradeReason(ctx, toolId)) };
+            const { reason, ...visible } = (await callMcpTool(
               entry.server.url,
               entry.headers,
               toolInfo.name,
               inputData,
-            )) as Record<string, unknown>,
+              toolId,
+            )) as Record<string, unknown>;
+            if (typeof visible?.error === 'string')
+              markToolFailed(ctx, toolId, typeof reason === 'string' ? reason : undefined);
+            return visible;
+          },
         });
       }
       toolsets[setKey] = tools;

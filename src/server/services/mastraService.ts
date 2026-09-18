@@ -12,6 +12,13 @@ import { Asset } from '../models/Asset';
 import { truncateForPrompt } from './textExtraction';
 import { mcpToolsetsForUser } from './mcpService';
 import {
+  degradedToolError,
+  markToolFailed,
+  reasonFrom,
+  toolDegradeReason,
+  toolIsFailed,
+} from './toolDegrade';
+import {
   CompletionOptions,
   LlmConnector,
   LlmProvider,
@@ -234,8 +241,25 @@ export const webSearchTool = createTool({
   inputSchema: z.object({ query: z.string().min(1).describe('Web search query') }),
   outputSchema: z.object({
     results: z.array(z.object({ title: z.string(), snippet: z.string(), url: z.string() })),
+    // #82: optional — only set when the search itself failed (never for a
+    // genuinely-empty search), so the model can tell the failure apart.
+    error: z.string().optional(),
   }),
-  execute: async ({ query }) => ({ results: await webSearch(query) }),
+  execute: async ({ query }, ctx) => {
+    // #82: a web_search that already failed earlier in this completion
+    // short-circuits to the degraded result without another Brave call.
+    if (toolIsFailed(ctx, 'web_search'))
+      return {
+        results: [],
+        error: degradedToolError('web_search', toolDegradeReason(ctx, 'web_search')),
+      };
+    try {
+      return { results: await webSearch(query) };
+    } catch (error) {
+      markToolFailed(ctx, 'web_search', reasonFrom(error));
+      return { results: [], error: degradedToolError('web_search', reasonFrom(error)) };
+    }
+  },
 });
 
 /*
@@ -285,8 +309,14 @@ export const listFilesTool = createTool({
     more: z.boolean().optional().describe('True when the list was truncated at 20'),
     error: z.string().optional(),
   }),
-  execute: async (_input, { requestContext }) => {
-    const userId = requestContext.get('userId') as string | undefined;
+  execute: async (_input, ctx) => {
+    // #82: retry-within-completion short-circuit for a previously failed call.
+    if (toolIsFailed(ctx, 'list_files'))
+      return {
+        files: [],
+        error: degradedToolError('list_files', toolDegradeReason(ctx, 'list_files')),
+      };
+    const userId = ctx.requestContext.get('userId') as string | undefined;
     if (!userId) return { files: [], error: 'unavailable' };
     try {
       // 21 rows: 20 returned, the 21st only feeds the `more` flag.
@@ -299,8 +329,9 @@ export const listFilesTool = createTool({
         files: rows.slice(0, 20).map((r) => assetFileFrom(r)),
         ...(hasMore ? { more: true } : {}),
       };
-    } catch {
-      return { files: [], error: 'unavailable' };
+    } catch (error) {
+      markToolFailed(ctx, 'list_files', reasonFrom(error));
+      return { files: [], error: degradedToolError('list_files', reasonFrom(error)) };
     }
   },
 });
@@ -327,8 +358,11 @@ export const readFileTool = createTool({
     note: z.string().optional(),
     error: z.string().optional(),
   }),
-  execute: async ({ id }, { requestContext }) => {
-    const userId = requestContext.get('userId') as string | undefined;
+  execute: async ({ id }, ctx) => {
+    // #82: retry-within-completion short-circuit for a previously failed call.
+    if (toolIsFailed(ctx, 'read_file'))
+      return { error: degradedToolError('read_file', toolDegradeReason(ctx, 'read_file')) };
+    const userId = ctx.requestContext.get('userId') as string | undefined;
     if (!userId) return { error: 'unavailable' };
     if (!id || !mongoose.isValidObjectId(id)) {
       return { error: 'not_found' };
@@ -353,8 +387,9 @@ export const readFileTool = createTool({
         };
       }
       return { file, content: truncateForPrompt(text), hasText: true };
-    } catch {
-      return { error: 'unavailable' };
+    } catch (error) {
+      markToolFailed(ctx, 'read_file', reasonFrom(error));
+      return { error: degradedToolError('read_file', reasonFrom(error)) };
     }
   },
 });

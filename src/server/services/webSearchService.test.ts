@@ -128,22 +128,23 @@ describe('Web Search Service', () => {
       await expect(webSearch('q')).resolves.toEqual([]);
     });
 
-    it('returns [] on non-ok HTTP responses', async () => {
+    it('throws (for the tool wrapper to degrade) on non-ok HTTP responses', async () => {
       global.fetch = jest.fn().mockResolvedValue({ ok: false, status: 429 });
-      await expect(webSearch('q')).resolves.toEqual([]);
-    });
-
-    it('returns [] on network failure', async () => {
-      global.fetch = jest.fn().mockRejectedValue(new Error('offline'));
-      await expect(webSearch('q')).resolves.toEqual([]);
+      await expect(webSearch('q')).rejects.toThrow('Brave search HTTP 429');
       expect(consoleErrorSpy).toHaveBeenCalled();
     });
 
-    it('returns [] on a malformed JSON body instead of throwing', async () => {
+    it('throws on network failure', async () => {
+      global.fetch = jest.fn().mockRejectedValue(new Error('offline'));
+      await expect(webSearch('q')).rejects.toThrow('offline');
+      expect(consoleErrorSpy).toHaveBeenCalled();
+    });
+
+    it('throws on a malformed JSON body (#82: the tool degrades, the service fails loudly)', async () => {
       global.fetch = jest
         .fn()
         .mockResolvedValue({ ok: true, json: () => Promise.reject(new Error('invalid JSON')) });
-      await expect(webSearch('q')).resolves.toEqual([]);
+      await expect(webSearch('q')).rejects.toThrow('invalid JSON');
       expect(consoleErrorSpy).toHaveBeenCalled();
     });
 

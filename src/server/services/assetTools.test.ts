@@ -1,7 +1,9 @@
 import { RequestContext } from '@mastra/core/request-context';
 import { Asset } from '../models/Asset';
 import { User } from '../models/User';
+import { Types } from 'mongoose';
 import { generateFileTool, listFilesTool, readFileTool } from './mastraService';
+import { toolIsFailed } from './toolDegrade';
 import { truncateForPrompt } from './textExtraction';
 
 jest.mock('./storageService', () => ({
@@ -309,5 +311,68 @@ describe('read_file tool (#58)', () => {
     expect(await readExecute({ id: notReady.id }, asCtx(user.id))).toEqual({
       error: 'not_found',
     });
+  });
+});
+
+describe('asset tools degradation (#82)', () => {
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  it('list_files: degrades with the failure reason, marks failed, and remembers it on retry', async () => {
+    const findSpy = jest.spyOn(Asset, 'find').mockImplementation(() => {
+      throw new Error('db down');
+    });
+    const ctxA = asCtx('owner-id');
+    const first = (await listExecute([], ctxA)) as { files: unknown[]; error?: string };
+    expect(first.files).toEqual([]);
+    expect(findSpy).toHaveBeenCalledTimes(1);
+    expect(first.error).toContain('list_files');
+    expect(first.error).toContain('db down');
+    expect(toolIsFailed(ctxA, 'list_files')).toBe(true);
+    const second = (await listExecute([], ctxA)) as { error?: string };
+    expect(findSpy).toHaveBeenCalledTimes(1); // short-circuit: no second query
+    expect(second.error).toContain('db down'); // original reason remembered
+    expect(toolIsFailed(asCtx('other'), 'list_files')).toBe(false); // scope is per-completion
+  });
+
+  it('list_files: model sees the "tried and failed" instruction', async () => {
+    jest.spyOn(Asset, 'find').mockImplementation(() => {
+      throw new Error('x');
+    });
+    const out = (await listExecute([], asCtx('owner-id'))) as { error?: string };
+    expect(out.error).toContain('tell the user');
+  });
+
+  it('read_file: degrades with the failure reason, marks failed, and remembers it on retry', async () => {
+    const findOneSpy = jest.spyOn(Asset, 'findOne').mockImplementation(() => {
+      throw new Error('read blew up');
+    });
+    const ctxA = asCtx('owner-id');
+    const id = new Types.ObjectId().toString();
+    const first = (await readExecute({ id }, ctxA)) as { error?: string };
+    expect(first.error).toContain('read_file');
+    expect(first.error).toContain('read blew up');
+    expect(findOneSpy).toHaveBeenCalledTimes(1);
+    expect(toolIsFailed(ctxA, 'read_file')).toBe(true);
+    const second = (await readExecute({ id }, ctxA)) as { error?: string };
+    expect(findOneSpy).toHaveBeenCalledTimes(1); // short-circuit: no second query
+    expect(second.error).toContain('read blew up');
+  });
+
+  it('read_file: a valid id path does not mark the tool failed', async () => {
+    const user = await createUser('read-ok@example.com');
+    const asset = await createAsset(user.id, 'ok.txt', { textExtracted: 'ok' });
+    const ctx = asCtx(user.id);
+    await readExecute({ id: asset.id }, ctx);
+    expect(toolIsFailed(ctx, 'read_file')).toBe(false);
+  });
+
+  it('a userId-less context returns the config-unavailable result without marking failure', async () => {
+    const ctx = asCtx();
+    expect(await listExecute([], ctx)).toEqual({ files: [], error: 'unavailable' });
+    expect(toolIsFailed(ctx, 'list_files')).toBe(false);
+    expect(await readExecute({}, ctx)).toEqual({ error: 'unavailable' });
+    expect(toolIsFailed(ctx, 'read_file')).toBe(false);
   });
 });
