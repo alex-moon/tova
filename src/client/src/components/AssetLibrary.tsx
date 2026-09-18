@@ -64,17 +64,19 @@ const AssetLibrary: React.FC<AssetLibraryProps> = ({ onClose, onPickAsset }) => 
   const [bulkDeleting, setBulkDeleting] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (opts: { silent?: boolean } = {}) => {
     try {
-      setLoading(true);
+      if (!opts.silent) setLoading(true);
       const page = await AssetService.list();
       setAssets(page.assets);
       setNextCursor(page.nextCursor);
     } catch (err) {
-      console.error('Error listing assets:', err);
-      toast.error('Could not load your files');
+      if (!opts.silent) {
+        console.error('Error listing assets:', err);
+        toast.error('Could not load your files');
+      }
     } finally {
-      setLoading(false);
+      if (!opts.silent) setLoading(false);
     }
   }, []);
 
@@ -82,6 +84,15 @@ const AssetLibrary: React.FC<AssetLibraryProps> = ({ onClose, onPickAsset }) => 
     // eslint-disable-next-line react-hooks/set-state-in-effect
     void load();
   }, [load]);
+
+  // Issue #83: while any listed asset is still converting, poll the list
+  // silently (no loading flash) so pending cards turn ready/failed in place.
+  const anyPending = assets.some((a) => a.markdownStatus === 'pending');
+  useEffect(() => {
+    if (!anyPending) return;
+    const timer = setInterval(() => void load({ silent: true }), 3000);
+    return () => clearInterval(timer);
+  }, [anyPending, load]);
 
   // Issue #68 bulk upload: feed every selected file through uploadMany and
   // expose per-file rows (progress on upload, message on error) plus an
@@ -375,6 +386,26 @@ const AssetLibrary: React.FC<AssetLibraryProps> = ({ onClose, onPickAsset }) => 
                         <span className="block text-xs text-muted-foreground">
                           {formatSize(asset.size)} ·{' '}
                           {new Date(asset.createdAt).toLocaleDateString()}
+                          {asset.markdownStatus === 'pending' && (
+                            <span data-testid="asset-extracting">
+                              {' '}
+                              · <Loader2 className="inline size-3 animate-spin align-[-2px]" />{' '}
+                              Extracting text…
+                            </span>
+                          )}
+                          {asset.markdownStatus === 'ready' && (
+                            <span data-testid="asset-extract-ready"> · Text extracted</span>
+                          )}
+                          {asset.markdownStatus === 'failed' && (
+                            <span
+                              data-testid="asset-extract-failed"
+                              className="text-destructive"
+                              title={asset.markdownFailureReason ?? 'Text extraction failed'}
+                            >
+                              {' '}
+                              · Extraction failed
+                            </span>
+                          )}
                         </span>
                       </span>
                       {onPickAsset && (

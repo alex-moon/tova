@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, afterEach } from 'vitest';
-import { render, screen, cleanup, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, cleanup, fireEvent, waitFor, act } from '@testing-library/react';
 import AssetLibrary from './AssetLibrary';
 import type { AssetSummary, BulkUploadFileResult } from '../services/assets';
 import { AuthContext } from '../context/AuthContext';
@@ -261,6 +261,143 @@ describe('AssetLibrary — bulk upload (issue #68)', () => {
     settle([row({ error: 'Behind upload' }, 'a.txt')]);
     await screen.findByTestId('upload-row-0');
     expect(screen.getByTestId('upload-row-0')).toHaveTextContent('Behind upload');
+  });
+});
+
+describe('AssetLibrary — conversion feedback (issue #83)', () => {
+  afterEach(() => {
+    cleanup();
+    vi.useRealTimers();
+  });
+
+  it('shows an extracting spinner for a pending conversion', async () => {
+    vi.mocked(AssetService.list).mockResolvedValue({
+      assets: [
+        asset({
+          id: 'a2',
+          filename: 'doc.pdf',
+          contentType: 'application/pdf',
+          markdownStatus: 'pending',
+          hasText: false,
+        }),
+      ],
+      nextCursor: null,
+    });
+    renderLibrary();
+    expect(await screen.findByTestId('asset-extracting')).toHaveTextContent('Extracting text…');
+  });
+
+  it('shows "Text extracted" for a ready conversion', async () => {
+    vi.mocked(AssetService.list).mockResolvedValue({
+      assets: [
+        asset({
+          id: 'a3',
+          filename: 'doc.pdf',
+          contentType: 'application/pdf',
+          markdownStatus: 'ready',
+          hasText: true,
+        }),
+      ],
+      nextCursor: null,
+    });
+    renderLibrary();
+    await screen.findByText('doc.pdf');
+    expect(screen.getByTestId('asset-extract-ready')).toHaveTextContent('Text extracted');
+    expect(screen.queryByTestId('asset-extracting')).not.toBeInTheDocument();
+  });
+
+  it('shows a failed badge with the failure reason as tooltip', async () => {
+    vi.mocked(AssetService.list).mockResolvedValue({
+      assets: [
+        asset({
+          id: 'a4',
+          filename: 'doc.pdf',
+          contentType: 'application/pdf',
+          markdownStatus: 'failed',
+          markdownFailureReason: 'Worker crashed',
+          hasText: false,
+        }),
+      ],
+      nextCursor: null,
+    });
+    renderLibrary();
+    const badge = await screen.findByTestId('asset-extract-failed');
+    expect(badge).toHaveTextContent('Extraction failed');
+    expect(badge).toHaveAttribute('title', 'Worker crashed');
+  });
+
+  it('stays silent for markdownStatus none (plain files)', async () => {
+    vi.mocked(AssetService.list).mockResolvedValue({
+      assets: [asset({ markdownStatus: 'none' })],
+      nextCursor: null,
+    });
+    renderLibrary();
+    await screen.findByText('notes.txt');
+    expect(screen.queryByTestId('asset-extracting')).not.toBeInTheDocument();
+    expect(screen.queryByText('Text extracted')).not.toBeInTheDocument();
+  });
+
+  it('refetches silently while a card is pending and clears the spinner on ready', async () => {
+    const pending = asset({
+      id: 'a5',
+      filename: 'doc.pdf',
+      contentType: 'application/pdf',
+      markdownStatus: 'pending',
+      hasText: false,
+    });
+    vi.useFakeTimers();
+    vi.mocked(AssetService.list)
+      .mockReset()
+      .mockResolvedValue({ assets: [pending], nextCursor: null });
+    renderLibrary();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(screen.getByTestId('asset-extracting')).toBeInTheDocument();
+    expect(vi.mocked(AssetService.list)).toHaveBeenCalledTimes(1);
+    vi.mocked(AssetService.list).mockResolvedValue({
+      assets: [asset({ ...pending, markdownStatus: 'ready', hasText: true })],
+      nextCursor: null,
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(3000);
+    });
+    vi.useRealTimers();
+    expect(screen.getByTestId('asset-extract-ready')).toHaveTextContent('Text extracted');
+    expect(screen.queryByTestId('asset-extracting')).not.toBeInTheDocument();
+    expect(vi.mocked(AssetService.list)).toHaveBeenCalledTimes(2);
+    // Silent poll: the grid never went back to the loading placeholder.
+    expect(screen.queryByTestId('asset-loading')).not.toBeInTheDocument();
+  });
+
+  it('keeps polling silently and never toasts when a polled refetch fails', async () => {
+    const pending = asset({
+      id: 'a6',
+      filename: 'doc.pdf',
+      contentType: 'application/pdf',
+      markdownStatus: 'pending',
+      hasText: false,
+    });
+    vi.useFakeTimers();
+    vi.mocked(AssetService.list)
+      .mockReset()
+      .mockResolvedValueOnce({ assets: [pending], nextCursor: null })
+      .mockRejectedValue(new Error('network down'));
+    renderLibrary();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(screen.getByTestId('asset-extracting')).toBeInTheDocument();
+    // Transient list failures during the silent poll must not interrupt the
+    // user (no error toast, no loading flash) and must not stop the poll.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(9000);
+    });
+    vi.useRealTimers();
+    expect(screen.getByTestId('asset-extracting')).toBeInTheDocument();
+    expect(vi.mocked(AssetService.list)).toHaveBeenCalledTimes(4);
+    expect(vi.mocked(AssetService.list)).toHaveBeenLastCalledWith();
+    expect(toast.error).not.toHaveBeenCalled();
   });
 });
 
