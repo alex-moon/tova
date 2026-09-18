@@ -658,6 +658,78 @@ describe('Assets confirm markdown conversion queue (#67)', () => {
   });
 });
 
+describe('Asset hasText & failureReason serialization (issue #83)', () => {
+  const seedAssetFor = async (email: string, extra: Record<string, unknown>): Promise<string> => {
+    const cookie = await registerUser(email);
+    const user = await User.findOne({ email });
+    const id = new Types.ObjectId();
+    await Asset.create({
+      _id: id,
+      userId: user?._id,
+      filename: 'report.pdf',
+      key: `k/${String(id)}/report.pdf`,
+      contentType: 'application/pdf',
+      size: 12,
+      status: 'ready',
+      ...extra,
+    });
+    return cookie;
+  };
+
+  it('a markdown-only converted asset counts as hasText: true', async () => {
+    const cookie = await seedAssetFor('assets-hastext-md@example.com', {
+      textExtracted: null,
+      markdownExtracted: '# converted report',
+      markdownStatus: 'ready',
+    });
+    const response = await request(app).get('/api/assets').set('Cookie', [cookie]);
+    expect(response.status).toBe(200);
+    const asset = response.body.assets.find(
+      (row: { filename: string }) => row.filename === 'report.pdf',
+    );
+    expect(asset.hasText).toBe(true);
+    expect(asset.markdownStatus).toBe('ready');
+    expect(asset.markdownFailureReason).toBeNull();
+  });
+
+  it('a genuinely textless asset still reports hasText: false', async () => {
+    const cookie = await seedAssetFor('assets-hastext-none@example.com', {
+      textExtracted: null,
+      markdownExtracted: null,
+      markdownStatus: 'none',
+    });
+    const response = await request(app).get('/api/assets').set('Cookie', [cookie]);
+    const asset = response.body.assets[0];
+    expect(asset.hasText).toBe(false);
+  });
+
+  it('fast-path extracted text still reports hasText: true', async () => {
+    const cookie = await seedAssetFor('assets-hastext-fast@example.com', {
+      textExtracted: 'plain text',
+      markdownStatus: 'none',
+    });
+    const response = await request(app).get('/api/assets').set('Cookie', [cookie]);
+    const asset = response.body.assets[0];
+    expect(asset.hasText).toBe(true);
+  });
+
+  it('a failed conversion surfaces its markdownFailureReason, never the text', async () => {
+    const cookie = await seedAssetFor('assets-hastext-fail@example.com', {
+      textExtracted: null,
+      markdownExtracted: null,
+      markdownStatus: 'failed',
+      markdownFailureReason: 'converter exploded',
+    });
+    const response = await request(app).get('/api/assets').set('Cookie', [cookie]);
+    const asset = response.body.assets[0];
+    expect(asset.markdownStatus).toBe('failed');
+    expect(asset.markdownFailureReason).toBe('converter exploded');
+    expect(asset.hasText).toBe(false);
+    // No markdown text content may reach the client payload.
+    expect(JSON.stringify(response.body)).not.toContain('converted report');
+  });
+});
+
 describe('Assets ownership isolation', () => {
   let cookieA: string;
   let cookieB: string;
