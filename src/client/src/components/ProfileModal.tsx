@@ -91,85 +91,87 @@ const ProfileModal: React.FC<ProfileModalProps> = ({ onClose }) => {
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
       data-testid="profile-modal"
     >
-      <div className="w-full max-w-md rounded-xl border border-border bg-card p-6 shadow-lg">
-        <div className="mb-4 flex items-center justify-between">
+      <div className="flex max-h-[85dvh] w-full max-w-md flex-col rounded-xl border border-border bg-card p-6 shadow-lg">
+        <div className="mb-4 flex shrink-0 items-center justify-between">
           <h2 className="font-heading text-xl font-semibold">Profile</h2>
           <Button variant="ghost" size="icon" aria-label="Close profile" onClick={onClose}>
             <X />
           </Button>
         </div>
-        <dl className="mb-4 space-y-2 text-sm">
-          <div className="flex justify-between gap-4">
-            <dt className="text-muted-foreground">Full name</dt>
-            <dd data-testid="profile-name">{displayName}</dd>
+        <div className="flex-1 overflow-y-auto">
+          <dl className="mb-4 space-y-2 text-sm">
+            <div className="flex justify-between gap-4">
+              <dt className="text-muted-foreground">Full name</dt>
+              <dd data-testid="profile-name">{displayName}</dd>
+            </div>
+            <div className="flex justify-between gap-4">
+              <dt className="text-muted-foreground">Avatar</dt>
+              <dd className="truncate" data-testid="profile-avatar">
+                {user.avatarUrl ? 'Set by Google' : 'None'}
+              </dd>
+            </div>
+          </dl>
+          <div className="space-y-4">
+            <label className="block text-sm">
+              <span className="mb-1 block">Preferred name</span>
+              <Input
+                value={preferredName}
+                onChange={(e) => setPreferredName(e.target.value)}
+                maxLength={PREFERRED_NAME_LIMIT}
+              />
+            </label>
+            <div className="text-sm">
+              <span className="mb-1 block">Theme</span>
+              <ThemeChoice value={theme} onChange={setTheme} />
+            </div>
+            <label className="block text-sm">
+              <span className="mb-1 block">Custom instructions</span>
+              <textarea
+                data-testid="profile-custom-instructions"
+                value={customInstructions}
+                onChange={(e) => setCustomInstructions(e.target.value)}
+                maxLength={CUSTOM_INSTRUCTIONS_LIMIT}
+                rows={5}
+                className="w-full rounded-lg border border-border bg-transparent px-3 py-1 text-base outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/30"
+              />
+            </label>
+            <McpServersSection />
+            <fieldset className="text-sm">
+              <legend className="mb-1 block">Delete confirmations</legend>
+              {(['chat', 'file'] as const).map((target) => (
+                <label key={target} className="mt-1 flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    data-testid={`profile-confirm-delete-${target}`}
+                    checked={confirmDeletes[target]}
+                    onChange={(e) =>
+                      setConfirmDeletes((prev) => ({ ...prev, [target]: e.target.checked }))
+                    }
+                  />
+                  Ask before deleting {target === 'chat' ? 'chats' : 'files'}
+                </label>
+              ))}
+            </fieldset>
           </div>
-          <div className="flex justify-between gap-4">
-            <dt className="text-muted-foreground">Avatar</dt>
-            <dd className="truncate" data-testid="profile-avatar">
-              {user.avatarUrl ? 'Set by Google' : 'None'}
-            </dd>
+          {error && (
+            <div
+              data-testid="profile-error"
+              className="mt-3 rounded-lg border border-destructive bg-destructive/10 p-3 text-sm text-destructive"
+            >
+              {error}
+            </div>
+          )}
+          <div className="mt-4 flex justify-end gap-2">
+            <Button variant="outline" onClick={onClose} disabled={pending}>
+              Cancel
+            </Button>
+            <Button onClick={save} disabled={pending} data-testid="profile-save">
+              {pending ? 'Saving...' : 'Save'}
+            </Button>
           </div>
-        </dl>
-        <div className="space-y-4">
-          <label className="block text-sm">
-            <span className="mb-1 block">Preferred name</span>
-            <Input
-              value={preferredName}
-              onChange={(e) => setPreferredName(e.target.value)}
-              maxLength={PREFERRED_NAME_LIMIT}
-            />
-          </label>
-          <div className="text-sm">
-            <span className="mb-1 block">Theme</span>
-            <ThemeChoice value={theme} onChange={setTheme} />
-          </div>
-          <label className="block text-sm">
-            <span className="mb-1 block">Custom instructions</span>
-            <textarea
-              data-testid="profile-custom-instructions"
-              value={customInstructions}
-              onChange={(e) => setCustomInstructions(e.target.value)}
-              maxLength={CUSTOM_INSTRUCTIONS_LIMIT}
-              rows={5}
-              className="w-full rounded-lg border border-border bg-transparent px-3 py-1 text-base outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/30"
-            />
-          </label>
-          <McpServersSection />
-          <fieldset className="text-sm">
-            <legend className="mb-1 block">Delete confirmations</legend>
-            {(['chat', 'file'] as const).map((target) => (
-              <label key={target} className="mt-1 flex items-center gap-2">
-                <input
-                  type="checkbox"
-                  data-testid={`profile-confirm-delete-${target}`}
-                  checked={confirmDeletes[target]}
-                  onChange={(e) =>
-                    setConfirmDeletes((prev) => ({ ...prev, [target]: e.target.checked }))
-                  }
-                />
-                Ask before deleting {target === 'chat' ? 'chats' : 'files'}
-              </label>
-            ))}
-          </fieldset>
-        </div>
-        {error && (
-          <div
-            data-testid="profile-error"
-            className="mt-3 rounded-lg border border-destructive bg-destructive/10 p-3 text-sm text-destructive"
-          >
-            {error}
-          </div>
-        )}
-        <div className="mt-4 flex justify-end gap-2">
-          <Button variant="outline" onClick={onClose} disabled={pending}>
-            Cancel
-          </Button>
-          <Button onClick={save} disabled={pending} data-testid="profile-save">
-            {pending ? 'Saving...' : 'Save'}
-          </Button>
         </div>
       </div>
     </div>
