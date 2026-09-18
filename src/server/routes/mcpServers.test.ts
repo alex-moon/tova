@@ -59,6 +59,15 @@ describe('POST /api/mcp-servers (issue #36)', () => {
     });
   });
 
+  it('handshakes exactly once per add (result reused, not re-fetched, #77)', async () => {
+    const { app, cookie } = await registerUser('mcp-once@example.com');
+    await request(app).post('/api/mcp-servers').set('Cookie', cookie).send({
+      name: 'once',
+      url: 'https://once.example.com/mcp',
+    });
+    expect(mockListMcpServerTools).toHaveBeenCalledTimes(1);
+  });
+
   it('rejects a server whose handshake fails with the connection error', async () => {
     const { app, cookie } = await registerUser('mcp-dead@example.com');
     mockListMcpServerTools.mockRejectedValue(new Error('connect ECONNREFUSED'));
