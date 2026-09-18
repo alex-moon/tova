@@ -59,8 +59,9 @@ per `docs/workflow.md`.
    `mcpService` are unchanged. UI input is a password-type token field
    (`mcp-add-auth-token`); the per-server tool list is collapsed to an
    "N scopes" toggle (`mcp-show-scopes-<name>`, aria-expanded) that expands
-   to the full tool-name list. Crypto cleanup (dead `encryptHeader` pair)
-   still pending in this pass. Rationale kept for the PR: bcrypt (one-way)
+   to the full tool-name list. Crypto cleanup of the dead `encryptHeader`/
+   `decryptHeader` pair done; crypto.ts now has a single key scheme.
+   Rationale kept for the PR: bcrypt (one-way)
    cannot replace the encryption — tokens must be replayed verbatim in
    request headers.
 
