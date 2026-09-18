@@ -89,3 +89,70 @@ describe('App', () => {
     window.history.pushState({}, '', '/');
   });
 });
+
+describe('App startup chat (issue #96)', () => {
+  afterEach(cleanup);
+  beforeEach(() => {
+    axiosGet.mockReset();
+    axiosPost.mockReset();
+    window.history.pushState({}, '', '/');
+  });
+
+  const sessions = [
+    { _id: 'recent', title: 'Newest chat' },
+    { _id: 'older', title: 'Older chat' },
+  ];
+
+  const mockStartup = (startupChat?: 'recent' | 'new') =>
+    axiosGet.mockImplementation((url: string) => {
+      if (url === '/api/auth/me') {
+        return Promise.resolve({
+          data: {
+            user: { id: '1', email: 'a@b.c', role: 'user', permissions: [], startupChat },
+          },
+        });
+      }
+      if (url === '/api/chat/sessions') {
+        return Promise.resolve({ data: sessions });
+      }
+      if (url === '/api/chat/sessions/recent' || url === '/api/chat/sessions/older') {
+        return Promise.resolve({
+          data: { messages: [{ _id: 'm1', role: 'user', content: 'hi' }] },
+        });
+      }
+      return Promise.reject(new Error('no data'));
+    });
+
+  it('opens the most recent chat by default (startupChat unset)', async () => {
+    mockStartup(undefined);
+    renderApp();
+    await waitFor(() => expect(axiosGet).toHaveBeenCalledWith('/api/chat/sessions/recent'));
+  });
+
+  it('opens the most recent chat with startupChat recent', async () => {
+    mockStartup('recent');
+    renderApp();
+    await waitFor(() => expect(axiosGet).toHaveBeenCalledWith('/api/chat/sessions/recent'));
+  });
+
+  it('starts blank when startupChat is new', async () => {
+    mockStartup('new');
+    renderApp();
+    await waitFor(() => expect(axiosGet).toHaveBeenCalledWith('/api/chat/sessions'));
+    await new Promise((r) => setTimeout(r, 0));
+    expect(axiosGet).not.toHaveBeenCalledWith('/api/chat/sessions/recent');
+    expect(axiosGet).not.toHaveBeenCalledWith('/api/chat/sessions/older');
+  });
+
+  it('does not re-select a startup session after a refetch', async () => {
+    mockStartup('recent');
+    renderApp();
+    await waitFor(() => expect(axiosGet).toHaveBeenCalledWith('/api/chat/sessions/recent'));
+
+    // Refetch (e.g. after send): the already-applied startup must not reset.
+    axiosGet.mockClear();
+    mockStartup('recent');
+    await axiosGet;
+    renderApp();
+  });
+});

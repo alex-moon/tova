@@ -40,6 +40,36 @@ const ThemeChoice: React.FC<{
   </div>
 );
 
+const StartupChatChoice: React.FC<{
+  value: 'recent' | 'new';
+  onChange: (next: 'recent' | 'new') => void;
+}> = ({ value, onChange }) => (
+  <div className="flex gap-2" role="radiogroup" aria-label="When Tova opens">
+    {(
+      [
+        ['recent', 'Most recent chat'],
+        ['new', 'New chat'],
+      ] as const
+    ).map(([option, label]) => (
+      <button
+        key={option}
+        type="button"
+        role="radio"
+        aria-checked={value === option}
+        data-testid={`startup-chat-option-${option}`}
+        onClick={() => onChange(option)}
+        className={`rounded-lg border px-3 py-1.5 text-sm transition-colors ${
+          value === option
+            ? 'border-ring bg-accent text-accent-foreground'
+            : 'border-border hover:bg-accent hover:text-accent-foreground'
+        }`}
+      >
+        {label}
+      </button>
+    ))}
+  </div>
+);
+
 const ProfileModal: React.FC<ProfileModalProps> = ({ onClose }) => {
   const { user, updateUser } = useAuth();
   const initialTheme = (
@@ -48,6 +78,10 @@ const ProfileModal: React.FC<ProfileModalProps> = ({ onClose }) => {
   const [preferredName, setPreferredName] = useState(user?.preferredName ?? '');
   const [customInstructions, setCustomInstructions] = useState(user?.customInstructions ?? '');
   const [theme, setTheme] = useState<Theme>(initialTheme);
+  // Startup-chat preference (issue #96): null/absent resolves to the product
+  // default 'recent'.
+  const initialStartupChat = user?.startupChat ?? 'recent';
+  const [startupChat, setStartupChat] = useState<'recent' | 'new'>(initialStartupChat);
   const initialConfirmDeletes = {
     chat: user?.confirmDeletes?.chat ?? true,
     file: user?.confirmDeletes?.file ?? true,
@@ -70,6 +104,8 @@ const ProfileModal: React.FC<ProfileModalProps> = ({ onClose }) => {
         // Only patched when the choice actually moved, so a plain profile
         // edit cannot silently pin the device's theme onto the account.
         ...(theme !== initialTheme ? { theme } : {}),
+        // Only patched when the choice actually moved (issue #96).
+        ...(startupChat !== initialStartupChat ? { startupChat } : {}),
         // Only patched when a toggle moved, so an unrelated profile edit
         // cannot touch delete-confirmation prefs (issue #59).
         ...(confirmDeletes.chat !== initialConfirmDeletes.chat ||
@@ -126,6 +162,10 @@ const ProfileModal: React.FC<ProfileModalProps> = ({ onClose }) => {
             <div className="text-sm">
               <span className="mb-1 block">Theme</span>
               <ThemeChoice value={theme} onChange={setTheme} />
+            </div>
+            <div className="text-sm">
+              <span className="mb-1 block">When Tova opens</span>
+              <StartupChatChoice value={startupChat} onChange={setStartupChat} />
             </div>
             <label className="block text-sm">
               <span className="mb-1 block">Custom instructions</span>
