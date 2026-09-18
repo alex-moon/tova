@@ -96,7 +96,9 @@ export const classifyPromptDimensions = async (
   content: string,
 ): Promise<{ llm: LlmMetrics; skipReason: 'parse' | 'error' | null }> => {
   try {
-    const completion = await inferenceService.createCompletion({
+    // #77: tool-free agent — same rationale as the guard classifier
+    // (tool-rejecting small models, issue #41).
+    const completion = await inferenceService.createToolFreeCompletion({
       model: LLM_MODEL,
       messages: [{ role: 'user', content: `${LLM_PROMPT}\n\nPrompt: ${content.trim()}` }],
       temperature: 0,

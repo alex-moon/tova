@@ -159,7 +159,9 @@ export const routeQuery = async (
 
   // Tier 2: Guard model classification
   try {
-    const response = await inferenceService.createCompletion({
+    // #77: a tool-free agent — the guard model may reject tool-carrying
+    // requests entirely, and this call needs plain text only (issue #41).
+    const response = await inferenceService.createToolFreeCompletion({
       model: guardModel,
       messages: [
         {
