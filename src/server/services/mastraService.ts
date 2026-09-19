@@ -228,8 +228,7 @@ const traceOptionsFrom = (trace?: TraceContext) => ({
  * When the Brave key is unset the tool is not attached at all: the model
  * never sees it and plain chat behaves byte-identically to pre-#16.
  */
-const hasSearchKey = (): boolean =>
-  Boolean(process.env.BRAVE_API_KEY || process.env.BRAVE_SEARCH_API_KEY);
+const hasSearchKey = (): boolean => Boolean(process.env.BRAVE_SEARCH_API_KEY);
 
 export const webSearchTool = createTool({
   id: 'web_search',

@@ -1,7 +1,7 @@
 {
   "name": "tova",
   "version": "1.0.0",
-  "description": "Groq-focused chat application workspace",
+  "description": "Chat application with intelligent multi-provider model routing",
   "main": "dist/index.js",
   "scripts": {
     "build": "tsc -p tsconfig.json",
