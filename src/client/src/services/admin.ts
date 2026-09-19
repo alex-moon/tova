@@ -52,7 +52,13 @@ const AdminService = {
 
 export default AdminService;
 
-// Read-only model inventory (issue #33): no actions, list only.
+// Model inventory with CRUD (issue #104): list, create, update, delete
+// routing rows in the admin view. Mutations return the row id (POST/PUT) or
+// nothing (DELETE); callers refetch for the authoritative list.
+type ModelInput = Partial<Omit<AdminModel, 'id' | 'stats' | 'contextLength'>> & {
+  contextLength?: number | null;
+};
+
 const listModels = async (): Promise<AdminModel[]> => {
   try {
     const res = await axios.get<AdminModel[]>('/api/admin/models');
@@ -62,7 +68,33 @@ const listModels = async (): Promise<AdminModel[]> => {
   }
 };
 
-const AdminModelsService = { listModels };
+const createModel = async (payload: ModelInput): Promise<{ id: string }> => {
+  try {
+    const res = await axios.post<{ id: string }>('/api/admin/models', payload);
+    return res.data;
+  } catch (err) {
+    throw toAdminError(err, 'Failed to create model.');
+  }
+};
+
+const updateModel = async (id: string, payload: ModelInput): Promise<{ id: string }> => {
+  try {
+    const res = await axios.put<{ id: string }>(`/api/admin/models/${id}`, payload);
+    return res.data;
+  } catch (err) {
+    throw toAdminError(err, 'Failed to update model.');
+  }
+};
+
+const deleteModel = async (id: string): Promise<void> => {
+  try {
+    await axios.delete(`/api/admin/models/${id}`);
+  } catch (err) {
+    throw toAdminError(err, 'Failed to delete model.');
+  }
+};
+
+const AdminModelsService = { listModels, createModel, updateModel, deleteModel };
 
 export interface ListLogsParams {
   level?: 'info' | 'warn' | 'error';

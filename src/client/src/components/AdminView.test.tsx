@@ -8,6 +8,9 @@ const listUsers = vi.fn();
 const updatePermissions = vi.fn();
 const updateRole = vi.fn();
 const listModels = vi.fn();
+const createModel = vi.fn();
+const updateModel = vi.fn();
+const deleteModel = vi.fn();
 const listLogs = vi.fn();
 
 vi.mock('../services/admin', async (importOriginal) => {
@@ -19,7 +22,12 @@ vi.mock('../services/admin', async (importOriginal) => {
       updatePermissions: (...args: unknown[]) => updatePermissions(...args),
       updateRole: (...args: unknown[]) => updateRole(...args),
     },
-    AdminModelsService: { listModels: (...args: unknown[]) => listModels(...args) },
+    AdminModelsService: {
+      listModels: (...args: unknown[]) => listModels(...args),
+      createModel: (...args: unknown[]) => createModel(...args),
+      updateModel: (...args: unknown[]) => updateModel(...args),
+      deleteModel: (...args: unknown[]) => deleteModel(...args),
+    },
     AdminLogsService: { listLogs: (...args: unknown[]) => listLogs(...args) },
   };
 });
@@ -87,40 +95,109 @@ describe('AdminView', () => {
   });
 });
 
-describe('AdminView models table (issue #33)', () => {
+describe('AdminView models table (issue #33/#104)', () => {
   afterEach(cleanup);
+
+  const sampleRow = () => ({
+    id: 'r1',
+    provider: 'groq',
+    model: 'test-large',
+    tier: 'large',
+    eligible: true,
+    tools: true,
+    vision: false,
+    contextLength: 131072,
+    stats: [{ band: 'short|prose', up: 3, down: 1 }],
+  });
 
   beforeEach(() => {
     listUsers.mockReset().mockResolvedValue([admin()]);
     updatePermissions.mockReset().mockResolvedValue(admin());
     updateRole.mockReset().mockResolvedValue(admin());
+    updateModel.mockReset().mockResolvedValue({ id: 'r1' });
+    createModel.mockReset().mockResolvedValue({ id: 'r2' });
+    deleteModel.mockReset().mockResolvedValue(undefined);
   });
 
-  it('renders configured models as a read-only table', async () => {
-    listModels.mockResolvedValue([
-      {
-        id: 'groq/test-large',
-        provider: 'groq',
-        model: 'test-large',
-        tiers: ['large', 'guard'],
-        stats: [{ band: 'short|prose', up: 3, down: 1 }],
-      },
-    ]);
-    render(<AdminView />);
-    expect(await screen.findByTestId('admin-view')).toBeInTheDocument();
+  const setup = () => {
+    listModels.mockReset().mockResolvedValueOnce([sampleRow()]);
+    return render(<AdminView />);
+  };
+
+  it('renders configured models rows with tiers, context and feedback tallies', async () => {
+    setup();
+    await screen.findByTestId('admin-view');
     fireEvent.click(screen.getByTestId('admin-tab-models'));
     expect(await screen.findByTestId('admin-models')).toBeInTheDocument();
-    expect(screen.getByTestId('admin-model-groq/test-large')).toHaveTextContent('test-large');
-    expect(screen.getByTestId('admin-models')).toHaveTextContent('large, guard');
+    expect(screen.getByTestId('admin-model-r1')).toHaveTextContent('test-large');
+    expect(screen.getByTestId('admin-models')).toHaveTextContent('131,072');
     expect(screen.getByTestId('admin-models')).toHaveTextContent('short|prose: 3↑ 1↓');
     expect(screen.queryByText('Loading users...')).not.toBeInTheDocument();
   });
 
   it('shows an empty state when no models are configured', async () => {
-    listModels.mockResolvedValue([]);
+    listModels.mockReset().mockResolvedValue([]);
     render(<AdminView />);
     fireEvent.click(await screen.findByTestId('admin-tab-models'));
     expect(await screen.findByText('No models configured.')).toBeInTheDocument();
+  });
+
+  it('disables a model via the eligibility checkbox and refetches', async () => {
+    setup();
+    fireEvent.click(await screen.findByTestId('admin-tab-models'));
+    const checkbox = await screen.findByTestId('model-eligible-r1');
+    expect(checkbox).toBeChecked();
+    fireEvent.click(checkbox);
+    await waitFor(() => expect(updateModel).toHaveBeenCalledWith('r1', { eligible: false }));
+    await waitFor(() => expect(listModels).toHaveBeenCalledTimes(2));
+  });
+
+  it('deletes a model and refetches', async () => {
+    setup();
+    fireEvent.click(await screen.findByTestId('admin-tab-models'));
+    fireEvent.click(await screen.findByTestId('model-delete-r1'));
+    await waitFor(() => expect(deleteModel).toHaveBeenCalledWith('r1'));
+    await waitFor(() => expect(listModels).toHaveBeenCalledTimes(2));
+  });
+
+  it('edits an existing model through the inline form', async () => {
+    setup();
+    fireEvent.click(await screen.findByTestId('admin-tab-models'));
+    fireEvent.click(await screen.findByTestId('model-edit-r1'));
+    fireEvent.change(screen.getByTestId('model-form-model'), {
+      target: { value: 'renamed-model' },
+    });
+    fireEvent.click(screen.getByTestId('model-form-submit'));
+    await waitFor(() =>
+      expect(updateModel).toHaveBeenCalledWith(
+        'r1',
+        expect.objectContaining({ model: 'renamed-model', tier: 'large' }),
+      ),
+    );
+    expect(createModel).not.toHaveBeenCalled();
+  });
+
+  it('adds a new model through the inline form', async () => {
+    setup();
+    fireEvent.click(await screen.findByTestId('admin-tab-models'));
+    fireEvent.change(screen.getByTestId('model-form-model'), {
+      target: { value: 'org/new-model' },
+    });
+    fireEvent.change(screen.getByTestId('model-form-tier'), { target: { value: 'guard' } });
+    fireEvent.change(screen.getByTestId('model-form-context'), { target: { value: '131072' } });
+    fireEvent.click(screen.getByTestId('model-form-submit'));
+    await waitFor(() =>
+      expect(createModel).toHaveBeenCalledWith({
+        provider: 'deepinfra',
+        model: 'org/new-model',
+        tier: 'guard',
+        contextLength: 131072,
+        tools: true,
+        vision: false,
+      }),
+    );
+    await waitFor(() => expect(listModels).toHaveBeenCalledTimes(2));
+    expect(updateModel).not.toHaveBeenCalled();
   });
 });
 

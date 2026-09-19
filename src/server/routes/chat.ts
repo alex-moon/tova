@@ -12,6 +12,7 @@ import { hasPermission, ROUTING_PERMISSION } from '../services/userService';
 import { buildSystemContent } from '../services/promptAssembly';
 import { ensureUserLocation } from '../services/geoLocationService';
 import { inferenceService } from '../services/inferenceService';
+import { outputTokensFor, promptCharsFrom } from '../services/outputTokenCap';
 import type { NeutralStreamChunk } from '../services/llmTypes';
 import { classifyAndPersistPromptDimensions, isTriviallyNeutral } from '../services/metricsService';
 import { computeDeterministicMetrics } from '../services/promptMetrics';
@@ -302,6 +303,9 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
       messages,
       model: routingResult.model,
       provider: routingResult.provider,
+      // #104: always send an output-token budget so the provider cannot
+      // default it to the model's whole context window.
+      max_tokens: outputTokensFor(routingResult.contextLength, promptCharsFrom(messages)),
       userId,
       abortSignal: abortController.signal,
     });
@@ -442,6 +446,9 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
         messages,
         model: routingResult.model,
         provider: routingResult.provider,
+        // #104: always send an output-token budget so the provider cannot
+        // default it to the model's whole context window.
+        max_tokens: outputTokensFor(routingResult.contextLength, promptCharsFrom(messages)),
         userId,
         abortSignal: abortController.signal,
       });
