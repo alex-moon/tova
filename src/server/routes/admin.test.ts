@@ -242,15 +242,15 @@ describe('admin routes', () => {
       const cookie = await registerAdmin(app, 'models-admin@example.com');
 
       await ProviderRouting.create({
-        provider: 'groq',
+        provider: 'deepinfra',
         model: 'test-large',
-        tier: 'large',
+        tier: 'small',
         eligible: true,
       });
       await ProviderRouting.create({
-        provider: 'groq',
+        provider: 'deepinfra',
         model: 'test-large',
-        tier: 'guard',
+        tier: 'large',
         eligible: true,
       });
       await ModelMetricStat.findOneAndUpdate(
@@ -263,7 +263,7 @@ describe('admin routes', () => {
       expect(res.status).toBe(200);
       const large = res.body.find((m: { model: string }) => m.model === 'test-large') as
         Record<string, unknown> | undefined;
-      expect(large).toMatchObject({ provider: 'groq', tiers: ['large', 'guard'] });
+      expect(large).toMatchObject({ provider: 'deepinfra', tiers: ['small', 'large'] });
       expect(large?.stats).toEqual([{ band: 'short|prose', up: 3, down: 1 }]);
     });
   });

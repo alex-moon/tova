@@ -99,10 +99,10 @@ describe('AdminView models table (issue #33)', () => {
   it('renders configured models as a read-only table', async () => {
     listModels.mockResolvedValue([
       {
-        id: 'groq/test-large',
-        provider: 'groq',
+        id: 'deepinfra/test-large',
+        provider: 'deepinfra',
         model: 'test-large',
-        tiers: ['large', 'guard'],
+        tiers: ['small', 'large'],
         stats: [{ band: 'short|prose', up: 3, down: 1 }],
       },
     ]);
@@ -110,8 +110,8 @@ describe('AdminView models table (issue #33)', () => {
     expect(await screen.findByTestId('admin-view')).toBeInTheDocument();
     fireEvent.click(screen.getByTestId('admin-tab-models'));
     expect(await screen.findByTestId('admin-models')).toBeInTheDocument();
-    expect(screen.getByTestId('admin-model-groq/test-large')).toHaveTextContent('test-large');
-    expect(screen.getByTestId('admin-models')).toHaveTextContent('large, guard');
+    expect(screen.getByTestId('admin-model-deepinfra/test-large')).toHaveTextContent('test-large');
+    expect(screen.getByTestId('admin-models')).toHaveTextContent('small, large');
     expect(screen.getByTestId('admin-models')).toHaveTextContent('short|prose: 3↑ 1↓');
     expect(screen.queryByText('Loading users...')).not.toBeInTheDocument();
   });

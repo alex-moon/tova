@@ -12,7 +12,7 @@ const providerRoutingSchema = new mongoose.Schema({
   },
   tier: {
     type: String,
-    enum: ['small', 'large', 'guard'],
+    enum: ['small', 'large'],
     required: true,
   },
   eligible: {

@@ -5,12 +5,11 @@ import { muteConsoleError } from '../test/muteConsole';
 const TIER_ENV_VARS = {
   small: 'ROUTER_SMALL_MODEL',
   large: 'ROUTER_LARGE_MODEL',
-  guard: 'ROUTER_GUARD_MODEL',
 } as const;
 
 describe('Model Config Service', () => {
   describe('seeding', () => {
-    it('seeds DeepInfra completion pools plus the Groq guard on first read', async () => {
+    it('seeds DeepInfra completion pools on first read (#109: guard/groq rows gone)', async () => {
       const small = await listByTier('small');
       expect(small).toEqual(
         expect.arrayContaining([
@@ -69,23 +68,20 @@ describe('Model Config Service', () => {
           },
         ]),
       );
-      expect(await listByTier('guard')).toEqual([
-        { provider: 'groq', model: 'openai/gpt-oss-20b', tools: true, vision: false },
-      ]);
-      expect(await ProviderRouting.countDocuments()).toBe(8);
+      expect(await ProviderRouting.countDocuments()).toBe(7);
     });
 
-    it('completions never seed Groq rows (#94)', async () => {
+    it('completions never seed Groq rows and guard rows are gone (#94, #109)', async () => {
       await listByTier('small');
-      expect(await ProviderRouting.countDocuments({ provider: 'groq', tier: 'small' })).toBe(0);
-      expect(await ProviderRouting.countDocuments({ provider: 'groq', tier: 'large' })).toBe(0);
+      expect(await ProviderRouting.countDocuments({ provider: 'groq' })).toBe(0);
+      expect(await ProviderRouting.countDocuments({ tier: 'guard' })).toBe(0);
     });
 
     it('seeding is idempotent across repeated reads', async () => {
       await listByTier('small');
       await listByTier('large');
       await listByTier('small');
-      expect(await ProviderRouting.countDocuments()).toBe(8);
+      expect(await ProviderRouting.countDocuments()).toBe(7);
     });
   });
 
@@ -211,18 +207,6 @@ describe('Model Config Service', () => {
       const visionModels = (await listByTier('small', { vision: true })).map(({ model }) => model);
       expect(visionModels).toEqual(['google/gemma-3-4b-it']);
     });
-
-    it('a missing capability field rules nothing out under schema defaults', async () => {
-      await listByTier('guard');
-      const missingCaps = await ProviderRouting.findOne({ tier: 'guard' }).lean<{
-        tools?: boolean;
-      }>();
-      if (missingCaps && missingCaps.tools === undefined) {
-        expect(await listByTier('guard', { tools: true })).toEqual([
-          { provider: 'groq', model: 'openai/gpt-oss-20b' },
-        ]);
-      }
-    });
   });
 
   describe('eligible filtering', () => {
@@ -232,25 +216,12 @@ describe('Model Config Service', () => {
       const small = (await listByTier('small', { tools: true })) as ModelRef[];
       expect(small).toEqual([{ provider: 'deepinfra', model: 'openai/gpt-oss-20b' }]);
     });
-
-    it('falls back to env when all entries for a tier are ineligible', async () => {
-      await listByTier('guard');
-      process.env.ROUTER_GUARD_MODEL = 'env-guard-model';
-      await ProviderRouting.updateMany({ tier: 'guard' }, { eligible: false });
-      try {
-        expect(await listByTier('guard')).toEqual([
-          { provider: 'groq', model: 'env-guard-model', tools: true, vision: false },
-        ]);
-      } finally {
-        delete process.env.ROUTER_GUARD_MODEL;
-      }
-    });
   });
 
   describe('concurrent first reads', () => {
     it('survives concurrent seeding without duplicates or errors', async () => {
       await Promise.all([listByTier('small'), listByTier('small'), listByTier('small')]);
-      expect(await ProviderRouting.countDocuments()).toBe(8);
+      expect(await ProviderRouting.countDocuments()).toBe(7);
     });
   });
 });

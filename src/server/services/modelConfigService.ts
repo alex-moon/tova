@@ -1,6 +1,6 @@
 import { ProviderRouting } from '../models/ProviderRouting';
 
-export type ModelTier = 'small' | 'large' | 'guard';
+export type ModelTier = 'small' | 'large';
 
 export type ProviderName = 'groq' | 'deepinfra';
 
@@ -25,10 +25,8 @@ export interface ModelRef extends ModelCapabilities {
  * completion pools are resolved with `tools: true` — a row flagged
  * `tools: false` is ruled out deterministically. Guard/classifier/title/
  * followups run tool-free via `createToolFreeCompletion` and resolve pools
- * without capabilities (Groq's free-tier limits never matter there).
+ * without capabilities.
  */
-const GUARD_ENV: [envVar: string, fallback: string] = ['ROUTER_GUARD_MODEL', 'openai/gpt-oss-20b'];
-
 interface SeedEntry extends ModelRef {
   tier: ModelTier;
   eligible: boolean;
@@ -38,33 +36,24 @@ interface SeedEntry extends ModelRef {
 // Single source of truth for the env var and its default per tier, shared by
 // seeding and the env fallback so the two can never drift apart. Completion
 // tiers default to DeepInfra (#94: Groq is never used for completions — free
-// tier token limits mean tool use would never work); the guard tier stays
-// Groq, where small tool-free models have the biggest impact.
+// tier token limits mean tool use would never work).
 const DEFAULT_MODEL_ENV: Record<ModelTier, [envVar: string, fallback: string]> = {
   small: ['ROUTER_SMALL_MODEL', 'openai/gpt-oss-20b'],
   large: ['ROUTER_LARGE_MODEL', 'openai/gpt-oss-120b'],
-  guard: GUARD_ENV,
 };
 
 const envModel = ([envVar, fallback]: readonly [string, string]): string =>
   process.env[envVar] || fallback;
 
-const TIER_PROVIDER: Record<ModelTier, ProviderName> = {
-  small: 'deepinfra',
-  large: 'deepinfra',
-  guard: 'groq',
-};
-
 /*
  * Read at seed time (not module load) so env overrides set per-process are
  * honoured when the collection is first populated. Env overrides are seeded
- * with the tier's provider: `ROUTER_SMALL_MODEL`/`ROUTER_LARGE_MODEL` must
- * name DeepInfra models (completions never regress to Groq, #94), the guard
- * env names a Groq model.
+ * as DeepInfra refs: `ROUTER_SMALL_MODEL`/`ROUTER_LARGE_MODEL` must name
+ * DeepInfra models (completions never regress to Groq, #94).
  */
 const SEED_ENTRIES = (): SeedEntry[] => [
   {
-    provider: TIER_PROVIDER.small,
+    provider: 'deepinfra',
     model: envModel(DEFAULT_MODEL_ENV.small),
     tier: 'small',
     eligible: true,
@@ -89,7 +78,7 @@ const SEED_ENTRIES = (): SeedEntry[] => [
     contextLength: 40960,
   },
   {
-    provider: TIER_PROVIDER.large,
+    provider: 'deepinfra',
     model: envModel(DEFAULT_MODEL_ENV.large),
     tier: 'large',
     eligible: true,
@@ -119,12 +108,6 @@ const SEED_ENTRIES = (): SeedEntry[] => [
     eligible: true,
     tools: true,
     contextLength: 1048576,
-  },
-  {
-    provider: 'groq',
-    model: envModel(GUARD_ENV),
-    tier: 'guard',
-    eligible: true,
   },
 ];
 
@@ -161,11 +144,12 @@ const ensureSeed = async (): Promise<void> => {
 /*
  * Seeding stays an empty-pool recovery (per-process memos would fight test
  * and multi-worker workflows); upgrades get the new DeepInfra completion
- * pools through a migration (`remove-groq-completions-routings`) that also
- * sweeps the stale Groq rows — advertently not silently at runtime.
+ * pools through migrations (`remove-groq-completions-routings` for the
+ * completion tiers, then `remove-guard-groq-routings` for the guard tier and
+ * every remaining Groq row) — advertently not silently at runtime.
  */
 const fromEnv = (tier: ModelTier): ModelRef => ({
-  provider: TIER_PROVIDER[tier],
+  provider: 'deepinfra',
   model: envModel(DEFAULT_MODEL_ENV[tier]),
 });
 
