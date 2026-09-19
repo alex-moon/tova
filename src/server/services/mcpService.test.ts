@@ -270,8 +270,87 @@ describe('mcpService', () => {
 });
 
 describe('#77 MCP tool budget (user-scope toolsets)', () => {
+  let warnSpy: jest.SpyInstance | undefined;
   afterEach(() => {
     delete process.env.MCP_TOOL_BUDGET_TOKENS;
+    warnSpy?.mockRestore();
+    warnSpy = undefined;
+  });
+
+  it('#109: DeepInfra turns attach user tools unaudited — no budget, no warn', async () => {
+    // Default env (1500-token budget) yet every user tool attaches whole:
+    // the budget is a Groq-TPM mitigation, not a DeepInfra policy.
+    warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+    await McpServer.create({
+      scope: 'user',
+      userId: USER_ID,
+      name: 'github',
+      url: 'https://github.example.com/mcp',
+    });
+    mockListTools.mockResolvedValue({
+      tools: [
+        {
+          name: 'create_issue',
+          description: 'Create a new issue in a GitHub repository'.repeat(3),
+          inputSchema: { type: 'object', properties: { number: { type: 'string' } } },
+        },
+        { name: 'tiny', description: 'x', inputSchema: {} },
+        { name: 'fat', description: 'h'.repeat(4000), inputSchema: { type: 'object' } },
+      ],
+    });
+    const toolsets = await mcpToolsetsForUser(USER_ID, { provider: 'deepinfra' });
+    expect(Object.keys(toolsets.mcp_github)).toEqual(['create_issue', 'tiny', 'fat']);
+    expect(warnSpy).not.toHaveBeenCalled();
+  });
+
+  it('#109: an explicit MCP_TOOL_BUDGET_TOKENS override also applies to DeepInfra', async () => {
+    // Operator intent beats provider heuristics: the override forces the
+    // budget back on for every provider.
+    process.env.MCP_TOOL_BUDGET_TOKENS = '10';
+    warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+    await McpServer.create({
+      scope: 'user',
+      userId: USER_ID,
+      name: 'github',
+      url: 'https://github.example.com/mcp',
+    });
+    mockListTools.mockResolvedValue({
+      tools: [
+        {
+          name: 'create_issue',
+          description: 'Create a new issue in a GitHub repository'.repeat(3),
+          inputSchema: { type: 'object', properties: { number: { type: 'string' } } },
+        },
+      ],
+    });
+    const toolsets = await mcpToolsetsForUser(USER_ID, { provider: 'deepinfra' });
+    expect(toolsets).toEqual({});
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('dropped 1 user tool'));
+  });
+
+  it('#109: Groq turns keep the budget when the provider is tagged explicitly', async () => {
+    // Same setup as #77 cases, but via the new provider path rather than
+    // the un-tagged default.
+    process.env.MCP_TOOL_BUDGET_TOKENS = '10';
+    warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+    await McpServer.create({
+      scope: 'user',
+      userId: USER_ID,
+      name: 'github',
+      url: 'https://github.example.com/mcp',
+    });
+    mockListTools.mockResolvedValue({
+      tools: [
+        {
+          name: 'create_issue',
+          description: 'Create a new issue in a GitHub repository'.repeat(3),
+          inputSchema: { type: 'object', properties: { number: { type: 'string' } } },
+        },
+      ],
+    });
+    const toolsets = await mcpToolsetsForUser(USER_ID, { provider: 'groq' });
+    expect(toolsets).toEqual({});
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('dropped 1 user tool'));
   });
 
   it('#77: drops user tools beyond the token budget, attaches what fits', async () => {
