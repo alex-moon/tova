@@ -29,6 +29,11 @@ export interface RoutingResult {
    * path entries resolve to `groq` (they are seeded that way).
    */
   provider: LlmProvider;
+  /*
+   * Advertised context window of the picked model (#104): the chat routes
+   * size their `max_tokens` against it. Absent only for legacy pools.
+   */
+  contextLength?: number;
 }
 
 // Feedback-weighting injectables (issue #18): `band` is the deterministic
@@ -64,6 +69,13 @@ const epsilonFromEnv = (): number => {
  * consumes; no data for the band → no re-ordering, no suffix, pure ε pick.
  */
 const FEEDBACK_FLIP_RATIO = 1.25;
+
+// `RoutingResult.contextLength` rides only when the pool ref carries one (env
+// fallback refs do not) — never emit explicit `undefined` keys.
+const spreadRef = (modelRef: ModelRef): Omit<RoutingResult, 'model' | 'reason'> => ({
+  provider: modelRef.provider,
+  ...(modelRef.contextLength !== undefined ? { contextLength: modelRef.contextLength } : {}),
+});
 
 const orderPoolByFit = async (
   pool: ModelRef[],
@@ -154,7 +166,7 @@ export const routeQuery = async (
   // Rule 1: Short queries (greetings, simple confirmations)
   if (query.length < 20 && /^(hello|hi|hey|yes|no|ok|thanks|thank you)/i.test(query)) {
     const modelRef = pickModelRef(smallPoolRaw, 'small', epsilon, random);
-    return { model: modelRef.model, reason: 'deterministic-short', provider: modelRef.provider };
+    return { model: modelRef.model, reason: 'deterministic-short', ...spreadRef(modelRef) };
   }
 
   // Rule 2: Code blocks or explicit coding requests
@@ -165,7 +177,7 @@ export const routeQuery = async (
     /```/.test(query)
   ) {
     const modelRef = pickModelRef(largePool, 'large', epsilon, random);
-    return { model: modelRef.model, reason: 'deterministic-code', provider: modelRef.provider };
+    return { model: modelRef.model, reason: 'deterministic-code', ...spreadRef(modelRef) };
   }
 
   // Tier 2: Guard model classification
@@ -192,7 +204,7 @@ export const routeQuery = async (
       return {
         model: modelRef.model,
         reason: `classifier-complex${reasonSuffix}`,
-        provider: modelRef.provider,
+        ...spreadRef(modelRef),
       };
     }
   } catch (err) {
@@ -200,7 +212,7 @@ export const routeQuery = async (
     // Fallback to large model on error for safety (raw pool order — the
     // classifier is down, so its feedback weighting waits for a retry).
     const modelRef = pickModelRef(largePool, 'large', epsilon, random);
-    return { model: modelRef.model, reason: 'classifier-error', provider: modelRef.provider };
+    return { model: modelRef.model, reason: 'classifier-error', ...spreadRef(modelRef) };
   }
 
   const { pool, forced, reasonSuffix } = await orderPoolByFit(smallPoolRaw, band, readWeight);
@@ -208,6 +220,6 @@ export const routeQuery = async (
   return {
     model: modelRef.model,
     reason: `classifier-simple${reasonSuffix}`,
-    provider: modelRef.provider,
+    ...spreadRef(modelRef),
   };
 };

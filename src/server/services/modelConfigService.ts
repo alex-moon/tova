@@ -17,6 +17,12 @@ export interface ModelCapabilities {
 export interface ModelRef extends ModelCapabilities {
   provider: ProviderName;
   model: string;
+  /*
+   * Advertised context window (`providerroutings.contextLength`), carried so
+   * the completion path can size its output-token budget against the routed
+   * model (#104). Absent on the env fallback and on legacy rows.
+   */
+  contextLength?: number;
 }
 
 /*
