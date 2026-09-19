@@ -3,7 +3,7 @@ import { render, screen, fireEvent, cleanup, waitFor } from '@testing-library/re
 import { AuthContext } from '../context/AuthContext';
 import ProfileView from './ProfileView';
 import { AuthError } from '../services/auth';
-import { COOKIE_NAME } from '../theme';
+import { COOKIE_NAME, STORAGE_KEY } from '../theme';
 import { toast } from 'sonner';
 import type { User } from '../context/AuthContext';
 
@@ -121,6 +121,43 @@ describe('ProfileView (issue #95)', () => {
         customInstructions: '',
       }),
     );
+  });
+
+  it('patches confirmDeletes when a toggle moved and keeps unrelated edits out of it (#59)', async () => {
+    updateProfile.mockResolvedValue(user);
+    renderWithUser(user);
+
+    // Unchanged — a plain profile edit must not touch the pref.
+    fireEvent.click(screen.getByTestId('profile-save'));
+    await waitFor(() => expect(updateProfile).toHaveBeenCalled());
+    expect(updateProfile).toHaveBeenLastCalledWith({
+      preferredName: 'Al',
+      customInstructions: 'Be terse.',
+    });
+
+    fireEvent.click(screen.getByTestId('profile-confirm-delete-chat'));
+    fireEvent.click(screen.getByTestId('profile-save'));
+    await waitFor(() =>
+      expect(updateProfile).toHaveBeenLastCalledWith({
+        preferredName: 'Al',
+        customInstructions: 'Be terse.',
+        confirmDeletes: { chat: false, file: true },
+      }),
+    );
+  });
+
+  it('writes the theme mirror when a changed theme saves successfully (#95)', async () => {
+    updateProfile.mockResolvedValue(user);
+    localStorage.clear();
+    document.cookie = `${COOKIE_NAME}=;path=/;max-age=0`;
+    renderWithUser(user);
+
+    fireEvent.click(screen.getByTestId('theme-option-dark'));
+    fireEvent.click(screen.getByTestId('profile-save'));
+
+    await waitFor(() => expect(screen.getByTestId('profile-save')).toHaveTextContent(/^Save$/));
+    expect(document.cookie).toContain(`${COOKIE_NAME}=dark`);
+    expect(localStorage.getItem(STORAGE_KEY)).toBe('dark');
   });
 
   it('shows the API error and keeps the view open', async () => {
