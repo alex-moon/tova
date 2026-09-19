@@ -3,8 +3,11 @@ import { render, screen, fireEvent, cleanup, waitFor } from '@testing-library/re
 import { AuthContext } from '../context/AuthContext';
 import ProfileView from './ProfileView';
 import { AuthError } from '../services/auth';
-import type { User } from '../context/AuthContext';
 import { COOKIE_NAME } from '../theme';
+import { toast } from 'sonner';
+import type { User } from '../context/AuthContext';
+
+vi.mock('sonner', () => ({ toast: { success: vi.fn() } }));
 
 const updateProfile = vi.fn();
 
@@ -81,6 +84,16 @@ describe('ProfileView (issue #95)', () => {
       }),
     );
     expect(updateUser).toHaveBeenCalledWith(next);
+  });
+
+  it('stays on /profile and confirms with a toast after a successful save (#95)', async () => {
+    updateProfile.mockResolvedValue(user);
+    renderWithUser(user);
+
+    fireEvent.click(screen.getByTestId('profile-save'));
+
+    await waitFor(() => expect(vi.mocked(toast.success)).toHaveBeenCalledWith('Profile saved'));
+    expect(screen.getByTestId('profile-view')).toBeInTheDocument();
   });
 
   it('sends an empty string to clear a blanked field', async () => {
