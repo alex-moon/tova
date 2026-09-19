@@ -186,4 +186,91 @@ describe('Web Fetch Service', () => {
       await expect(fetchPage('https://example.com/bin')).resolves.toBeNull();
     });
   });
+
+  describe('redirect handling', () => {
+    const publicHost = () => {
+      (dns.promises.lookup as jest.Mock).mockResolvedValue([
+        { address: '93.184.216.34', family: 4 },
+      ]);
+    };
+    const redirectResponse = (location: string) => ({
+      ok: false,
+      status: 302,
+      headers: new Headers({ location }),
+      body: {},
+      text: () => Promise.resolve(''),
+    });
+
+    it('follows redirects and re-checks each hop', async () => {
+      publicHost();
+      (global.fetch as jest.Mock)
+        .mockResolvedValueOnce(redirectResponse('https://moved.example.com/finally'))
+        .mockResolvedValueOnce(okResponse('<html><title>Found</title></html>'));
+      await expect(fetchPage('https://example.com/here')).resolves.toEqual(
+        expect.objectContaining({ title: 'Found' }),
+      );
+      expect((global.fetch as jest.Mock).mock.calls[1][0]).toBe(
+        'https://moved.example.com/finally',
+      );
+    });
+
+    it('refuses a redirect that resolves to a private address', async () => {
+      (dns.promises.lookup as jest.Mock)
+        .mockResolvedValueOnce([{ address: '93.184.216.34', family: 4 }])
+        .mockResolvedValueOnce([{ address: '10.0.0.7', family: 4 }]);
+      (global.fetch as jest.Mock).mockResolvedValueOnce(redirectResponse('http://10.0.0.7/here'));
+      await expect(fetchPage('https://example.com/rebind')).rejects.toThrow('private address');
+      expect(global.fetch).not.toHaveBeenCalled(); // target host checked before any fetch
+    });
+
+    it('refuses a redirect to a non-http scheme', async () => {
+      publicHost();
+      (global.fetch as jest.Mock).mockResolvedValueOnce(redirectResponse('file:///etc/passwd'));
+      await expect(fetchPage('https://example.com/escape')).rejects.toThrow(
+        'unsupported redirect scheme',
+      );
+    });
+
+    it('gives up after too many redirects', async () => {
+      publicHost();
+      (global.fetch as jest.Mock).mockImplementation(() =>
+        Promise.resolve(redirectResponse('/next-hop')),
+      );
+      await expect(fetchPage('https://example.com/loop')).rejects.toThrow('too many redirects');
+      expect(global.fetch).toHaveBeenCalledTimes(6);
+    });
+
+    it('rejects a 3xx response with no location header', async () => {
+      publicHost();
+      (global.fetch as jest.Mock).mockResolvedValueOnce(redirectResponse(''));
+      await expect(fetchPage('https://example.com/lost')).rejects.toThrow('no location header');
+    });
+  });
+
+  describe('streaming size cap', () => {
+    it('stops reading a body that streams past the cap', async () => {
+      (dns.promises.lookup as jest.Mock).mockResolvedValue([
+        { address: '93.184.216.34', family: 4 },
+      ]);
+      const encoder = new TextEncoder();
+      let cancelled = false;
+      const infiniteStream = {
+        getReader: () => ({
+          read: () => Promise.resolve({ done: false, value: encoder.encode('x'.repeat(10_000)) }),
+          cancel: jest.fn(() => {
+            cancelled = true;
+            return Promise.resolve();
+          }),
+        }),
+        cancel: undefined,
+      };
+      (global.fetch as jest.Mock).mockResolvedValue({
+        ...okResponse('unused'),
+        body: infiniteStream,
+      });
+      const page = await fetchPage('https://example.com/eternal');
+      expect(page?.content).toHaveLength(8_000);
+      expect(cancelled).toBe(true); // stream cancelled as soon as the cap was hit
+    });
+  });
 });

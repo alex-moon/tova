@@ -96,15 +96,46 @@ const assertPublicHost = async (rawHostname: string): Promise<void> => {
   }
 };
 
+// Truncate without splitting a surrogate pair (emoji, CJK), which would
+// corrupt the tail of the prompt text.
+const safeSlice = (text: string, max: number): string =>
+  /[\uD800-\uDBFF]/.test(text.slice(max - 1, max)) ? text.slice(0, max - 1) : text.slice(0, max);
+
+// Stream the body to a real cap: response.text() would buffer an
+// arbitrarily large page before we could slice it, so read the stream and
+// stop as soon as the budget is exceeded.
 const readBodyCapped = async (response: Response): Promise<string> => {
   const declared = Number(response.headers.get('content-length') ?? 0);
   if (declared > MAX_BODY_CHARS) {
     throw new Error(`page too large: content-length ${declared} exceeds cap`);
   }
-  const text = await response.text();
-  if (text.length > MAX_BODY_CHARS) return text.slice(0, MAX_BODY_CHARS);
+  const body = response.body as ReadableStream<Uint8Array> | null;
+  if (!body || typeof body.getReader !== 'function') {
+    return safeSlice(await response.text(), MAX_BODY_CHARS);
+  }
+  const reader = body.getReader() as ReadableStreamDefaultReader<Uint8Array>;
+  const decoder = new TextDecoder('utf-8');
+  let text = '';
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      text += decoder.decode(value, { stream: true });
+      if (text.length > MAX_BODY_CHARS) {
+        void reader.cancel().catch(() => undefined);
+        return safeSlice(text, MAX_BODY_CHARS);
+      }
+    }
+  } finally {
+    text += decoder.decode();
+  }
   return text;
 };
+
+// Each hop is re-checked against the SSRF guard (the plan's fallback rule),
+// so a redirect to a private host is refused instead of followed.
+const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
+const MAX_REDIRECTS = 5;
 
 const titleOf = (html: string, fallback: string): string => {
   const match = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
@@ -129,19 +160,41 @@ export const fetchPage = async (url: string): Promise<FetchedPage | null> => {
   }
   await assertPublicHost(parsed.hostname);
 
-  const response = await fetch(parsed.toString(), {
-    headers: {
-      Accept: 'text/html, text/plain, application/json;q=0.9, */*;q=0.5',
-      'User-Agent': BROWSER_UA,
-    },
-    redirect: 'follow',
-    signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
-  }).catch((err: unknown) => {
-    const message = err instanceof Error ? err.message : String(err);
-    throw new Error(`fetch failed: ${message}`);
-  });
-  if (!response.ok) throw new Error(`HTTP ${response.status} fetching ${parsed.hostname}`);
-  if (!response.body) throw new Error(`no response body from ${parsed.hostname}`);
+  const requestOnce = (target: URL): Promise<Response> =>
+    fetch(target.toString(), {
+      headers: {
+        Accept: 'text/html, text/plain, application/json;q=0.9, */*;q=0.5',
+        'User-Agent': BROWSER_UA,
+      },
+      redirect: 'manual',
+      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+    }).catch((err: unknown) => {
+      const message = err instanceof Error ? err.message : String(err);
+      throw new Error(`fetch failed: ${message}`);
+    });
+
+  let target = parsed;
+  let response: Response | undefined;
+  for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
+    await assertPublicHost(target.hostname);
+    response = await requestOnce(target);
+    if (REDIRECT_STATUSES.has(response.status)) {
+      const location = response.headers.get('location');
+      if (!location) throw new Error(`redirect from ${target.hostname} has no location header`);
+      target = new URL(location, target);
+      if (target.protocol !== 'http:' && target.protocol !== 'https:') {
+        throw new Error(`unsupported redirect scheme: ${target.protocol}`);
+      }
+      if (hop === MAX_REDIRECTS) {
+        throw new Error(`too many redirects fetching ${parsed.hostname} (limit ${MAX_REDIRECTS})`);
+      }
+    } else {
+      break;
+    }
+  }
+  if (!response) throw new Error(`fetch did not run for ${parsed.hostname}`);
+  if (!response.ok) throw new Error(`HTTP ${response.status} fetching ${target.hostname}`);
+  if (!response.body) throw new Error(`no response body from ${target.hostname}`);
 
   const contentType = (response.headers.get('content-type') ?? '').toLowerCase();
   const body = await readBodyCapped(response);
@@ -150,10 +203,13 @@ export const fetchPage = async (url: string): Promise<FetchedPage | null> => {
   if (contentType.includes('text/html') || contentType.includes('application/xhtml')) {
     const markdown = htmlToMarkdown(body).replace(/\r\n/g, '\n').trim();
     if (!markdown) throw new Error(`conversion produced empty markdown for ${parsed.hostname}`);
-    return { title: titleOf(body, parsed.toString()), content: markdown.slice(0, MAX_FETCH_CHARS) };
+    return {
+      title: titleOf(body, target.toString()),
+      content: safeSlice(markdown, MAX_FETCH_CHARS),
+    };
   }
   if (contentType.includes('text/plain') || contentType.includes('application/json')) {
-    return { title: parsed.toString(), content: body.trim().slice(0, MAX_FETCH_CHARS) };
+    return { title: target.toString(), content: safeSlice(body.trim(), MAX_FETCH_CHARS) };
   }
   return null;
 };
