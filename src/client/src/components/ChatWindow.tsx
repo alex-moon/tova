@@ -94,12 +94,12 @@ const MarkdownLink = ({ href, children }: { href?: string; children?: React.Reac
 // Favicons come from the public s2 service (third-party request, accepted in
 // the issue); a failed load simply hides the image.
 const SourceItem: React.FC<{ url: string; title?: string }> = ({ url, title }) => (
-  <li>
+  <li className="shrink-0">
     <a
       href={url}
       target="_blank"
       rel="noopener noreferrer"
-      className="inline-flex items-center gap-1.5 text-sm text-primary underline-offset-2 hover:text-primary-hover hover:underline"
+      className="inline-flex max-w-full items-center gap-1.5 text-sm text-primary underline-offset-2 hover:text-primary-hover hover:underline"
     >
       <img
         src={`https://www.google.com/s2/favicons?domain=${hostOf(url)}&sz=32`}
@@ -110,7 +110,7 @@ const SourceItem: React.FC<{ url: string; title?: string }> = ({ url, title }) =
           e.currentTarget.style.display = 'none';
         }}
       />
-      <span className="truncate">{title || url}</span>
+      <span className="max-w-48 truncate whitespace-nowrap">{title || url}</span>
     </a>
   </li>
 );
@@ -130,7 +130,7 @@ const SourcesBlock: React.FC<{ message: Message }> = ({ message }) => {
   return (
     <div data-testid="sources-block" className="mt-2 px-4 text-muted-foreground md:px-5">
       <div className="mb-1 text-xs font-medium uppercase tracking-wide">Sources</div>
-      <ul className="space-y-1">
+      <ul className="flex gap-3 overflow-x-auto">
         {visibleUrls.map((url) => (
           <SourceItem key={url} url={url} title={titles.find((t) => t.url === url)?.title} />
         ))}
@@ -140,7 +140,7 @@ const SourcesBlock: React.FC<{ message: Message }> = ({ message }) => {
           type="button"
           data-testid="sources-show-all"
           onClick={() => setExpanded(true)}
-          className="mt-1 text-xs underline hover:text-foreground"
+          className="mt-1 shrink-0 text-xs underline hover:text-foreground"
         >
           Show all {urls.length} sources
         </button>
@@ -148,7 +148,7 @@ const SourcesBlock: React.FC<{ message: Message }> = ({ message }) => {
         <button
           type="button"
           onClick={() => setExpanded(false)}
-          className="mt-1 text-xs underline hover:text-foreground"
+          className="mt-1 shrink-0 text-xs underline hover:text-foreground"
         >
           Show fewer sources
         </button>
@@ -225,13 +225,13 @@ const FollowupChips: React.FC<{ suggestions: string[]; onPick: (value: string) =
   onPick,
 }) =>
   suggestions.length > 0 ? (
-    <div className="mb-2 flex flex-wrap gap-2" data-testid="suggestion-chips">
+    <div className="mb-2 flex flex-nowrap gap-2 overflow-x-auto" data-testid="suggestion-chips">
       {suggestions.map((s) => (
         <button
           key={s}
           type="button"
           onClick={() => onPick(s)}
-          className="rounded-full border border-border bg-muted px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:border-primary hover:bg-accent hover:text-accent-foreground focus-visible:outline-2 focus-visible:outline-primary"
+          className="shrink-0 whitespace-nowrap rounded-full border border-border bg-muted px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:border-primary hover:bg-accent hover:text-accent-foreground focus-visible:outline-2 focus-visible:outline-primary"
         >
           {s}
         </button>
@@ -244,10 +244,10 @@ const MessageContent: React.FC<{ content: string; markdown: boolean }> = ({
   markdown,
 }) => {
   if (!markdown) {
-    return <>{content}</>;
+    return <div className="min-w-0 break-words">{content}</div>;
   }
   return (
-    <div className="markdown-body">
+    <div className="markdown-body min-w-0 break-words [&_pre]:max-w-full [&_pre]:overflow-x-auto">
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         rehypePlugins={[rehypeRaw, rehypeSanitize]}
@@ -405,7 +405,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
       <div
         ref={scrollRef}
         onScroll={handleScroll}
-        className="flex flex-1 flex-col overflow-y-auto px-3 py-4 md:px-6 md:py-6"
+        className="flex min-w-0 flex-1 flex-col overflow-x-hidden overflow-y-auto px-3 py-4 md:px-6 md:py-6"
       >
         {messages.length === 0 && !isLoading && (
           <div className="animate-message-in mx-auto my-auto max-w-full text-center">
@@ -448,26 +448,26 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
           .map((msg) => (
             <div key={msg._id} className="animate-message-in">
               {msg.isError ? (
-                <div className="mb-4 max-w-[92%] self-start rounded-lg rounded-bl-sm border border-destructive/40 bg-destructive/10 px-3 py-2.5 text-sm text-destructive md:mb-6 md:max-w-[85%] md:px-4 md:py-3">
+                <div className="mb-4 max-w-[92%] min-w-0 self-start rounded-lg rounded-bl-sm border border-destructive/40 bg-destructive/10 px-3 py-2.5 text-sm break-words text-destructive md:mb-6 md:max-w-[85%] md:px-4 md:py-3">
                   {msg.content}
                 </div>
               ) : msg.role === 'user' ? (
-                <div className="mb-4 flex flex-col items-end md:mb-6">
+                <div className="mb-4 flex min-w-0 flex-col items-end md:mb-6">
                   {msg.assetFilename && (
                     <span
-                      className="mb-1 inline-flex items-center gap-1 rounded-full border border-border bg-muted px-2 py-0.5 text-xs text-muted-foreground"
+                      className="mb-1 inline-flex max-w-[92%] min-w-0 items-center gap-1 rounded-full border border-border bg-muted px-2 py-0.5 text-xs text-muted-foreground"
                       data-testid="message-attachment-chip"
                     >
                       <Paperclip className="size-3" aria-hidden />
-                      {msg.assetFilename ?? 'Attached file'}
+                      <span className="truncate">{msg.assetFilename ?? 'Attached file'}</span>
                     </span>
                   )}
-                  <div className="max-w-[92%] rounded-lg rounded-br-sm border border-primary/25 bg-msg-user px-4 py-3 md:max-w-[85%] md:px-5 md:py-4">
+                  <div className="max-w-[92%] min-w-0 rounded-lg rounded-br-sm border border-primary/25 bg-msg-user px-4 py-3 break-words md:max-w-[85%] md:px-5 md:py-4">
                     <MessageContent content={msg.content} markdown={false} />
                   </div>
                 </div>
               ) : (
-                <div className="mb-6 max-w-[92%] md:mb-8 md:max-w-[85%]">
+                <div className="mb-6 min-w-0 max-w-[92%] md:mb-8 md:max-w-[85%]">
                   <div className="mb-1 flex items-center gap-1.5 text-xs text-muted-foreground">
                     <span className="flex size-5 items-center justify-center rounded-full bg-primary text-[10px] font-semibold text-primary-foreground">
                       <img src="/tova-logo.png" alt="Tova" className="size-5 rounded-full" />
