@@ -25,8 +25,10 @@ jest.mock('@mastra/core/agent', () => ({
 
 jest.mock('./modelConfigService', () => ({
   listByTier: jest.fn(),
+  completionsPoolFor: jest.fn(),
 }));
-const mockListByTier = jest.requireMock('./modelConfigService').listByTier as jest.Mock;
+const mockCompletionsPoolFor = jest.requireMock('./modelConfigService')
+  .completionsPoolFor as jest.Mock;
 
 const mockAgentCtor = jest.requireMock('@mastra/core/agent').Agent as jest.Mock;
 
@@ -343,22 +345,22 @@ describe('Router Service', () => {
 
   describe('DB-config routing (#4 task 7)', () => {
     it('resolves tier pools from modelConfigService when no config is passed', async () => {
-      mockListByTier.mockImplementation(async (tier: string) =>
+      mockCompletionsPoolFor.mockImplementation(async (tier: string) =>
         tier === 'small'
           ? [groqSmall, { provider: 'deepinfra', model: 'gemma-test' }]
           : [groqLarge],
       );
       classifyAs('simple');
       const result = await routeQuery('Tell me about classic cars', null, () => 0.9);
-      expect(mockListByTier).toHaveBeenCalledWith('small');
-      expect(mockListByTier).toHaveBeenCalledWith('large');
+      expect(mockCompletionsPoolFor).toHaveBeenCalledWith('small');
+      expect(mockCompletionsPoolFor).toHaveBeenCalledWith('large');
       expect(result.model).toBe('gemma-test');
       expect(result.reason).toBe('classifier-simple');
       expect(result.provider).toBe('deepinfra');
     });
 
-    it('fails loudly when the DB-config tier resolves empty (#4 G)', async () => {
-      mockListByTier.mockResolvedValue([]);
+    it('fails loudly when the completions pool resolves empty (#4 G, #94)', async () => {
+      mockCompletionsPoolFor.mockResolvedValue([]);
       await expect(routeQuery('Hello')).rejects.toThrow('No eligible models configured for tier');
     });
   });
