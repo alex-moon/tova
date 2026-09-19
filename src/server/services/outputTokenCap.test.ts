@@ -30,6 +30,14 @@ describe('outputTokenCap', () => {
       expect(outputTokensFor(undefined, 0)).toBe(8192);
       process.env.CHAT_MAX_OUTPUT_TOKENS = '0';
       expect(outputTokensFor(undefined, 0)).toBe(8192);
+      process.env.CHAT_MAX_OUTPUT_TOKENS = '-5';
+      expect(outputTokensFor(undefined, 0)).toBe(8192);
+    });
+
+    it('clamps a too-large env base down to the window budget', () => {
+      process.env.CHAT_MAX_OUTPUT_TOKENS = '200000';
+      // ceil(12737/4)=3185; 40960-3185-512 = 37263.
+      expect(outputTokensFor(40960, 12737)).toBe(40960 - 3185 - 512);
     });
 
     it('clamps the base to a small model window minus the prompt estimate and slack', () => {
