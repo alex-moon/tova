@@ -258,7 +258,8 @@ const sanitizeToolsetKey = (name: string): string =>
  * provider tag (un-tagged callers default to `groq` inside
  * `inferenceService`, so this matches their effective behaviour). An
  * explicit `MCP_TOOL_BUDGET_TOKENS` operator override forces the budget on
- * all providers; `0` disables it fully on every provider.
+ * all providers; `0` drops every user tool on every provider (empty-string
+ * or invalid values fall back to the 1500 default).
  */
 export const budgetAppliesFor = (provider?: LlmProvider): boolean => {
   if (process.env.MCP_TOOL_BUDGET_TOKENS !== undefined) return true;
