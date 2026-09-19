@@ -4,14 +4,14 @@ This repository keeps shared, agent-agnostic project coordination documents in `
 
 ### Project intent
 
-`Tova` is building a Groq-focused chat application with:
+`Tova` is building a chat application with:
 
 - authenticated users
 - persistent chat sessions stored in MongoDB
-- an intelligent router that selects Groq models based on prompt complexity
+- an intelligent router that selects models based on prompt complexity
 - a React frontend served through a unified local development experience
 
-In short: it is aiming to be an application-layer “Heroku for Groq” with a built-in chat product.
+In short: it is aiming to be an application-layer service for inference providers with a built-in chat product.
 
 ### Documentation structure
 
