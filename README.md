@@ -5,7 +5,7 @@ Tova is a Groq-primary chat application: authenticated users, persistent MongoDB
 ## Features
 
 - **Intelligent Routing**: Model pools (not fixed pairs) are resolved from MongoDB per tier (`small`, `large`, `guard`); a fast guard-model classifier and deterministic rules pick the tier, feedback weighting re-orders the pool.
-- **Tool-calling Agent**: Chat runs through a Mastra agent loop with optional `web_search` (Brave Search API), user-scoped MCP server tools, and asset tools (list/read/write files). The SSE stream emits structured `tool` call/result events.
+- **Tool-calling Agent**: Chat runs through a Mastra agent loop with optional `web_search` (Brave Search API), the current time (`current_datetime`), user-scoped MCP server tools, and asset tools (`list_files`, `read_file`, `generate_file`). The SSE stream emits structured `tool` call/result events.
 - **Persistent Chat**: Session-based chat history in MongoDB, with per-message routing `metrics` and feedback-driven model fit statistics, followup suggestions, and auto-generated session titles.
 - **Asset Library**: File uploads to DigitalOcean Spaces with presigned uploads/downloads, text extraction for documents, and per-message attachments.
 - **MCP Servers**: Per-user MCP server CRUD; auth tokens are encrypted at rest with AES-256-GCM (`MCP_ENCRYPTION_KEY`).
