@@ -192,6 +192,43 @@ describe('Message content links (issue #33)', () => {
   });
 });
 
+describe('Horizontal overflow (issue #118)', () => {
+  afterEach(cleanup);
+
+  const overflow = (el: Element) => /overflow-x-auto|overflow-x-hidden/.test(el.className);
+
+  it('scrolls the chat container horizontally only via overflow-x-hidden', () => {
+    renderChat([base()]);
+    const scroller = document.querySelector('.overflow-y-auto');
+    expect(scroller).not.toBeNull();
+    expect(overflow(scroller!)).toBe(true);
+    expect(scroller!.className).toContain('overflow-x-hidden');
+  });
+
+  it('renders the sources block as a single horizontally scrollable strip', () => {
+    renderChat([base({ sources: ['https://a.example.com', 'https://b.example.com'] })]);
+    const ul = screen.getByTestId('sources-block').querySelector('ul')!;
+    expect(ul.className).toContain('flex');
+    expect(overflow(ul)).toBe(true);
+    for (const li of ul.querySelectorAll('li')) {
+      expect(li.className).toContain('shrink-0');
+    }
+  });
+
+  it('renders follow-up chips as one non-wrapping scrollable row', () => {
+    renderChat([
+      { _id: 'u1', role: 'user', content: 'question' },
+      { _id: 'm1', role: 'assistant', content: 'answer', suggestions: ['a', 'b'] },
+    ]);
+    const chips = screen.getAllByTestId('suggestion-chips')[0];
+    expect(chips.className).toContain('flex-nowrap');
+    expect(overflow(chips)).toBe(true);
+    for (const btn of chips.querySelectorAll('button')) {
+      expect(btn.className).toContain('shrink-0');
+    }
+  });
+});
+
 describe('Composer placeholder (issue #41)', () => {
   afterEach(cleanup);
 
