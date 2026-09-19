@@ -68,6 +68,14 @@ describe('Web Fetch Service', () => {
       expect(global.fetch).not.toHaveBeenCalled();
     });
 
+    it('refuses localhost resolving to loopback (real pasted-URL case)', async () => {
+      (dns.promises.lookup as jest.Mock).mockResolvedValue([{ address: '127.0.0.1', family: 4 }]);
+      await expect(fetchPage('http://localhost:3000/admin')).rejects.toThrow(
+        'resolving to a private address',
+      );
+      expect(global.fetch).not.toHaveBeenCalled();
+    });
+
     it('refuses hostnames that resolve to a private address', async () => {
       (dns.promises.lookup as jest.Mock).mockResolvedValue([
         { address: '93.184.216.34', family: 4 },
@@ -244,6 +252,21 @@ describe('Web Fetch Service', () => {
       publicHost();
       (global.fetch as jest.Mock).mockResolvedValueOnce(redirectResponse(''));
       await expect(fetchPage('https://example.com/lost')).rejects.toThrow('no location header');
+    });
+  });
+
+  describe('surrogate-safe truncation', () => {
+    it('does not split an emoji pair straddling the 8k cut', async () => {
+      (dns.promises.lookup as jest.Mock).mockResolvedValue([
+        { address: '93.184.216.34', family: 4 },
+      ]);
+      // 'a' x7999 puts the surrogate pair exactly on the 8000-char boundary.
+      const body = 'a'.repeat(7_999) + '😀';
+      (global.fetch as jest.Mock).mockResolvedValue(okResponse(body, 'text/plain'));
+      const page = await fetchPage('https://example.com/emoji');
+      expect(page?.content.length).toBe(7_999);
+      expect(page?.content).not.toMatch(/[\uD800-\uDFFF]/); // no lone surrogates
+      expect(page?.content.startsWith('a')).toBe(true);
     });
   });
 
