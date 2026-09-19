@@ -13,10 +13,7 @@ export interface SearchResult {
 // return [] as "no results". The chat turn must never fail because of the
 // search provider; that guarantee now lives in the tool wrapper.
 export const webSearch = async (query: string): Promise<SearchResult[]> => {
-  // Canonical name per owner decision on issue #16 is BRAVE_SEARCH_API_KEY;
-  // BRAVE_API_KEY is still accepted (read first) for forward compatibility
-  // with pre-rename environments, pinned by a unit test.
-  const apiKey = process.env.BRAVE_API_KEY || process.env.BRAVE_SEARCH_API_KEY;
+  const apiKey = process.env.BRAVE_SEARCH_API_KEY;
   if (!apiKey) return [];
   // An empty query (malformed tool arguments fall back to '') would hit the
   // API pointlessly; treat it as "no results" without spending quota.

@@ -1,6 +1,6 @@
 # Tova
 
-Tova is a Groq-primary chat application: authenticated users, persistent MongoDB-backed chat sessions, and an intelligent router that picks the best model for each prompt from eligible model pools spanning Groq and DeepInfra — with a built-in tool-calling agent, an asset library, and per-user MCP extensions. Think of it as an application-layer "Heroku for Groq".
+Tova is a chat application with authenticated users, persistent MongoDB-backed chat sessions, and an intelligent router that picks the best model for each prompt from eligible multi-provider model pools — with a built-in tool-calling agent, an asset library, and per-user MCP extensions. Think of it as an application layer that puts model routing, tools, and storage behind a single chat product.
 
 ## Features
 
@@ -10,7 +10,7 @@ Tova is a Groq-primary chat application: authenticated users, persistent MongoDB
 - **Asset Library**: File uploads to DigitalOcean Spaces with presigned uploads/downloads, text extraction for documents, and per-message attachments.
 - **MCP Servers**: Per-user MCP server CRUD; auth tokens are encrypted at rest with AES-256-GCM (`MCP_ENCRYPTION_KEY`).
 - **Optional Observability**: LangSmith tracing of every LLM call (agent → step → inference → llm) when configured.
-- **Secure Auth**: JWT-based authentication with HTTP-only cookies, plus optional Google sign-in.
+- **Secure Auth**: JWT-based authentication with HTTP-only cookies, plus Google sign-in.
 - **Modern UI**: React chat interface with drag-drop asset panel and markdown rendering.
 
 Optional features degrade gracefully: unset env keys simply disable the feature (no search tool, no asset library, no tracing), plain chat keeps working.
@@ -23,7 +23,7 @@ Backing services (MongoDB) run in Docker Compose; the backend and frontend run d
 
 - Node.js (v22+) and npm
 - Docker with the Compose plugin (for MongoDB only)
-- A Groq API key
+- Provider API keys: Groq (routing/classifier) and the Google OAuth credentials described below
 
 ### Setup
 
@@ -33,7 +33,7 @@ Backing services (MongoDB) run in Docker Compose; the backend and frontend run d
    npm run install:all
    ```
 
-2. **Configure environment** — copy `.env.example` to `.env` in the repo root (it is the canonical list). Required: `GROQ_API_KEY`, `JWT_SECRET`, `MONGODB_PASSWORD`. Optional per feature: `BRAVE_SEARCH_API_KEY` (web search tool), `DO_SPACES_KEY`/`DO_SPACES_SECRET`/`DO_SPACES_BUCKET`/`DO_SPACES_REGION` (asset library), `MCP_ENCRYPTION_KEY` (MCP servers with auth headers), `LANGSMITH_API_KEY` + `LANGCHAIN_PROJECT` (tracing), `ADMIN_PASSWORD` (default `admin`).
+2. **Configure environment** — copy `.env.example` to `.env` in the repo root (it is the canonical list). Required: `GROQ_API_KEY`, `JWT_SECRET`, `MONGODB_PASSWORD`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_CALLBACK_URL`. Optional per feature: `BRAVE_SEARCH_API_KEY` (web search tool), `DO_SPACES_KEY`/`DO_SPACES_SECRET`/`DO_SPACES_BUCKET`/`DO_SPACES_REGION` (asset library), `MCP_ENCRYPTION_KEY` (MCP servers with auth headers), `LANGSMITH_API_KEY` + `LANGCHAIN_PROJECT` (tracing), `ADMIN_PASSWORD` (default `admin`).
 3. **Start the stack** (MongoDB in Docker)
 
    ```bash
@@ -67,7 +67,7 @@ Admin password comes from `ADMIN_PASSWORD` in `.env` (defaults to `admin` — ch
 
 ### Google sign-in
 
-"Continue with Google" is optional and guarded by three vars that are not in `.env.example`: `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, and `GOOGLE_CALLBACK_URL`. Without them, Google sign-in is simply unavailable. Register a Google OAuth client (Web application) with authorized redirect URI `http://localhost:5173/api/auth/google/callback` for dev and `https://<prod-host>/api/auth/google/callback` for prod. If the email already exists, the Google identity is linked to that user; otherwise a new user is created (without the `routing` permission).
+Required: set `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, and `GOOGLE_CALLBACK_URL` in `.env` (see `/.env.example` for where to get them). "Continue with Google" is unavailable while any of the three is unset. Register a Google OAuth client (Web application) with authorized redirect URI `http://localhost:5173/api/auth/google/callback` for dev and `https://<prod-host>/api/auth/google/callback` for prod. If the email already exists, the Google identity is linked to that user; otherwise a new user is created (without the `routing` permission).
 
 ### Individual commands
 
@@ -107,7 +107,7 @@ Routing picks a tier, then a model:
 
 Per-band/model up/down feedback (`/api/feedback`) is aggregated into fit weights; when a pool's leader exceeds the `FEEDBACK_FLIP_RATIO` margin, it is forced into the pick, otherwise the pool is ε-shuffled. Empty pools fail loudly rather than falling back silently.
 
-Inference runs through Mastra connectors. Groq is the primary provider (the guard classifier always rides Groq); per #94, completions default to DeepInfra models — Groq's free-tier token limits make tool-heavy completion use impractical there. Chat responses carry `routing` metadata, and the SSE stream emits `meta`, `tool` (call and result), `delta`, `error`, and `done` events. See `docs/overview.md` for the product-level detail.
+Inference runs through Mastra connectors across multiple providers; per #94, completions default to DeepInfra models, while the routing classifier's guard model rides a Groq small-tier model. Chat responses carry `routing` metadata, and the SSE stream emits `meta`, `tool` (call and result), `delta`, `error`, and `done` events. See `docs/overview.md` for the product-level detail.
 
 ## Optional Integrations
 
