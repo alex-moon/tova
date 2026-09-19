@@ -270,6 +270,82 @@ describe('Chat streaming route', () => {
     expect(done?.data.sourceTitles).toHaveLength(3);
   });
 
+  it('emits structured tool events when the agent calls fetch_url and persists the fetched page (#113)', async () => {
+    const cookies = await registerUser('stream-fetch-url@example.com');
+    // A pasted URL turn: the agent fetches the link via `fetch_url`, which
+    // mirrors web_search's `{ results: [...] }` shape so the same provenance
+    // extraction persists the fetched URL + page title as a source.
+    mockAgentStream.mockImplementation(async () => ({
+      fullStream: (async function* () {
+        yield {
+          type: 'tool-call',
+          payload: {
+            toolName: 'fetch_url',
+            args: { url: 'https://example.com/groq-docs' },
+          },
+        };
+        yield {
+          type: 'tool-result',
+          payload: {
+            toolName: 'fetch_url',
+            result: {
+              results: [
+                {
+                  title: 'Groq docs',
+                  snippet: 'Fetched page content…',
+                  url: 'https://example.com/groq-docs',
+                },
+              ],
+            },
+          },
+        };
+        yield { type: 'text-delta', payload: { text: 'Here is the page summary…' } };
+      })(),
+    }));
+
+    const app = createApp();
+    const response = await request(app)
+      .post('/api/chat/stream')
+      .set('Cookie', cookies)
+      .send({ content: 'summarise https://example.com/groq-docs' });
+
+    expect(response.status).toBe(200);
+    const events = response.text
+      .split('\n\n')
+      .filter((part) => part.trim().length > 0)
+      .map((part) => {
+        const eventLine = part.split('\n').find((l) => l.startsWith('event: '));
+        const dataLine = part.split('\n').find((l) => l.startsWith('data: '));
+        return {
+          event: eventLine?.slice(7),
+          data: dataLine ? JSON.parse(dataLine.slice(6)) : undefined,
+        };
+      });
+    const toolEvents = events.filter((e) => e.event === 'tool');
+    expect(toolEvents).toHaveLength(2);
+    expect(toolEvents[0].data).toMatchObject({
+      phase: 'call',
+      name: 'fetch_url',
+      label: 'Fetched the page',
+    });
+    expect(toolEvents[1].data).toMatchObject({
+      phase: 'result',
+      name: 'fetch_url',
+      status: 'ok',
+      resultCount: 1,
+      domains: ['example.com'],
+    });
+    const persisted = await Message.findOne({ role: 'assistant' });
+    expect(persisted?.sources).toEqual(['https://example.com/groq-docs']);
+    expect(persisted?.toObject().sourceTitles).toEqual([
+      { url: 'https://example.com/groq-docs', title: 'Groq docs' },
+    ]);
+    const done = events.find((e) => e.event === 'done');
+    expect(done?.data.sourceTitles).toEqual([
+      { url: 'https://example.com/groq-docs', title: 'Groq docs' },
+    ]);
+  });
+
   it('emits an empty-status tool result when the search returns nothing', async () => {
     const cookies = await registerUser('stream-search-empty@example.com');
     mockAgentStream.mockImplementation(async () => ({
