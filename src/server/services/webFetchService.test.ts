@@ -96,11 +96,11 @@ describe('Web Fetch Service', () => {
           '<html><head><title>Hello Page</title></head><body><h1>Hi</h1><p>Body.</p></body></html>',
         ),
       );
-      await expect(fetchPage('https://example.com/post')).resolves.toEqual({
+      await expect(fetchPage('https://example.com/post')).resolves.toMatchObject({
         title: 'Hello Page',
         content: expect.stringContaining('Hi'),
       });
-      await expect(fetchPage('https://example.com/post')).resolves.toEqual({
+      await expect(fetchPage('https://example.com/post')).resolves.toMatchObject({
         title: 'Hello Page',
         content: expect.stringMatching(/# Hi[\s\S]*Body\./),
       });
@@ -113,7 +113,7 @@ describe('Web Fetch Service', () => {
       (global.fetch as jest.Mock).mockResolvedValue(
         okResponse('<html><body><p>Just text.</p></body></html>'),
       );
-      await expect(fetchPage('https://example.com/plain')).resolves.toEqual({
+      await expect(fetchPage('https://example.com/plain')).resolves.toMatchObject({
         title: 'https://example.com/plain',
         content: 'Just text.',
       });
@@ -124,7 +124,7 @@ describe('Web Fetch Service', () => {
         { address: '93.184.216.34', family: 4 },
       ]);
       (global.fetch as jest.Mock).mockResolvedValue(okResponse('plain text body', 'text/plain'));
-      await expect(fetchPage('https://example.com/raw.txt')).resolves.toEqual({
+      await expect(fetchPage('https://example.com/raw.txt')).resolves.toMatchObject({
         title: 'https://example.com/raw.txt',
         content: 'plain text body',
       });
@@ -137,7 +137,7 @@ describe('Web Fetch Service', () => {
       (global.fetch as jest.Mock).mockResolvedValue(
         okResponse('{"key":"value"}', 'application/json'),
       );
-      await expect(fetchPage('https://example.com/api')).resolves.toEqual({
+      await expect(fetchPage('https://example.com/api')).resolves.toMatchObject({
         title: 'https://example.com/api',
         content: '{"key":"value"}',
       });

@@ -9,6 +9,9 @@ import { htmlToMarkdown } from './markdownConversion';
 // wrapper owns graceful degradation (#82 pattern).
 
 export interface FetchedPage {
+  // The URL the page was actually fetched from (after redirects), so tool
+  // consumers can attribute the content and surface provenance.
+  url: string;
   title: string;
   content: string;
 }
@@ -204,12 +207,17 @@ export const fetchPage = async (url: string): Promise<FetchedPage | null> => {
     const markdown = htmlToMarkdown(body).replace(/\r\n/g, '\n').trim();
     if (!markdown) throw new Error(`conversion produced empty markdown for ${parsed.hostname}`);
     return {
+      url: target.toString(),
       title: titleOf(body, target.toString()),
       content: safeSlice(markdown, MAX_FETCH_CHARS),
     };
   }
   if (contentType.includes('text/plain') || contentType.includes('application/json')) {
-    return { title: target.toString(), content: safeSlice(body.trim(), MAX_FETCH_CHARS) };
+    return {
+      url: target.toString(),
+      title: target.toString(),
+      content: safeSlice(body.trim(), MAX_FETCH_CHARS),
+    };
   }
   return null;
 };
