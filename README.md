@@ -1,10 +1,10 @@
 # Tova
 
-Tova is an intelligent model router and chat interface for Groq LLMs. Think of it as "Heroku for Groq".
+Tova is an intelligent model router and chat interface for LLMs: Groq serves the fast, cheap auxiliary tasks (routing, classification, summarisation, follow-up suggestions) while DeepInfra frontier models handle chat completions. Think of it as the application layer over Groq and DeepInfra.
 
 ## Features
 
-- **Intelligent Routing**: Automatically selects between small (Llama 3 8B) and large (Llama 3 70B) models based on query complexity.
+- **Intelligent Routing**: Automatically selects between small and large DeepInfra models based on query complexity, with capability matching (tool use, vision) so unsuitable models are ruled out deterministically.
 - **Persistent Chat**: Session-based chat history stored in MongoDB.
 - **Secure Auth**: JWT-based authentication with HTTP-only cookies.
 - **Modern UI**: Semantic React-based chat interface.
@@ -17,7 +17,8 @@ Backing services (MongoDB) run in Docker Compose; the backend and frontend run d
 
 - Node.js (v22+) and npm
 - Docker with the Compose plugin (for MongoDB only)
-- A Groq API key
+- A Groq API key (routing and auxiliary tasks)
+- A DeepInfra API key (chat completions)
 
 ### Setup
 
@@ -55,7 +56,7 @@ Backing services (MongoDB) run in Docker Compose; the backend and frontend run d
 7. **Test end to end**
    - Open http://localhost:5173
    - Log in with the admin email from step 4. Password: `ADMIN_PASSWORD` from `.env` (default `admin`).
-   - Send a chat message. You get a reply from a Groq model.
+   - Send a chat message. You get a reply from a DeepInfra model; Groq runs the routing and auxiliary tasks behind the scenes.
 
 Admin password comes from `ADMIN_PASSWORD` in `.env` (defaults to `admin` — change it before seeding a shared environment). The seeded user (`formsatz@gmail.com`) has `role: admin` and the `routing` permission.
 
@@ -85,7 +86,7 @@ Admin password comes from `ADMIN_PASSWORD` in `.env` (defaults to `admin` — ch
 `docker-compose.live.yml` runs everything in containers: MongoDB, backend, and frontend, as a self-contained deployment.
 
 ```bash
-JWT_SECRET=your_secret_key GROQ_API_KEY=your_key docker compose -f docker-compose.live.yml up
+JWT_SECRET=your_secret_key GROQ_API_KEY=your_groq_key DEEPINFRA_API_KEY=your_deepinfra_key docker compose -f docker-compose.live.yml up
 ```
 
 - Frontend: http://localhost:5173

@@ -1,4 +1,5 @@
-import { MigrationInterface, Db } from 'mongo-migrate-ts';
+import { MigrationInterface } from 'mongo-migrate-ts';
+import { Db } from 'mongodb';
 
 /*
  * #94: Groq must never serve completions — free-tier token limits mean tool
@@ -13,6 +14,13 @@ import { MigrationInterface, Db } from 'mongo-migrate-ts';
  * lengths are the advertised limits. Model ids are pinned literal here (the
  * migration cannot read tier env overrides; a deployment overriding
  * ROUTER_SMALL_MODEL/ROUTER_LARGE_MODEL keeps its DB-side rows anyway).
+ *
+ * The guard tier is swept too (#94 follow-up 2026-09-19): the pre-branch
+ * default `groq/allam-2-7b` is deprecated (absent from Groq's production
+ * list). Guard rows are only read, never updated at runtime, and the app
+ * reseeds a tier from `ROUTER_GUARD_MODEL` when its pool becomes empty — so
+ * deleting all guard rows here both removes the stale default and lets each
+ * deployment's own env value re-enter through `ensureSeed` on first aux call.
  */
 const DEEPINFRA_COMPLETIONS_ROWS: {
   model: string;
@@ -38,8 +46,9 @@ export class RemoveGroqCompletionsRoutings implements MigrationInterface {
     const routings = db.collection('providerroutings');
     await routings.deleteMany({
       provider: 'groq',
-      tier: { $in: ['small', 'large'] },
+      tier: { $in: ['small', 'large', 'guard'] },
     });
+    await routings.deleteMany({ tier: 'guard' });
     for (const { model, tier, vision, contextLength } of DEEPINFRA_COMPLETIONS_ROWS) {
       const row: Record<string, unknown> = {
         provider: 'deepinfra',
@@ -66,9 +75,17 @@ export class RemoveGroqCompletionsRoutings implements MigrationInterface {
       provider: 'deepinfra',
       tier: { $in: ['small', 'large'] },
     });
+    await routings.deleteMany({ tier: 'guard' });
     await routings.insertMany([
       { provider: 'groq', model: 'openai/gpt-oss-20b', tier: 'small', eligible: true },
       { provider: 'groq', model: 'openai/gpt-oss-120b', tier: 'large', eligible: true },
+      {
+        // Pre-branch guard default; runtime reseeding handles env overrides.
+        provider: 'groq',
+        model: 'allam-2-7b',
+        tier: 'guard',
+        eligible: true,
+      },
     ]);
   }
 }
