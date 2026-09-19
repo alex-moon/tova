@@ -83,8 +83,9 @@ Admin password comes from `ADMIN_PASSWORD` in `.env` (defaults to `admin` — ch
 | `npm run build`                          | Compile backend TypeScript to `dist/`                                |
 | `npm run build:client`                   | Build the frontend bundle                                            |
 | `npm start`                              | Start the built backend from `dist/index.js`                         |
-| `npm test`                               | Run the backend Jest suite                                           |
-| `npm run lint` / `lint:fix`              | ESLint over `src/` and `migrations/`                                 |
+| `npm test`                               | Run the backend Jest suite (also run via `test:server`)              |
+| `npm run test:e2e`                       | Run the Playwright e2e suite (`e2e/`)                                |
+| `npm run lint` / `lint:fix`              | ESLint over `src/` and `migrations/`; `fix` lint-fixes + formats     |
 | `npm run format` / `format:check`        | Prettier over the repo                                               |
 | `npm run typecheck`                      | TypeScript, no emit                                                  |
 | `npm run ci`                             | Full gate: lint, format, typecheck, tests, client checks + build     |
