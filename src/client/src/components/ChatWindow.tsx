@@ -455,11 +455,11 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
                 <div className="mb-4 flex min-w-0 flex-col items-end md:mb-6">
                   {msg.assetFilename && (
                     <span
-                      className="mb-1 inline-flex items-center gap-1 rounded-full border border-border bg-muted px-2 py-0.5 text-xs text-muted-foreground"
+                      className="mb-1 inline-flex max-w-[92%] min-w-0 items-center gap-1 rounded-full border border-border bg-muted px-2 py-0.5 text-xs text-muted-foreground"
                       data-testid="message-attachment-chip"
                     >
                       <Paperclip className="size-3" aria-hidden />
-                      {msg.assetFilename ?? 'Attached file'}
+                      <span className="truncate">{msg.assetFilename ?? 'Attached file'}</span>
                     </span>
                   )}
                   <div className="max-w-[92%] min-w-0 rounded-lg rounded-br-sm border border-primary/25 bg-msg-user px-4 py-3 break-words md:max-w-[85%] md:px-5 md:py-4">

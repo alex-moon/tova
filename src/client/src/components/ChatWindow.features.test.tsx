@@ -227,6 +227,20 @@ describe('Horizontal overflow (issue #118)', () => {
       expect(btn.className).toContain('shrink-0');
     }
   });
+
+  it('truncates a long attachment filename inside the user bubble', () => {
+    renderChat([
+      {
+        _id: 'u1',
+        role: 'user',
+        content: 'question',
+        assetFilename: 'a'.repeat(300) + '.png',
+      },
+    ]);
+    const chip = screen.getByTestId('message-attachment-chip');
+    expect(chip.className).toContain('max-w-[92%]');
+    expect(chip.querySelector('span')!.className).toContain('truncate');
+  });
 });
 
 describe('Composer placeholder (issue #41)', () => {
