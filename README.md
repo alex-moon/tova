@@ -93,7 +93,7 @@ Required: set `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, and `GOOGLE_CALLBACK_U
 
 ## Live (all-in-Docker) Workflow
 
-`npm run deploy` pushes and runs the full containerized stack on the configured server via `scripts/deploy.sh`: it SSHes to `SSH_HOST` (default baked into the script, override with e.g. `SSH_HOST=user@host npm run deploy`) and sets the app up under `/opt/tova`, where `.env` (modeled on `.env.example`) is loaded by `docker-compose.live.yml`. The compose file runs MongoDB, backend (port 5000), and frontend (port 5173) as one self-contained deployment.
+`npm run deploy` pushes and runs the full containerized stack on the configured server via `scripts/deploy.sh`: it SSHes to `SSH_HOST` (default baked into the script, override with e.g. `SSH_HOST=user@host npm run deploy`) and sets the app up under `/opt/tova`, where `.env` (modeled on `.env.example`) is loaded by `docker-compose.live.yml`. The compose file runs MongoDB, backend, and frontend as one self-contained deployment. On the host, the backend is reachable at port `15000` (container port 5000) and the frontend at port `15173` (container port 4173); the deployed Google OAuth callback must therefore use the frontend host port.
 
 `docker-compose.local.yml` is the MongoDB-only file used by the local workflow above.
 
