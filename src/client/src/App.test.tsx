@@ -80,6 +80,16 @@ describe('App', () => {
     window.history.pushState({}, '', '/');
   });
 
+  it('renders the profile view at the /profile route', async () => {
+    mockMe('user');
+    window.history.pushState({}, '', '/profile');
+    renderApp();
+    expect(await screen.findByTestId('profile-view')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Back to chat' }).getAttribute('href')).toBe('/');
+    expect(screen.queryByRole('link', { name: 'Admin' })).not.toBeInTheDocument();
+    window.history.pushState({}, '', '/');
+  });
+
   it('falls back to the chat view for non-admins at /admin', async () => {
     mockMe('user');
     window.history.pushState({}, '', '/admin');
