@@ -7,6 +7,8 @@ import Sidebar from './components/Sidebar';
 import ChatWindow from './components/ChatWindow';
 import Login from './components/Login';
 import AdminView from './components/AdminView';
+import ProfileView from './components/ProfileView';
+import BackToChatLink from './components/BackToChatLink';
 
 export interface ToolEvent {
   phase: 'call' | 'result';
@@ -50,9 +52,16 @@ export function isAdminRoute() {
   return typeof window !== 'undefined' && window.location.pathname.startsWith('/admin');
 }
 
+// Profile has the same separate-URL view treatment as admin (issue #95);
+// both helpers sit together for the deferred app-wide router ticket.
+export function isProfileRoute() {
+  return typeof window !== 'undefined' && window.location.pathname.startsWith('/profile');
+}
+
 function App() {
   const { user, loading } = useAuth();
   const showAdminView = isAdminRoute();
+  const showProfileView = isProfileRoute();
   const [sessions, setSessions] = useState<Session[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -324,16 +333,14 @@ function App() {
   return (
     <main className="relative flex h-dvh w-full overflow-hidden">
       <Toaster position="bottom-center" richColors />
-      {showAdminView && user.role === 'admin' ? (
+      {showProfileView ? (
         <>
-          <div className="absolute right-4 top-4 z-10 flex flex-col items-start gap-2">
-            <a
-              href="/"
-              className="text-sm text-muted-foreground underline-offset-4 transition-colors hover:text-foreground hover:underline"
-            >
-              Back to chat
-            </a>
-          </div>
+          <BackToChatLink />
+          <ProfileView />
+        </>
+      ) : showAdminView && user.role === 'admin' ? (
+        <>
+          <BackToChatLink />
           <AdminView />
         </>
       ) : (
