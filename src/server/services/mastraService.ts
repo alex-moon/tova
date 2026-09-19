@@ -186,7 +186,7 @@ const modelSettingsFrom = (options: CompletionOptions) => ({
  */
 const mcpToolsetsFrom = async (options: CompletionOptions) => {
   if (!options.userId) return {};
-  const toolsets = await mcpToolsetsForUser(options.userId);
+  const toolsets = await mcpToolsetsForUser(options.userId, { provider: options.provider });
   return Object.keys(toolsets).length ? { toolsets } : {};
 };
 

@@ -7,6 +7,7 @@ import mongoose from 'mongoose';
 import { z } from 'zod';
 import type { McpServerDocument } from '../models/McpServer';
 import { McpServer } from '../models/McpServer';
+import type { LlmProvider } from './llmTypes';
 import { decryptEnvelope } from './crypto';
 import {
   degradedToolError,
@@ -248,7 +249,21 @@ const sanitizeToolsetKey = (name: string): string =>
  * as an estimate (serialized description + input schema at ~4 chars/token).
  * Tools attach in order until the budget is spent; tools that do not fit are
  * logged and dropped, and chat continues degraded, never failed.
+ *
+ * Provider awareness (#109): since #94 completions never route to Groq by
+ * default — DeepInfra models have handled full MCP tool lists without issue —
+ * so on `deepinfra` turns the budget is not applied at all and every user
+ * tool attaches unaudited. The 1500 default still applies to `groq` turns
+ * (the enum keeps the provider for guard paths) and to turns with no
+ * provider tag (un-tagged callers default to `groq` inside
+ * `inferenceService`, so this matches their effective behaviour). An
+ * explicit `MCP_TOOL_BUDGET_TOKENS` operator override forces the budget on
+ * all providers; `0` disables it fully on every provider.
  */
+export const budgetAppliesFor = (provider?: LlmProvider): boolean => {
+  if (process.env.MCP_TOOL_BUDGET_TOKENS !== undefined) return true;
+  return provider !== 'deepinfra';
+};
 const toolTokenBudget = (): number => {
   const parsed = Number.parseInt(process.env.MCP_TOOL_BUDGET_TOKENS ?? '1500', 10);
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : 1500;
@@ -272,9 +287,15 @@ const estimateToolTokens = (toolInfo: McpToolInfo): number =>
  */
 export const mcpToolsetsForUser = async (
   userId?: string,
+  options?: { provider?: LlmProvider },
 ): Promise<Record<string, Record<string, ReturnType<typeof createTool>>>> => {
   const now = Date.now();
-  const cacheKey = userId ?? '__anon__';
+  const budgetApplies = budgetAppliesFor(options?.provider);
+  /* The cache key includes the budget flag so a Groq turn and a DeepInfra
+   * turn for the same user inside one TTL window cannot share a mis-budgeted
+   * resolution (a race the plain userId key would expose, plan #109).
+   * Behaviourally identical tools either way; only the audit differs. */
+  const cacheKey = `${userId ?? '__anon__'}|budget:${budgetApplies}`;
   const cached = serversCache.get(cacheKey);
   if (cached && cached.expiresAt > now) return cached.promise;
 
@@ -312,9 +333,11 @@ export const mcpToolsetsForUser = async (
       let acceptedInServer = 0;
       for (const toolInfo of entry.tools) {
         if (tools[toolInfo.name]) continue;
-        if (entry.server.scope === 'user') {
+        if (budgetApplies && entry.server.scope === 'user') {
           // Budget applies to user-raised toolsets only; platform toolsets
-          // are curated by the deployment itself.
+          // are curated by the deployment itself. On DeepInfra turns
+          // (#109) the audit is skipped entirely: every user tool attaches
+          // with no counting and no drop warn.
           const cost = estimateToolTokens(toolInfo);
           if (budgetRemaining - cost < 0) {
             droppedTools += toolCount - acceptedInServer;
