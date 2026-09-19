@@ -50,50 +50,200 @@ router.get('/users', ...adminGuard, async (_req, res) => {
   }
 });
 
-// Read-only model inventory (issue #33): every configured routing model with
-// the tiers it serves and its captured feedback tallies per band. Read
-// errors degrade to empty lists; the view shows a 'no data' state instead of
-// failing admin.
+/*
+ * Model inventory with CRUD (issue #104). Each row is one `providerroutings`
+ * document (a provider/model pair can repeat across tiers); `stats` carries
+ * the feedback tallies captured in ModelMetricStat for the model name.
+ * Read errors degrade to empty lists; the view shows a 'no data' state.
+ */
+const PROVIDER_SET = ['groq', 'deepinfra'] as const;
+const TIER_SET = ['small', 'large', 'guard'] as const;
+
+type ProviderRow = {
+  provider: string;
+  model: string;
+  tier: string;
+  eligible: boolean;
+  tools?: boolean;
+  vision?: boolean;
+  contextLength?: number;
+  _id: mongoose.Types.ObjectId;
+};
+
+interface ModelMutation {
+  model?: string;
+  tier?: string;
+  provider?: string;
+  eligible?: boolean;
+  tools?: boolean;
+  vision?: boolean;
+  contextLength?: number | null;
+}
+
+const isProvided = (v: unknown): boolean =>
+  v !== undefined && v !== null && v !== '' && v !== false;
+
+/*
+ * Validates a create/update payload against the ProviderRouting schema and
+ * returns just the whitelisted fields, or a 400 message. `forUpdate` only
+ * rejects fields in the payload; omitted fields mean "leave unchanged".
+ */
+const validateModelMutation = (
+  body: unknown,
+  forUpdate: boolean,
+): ModelMutation | { error: string } => {
+  if (!body || typeof body !== 'object') {
+    return { error: 'Body must be an object' };
+  }
+  const b = body as Record<string, unknown>;
+  const out: ModelMutation = {};
+  if (b.provider !== undefined) {
+    if (typeof b.provider !== 'string' || !PROVIDER_SET.includes(b.provider as 'groq')) {
+      return { error: 'Invalid provider' };
+    }
+    out.provider = b.provider;
+  } else if (!forUpdate) {
+    return { error: 'provider is required' };
+  }
+  if (b.model !== undefined) {
+    if (typeof b.model !== 'string' || !b.model.trim()) return { error: 'Invalid model' };
+    out.model = b.model.trim();
+  } else if (!forUpdate) {
+    return { error: 'model is required' };
+  }
+  if (b.tier !== undefined) {
+    if (typeof b.tier !== 'string' || !TIER_SET.includes(b.tier as 'small')) {
+      return { error: 'Invalid tier' };
+    }
+    out.tier = b.tier;
+  } else if (!forUpdate) {
+    return { error: 'tier is required' };
+  }
+  if (b.eligible !== undefined) {
+    if (typeof b.eligible !== 'boolean') return { error: 'eligible must be a boolean' };
+    out.eligible = b.eligible;
+  }
+  for (const flag of ['tools', 'vision'] as const) {
+    if (b[flag] !== undefined) {
+      if (typeof b[flag] !== 'boolean') return { error: `${flag} must be a boolean` };
+      out[flag] = b[flag];
+    }
+  }
+  if (b.contextLength !== undefined && isProvided(b.contextLength)) {
+    const n = Number(b.contextLength);
+    if (!Number.isInteger(n) || n <= 0) return { error: 'Invalid contextLength' };
+    out.contextLength = n;
+  } else if (forUpdate && (b.contextLength === '' || b.contextLength === null)) {
+    // `null` (not `undefined`) so mongoose passes the clear through: update
+    // casting silently drops undefined keys.
+    out.contextLength = null;
+  }
+  if (forUpdate) {
+    const allowed = new Set([
+      'provider',
+      'model',
+      'tier',
+      'eligible',
+      'tools',
+      'vision',
+      'contextLength',
+    ]);
+    if (Object.keys(b).some((k) => !allowed.has(k))) {
+      return { error: 'Unknown field' };
+    }
+  }
+  return out;
+};
+
+const duplicateModelError = (err: unknown): boolean =>
+  err instanceof mongoose.mongo.MongoServerError && err.code === 11000;
+
 router.get('/models', ...adminGuard, async (_req, res) => {
   try {
     const [routes, stats] = await Promise.all([
       ProviderRouting.find({}).lean(),
       ModelMetricStat.find({}).lean(),
     ]);
-    const byKey = new Map<
-      string,
-      {
-        id: string;
-        provider: string;
-        model: string;
-        tiers: string[];
-        stats: { band: string; up: number; down: number }[];
-      }
-    >();
-    for (const route of routes as { provider: string; model: string; tier: string }[]) {
-      const key = `${route.provider}/${route.model}`;
-      const existing = byKey.get(key);
-      if (existing) {
-        if (!existing.tiers.includes(route.tier)) existing.tiers.push(route.tier);
-      } else {
-        byKey.set(key, {
-          id: key,
-          provider: route.provider,
-          model: route.model,
-          tiers: [route.tier],
-          stats: [],
-        });
-      }
-    }
+    const statMap = new Map<string, { band: string; up: number; down: number }[]>();
     for (const stat of stats as { band: string; modelName: string; up: number; down: number }[]) {
-      const entry = [...byKey.values()].find((m) => m.model === stat.modelName);
-      if (entry) {
-        entry.stats.push({ band: stat.band, up: stat.up ?? 0, down: stat.down ?? 0 });
-      }
+      const list = statMap.get(stat.modelName) ?? [];
+      list.push({ band: stat.band, up: stat.up ?? 0, down: stat.down ?? 0 });
+      statMap.set(stat.modelName, list);
     }
-    res.json([...byKey.values()]);
+    res.json(
+      ((routes ?? []) as unknown as ProviderRow[]).map((route) => ({
+        id: String(route._id),
+        provider: route.provider,
+        model: route.model,
+        tier: route.tier,
+        eligible: route.eligible,
+        tools: route.tools !== false,
+        vision: route.vision === true,
+        contextLength: route.contextLength,
+        stats: [...(statMap.get(route.model) ?? [])],
+      })),
+    );
   } catch (_err) {
     res.status(500).json({ message: 'Error listing models' });
+  }
+});
+
+router.post('/models', ...adminGuard, async (req, res) => {
+  const payload = validateModelMutation(req.body, false);
+  if ('error' in payload) {
+    return res.status(400).json({ message: payload.error });
+  }
+  try {
+    const doc = await ProviderRouting.create({
+      provider: payload.provider,
+      model: payload.model,
+      tier: payload.tier,
+      ...(payload.eligible !== undefined ? { eligible: payload.eligible } : {}),
+      ...(payload.tools !== undefined ? { tools: payload.tools } : {}),
+      ...(payload.vision !== undefined ? { vision: payload.vision } : {}),
+      ...(payload.contextLength !== undefined ? { contextLength: payload.contextLength } : {}),
+    });
+    res.status(201).json({ id: doc.id });
+  } catch (err) {
+    if (duplicateModelError(err)) {
+      return res.status(409).json({ message: 'A routing row already exists for this model' });
+    }
+    res.status(500).json({ message: 'Error creating model' });
+  }
+});
+
+router.put('/models/:id', ...adminGuard, async (req, res) => {
+  const id = String(req.params.id);
+  if (!mongoose.isValidObjectId(id)) {
+    return res.status(404).json({ message: 'Model not found' });
+  }
+  const payload = validateModelMutation(req.body, true);
+  if ('error' in payload) {
+    return res.status(400).json({ message: payload.error });
+  }
+  try {
+    const doc = await ProviderRouting.findByIdAndUpdate(id, payload, { new: true });
+    if (!doc) return res.status(404).json({ message: 'Model not found' });
+    res.json({ id: doc.id });
+  } catch (err) {
+    if (duplicateModelError(err)) {
+      return res.status(409).json({ message: 'A routing row already exists for this model' });
+    }
+    res.status(500).json({ message: 'Error updating model' });
+  }
+});
+
+router.delete('/models/:id', ...adminGuard, async (req, res) => {
+  const id = String(req.params.id);
+  if (!mongoose.isValidObjectId(id)) {
+    return res.status(404).json({ message: 'Model not found' });
+  }
+  try {
+    const doc = await ProviderRouting.findByIdAndDelete(id);
+    if (!doc) return res.status(404).json({ message: 'Model not found' });
+    res.status(204).end();
+  } catch (_err) {
+    res.status(500).json({ message: 'Error deleting model' });
   }
 });
 

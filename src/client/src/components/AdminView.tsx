@@ -49,10 +49,95 @@ const AdminView = () => {
     try {
       const res = await AdminModelsService.listModels();
       setModels(res);
+      setError(null);
     } catch (err) {
       setError(err instanceof AdminError ? err.message : 'Something went wrong.');
     }
   }, []);
+
+  // CRUD for routing rows (issue #104). Mutations refetch the authoritative
+  // list rather than trusting the (id-only) response bodies.
+  const [editingModelId, setEditingModelId] = useState<string | null>(null);
+  const [form, setForm] = useState<{
+    provider: string;
+    model: string;
+    tier: string;
+    contextLength: string;
+    tools: boolean;
+    vision: boolean;
+  }>({
+    provider: 'deepinfra',
+    model: '',
+    tier: 'small',
+    contextLength: '',
+    tools: true,
+    vision: false,
+  });
+
+  const formDataFor = (m: AdminModel) => ({
+    provider: m.provider,
+    model: m.model,
+    tier: m.tier as string,
+    contextLength: m.contextLength === undefined ? '' : String(m.contextLength),
+    tools: m.tools,
+    vision: m.vision,
+  });
+
+  const startEdit = (m: AdminModel) => {
+    setEditingModelId(m.id);
+    setForm(formDataFor(m));
+  };
+
+  const submitForm = async () => {
+    const payload = {
+      provider: form.provider,
+      model: form.model,
+      tier: form.tier as AdminModel['tier'],
+      ...(form.contextLength ? { contextLength: Number(form.contextLength) } : {}),
+      tools: form.tools,
+      vision: form.vision,
+    };
+    try {
+      if (editingModelId) {
+        await AdminModelsService.updateModel(
+          editingModelId,
+          form.contextLength ? payload : { ...payload, contextLength: null },
+        );
+      } else {
+        await AdminModelsService.createModel(payload);
+      }
+      setEditingModelId(null);
+      setForm({
+        provider: 'deepinfra',
+        model: '',
+        tier: 'small',
+        contextLength: '',
+        tools: true,
+        vision: false,
+      });
+      await loadModels();
+    } catch (err) {
+      setError(err instanceof AdminError ? err.message : 'Something went wrong.');
+    }
+  };
+
+  const toggleModelEligible = async (m: AdminModel) => {
+    try {
+      await AdminModelsService.updateModel(m.id, { eligible: !m.eligible });
+      await loadModels();
+    } catch (err) {
+      setError(err instanceof AdminError ? err.message : 'Something went wrong.');
+    }
+  };
+
+  const deleteModel = async (m: AdminModel) => {
+    try {
+      await AdminModelsService.deleteModel(m.id);
+      await loadModels();
+    } catch (err) {
+      setError(err instanceof AdminError ? err.message : 'Something went wrong.');
+    }
+  };
 
   const loadUsers = useCallback(async () => {
     try {
@@ -219,8 +304,92 @@ const AdminView = () => {
             <section data-testid="admin-models-section">
               <h3 className="font-heading text-lg font-semibold">Models</h3>
               <p className="text-xs text-muted-foreground">
-                Read-only (issue #33) — routing bands and feedback tallies.
+                Routing rows (issue #33/#104) — disable, edit, add or delete; feedback tallies per
+                band.
               </p>
+              <div className="mt-4 flex flex-wrap items-end gap-3 rounded-xl border border-border bg-card p-4">
+                <label className="text-sm">
+                  <span className="mr-2 text-muted-foreground">Provider</span>
+                  <select
+                    data-testid="model-form-provider"
+                    value={form.provider}
+                    onChange={(e) => setForm((f) => ({ ...f, provider: e.target.value }))}
+                    className="rounded-lg border border-border bg-background px-2 py-1"
+                  >
+                    <option value="groq">groq</option>
+                    <option value="deepinfra">deepinfra</option>
+                  </select>
+                </label>
+                <label className="text-sm">
+                  <span className="mr-2 text-muted-foreground">Model</span>
+                  <input
+                    data-testid="model-form-model"
+                    value={form.model}
+                    onChange={(e) => setForm((f) => ({ ...f, model: e.target.value }))}
+                    placeholder="org/model-name"
+                    className="w-64 rounded-lg border border-border bg-background px-2 py-1"
+                  />
+                </label>
+                <label className="text-sm">
+                  <span className="mr-2 text-muted-foreground">Tier</span>
+                  <select
+                    data-testid="model-form-tier"
+                    value={form.tier}
+                    onChange={(e) => setForm((f) => ({ ...f, tier: e.target.value }))}
+                    className="rounded-lg border border-border bg-background px-2 py-1"
+                  >
+                    <option value="small">small</option>
+                    <option value="large">large</option>
+                    <option value="guard">guard</option>
+                  </select>
+                </label>
+                <label className="text-sm">
+                  <span className="mr-2 text-muted-foreground">Context</span>
+                  <input
+                    data-testid="model-form-context"
+                    value={form.contextLength}
+                    onChange={(e) => setForm((f) => ({ ...f, contextLength: e.target.value }))}
+                    inputMode="numeric"
+                    placeholder="e.g. 131072"
+                    className="w-28 rounded-lg border border-border bg-background px-2 py-1"
+                  />
+                </label>
+                <label className="inline-flex items-center gap-1.5 text-sm">
+                  <input
+                    type="checkbox"
+                    data-testid="model-form-tools"
+                    checked={form.tools}
+                    onChange={(e) => setForm((f) => ({ ...f, tools: e.target.checked }))}
+                  />
+                  tools
+                </label>
+                <label className="inline-flex items-center gap-1.5 text-sm">
+                  <input
+                    type="checkbox"
+                    data-testid="model-form-vision"
+                    checked={form.vision}
+                    onChange={(e) => setForm((f) => ({ ...f, vision: e.target.checked }))}
+                  />
+                  vision
+                </label>
+                <button
+                  data-testid="model-form-submit"
+                  onClick={submitForm}
+                  disabled={!form.model.trim()}
+                  className="rounded-lg border border-primary bg-primary px-3 py-1.5 text-sm text-primary-foreground transition-colors disabled:opacity-50"
+                >
+                  {editingModelId ? 'Save' : 'Add model'}
+                </button>
+                {editingModelId && (
+                  <button
+                    data-testid="model-form-cancel"
+                    onClick={() => setEditingModelId(null)}
+                    className="rounded-lg border border-border px-3 py-1.5 text-sm transition-colors hover:bg-accent"
+                  >
+                    Cancel
+                  </button>
+                )}
+              </div>
               <div
                 data-testid="admin-models"
                 className="mt-4 overflow-x-auto rounded-xl border border-border bg-card"
@@ -230,8 +399,11 @@ const AdminView = () => {
                     <tr className="border-b border-border text-left text-muted-foreground">
                       <th className="px-4 py-3 font-medium">Model</th>
                       <th className="px-4 py-3 font-medium">Provider</th>
-                      <th className="px-4 py-3 font-medium">Bands</th>
+                      <th className="px-4 py-3 font-medium">Tier</th>
+                      <th className="px-4 py-3 font-medium">Context</th>
+                      <th className="px-4 py-3 font-medium">Eligible</th>
                       <th className="px-4 py-3 font-medium">Feedback</th>
+                      <th className="px-4 py-3" />
                     </tr>
                   </thead>
                   <tbody>
@@ -241,17 +413,44 @@ const AdminView = () => {
                           {model.model}
                         </td>
                         <td className="px-4 py-3 text-muted-foreground">{model.provider}</td>
-                        <td className="px-4 py-3">{model.tiers.join(', ')}</td>
+                        <td className="px-4 py-3">{model.tier}</td>
+                        <td className="px-4 py-3 text-muted-foreground">
+                          {model.contextLength?.toLocaleString() ?? '—'}
+                        </td>
+                        <td className="px-4 py-3">
+                          <input
+                            type="checkbox"
+                            data-testid={`model-eligible-${model.id}`}
+                            checked={model.eligible}
+                            onChange={() => toggleModelEligible(model)}
+                          />
+                        </td>
                         <td className="px-4 py-3 text-muted-foreground">
                           {model.stats.length === 0
                             ? '—'
                             : model.stats.map((s) => `${s.band}: ${s.up}↑ ${s.down}↓`).join(' · ')}
                         </td>
+                        <td className="px-4 py-3">
+                          <button
+                            data-testid={`model-edit-${model.id}`}
+                            onClick={() => startEdit(model)}
+                            className="mr-2 rounded-lg border border-border px-2 py-1 text-xs transition-colors hover:bg-accent"
+                          >
+                            Edit
+                          </button>
+                          <button
+                            data-testid={`model-delete-${model.id}`}
+                            onClick={() => deleteModel(model)}
+                            className="rounded-lg border border-destructive px-2 py-1 text-xs text-destructive transition-colors hover:bg-destructive/10"
+                          >
+                            Delete
+                          </button>
+                        </td>
                       </tr>
                     ))}
                     {models?.length === 0 && (
                       <tr>
-                        <td className="px-4 py-3 text-muted-foreground" colSpan={4}>
+                        <td className="px-4 py-3 text-muted-foreground" colSpan={7}>
                           No models configured.
                         </td>
                       </tr>
