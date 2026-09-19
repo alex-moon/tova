@@ -90,6 +90,23 @@ describe('App', () => {
     window.history.pushState({}, '', '/');
   });
 
+  it('renders the profile view for admins too (profile branch wins over admin, #95)', async () => {
+    mockMe('admin');
+    window.history.pushState({}, '', '/profile');
+    renderApp();
+    expect(await screen.findByTestId('profile-view')).toBeInTheDocument();
+    expect(screen.queryByTestId('admin-view')).not.toBeInTheDocument();
+    window.history.pushState({}, '', '/');
+  });
+
+  it('still shows Login when unauthenticated, even at /profile', async () => {
+    window.history.pushState({}, '', '/profile');
+    renderApp();
+    expect(await screen.findByRole('heading', { name: /Login to Tova/i })).toBeInTheDocument();
+    expect(screen.queryByTestId('profile-view')).not.toBeInTheDocument();
+    window.history.pushState({}, '', '/');
+  });
+
   it('falls back to the chat view for non-admins at /admin', async () => {
     mockMe('user');
     window.history.pushState({}, '', '/admin');

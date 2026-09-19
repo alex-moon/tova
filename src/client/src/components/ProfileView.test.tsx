@@ -86,6 +86,18 @@ describe('ProfileView (issue #95)', () => {
     expect(updateUser).toHaveBeenCalledWith(next);
   });
 
+  it('disables Save while a save is in flight and re-enables it after a failure', async () => {
+    updateProfile.mockRejectedValue(new AuthError('Too long'));
+    renderWithUser(user, vi.fn());
+
+    fireEvent.click(screen.getByTestId('profile-save'));
+    expect(screen.getByTestId('profile-save')).toBeDisabled();
+    expect(screen.getByTestId('profile-save')).toHaveTextContent('Saving...');
+
+    await waitFor(() => expect(screen.getByTestId('profile-save')).toHaveTextContent(/^Save$/));
+    expect(screen.getByTestId('profile-save')).not.toBeDisabled();
+  });
+
   it('stays on /profile and confirms with a toast after a successful save (#95)', async () => {
     updateProfile.mockResolvedValue(user);
     renderWithUser(user);
