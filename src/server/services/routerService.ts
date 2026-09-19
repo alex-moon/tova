@@ -134,7 +134,7 @@ const defaultConfig = async (): Promise<RouterConfig> => {
   return {
     small,
     large,
-    guardModel: process.env.ROUTER_GUARD_MODEL || 'allam-2-7b',
+    guardModel: process.env.ROUTER_GUARD_MODEL || 'openai/gpt-oss-20b',
   };
 };
 
