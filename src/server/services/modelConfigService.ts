@@ -27,7 +27,7 @@ export interface ModelRef extends ModelCapabilities {
  * followups run tool-free via `createToolFreeCompletion` and resolve pools
  * without capabilities (Groq's free-tier limits never matter there).
  */
-const GUARD_ENV: [envVar: string, fallback: string] = ['ROUTER_GUARD_MODEL', 'allam-2-7b'];
+const GUARD_ENV: [envVar: string, fallback: string] = ['ROUTER_GUARD_MODEL', 'openai/gpt-oss-20b'];
 
 interface SeedEntry extends ModelRef {
   tier: ModelTier;

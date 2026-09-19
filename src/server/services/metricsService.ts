@@ -2,7 +2,7 @@ import { Message } from '../models/Message';
 import { inferenceService } from './inferenceService';
 import { computeDeterministicMetrics } from './promptMetrics';
 
-const LLM_MODEL = process.env.ROUTER_GUARD_MODEL || 'allam-2-7b';
+const LLM_MODEL = process.env.ROUTER_GUARD_MODEL || 'openai/gpt-oss-20b';
 
 const LLM_PROMPT =
   'Classify the user prompt below. Reply with ONLY one JSON object and nothing else, ' +

@@ -70,7 +70,7 @@ describe('Model Config Service', () => {
         ]),
       );
       expect(await listByTier('guard')).toEqual([
-        { provider: 'groq', model: 'allam-2-7b', tools: true, vision: false },
+        { provider: 'groq', model: 'openai/gpt-oss-20b', tools: true, vision: false },
       ]);
       expect(await ProviderRouting.countDocuments()).toBe(8);
     });
@@ -219,7 +219,7 @@ describe('Model Config Service', () => {
       }>();
       if (missingCaps && missingCaps.tools === undefined) {
         expect(await listByTier('guard', { tools: true })).toEqual([
-          { provider: 'groq', model: 'allam-2-7b' },
+          { provider: 'groq', model: 'openai/gpt-oss-20b' },
         ]);
       }
     });

@@ -1,6 +1,6 @@
 import { inferenceService } from './inferenceService';
 
-const SUGGESTION_MODEL = process.env.ROUTER_GUARD_MODEL || 'allam-2-7b';
+const SUGGESTION_MODEL = process.env.ROUTER_GUARD_MODEL || 'openai/gpt-oss-20b';
 
 const SUGGESTION_PROMPT =
   'Generate 2-3 very short follow-up questions the user might ask next, as a ' +
