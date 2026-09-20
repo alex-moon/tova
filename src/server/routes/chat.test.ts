@@ -486,8 +486,6 @@ describe('streamingErrorMessage (#77, #117)', () => {
     expect(streamingErrorMessage(new Error('boom'))).toBe('Error streaming from model');
     expect(streamingErrorMessage(null)).toBe('Error streaming from model');
     expect(streamingErrorMessage({ statusCode: 500 })).toBe('Error streaming from model');
-<<<<<<< HEAD
-=======
   });
 });
 
@@ -524,6 +522,5 @@ describe('pre-stream 429 surfacing (#117)', () => {
     expect(res.status).toBe(500);
     expect(res.body.message).toBe('Error processing chat');
     expect(res.body.detail).toMatch(/Rate limited/);
->>>>>>> feat/117-no-content
   });
 });

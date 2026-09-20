@@ -13,7 +13,6 @@ describe('outputTokenCap', () => {
     it('returns 0 for an empty prompt', () => {
       expect(promptCharsFrom([])).toBe(0);
     });
-<<<<<<< HEAD
 
     it('counts only text parts of a multimodal message (#115)', () => {
       expect(
@@ -31,8 +30,6 @@ describe('outputTokenCap', () => {
     it('treats an empty or malformed part array as zero chars, not a crash', () => {
       expect(promptCharsFrom([{ content: [] }, { content: [{ type: 'text' }] }])).toBe(0);
     });
-=======
->>>>>>> feat/104-new-errors
   });
 
   describe('outputTokensFor', () => {

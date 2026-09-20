@@ -241,7 +241,6 @@ const sanitizeToolsetKey = (name: string): string =>
   `mcp_${name.replace(/[^a-zA-Z0-9_]+/g, '_').slice(0, 40)}`;
 
 /*
-<<<<<<< HEAD
  * MCP tool budget (#77 root cause 2). Attaching a full MCP server's tools to
  * every chat request inflates the prompt by an unbounded number of tokens —
  * the GitHub MCP server tests against carries far more than fits under a
@@ -281,8 +280,6 @@ const estimateToolTokens = (toolInfo: McpToolInfo): number =>
   );
 
 /*
-=======
->>>>>>> feat/109-no-mcp
  * Per-user toolset resolution: platform servers plus the calling user's own.
  * Connections happen in parallel with a bounded connect timeout so a first
  * chat after adding N servers stays within that bound, never N× it. Any
@@ -340,7 +337,6 @@ export const mcpToolsetsForUser = async (
       const tools: Record<string, ReturnType<typeof createTool>> = {};
       for (const toolInfo of entry.tools) {
         if (tools[toolInfo.name]) continue;
-<<<<<<< HEAD
         if (budgetApplies && entry.server.scope === 'user') {
           // Budget applies to user-raised toolsets only; platform toolsets
           // are curated by the deployment itself. On DeepInfra turns
@@ -354,8 +350,6 @@ export const mcpToolsetsForUser = async (
           budgetRemaining -= cost;
           acceptedInServer += 1;
         }
-=======
->>>>>>> feat/109-no-mcp
         tools[toolInfo.name] = createTool({
           id: `${setKey}/${toolInfo.name}`,
           description: toolInfo.description || `Tool ${toolInfo.name} from an MCP server`,

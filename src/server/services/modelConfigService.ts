@@ -1,6 +1,6 @@
 import { ProviderRouting } from '../models/ProviderRouting';
 
-export type ModelTier = 'small' | 'large';
+export type ModelTier = 'small' | 'large' | 'guard';
 
 export type ProviderName = 'groq' | 'deepinfra';
 
@@ -12,7 +12,6 @@ export type ProviderName = 'groq' | 'deepinfra';
 export interface ModelCapabilities {
   tools?: boolean;
   vision?: boolean;
-<<<<<<< HEAD
 }
 
 /*
@@ -36,26 +35,12 @@ export interface ModelRef extends ModelCapabilities {
 }
 
 /*
-=======
-}
-
-export interface ModelRef extends ModelCapabilities {
-  provider: ProviderName;
-  model: string;
-}
-
-/*
->>>>>>> feat/94-better-model
  * Completions always run tool-carrying (web_search / asset tools / MCP
  * toolsets attach since #52, key-less `current_datetime` included), so the
  * completion pools are resolved with `tools: true` — a row flagged
  * `tools: false` is ruled out deterministically. Guard/classifier/title/
  * followups run tool-free via `createToolFreeCompletion` and resolve pools
-<<<<<<< HEAD
- * without capabilities.
-=======
  * without capabilities (Groq's free-tier limits never matter there).
->>>>>>> feat/94-better-model
  */
 const GUARD_ENV: [envVar: string, fallback: string] = ['ROUTER_GUARD_MODEL', 'openai/gpt-oss-20b'];
 
@@ -68,35 +53,17 @@ interface SeedEntry extends ModelRef {
 // Single source of truth for the env var and its default per tier, shared by
 // seeding and the env fallback so the two can never drift apart. Completion
 // tiers default to DeepInfra (#94: Groq is never used for completions — free
-<<<<<<< HEAD
-// tier token limits mean tool use would never work).
-const DEFAULT_MODEL_ENV: Record<ModelTier, [envVar: string, fallback: string]> = {
-  small: ['ROUTER_SMALL_MODEL', 'openai/gpt-oss-20b'],
-  large: ['ROUTER_LARGE_MODEL', 'openai/gpt-oss-120b'],
-=======
 // tier token limits mean tool use would never work); the guard tier stays
 // Groq, where small tool-free models have the biggest impact.
 const DEFAULT_MODEL_ENV: Record<ModelTier, [envVar: string, fallback: string]> = {
   small: ['ROUTER_SMALL_MODEL', 'openai/gpt-oss-20b'],
   large: ['ROUTER_LARGE_MODEL', 'openai/gpt-oss-120b'],
   guard: GUARD_ENV,
->>>>>>> feat/94-better-model
 };
 
 const envModel = ([envVar, fallback]: readonly [string, string]): string =>
   process.env[envVar] || fallback;
 
-<<<<<<< HEAD
-/*
- * Read at seed time (not module load) so env overrides set per-process are
- * honoured when the collection is first populated. Env overrides are seeded
- * as DeepInfra refs: `ROUTER_SMALL_MODEL`/`ROUTER_LARGE_MODEL` must name
- * DeepInfra models (completions never regress to Groq, #94).
- */
-const SEED_ENTRIES = (): SeedEntry[] => [
-  {
-    provider: 'deepinfra',
-=======
 const TIER_PROVIDER: Record<ModelTier, ProviderName> = {
   small: 'deepinfra',
   large: 'deepinfra',
@@ -113,14 +80,12 @@ const TIER_PROVIDER: Record<ModelTier, ProviderName> = {
 const SEED_ENTRIES = (): SeedEntry[] => [
   {
     provider: TIER_PROVIDER.small,
->>>>>>> feat/94-better-model
     model: envModel(DEFAULT_MODEL_ENV.small),
     tier: 'small',
     eligible: true,
     tools: true,
     contextLength: 131072,
   },
-<<<<<<< HEAD
   /*
    * gemma-3-4b-it: the user vetoed it for ALL turns (#115, 2026-09-20):
    * "too small to be useful for anything at all". The row exists so the seed
@@ -128,17 +93,11 @@ const SEED_ENTRIES = (): SeedEntry[] => [
    * pool (listByTier filters eligibility); its vision capability is now
    * decorative. The up-migration matches this for upgraded deployments.
    */
-=======
->>>>>>> feat/94-better-model
   {
     provider: 'deepinfra',
     model: 'google/gemma-3-4b-it',
     tier: 'small',
-<<<<<<< HEAD
     eligible: false,
-=======
-    eligible: true,
->>>>>>> feat/94-better-model
     tools: true,
     vision: true,
     contextLength: 131072,
@@ -151,7 +110,6 @@ const SEED_ENTRIES = (): SeedEntry[] => [
     tools: true,
     contextLength: 40960,
   },
-<<<<<<< HEAD
   /*
    * #115 image pool: the user routed ALL image turns through the large tier
    * (2026-09-20) and wants two vision models there to compare. Both entries
@@ -179,11 +137,7 @@ const SEED_ENTRIES = (): SeedEntry[] => [
     contextLength: 262144,
   },
   {
-    provider: 'deepinfra',
-=======
-  {
     provider: TIER_PROVIDER.large,
->>>>>>> feat/94-better-model
     model: envModel(DEFAULT_MODEL_ENV.large),
     tier: 'large',
     eligible: true,
@@ -214,15 +168,12 @@ const SEED_ENTRIES = (): SeedEntry[] => [
     tools: true,
     contextLength: 1048576,
   },
-<<<<<<< HEAD
-=======
   {
     provider: 'groq',
     model: envModel(GUARD_ENV),
     tier: 'guard',
     eligible: true,
   },
->>>>>>> feat/94-better-model
 ];
 
 /*
@@ -258,20 +209,11 @@ const ensureSeed = async (): Promise<void> => {
 /*
  * Seeding stays an empty-pool recovery (per-process memos would fight test
  * and multi-worker workflows); upgrades get the new DeepInfra completion
-<<<<<<< HEAD
- * pools through migrations (`remove-groq-completions-routings` for the
- * completion tiers, then `remove-guard-groq-routings` for the guard tier and
- * every remaining Groq row) — advertently not silently at runtime.
- */
-const fromEnv = (tier: ModelTier): ModelRef => ({
-  provider: 'deepinfra',
-=======
  * pools through a migration (`remove-groq-completions-routings`) that also
  * sweeps the stale Groq rows — advertently not silently at runtime.
  */
 const fromEnv = (tier: ModelTier): ModelRef => ({
   provider: TIER_PROVIDER[tier],
->>>>>>> feat/94-better-model
   model: envModel(DEFAULT_MODEL_ENV[tier]),
 });
 
@@ -297,7 +239,6 @@ const readRows = async (tier: ModelTier) =>
  * an explicit `tools: false` rules it out; `vision` defaults to false — a
  * vision requirement is only met when the row is explicitly `vision: true`.
  */
-<<<<<<< HEAD
 const rowMeetsFilter = (
   row: { provider: ProviderName; tools?: boolean; vision?: boolean },
   filter: ModelFilter,
@@ -305,14 +246,6 @@ const rowMeetsFilter = (
   (filter.provider === undefined || row.provider === filter.provider) &&
   (filter.tools === undefined || filter.tools === false || row.tools !== false) &&
   (filter.vision === undefined || filter.vision === false || row.vision === true);
-=======
-const rowMeetsCapabilities = (
-  row: { tools?: boolean; vision?: boolean },
-  caps: ModelCapabilities,
-) =>
-  (caps.tools === undefined || caps.tools === false || row.tools !== false) &&
-  (caps.vision === undefined || caps.vision === false || row.vision === true);
->>>>>>> feat/94-better-model
 
 /*
  * Seed on first read; idempotent upserts keep concurrent/multi-call seeding
@@ -326,11 +259,7 @@ const rowMeetsCapabilities = (
  */
 export const listByTier = async (
   tier: ModelTier,
-<<<<<<< HEAD
   requiredFilter?: ModelFilter,
-=======
-  requiredCapabilities?: ModelCapabilities,
->>>>>>> feat/94-better-model
 ): Promise<ModelRef[]> => {
   try {
     let rows = await readRows(tier);
@@ -339,13 +268,8 @@ export const listByTier = async (
       rows = await readRows(tier);
       if (rows.length === 0) return [fromEnv(tier)];
     }
-<<<<<<< HEAD
     const filtered = requiredFilter
       ? rows.filter((row) => rowMeetsFilter(row, requiredFilter))
-=======
-    const filtered = requiredCapabilities
-      ? rows.filter((row) => rowMeetsCapabilities(row, requiredCapabilities))
->>>>>>> feat/94-better-model
       : rows;
     return filtered.map(({ provider, model, tools, vision, contextLength }) => ({
       provider,
@@ -362,7 +286,6 @@ export const listByTier = async (
 
 /*
  * Completions-tier helper: pools with the tools requirement pre-applied, so
-<<<<<<< HEAD
  * the router can never route a completion to a tool-incapable model. DeepInfra
  * is pinned in code (#94, #117): even a stale Groq row in the collection is
  * excluded here, so a 429'd tool-carrying completion on Groq's free tier
@@ -370,9 +293,3 @@ export const listByTier = async (
  */
 export const completionsPoolFor = async (tier: 'small' | 'large'): Promise<ModelRef[]> =>
   listByTier(tier, { tools: true, provider: 'deepinfra' });
-=======
- * the router can never route a completion to a tool-incapable model.
- */
-export const completionsPoolFor = async (tier: 'small' | 'large'): Promise<ModelRef[]> =>
-  listByTier(tier, { tools: true });
->>>>>>> feat/94-better-model

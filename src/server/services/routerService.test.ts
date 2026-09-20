@@ -327,7 +327,6 @@ describe('Router Service', () => {
     });
   });
 
-<<<<<<< HEAD
   describe('Vision-aware routing (#115)', () => {
     const vlSmall: ModelRef = { provider: 'deepinfra', model: 'vl-small', vision: true };
     const vlLarge: ModelRef = { provider: 'deepinfra', model: 'vl-large', vision: true };
@@ -382,8 +381,6 @@ describe('Router Service', () => {
     });
   });
 
-=======
->>>>>>> feat/104-new-errors
   describe('contextLength propagation (#104)', () => {
     // #104: the chat routes size `max_tokens` against the routed model's
     // window, so every RoutingResult must carry (or omit) `contextLength`
