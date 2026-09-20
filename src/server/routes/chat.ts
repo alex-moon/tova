@@ -32,6 +32,7 @@ type AssetDoc = {
   key: string;
   contentType: string;
   size: number;
+  status?: 'pending' | 'ready' | 'failed';
   ephemeral?: boolean;
   textExtracted?: string | null;
   markdownExtracted?: string | null;
@@ -40,6 +41,18 @@ type AssetDoc = {
 // Asset attach (issue #34): resolves the attached asset for a turn — 'none'
 // when the request sent no assetId, 'invalid' for a malformed reference,
 // 'missing' when it points at a different user's asset.
+// Turns that will actually carry pixels (#115). Mirrors buildImageTurn's
+// conditions (image content type, uploaded-and-confirmed asset, configured
+// storage) so routing and message assembly can never disagree: a turn that
+// routed vision-only must never silently degrade to the filename envelope.
+const turnsWithImage = (asset: AssetDoc | null): boolean =>
+  Boolean(
+    asset &&
+    asset.status === 'ready' &&
+    isImageContentType(asset.contentType) &&
+    isStorageConfigured(),
+  );
+
 const loadAttachedAsset = async (
   req: AuthRequest,
 ): Promise<AssetDoc | null | 'invalid' | 'missing'> => {
@@ -85,7 +98,15 @@ const buildImageTurn = async (
   messages: { role: 'system' | 'user' | 'assistant'; content: string | MessageContentPart[] }[],
   asset: AssetDoc,
 ): Promise<boolean> => {
-  if (!isImageContentType(asset.contentType) || !isStorageConfigured()) return false;
+  // `ready` matters: a pending upload has no object in Spaces yet, so the
+  // presigned GET would 404 inside the model's fetch and fail the turn.
+  if (
+    !isImageContentType(asset.contentType) ||
+    asset.status !== 'ready' ||
+    !isStorageConfigured()
+  ) {
+    return false;
+  }
   const last = messages[messages.length - 1];
   if (last?.role !== 'user') return false;
   const url = await presignGetUrl(asset.key);
@@ -464,9 +485,7 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
     // Determine model. Image turns (#115) route vision-first only when the
     // presign path is actually available; otherwise the turn degrades to the
     // legacy text envelope and normal routing applies.
-    const hasImage =
-      Boolean(attachedAsset && isImageContentType(attachedAsset.contentType)) &&
-      isStorageConfigured();
+    const hasImage = turnsWithImage(attachedAsset);
     const routingResult = await routeQuery(content, undefined, undefined, {
       band: routingBand,
       hasImage,
@@ -610,9 +629,7 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
 
     // Image turns (#115): gate on both the content type and a configured
     // presign path; the image part replaces the filename envelope this turn.
-    const hasImage =
-      Boolean(attachedAsset && isImageContentType(attachedAsset.contentType)) &&
-      isStorageConfigured();
+    const hasImage = turnsWithImage(attachedAsset);
 
     await ensureUserLocation(streamUserDoc, req.ip);
     if (zdr) {

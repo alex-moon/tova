@@ -310,6 +310,36 @@ describe('Chat image turn (#115)', () => {
     expect(String(last.content)).toContain('photo.png');
   });
 
+  it('degrades a not-yet-ready image asset to the filename envelope and normal routing', async () => {
+    // A pending image has no object in Spaces yet, so a presigned URL would
+    // 404 inside the model's fetch: the turn must route and behave as a
+    // plain text turn instead (#115 hardening).
+    const email = 'image-pending@example.com';
+    const cookies = await registerUser(email);
+    const user = await User.findOne({ email });
+    const id = new Types.ObjectId();
+    await Asset.create({
+      _id: id,
+      userId: user?._id,
+      filename: 'photo.png',
+      key: `k/${String(id)}/photo.png`,
+      contentType: 'image/png',
+      size: 4321,
+      status: 'pending',
+    });
+
+    const response = await streamMessage(cookies, {
+      content: 'what is in this image?',
+      assetId: String(id),
+    });
+    expect(response.status).toBe(200);
+    expect(mockPresignGetUrl).not.toHaveBeenCalled();
+    const [routingOpts] = (mockRouteQuery.mock.calls[0]?.slice(3) ?? []) as unknown as [
+      { band?: string; hasImage: boolean },
+    ];
+    expect(routingOpts.hasImage).toBe(false);
+  });
+
   it('keeps the text envelope and normal routing for non-image assets', async () => {
     const email = 'image-nonimage@example.com';
     const cookies = await registerUser(email);
