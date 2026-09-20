@@ -133,6 +133,19 @@ export const streamingErrorMessage = (err: unknown): string => {
       'may have added many tools to the request. Try again shortly or remove MCP servers in settings.'
     );
   }
+  /*
+   * #117: a 429 (or its Groq-style message body that Mastra rethrows without a
+   * status code) is actionable — the suggestion is simply to retry — so it is
+   * surfaced as such instead of the generic streaming message.
+   */
+  if (
+    statusCode === 429 ||
+    /rate[ _-]?limit/i.test(message) ||
+    /(tokens per minute|requests per minute)/i.test(message) ||
+    /\bTPM\b|\bRPM\b/.test(message)
+  ) {
+    return 'Rate limited by the model provider — please retry in a moment.';
+  }
   return 'Error streaming from model';
 };
 
@@ -168,7 +181,7 @@ const toolResultEvent = (result: { name: string; result: unknown }) => {
     name: result.name,
     label: toolLabelFrom(result.name),
   };
-  if (result.name === 'web_search') {
+  if (result.name === 'web_search' || result.name === 'fetch_url') {
     const items = Array.isArray((result.result as { results?: unknown })?.results)
       ? (result.result as { results: unknown[] }).results
       : [];
@@ -373,6 +386,7 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
       role: 'assistant',
       content: assistantContent,
       modelName: routingResult.model,
+      provider: routingResult.provider,
       routingBand,
       ...(sources.length > 0 ? { sources } : {}),
       ...(sourceTitles.length > 0 ? { sourceTitles } : {}),
@@ -513,7 +527,7 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
         }
       }
     } catch (err) {
-      console.error('Groq streaming error:', err);
+      console.error('Streaming error for %s/%s:', routingResult.provider, routingResult.model, err);
       sendEvent('error', { message: streamingErrorMessage(err) });
       sendEvent('done', { complete: false });
       res.end();
@@ -529,6 +543,7 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
     const assistantMessage = new Message({
       sessionId: session._id,
       role: 'assistant',
+      provider: routingResult.provider,
       content: assistantContent,
       modelName: routingResult.model,
       routingBand,

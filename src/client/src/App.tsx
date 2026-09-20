@@ -30,6 +30,7 @@ export interface Message {
   role: 'user' | 'assistant';
   content: string;
   modelName?: string;
+  provider?: string;
   isError?: boolean;
   feedback?: { value: 'up' | 'down' | string | null; updatedAt?: Date | string | null };
   sources?: string[];
@@ -200,6 +201,15 @@ function App() {
               setActiveSessionId(newSessionId);
               fetchSessions();
             }
+            // Provider visibility (#117): show which provider serves the turn
+            // as soon as the router resolves, including mid-stream.
+            const routing = data.routing as { provider?: string } | undefined;
+            if (routing?.provider) {
+              const prov = routing.provider;
+              setMessages((prev) =>
+                prev.map((m) => (m._id === streamId ? { ...m, provider: prov } : m)),
+              );
+            }
           } else if (event === 'delta') {
             const delta = (data.content as string) || '';
             setMessages((prev) =>
@@ -239,6 +249,7 @@ function App() {
                       _id: saved._id || m._id,
                       content: saved.content,
                       modelName: saved.modelName,
+                      provider: saved.provider,
                       feedback: saved.feedback,
                       sources: saved.sources,
                       sourceTitles: saved.sourceTitles ?? sourceTitles,

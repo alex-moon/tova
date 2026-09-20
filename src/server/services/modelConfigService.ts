@@ -14,6 +14,15 @@ export interface ModelCapabilities {
   vision?: boolean;
 }
 
+/*
+ * `provider` is not a capability but a hard exclusion (#94, #117): completions
+ * may never run on Groq, so a completion-pool filter pins the provider
+ * regardless of what stale rows exist in the collection.
+ */
+export interface ModelFilter extends ModelCapabilities {
+  provider?: ProviderName;
+}
+
 export interface ModelRef extends ModelCapabilities {
   provider: ProviderName;
   model: string;
@@ -197,12 +206,13 @@ const readRows = async (tier: ModelTier) =>
  * an explicit `tools: false` rules it out; `vision` defaults to false — a
  * vision requirement is only met when the row is explicitly `vision: true`.
  */
-const rowMeetsCapabilities = (
-  row: { tools?: boolean; vision?: boolean },
-  caps: ModelCapabilities,
+const rowMeetsFilter = (
+  row: { provider: ProviderName; tools?: boolean; vision?: boolean },
+  filter: ModelFilter,
 ) =>
-  (caps.tools === undefined || caps.tools === false || row.tools !== false) &&
-  (caps.vision === undefined || caps.vision === false || row.vision === true);
+  (filter.provider === undefined || row.provider === filter.provider) &&
+  (filter.tools === undefined || filter.tools === false || row.tools !== false) &&
+  (filter.vision === undefined || filter.vision === false || row.vision === true);
 
 /*
  * Seed on first read; idempotent upserts keep concurrent/multi-call seeding
@@ -216,7 +226,7 @@ const rowMeetsCapabilities = (
  */
 export const listByTier = async (
   tier: ModelTier,
-  requiredCapabilities?: ModelCapabilities,
+  requiredFilter?: ModelFilter,
 ): Promise<ModelRef[]> => {
   try {
     let rows = await readRows(tier);
@@ -225,8 +235,8 @@ export const listByTier = async (
       rows = await readRows(tier);
       if (rows.length === 0) return [fromEnv(tier)];
     }
-    const filtered = requiredCapabilities
-      ? rows.filter((row) => rowMeetsCapabilities(row, requiredCapabilities))
+    const filtered = requiredFilter
+      ? rows.filter((row) => rowMeetsFilter(row, requiredFilter))
       : rows;
     return filtered.map(({ provider, model, tools, vision, contextLength }) => ({
       provider,
@@ -243,7 +253,10 @@ export const listByTier = async (
 
 /*
  * Completions-tier helper: pools with the tools requirement pre-applied, so
- * the router can never route a completion to a tool-incapable model.
+ * the router can never route a completion to a tool-incapable model. DeepInfra
+ * is pinned in code (#94, #117): even a stale Groq row in the collection is
+ * excluded here, so a 429'd tool-carrying completion on Groq's free tier
+ * cannot recur from stale DB state.
  */
 export const completionsPoolFor = async (tier: 'small' | 'large'): Promise<ModelRef[]> =>
-  listByTier(tier, { tools: true });
+  listByTier(tier, { tools: true, provider: 'deepinfra' });

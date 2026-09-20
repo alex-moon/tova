@@ -491,7 +491,11 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
                   {msg.sources && msg.sources.length > 0 && <SourcesBlock message={msg} />}
                   {msg.modelName && (
                     <div className="mt-1 flex items-center gap-3 px-4 text-xs text-muted-foreground md:px-5">
-                      <span>{msg.modelName}</span>
+                      <span>
+                        {msg.provider && msg.modelName
+                          ? `${msg.provider} · ${msg.modelName}`
+                          : msg.modelName}
+                      </span>
                       {onFeedback && (
                         <span className="flex items-center gap-1">
                           <button

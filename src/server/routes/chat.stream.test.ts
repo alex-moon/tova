@@ -26,7 +26,11 @@ jest.mock('../services/titleService', () => ({
   generateChatTitle: jest.fn().mockResolvedValue('Hello'),
 }));
 
-const MOCK_ROUTING = { model: 'mock-small-model', reason: 'deterministic-short' };
+const MOCK_ROUTING = {
+  model: 'mock-small-model',
+  provider: 'deepinfra',
+  reason: 'deterministic-short',
+};
 
 const isClassifierCall = (args?: { messages?: { role: string; content: string }[] }) =>
   args?.messages?.[0]?.content.startsWith('Classify the user prompt') ?? false;
@@ -121,6 +125,7 @@ describe('Chat streaming route', () => {
       role: 'assistant',
       content: 'Hello! Done.',
       modelName: 'mock-small-model',
+      provider: 'deepinfra',
     });
     const session = await Session.findById(sessionId);
     expect(session).not.toBeNull();

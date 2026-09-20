@@ -454,17 +454,37 @@ describe('Chat route prompt metrics', () => {
   });
 });
 
-describe('streamingErrorMessage (#77)', () => {
+describe('streamingErrorMessage (#77, #117)', () => {
   it('maps 413 / request-too-large errors to an actionable MCP-rate-limit message', () => {
     expect(streamingErrorMessage({ statusCode: 413 })).toMatch(/MCP servers/);
     expect(
-      streamingErrorMessage(new Error('Request too large for model `openai/gpt-oss-120b` on TPM')),
+      streamingErrorMessage(new Error('Request too large for model `openai/gpt-oss-120b`')),
     ).toMatch(/MCP servers/);
+  });
+
+  it('maps 429 / rate-limit errors to an actionable retry message (#117)', () => {
+    expect(streamingErrorMessage({ statusCode: 429 })).toMatch(/Rate limited/);
+    expect(
+      streamingErrorMessage(
+        new Error(
+          'Rate limit reached for model `openai/gpt-oss-20b` on tokens per minute (TPM): Limit 8000',
+        ),
+      ),
+    ).toMatch(/Rate limited/);
+    expect(streamingErrorMessage(new Error('helpful nudge: TPM exceeded'))).toMatch(/Rate limited/);
+    // Slug-form bodies rethrown without a status code (DeepInfra-style
+    // `rate_limit_exceeded`) must match too — separators are not just spaces.
+    expect(streamingErrorMessage(new Error('rate_limit_exceeded'))).toMatch(/Rate limited/);
+    // 413 takes precedence — it is the more specific diagnosis of the same
+    // "tokens" family, and #117 must not unlink #77's message.
+    expect(streamingErrorMessage({ statusCode: 413, message: 'TPM exceeded' })).toMatch(
+      /MCP servers/,
+    );
   });
 
   it('keeps the generic message for everything else', () => {
     expect(streamingErrorMessage(new Error('boom'))).toBe('Error streaming from model');
     expect(streamingErrorMessage(null)).toBe('Error streaming from model');
-    expect(streamingErrorMessage({ statusCode: 429 })).toBe('Error streaming from model');
+    expect(streamingErrorMessage({ statusCode: 500 })).toBe('Error streaming from model');
   });
 });
