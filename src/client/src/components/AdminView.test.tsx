@@ -122,6 +122,45 @@ describe('AdminView models table (issue #33)', () => {
     fireEvent.click(await screen.findByTestId('admin-tab-models'));
     expect(await screen.findByText('No models configured.')).toBeInTheDocument();
   });
+
+  // #115: capabilities are surfaced as read-only badges per model row.
+  it('renders vision/tools capability badges with the context length', async () => {
+    listModels.mockResolvedValue([
+      {
+        id: 'deepinfra/Qwen/Qwen3-VL-8B-Instruct',
+        provider: 'deepinfra',
+        model: 'Qwen/Qwen3-VL-8B-Instruct',
+        tiers: ['small'],
+        tools: true,
+        vision: true,
+        contextLength: 262144,
+        stats: [],
+      },
+      {
+        id: 'deepinfra/Qwen/Qwen3-14B',
+        provider: 'deepinfra',
+        model: 'Qwen/Qwen3-14B',
+        tiers: ['small'],
+        tools: true,
+        vision: false,
+        contextLength: 40960,
+        stats: [],
+      },
+    ]);
+    render(<AdminView />);
+    expect(await screen.findByTestId('admin-view')).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('admin-tab-models'));
+    const vl = await screen.findByTestId('admin-model-caps-deepinfra/Qwen/Qwen3-VL-8B-Instruct');
+    expect(
+      vl.querySelector('[data-testid="admin-model-vision-deepinfra/Qwen/Qwen3-VL-8B-Instruct"]'),
+    ).toHaveTextContent('vision ✓');
+    expect(vl).toHaveTextContent('tools ✓');
+    expect(vl).toHaveTextContent('262,144 tok');
+    const plain = screen.getByTestId('admin-model-caps-deepinfra/Qwen/Qwen3-14B');
+    expect(
+      plain.querySelector('[data-testid="admin-model-vision-deepinfra/Qwen/Qwen3-14B"]'),
+    ).toHaveTextContent('vision ✗');
+  });
 });
 
 describe('AdminView layout (issue #91)', () => {

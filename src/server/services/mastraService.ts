@@ -555,16 +555,48 @@ const agentFor = (provider: LlmProvider, model: string, tools?: boolean): Agent 
   return agent;
 };
 
+/*
+ * Multimodal messages (#115): neutral `image_url` parts map to Mastra's
+ * AI-SDK-style `image` part (`image: URL`). Mastra downloads URL-based parts
+ * itself and converts them to base64 inside the provider payload — verified
+ * live against `deepinfra/Qwen/Qwen3-VL-8B-Instruct` (both URL and data-URI
+ * variants), so a presigned Spaces URL is fetchable by this process but never
+ * requires the inference endpoint itself to fetch anything. Groq never takes
+ * completions with images (#94 policy): part-array content is rejected with a
+ * clear error instead of silently flattening.
+ */
+export const mastraMessagesFor = (
+  provider: LlmProvider,
+  messages: CompletionOptions['messages'],
+): Parameters<Agent['generate']>[0] => {
+  if (messages.every((m) => typeof m.content === 'string')) {
+    return messages as unknown as Parameters<Agent['generate']>[0];
+  }
+  if (provider === 'groq') {
+    throw new Error('The Groq connector does not support multimodal (image) content parts');
+  }
+  return messages.map((message) =>
+    typeof message.content === 'string'
+      ? message
+      : {
+          ...message,
+          content: message.content.map((part) =>
+            part.type === 'image_url'
+              ? { type: 'image' as const, image: new URL(part.image_url.url) }
+              : part,
+          ),
+        },
+  ) as unknown as Parameters<Agent['generate']>[0];
+};
+
 const buildConnector = (provider: LlmProvider): LlmConnector => {
-  const asMessageList = (messages: CompletionOptions['messages']) =>
-    messages as unknown as Parameters<Agent['generate']>[0];
   // #52: the default main-chat path always carries built-in tools now.
   const defaultMode: ToolsMode = 'full';
 
   return {
     createCompletion: async (options: CompletionOptions): Promise<NeutralCompletion> => {
       const result = await agentFor(provider, options.model).generate(
-        asMessageList(options.messages),
+        mastraMessagesFor(provider, options.messages),
         {
           ...callOptionsFrom(options, defaultMode),
           ...(await mcpToolsetsFrom(options)),
@@ -584,7 +616,7 @@ const buildConnector = (provider: LlmProvider): LlmConnector => {
     },
     createStreamingCompletion: async (options: CompletionOptions): Promise<NeutralChunkStream> => {
       const result = await agentFor(provider, options.model).stream(
-        asMessageList(options.messages),
+        mastraMessagesFor(provider, options.messages),
         {
           ...callOptionsFrom(options, defaultMode),
           ...(await mcpToolsetsFrom(options)),
@@ -601,7 +633,7 @@ const buildConnector = (provider: LlmProvider): LlmConnector => {
      */
     createToolFreeCompletion: async (options: CompletionOptions): Promise<NeutralCompletion> => {
       const result = await agentFor(provider, options.model, false).generate(
-        asMessageList(options.messages),
+        mastraMessagesFor(provider, options.messages),
         { ...callOptionsFrom(options), maxSteps: 1 },
       );
       return { choices: [{ message: { content: result.text ?? null } }] };

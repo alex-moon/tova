@@ -257,12 +257,33 @@ describe('Composer library-pick (issue #51)', () => {
   it('turns a picked asset into the attachment chip and fires the no-text toast when hasText is false', () => {
     const onPickedConsumed = vi.fn();
     renderChat([], false, {
-      incomingAsset: { id: 'a9', filename: 'scan.png', hasText: false },
+      incomingAsset: {
+        id: 'a9',
+        filename: 'scan.dat',
+        contentType: 'application/octet-stream',
+        hasText: false,
+      },
       onPickedConsumed,
     });
-    expect(screen.getByTestId('attachment-chip')).toHaveTextContent('scan.png');
+    expect(screen.getByTestId('attachment-chip')).toHaveTextContent('scan.dat');
     expect(onPickedConsumed).toHaveBeenCalledTimes(1);
     expect(toast.info).toHaveBeenCalledWith(NO_TEXT_TOAST);
+  });
+
+  // Issue #115: images are first-class attachments — no no-text toast.
+  it('shows no toast for an image pick and marks the chip with the image icon', () => {
+    const onPickedConsumed = vi.fn();
+    renderChat([], false, {
+      incomingAsset: {
+        id: 'a9',
+        filename: 'photo.png',
+        contentType: 'image/png',
+        hasText: false,
+      },
+      onPickedConsumed,
+    });
+    expect(screen.getByTestId('attachment-chip')).toHaveTextContent('photo.png');
+    expect(toast.info).not.toHaveBeenCalled();
   });
 
   it('shows no toast when the picked asset has text', () => {

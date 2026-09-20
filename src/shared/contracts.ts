@@ -27,6 +27,13 @@ export interface AdminModel {
   provider: string;
   model: string;
   tiers: string[];
+  // #115 capability badges, read-only (seeding stays the source of truth).
+  // `tools` is schema-defaulted to true; `vision` is only ever true when the
+  // seeded row explicitly claims it; `contextLength` is the widest advertised
+  // limit across tier rows (null when none is known).
+  tools: boolean;
+  vision: boolean;
+  contextLength: number | null;
   stats: { band: string; up: number; down: number }[];
 }
 

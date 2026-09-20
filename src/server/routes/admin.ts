@@ -67,20 +67,41 @@ router.get('/models', ...adminGuard, async (_req, res) => {
         provider: string;
         model: string;
         tiers: string[];
+        vision: boolean;
+        tools: boolean;
+        contextLength: number | null;
         stats: { band: string; up: number; down: number }[];
       }
     >();
-    for (const route of routes as { provider: string; model: string; tier: string }[]) {
+    for (const route of routes as {
+      provider: string;
+      model: string;
+      tier: string;
+      tools?: boolean;
+      vision?: boolean;
+      contextLength?: number;
+    }[]) {
       const key = `${route.provider}/${route.model}`;
       const existing = byKey.get(key);
       if (existing) {
         if (!existing.tiers.includes(route.tier)) existing.tiers.push(route.tier);
+        // #115 capability badges surface per model across its tier rows:
+        // vision if any row claims it, tools unless every explicit row
+        // denies it (absent row = tool-capable, per the schema defaults),
+        // and the widest advertised context length.
+        if (route.vision === true) existing.vision = true;
+        if (route.tools === false) existing.tools = false;
+        if (route.contextLength && route.contextLength > (existing.contextLength ?? 0))
+          existing.contextLength = route.contextLength;
       } else {
         byKey.set(key, {
           id: key,
           provider: route.provider,
           model: route.model,
           tiers: [route.tier],
+          vision: route.vision === true,
+          tools: route.tools !== false,
+          contextLength: route.contextLength ?? null,
           stats: [],
         });
       }

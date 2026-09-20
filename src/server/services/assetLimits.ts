@@ -31,6 +31,16 @@ export const ALLOWED_CONTENT_TYPES = new Set([
 
 // Filenames become the last path segment of the object key: no path
 // separators, control chars or whitespace-only names.
+// Issue #115: images attach as real `image_url` content parts on the turn,
+// so "is this asset an image" is judged by content type (never filename).
+// The image branches of the allowlist above are exactly these.
+const IMAGE_CONTENT_TYPES = [...ALLOWED_CONTENT_TYPES].filter((type) => type.startsWith('image/'));
+
+export const isImageContentType = (contentType: string): boolean =>
+  IMAGE_CONTENT_TYPES.includes(contentType);
+
+// Filenames become the last path segment of the object key: no path
+// separators, control chars or whitespace-only names.
 export const sanitizeFilename = (filename: string): string =>
   filename
     .split('')

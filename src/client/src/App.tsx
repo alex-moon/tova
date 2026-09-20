@@ -65,6 +65,7 @@ function App() {
   const [pickedAsset, setPickedAsset] = useState<{
     id: string;
     filename: string;
+    contentType?: string;
     hasText: boolean;
     markdownStatus?: string;
   } | null>(null);
@@ -363,6 +364,7 @@ function App() {
               setPickedAsset({
                 id: asset.id,
                 filename: asset.filename,
+                contentType: asset.contentType,
                 hasText: asset.hasText,
                 markdownStatus: asset.markdownStatus,
               });
