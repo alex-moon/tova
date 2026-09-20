@@ -144,7 +144,7 @@ describe('metricsService', () => {
       const ctorCall = (ctorArgs?.[0] ?? {}) as { model: string; tools?: unknown };
       // Tool-rejecting guard models (#41/#77): no `tools` argument at all.
       expect('tools' in ctorCall).toBe(false);
-      expect(ctorCall.model).toBe('groq/openai/gpt-oss-20b');
+      expect(ctorCall.model).toBe('deepinfra/openai/gpt-oss-20b');
     });
 
     it('reports skipReason parse when the response shape is unexpected', async () => {

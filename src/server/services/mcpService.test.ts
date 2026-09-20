@@ -269,6 +269,7 @@ describe('mcpService', () => {
   });
 });
 
+<<<<<<< HEAD
 describe('#77 MCP tool budget (user-scope toolsets)', () => {
   let warnSpy: jest.SpyInstance | undefined;
   afterEach(() => {
@@ -351,12 +352,41 @@ describe('#77 MCP tool budget (user-scope toolsets)', () => {
     const toolsets = await mcpToolsetsForUser(USER_ID, { provider: 'groq' });
     expect(toolsets).toEqual({});
     expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('dropped 1 user tool'));
+=======
+describe('#109 user toolsets attach unaudited (budget removed)', () => {
+  it('attaches every user tool whole even when the serialized schemas are large', async () => {
+    // Pre-#109 removal: the Groq-TPM token budget would have dropped `fat`
+    // (and, at the 1500 default, `create_issue` too). With the budget gone no
+    // user tool may be dropped or warned about, ever.
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+    try {
+      await McpServer.create({
+        scope: 'user',
+        userId: USER_ID,
+        name: 'github',
+        url: 'https://github.example.com/mcp',
+      });
+      mockListTools.mockResolvedValue({
+        tools: [
+          {
+            name: 'create_issue',
+            description: 'Create a new issue in a GitHub repository'.repeat(3),
+            inputSchema: { type: 'object', properties: { number: { type: 'string' } } },
+          },
+          { name: 'tiny', description: 'x', inputSchema: {} },
+          { name: 'fat', description: 'h'.repeat(4000), inputSchema: { type: 'object' } },
+        ],
+      });
+      const toolsets = await mcpToolsetsForUser(USER_ID);
+      expect(Object.keys(toolsets.mcp_github)).toEqual(['create_issue', 'tiny', 'fat']);
+      expect(warnSpy).not.toHaveBeenCalled();
+    } finally {
+      warnSpy.mockRestore();
+    }
+>>>>>>> feat/109-no-mcp
   });
 
-  it('#77: drops user tools beyond the token budget, attaches what fits', async () => {
-    process.env.MCP_TOOL_BUDGET_TOKENS = '10';
-    // A GitHub-MCP-shaped tool: description long enough to exceed 10 est.
-    // tokens (deserializeJSON → description 56 chars, + boilerplate).
+  it('still deduplicates tools of the same name within one toolset', async () => {
     await McpServer.create({
       scope: 'user',
       userId: USER_ID,
@@ -365,112 +395,32 @@ describe('#77 MCP tool budget (user-scope toolsets)', () => {
     });
     mockListTools.mockResolvedValue({
       tools: [
-        {
-          name: 'create_issue',
-          description: 'Create a new issue in a GitHub repository'.repeat(3),
-          inputSchema: { type: 'object', properties: { number: { type: 'string' } } },
-        },
-        { name: 'tiny', description: 'x', inputSchema: {} },
+        { name: 'create_issue', description: 'a', inputSchema: { type: 'object' } },
+        { name: 'create_issue', description: 'b', inputSchema: { type: 'object' } },
       ],
     });
     const toolsets = await mcpToolsetsForUser(USER_ID);
-    expect(toolsets).toEqual({});
+    expect(Object.keys(toolsets.mcp_github)).toEqual(['create_issue']);
   });
 
-  it('#77: attaches user tools that fit and skips the oversized ones', async () => {
-    process.env.MCP_TOOL_BUDGET_TOKENS = '200';
-    await McpServer.create({
-      scope: 'user',
-      userId: USER_ID,
-      name: 'mixed',
-      url: 'https://mixed.example.com/mcp',
-    });
-    const hugeSchema = { type: 'object', properties: { blob: { type: 'string' } } };
-    mockListTools.mockResolvedValue({
-      tools: [
-        { name: 'small', description: 'Small tool', inputSchema: { type: 'object' } },
-        { name: 'huge', description: 'h'.repeat(4000), inputSchema: hugeSchema },
-      ],
-    });
-    const toolsets = await mcpToolsetsForUser(USER_ID);
-    expect(Object.keys(toolsets.mcp_mixed)).toEqual(['small']);
-  });
-
-  it('#77: platform toolsets stay out of the user budget', async () => {
-    process.env.MCP_TOOL_BUDGET_TOKENS = '0';
+  it('does not budget platform toolsets (they attach exactly like user tools)', async () => {
     await McpServer.create({
       scope: 'platform',
       name: 'platform-tools',
       url: 'https://mcp.example.com/mcp',
     });
-    const toolsets = await mcpToolsetsForUser(USER_ID);
-    expect(Object.keys(toolsets.mcp_platform_tools)).toEqual([
-      'weather',
-      'surf_board.shaper.build',
-    ]);
-  });
-});
-
-describe('#77 MCP tool budget edge cases (user-scope toolsets)', () => {
-  afterEach(() => {
-    delete process.env.MCP_TOOL_BUDGET_TOKENS;
-  });
-
-  it('#77: drops every user tool when the budget is too small for even one', async () => {
-    process.env.MCP_TOOL_BUDGET_TOKENS = '10';
-    // A GitHub-MCP-shaped tool: description long enough to exceed 10 est.
-    // tokens (deserializeJSON → description 56 chars, + boilerplate).
     await McpServer.create({
       scope: 'user',
       userId: USER_ID,
-      name: 'github',
-      url: 'https://github.example.com/mcp',
+      name: 'fat',
+      url: 'https://fat.example.com/mcp',
     });
     mockListTools.mockResolvedValue({
-      tools: [
-        {
-          name: 'create_issue',
-          description: 'Create a new issue in a GitHub repository'.repeat(3),
-          inputSchema: { type: 'object', properties: { number: { type: 'string' } } },
-        },
-        { name: 'tiny', description: 'x', inputSchema: {} },
-      ],
+      tools: [{ name: 'huge', description: 'h'.repeat(4000), inputSchema: { type: 'object' } }],
     });
     const toolsets = await mcpToolsetsForUser(USER_ID);
-    expect(toolsets).toEqual({});
-  });
-
-  it('#77: attaches user tools that fit and skips the oversized ones', async () => {
-    process.env.MCP_TOOL_BUDGET_TOKENS = '200';
-    await McpServer.create({
-      scope: 'user',
-      userId: USER_ID,
-      name: 'mixed',
-      url: 'https://mixed.example.com/mcp',
-    });
-    const hugeSchema = { type: 'object', properties: { blob: { type: 'string' } } };
-    mockListTools.mockResolvedValue({
-      tools: [
-        { name: 'small', description: 'Small tool', inputSchema: { type: 'object' } },
-        { name: 'huge', description: 'h'.repeat(4000), inputSchema: hugeSchema },
-      ],
-    });
-    const toolsets = await mcpToolsetsForUser(USER_ID);
-    expect(Object.keys(toolsets.mcp_mixed)).toEqual(['small']);
-  });
-
-  it('#77: platform toolsets stay out of the user budget', async () => {
-    process.env.MCP_TOOL_BUDGET_TOKENS = '0';
-    await McpServer.create({
-      scope: 'platform',
-      name: 'platform-tools',
-      url: 'https://mcp.example.com/mcp',
-    });
-    const toolsets = await mcpToolsetsForUser(USER_ID);
-    expect(Object.keys(toolsets.mcp_platform_tools)).toEqual([
-      'weather',
-      'surf_board.shaper.build',
-    ]);
+    expect(Object.keys(toolsets.mcp_platform_tools)).toEqual(['huge']);
+    expect(Object.keys(toolsets.mcp_fat)).toEqual(['huge']);
   });
 });
 

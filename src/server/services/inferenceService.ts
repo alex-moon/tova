@@ -4,11 +4,13 @@ import { deepinfraConnector, groqConnector } from './mastraService';
 /*
  * Delegating LLM service: every completion call across the app goes through
  * here so the provider can be swapped in one place. Callers may target a
- * provider explicitly via `options.provider`; un-tagged callers stay on
- * `groq` so existing call sites (guard classifier, title, metrics) are
- * unaffected. All transport lives behind the connectors in
- * `mastraService.ts` (the single owner of `@mastra/*` imports); provider
- * shapes are normalised to the neutral types there.
+ * provider explicitly via `options.provider`; un-tagged callers fall back to
+ * `deepinfra` (#109: Groq no longer handles any completion work — it stays in
+ * the enum only for the tool-free guard classifier/title/followup model refs
+ * until the DB/config cleanup in the follow-up ticket). All transport lives
+ * behind the connectors in `mastraService.ts` (the single owner of
+ * `@mastra/*` imports); provider shapes are normalised to the neutral types
+ * there.
  */
 export { CompletionOptions, NeutralCompletion, NeutralChunkStream } from './llmTypes';
 export type { LlmConnector, LlmProvider } from './llmTypes';
@@ -25,7 +27,7 @@ const connectors: Record<LlmProvider, LlmConnector> = {
  * `TypeError: undefined is not a function` mid-request.
  */
 const connectorFor = (provider: LlmProvider | undefined): LlmConnector => {
-  const connector = connectors[provider ?? 'groq'];
+  const connector = connectors[provider ?? 'deepinfra'];
   if (!connector) throw new Error(`Unknown LLM provider: ${String(provider)}`);
   return connector;
 };

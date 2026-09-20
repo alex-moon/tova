@@ -124,6 +124,7 @@ describe('AdminView models table (issue #33/#104)', () => {
     deleteModel.mockReset().mockResolvedValue(undefined);
   });
 
+<<<<<<< HEAD
   const setup = () => {
     listModels.mockReset().mockResolvedValueOnce([sampleRow()]);
     return render(<AdminView />);
@@ -136,6 +137,24 @@ describe('AdminView models table (issue #33/#104)', () => {
     expect(await screen.findByTestId('admin-models')).toBeInTheDocument();
     expect(screen.getByTestId('admin-model-r1')).toHaveTextContent('test-large');
     expect(screen.getByTestId('admin-models')).toHaveTextContent('131,072');
+=======
+  it('renders configured models as a read-only table', async () => {
+    listModels.mockResolvedValue([
+      {
+        id: 'deepinfra/test-large',
+        provider: 'deepinfra',
+        model: 'test-large',
+        tiers: ['small', 'large'],
+        stats: [{ band: 'short|prose', up: 3, down: 1 }],
+      },
+    ]);
+    render(<AdminView />);
+    expect(await screen.findByTestId('admin-view')).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('admin-tab-models'));
+    expect(await screen.findByTestId('admin-models')).toBeInTheDocument();
+    expect(screen.getByTestId('admin-model-deepinfra/test-large')).toHaveTextContent('test-large');
+    expect(screen.getByTestId('admin-models')).toHaveTextContent('small, large');
+>>>>>>> feat/109-no-mcp
     expect(screen.getByTestId('admin-models')).toHaveTextContent('short|prose: 3↑ 1↓');
     expect(screen.queryByText('Loading users...')).not.toBeInTheDocument();
   });

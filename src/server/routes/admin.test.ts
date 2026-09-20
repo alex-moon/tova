@@ -248,17 +248,22 @@ describe('admin routes', () => {
       const cookie = await registerAdmin(app, 'models-admin@example.com');
 
       await ProviderRouting.create({
-        provider: 'groq',
+        provider: 'deepinfra',
         model: 'test-large',
-        tier: 'large',
+        tier: 'small',
         eligible: true,
         contextLength: 131072,
       });
       await ProviderRouting.create({
-        provider: 'groq',
+        provider: 'deepinfra',
         model: 'test-large',
+<<<<<<< HEAD
         tier: 'guard',
         eligible: false,
+=======
+        tier: 'large',
+        eligible: true,
+>>>>>>> feat/109-no-mcp
       });
       await ModelMetricStat.findOneAndUpdate(
         { band: 'short|prose', modelName: 'test-large' },
@@ -268,6 +273,7 @@ describe('admin routes', () => {
 
       const res = await request(app).get('/api/admin/models').set('Cookie', cookie);
       expect(res.status).toBe(200);
+<<<<<<< HEAD
       const rows = res.body.filter((m: { model: string }) => m.model === 'test-large') as Record<
         string,
         unknown
@@ -416,6 +422,12 @@ describe('admin routes', () => {
           .set('Cookie', cookie);
         expect(missing.status).toBe(404);
       });
+=======
+      const large = res.body.find((m: { model: string }) => m.model === 'test-large') as
+        Record<string, unknown> | undefined;
+      expect(large).toMatchObject({ provider: 'deepinfra', tiers: ['small', 'large'] });
+      expect(large?.stats).toEqual([{ band: 'short|prose', up: 3, down: 1 }]);
+>>>>>>> feat/109-no-mcp
     });
   });
 });

@@ -241,6 +241,7 @@ const sanitizeToolsetKey = (name: string): string =>
   `mcp_${name.replace(/[^a-zA-Z0-9_]+/g, '_').slice(0, 40)}`;
 
 /*
+<<<<<<< HEAD
  * MCP tool budget (#77 root cause 2). Attaching a full MCP server's tools to
  * every chat request inflates the prompt by an unbounded number of tokens —
  * the GitHub MCP server tests against carries far more than fits under a
@@ -280,11 +281,20 @@ const estimateToolTokens = (toolInfo: McpToolInfo): number =>
   );
 
 /*
+=======
+>>>>>>> feat/109-no-mcp
  * Per-user toolset resolution: platform servers plus the calling user's own.
  * Connections happen in parallel with a bounded connect timeout so a first
  * chat after adding N servers stays within that bound, never N× it. Any
  * unreachable server is dropped from the set (its tools stop being offered)
  * — chat proceeds degraded, not stalled.
+ *
+ * Every user tool attaches unaudited: a token budget over user toolsets
+ * (Groq TPM mitigation, #77) was removed per #109 because since #94 no
+ * completion turn routes to Groq, and each remaining Groq call (guard
+ * classifier, chat titles, followups) is tool-free by design. The 413
+ * "Request too large" mapping in `routes/chat.ts` (renamed to an
+ * actionable MCP-servers message) remains as a safety net.
  */
 export const mcpToolsetsForUser = async (
   userId?: string,
@@ -324,16 +334,13 @@ export const mcpToolsetsForUser = async (
       }),
     );
     const toolsets: Record<string, Record<string, ReturnType<typeof createTool>>> = {};
-    let budgetRemaining = toolTokenBudget();
-    let droppedTools = 0;
     for (const entry of live) {
       if (!entry) continue;
       const setKey = sanitizeToolsetKey(entry.server.name);
       const tools: Record<string, ReturnType<typeof createTool>> = {};
-      const toolCount = entry.tools.length;
-      let acceptedInServer = 0;
       for (const toolInfo of entry.tools) {
         if (tools[toolInfo.name]) continue;
+<<<<<<< HEAD
         if (budgetApplies && entry.server.scope === 'user') {
           // Budget applies to user-raised toolsets only; platform toolsets
           // are curated by the deployment itself. On DeepInfra turns
@@ -347,6 +354,8 @@ export const mcpToolsetsForUser = async (
           budgetRemaining -= cost;
           acceptedInServer += 1;
         }
+=======
+>>>>>>> feat/109-no-mcp
         tools[toolInfo.name] = createTool({
           id: `${setKey}/${toolInfo.name}`,
           description: toolInfo.description || `Tool ${toolInfo.name} from an MCP server`,
@@ -373,12 +382,6 @@ export const mcpToolsetsForUser = async (
         });
       }
       if (Object.keys(tools).length) toolsets[setKey] = tools;
-    }
-    if (droppedTools > 0) {
-      console.warn(
-        `MCP tool budget (${toolTokenBudget()} est. tokens): dropped ${droppedTools} user tool` +
-          `${droppedTools === 1 ? '' : 's'} from this turn's chat request`,
-      );
     }
     return toolsets;
   })();
