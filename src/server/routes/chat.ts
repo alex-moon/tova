@@ -333,6 +333,9 @@ const saveUserMessageWithMetrics = async (
 
 // Chat endpoint (non-streaming, preserved for compatibility)
 router.post('/', authenticate, async (req: AuthRequest, res) => {
+  // Held outside try so the catch can erase a throwaway attachment on any
+  // failure path (#116). Null until the asset is loaded.
+  let attachedAsset: AssetDoc | null = null;
   try {
     const { sessionId, content } = req.body;
     const userId = req.user?.id;
@@ -352,7 +355,7 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
     if (attachResult === 'missing') {
       return res.status(404).json({ message: 'Asset not found' });
     }
-    const attachedAsset = attachResult;
+    attachedAsset = attachResult;
 
     const userDoc = await User.findById(userId);
     if (!userDoc) {
@@ -374,6 +377,7 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
       // (validation-gated). A ZDR turn must not continue a persisted chat:
       // writing there would contradict the retention promise.
       if (sessionId) {
+        await cleanupEphemeralAsset(attachedAsset);
         return res.status(409).json({
           message:
             'Zero-data-retention is on — new turns are never stored, so they cannot continue a saved chat. Start a new chat instead.',
@@ -381,6 +385,9 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
       }
       const zdrHistory = parseZdrHistory(req.body.history);
       if (!zdrHistory.ok) {
+        // The turn is rejected before it consumes anything, so the throwaway
+        // attachment does not outlive the request either (#116).
+        await cleanupEphemeralAsset(attachedAsset);
         return res.status(400).json({ message: 'Invalid chat history' });
       }
       const messages = buildZdrMessages(zdrHistory.value, content);
@@ -492,12 +499,19 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
     });
   } catch (err) {
     console.error('Chat error:', err);
+    // A ZDR turn that fails mid-flight (routing, provider, geo, metrics) still
+    // erases its throwaway attachment — cleanup is a no-op for durable
+    // assets, so the persisted path is untouched (#116).
+    await cleanupEphemeralAsset(attachedAsset);
     res.status(500).json({ message: 'Error processing chat' });
   }
 });
 
 // Chat streaming endpoint (SSE)
 router.post('/stream', authenticate, async (req: AuthRequest, res) => {
+  // Held outside try so the catch can erase a throwaway attachment on any
+  // failure path (#116); Safe: cleanup is a no-op for durable assets.
+  let attachedAsset: AssetDoc | null = null;
   try {
     const { sessionId, content } = req.body;
     const userId = req.user?.id;
@@ -517,7 +531,7 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
     if (attachResult === 'missing') {
       return res.status(404).json({ message: 'Asset not found' });
     }
-    const attachedAsset = attachResult;
+    attachedAsset = attachResult;
 
     const streamUserDoc = await User.findById(userId);
     if (!streamUserDoc) {
@@ -531,6 +545,7 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
       // Zero-data retention (#116): see the non-streaming route's rationale —
       // no session is created, and saved chats cannot be continued.
       if (sessionId) {
+        await cleanupEphemeralAsset(attachedAsset);
         return res.status(409).json({
           message:
             'Zero-data-retention is on — new turns are never stored, so they cannot continue a saved chat. Start a new chat instead.',
@@ -538,6 +553,7 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
       }
       const parsedHistory = parseZdrHistory(req.body.history);
       if (!parsedHistory.ok) {
+        await cleanupEphemeralAsset(attachedAsset);
         return res.status(400).json({ message: 'Invalid chat history' });
       }
       zdrHistory = parsedHistory.value;
@@ -730,6 +746,9 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
     res.end();
   } catch (err) {
     console.error('Chat stream error:', err);
+    // A ZDR turn that fails before or during streaming still erases its
+    // throwaway attachment (#116); no-op for durable assets.
+    await cleanupEphemeralAsset(attachedAsset);
     if (!res.headersSent) {
       res.status(500).json({ message: 'Error processing chat' });
     } else {

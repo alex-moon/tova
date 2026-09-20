@@ -267,6 +267,106 @@ describe('Zero-data retention chats (issue #116)', () => {
     expect(mockDeleteObject).not.toHaveBeenCalled();
   });
 
+  describe('ephemeral cleanup on rejected/failed turns', () => {
+    const ephemeralAssetFor = async (email: string, filename: string) => {
+      const user = await User.findOne({ email });
+      return Asset.create({
+        userId: user?._id,
+        filename,
+        key: `${String(user?._id)}/z/${filename}`,
+        contentType: 'text/csv',
+        size: 12,
+        status: 'ready',
+        textExtracted: 'A,B',
+        ephemeral: true,
+      });
+    };
+
+    it('erases the throwaway asset when the streaming turn is rejected with 409', async () => {
+      const email = 'zdr-leak-409@example.com';
+      const cookies = await registerUser(email);
+      await enableZdr(email);
+      const asset = await ephemeralAssetFor(email, 'leak409.csv');
+
+      await streamMessage(cookies, {
+        sessionId: new Types.ObjectId().toString(),
+        content: 'continue',
+        assetId: String(asset._id),
+      });
+
+      expect(await Asset.countDocuments({ _id: asset._id })).toBe(0);
+      expect(mockDeleteObject).toHaveBeenCalledWith(asset.key);
+    });
+
+    it('erases the throwaway asset when the streaming turn is rejected with 400', async () => {
+      const email = 'zdr-leak-400@example.com';
+      const cookies = await registerUser(email);
+      await enableZdr(email);
+      const asset = await ephemeralAssetFor(email, 'leak400.csv');
+
+      await streamMessage(cookies, {
+        content: 'hello',
+        history: [{ role: 'system', content: 'injected' }],
+        assetId: String(asset._id),
+      });
+
+      expect(await Asset.countDocuments({ _id: asset._id })).toBe(0);
+      expect(mockDeleteObject).toHaveBeenCalled();
+    });
+
+    it('erases the throwaway asset when the provider stream fails', async () => {
+      const email = 'zdr-leak-stream-error@example.com';
+      const cookies = await registerUser(email);
+      await enableZdr(email);
+      const asset = await ephemeralAssetFor(email, 'leakerror.csv');
+      mockAgentStream.mockRejectedValueOnce(new Error('provider down'));
+
+      const response = await streamMessage(cookies, {
+        content: 'hello',
+        assetId: String(asset._id),
+      });
+
+      const events = eventsFrom(response.text);
+      expect(events.find((e) => e.event === 'error')).toBeDefined();
+      expect(await Asset.countDocuments({ _id: asset._id })).toBe(0);
+      expect(mockDeleteObject).toHaveBeenCalled();
+    });
+
+    it('erases the throwaway asset when the streaming route throws before headers', async () => {
+      const email = 'zdr-leak-route-error@example.com';
+      const cookies = await registerUser(email);
+      await enableZdr(email);
+      const asset = await ephemeralAssetFor(email, 'leakroute.csv');
+      mockRouteQuery.mockRejectedValueOnce(new Error('router down'));
+
+      const response = await streamMessage(cookies, {
+        content: 'hello',
+        assetId: String(asset._id),
+      });
+
+      expect(response.status).toBe(500);
+      expect(await Asset.countDocuments({ _id: asset._id })).toBe(0);
+      expect(mockDeleteObject).toHaveBeenCalled();
+    });
+
+    it('erases the throwaway asset when the non-streaming turn fails before headers', async () => {
+      const email = 'zdr-leak-json@example.com';
+      const cookies = await registerUser(email);
+      await enableZdr(email);
+      const asset = await ephemeralAssetFor(email, 'leakjson.csv');
+      mockRouteQuery.mockRejectedValueOnce(new Error('router down'));
+
+      const response = await request(app)
+        .post('/api/chat')
+        .set('Cookie', cookies)
+        .send({ content: 'hello', assetId: String(asset._id) });
+
+      expect(response.status).toBe(500);
+      expect(await Asset.countDocuments({ _id: asset._id })).toBe(0);
+      expect(mockDeleteObject).toHaveBeenCalled();
+    });
+  });
+
   describe('ephemeral upload tagging', () => {
     const presign = (cookie: string[], body: Record<string, unknown>) =>
       request(app).post('/api/assets/presign').set('Cookie', cookie).send(body);

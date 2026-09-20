@@ -2,6 +2,16 @@
 
 ## Status (current)
 
+#116 ZDR option (merged via PR #124): a per-user "Zero data retention" toggle
+(`settings.zdr`, ProfileModal → `PATCH /api/profile`). With it on: chat turns are
+session-less (no Session/Message rows, no title/classification writes), continuity is a
+client-replayed capped `history` payload, a request carrying a `sessionId` is rejected
+with 409, chat-composer attachments ride a throwaway `ephemeral` flag (row + Spaces
+object erased with the turn, including on error paths), Assets-page uploads are
+unchanged, first-enable soft-deletes prior sessions and hard-deletes their messages,
+and copy states chats/files are never used to train models. Turned off, chat behaves
+exactly as before.
+
 No outstanding local tasks. Planning and tracking happen on GitHub (`alex-moon/tova`):
 issues for open work, PRs for changes; plans live in `docs/plan-<ticket>-<summary>.md`
 per `docs/workflow.md`.
