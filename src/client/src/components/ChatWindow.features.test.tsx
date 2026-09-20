@@ -13,7 +13,7 @@ vi.mock('../services/assets', async (importOriginal) => {
 
 import AssetService from '../services/assets';
 import ChatWindow from './ChatWindow';
-import type { Message } from '../App';
+import type { Message, ToolEvent } from '../App';
 
 const NO_TEXT_TOAST =
   'No text could be extracted from this file type — Tova will see the filename only.';
@@ -104,6 +104,66 @@ describe('Tool chip (issue #33)', () => {
     fireEvent.click(screen.getByTestId('tool-chip-web_search').querySelector('button')!);
     expect(screen.getByTestId('tool-detail')).toHaveTextContent('5 result(s) · groq.com');
     expect(screen.getByTestId('tool-detail')).toHaveTextContent('groq.com');
+  });
+});
+
+describe('Tool chip result counts (issue #114)', () => {
+  afterEach(cleanup);
+
+  const resultMessage = (tools: ToolEvent[]): Message[] => [
+    { _id: 'm1', role: 'assistant', content: 'answer', tools },
+  ];
+
+  it('shows the file count for list_files results', () => {
+    renderChat(
+      resultMessage([
+        {
+          phase: 'result',
+          name: 'list_files',
+          label: 'Listed your files',
+          status: 'ok',
+          resultCount: 3,
+        },
+      ]),
+    );
+    expect(screen.getByTestId('tool-chip-list_files')).toHaveTextContent('3 results');
+  });
+
+  it('shows no results text when the event carries no count', () => {
+    renderChat(
+      resultMessage([{ phase: 'result', name: 'read_file', label: 'Read a file', status: 'ok' }]),
+    );
+    expect(screen.getByTestId('tool-chip-read_file')).not.toHaveTextContent('results');
+  });
+
+  it('suppresses the legacy resultCount 0 artifact on unknown tools', () => {
+    renderChat(
+      resultMessage([
+        {
+          phase: 'result',
+          name: 'list_repositories',
+          label: 'Listed repositories',
+          status: 'ok',
+          resultCount: 0,
+        },
+      ]),
+    );
+    expect(screen.getByTestId('tool-chip-list_repositories')).not.toHaveTextContent('results');
+  });
+
+  it('keeps a real 0 visible for web_search', () => {
+    renderChat(
+      resultMessage([
+        {
+          phase: 'result',
+          name: 'web_search',
+          label: 'Searched the web',
+          status: 'empty',
+          resultCount: 0,
+        },
+      ]),
+    );
+    expect(screen.getByTestId('tool-chip-web_search')).toHaveTextContent('0 results');
   });
 });
 
