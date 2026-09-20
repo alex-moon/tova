@@ -576,7 +576,11 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
                 className="mb-1.5 flex items-center gap-2 rounded-md border border-border bg-muted px-2.5 py-1.5 text-xs text-muted-foreground"
                 data-testid="attachment-chip"
               >
-                <FileImage className="size-3.5 shrink-0" aria-hidden />
+                {isImageAttachment(attachment) ? (
+                  <FileImage className="size-3.5 shrink-0" aria-hidden />
+                ) : (
+                  <Paperclip className="size-3.5 shrink-0" aria-hidden />
+                )}
                 <span className="min-w-0 flex-1 truncate">{attachment.filename}</span>
                 <button
                   type="button"

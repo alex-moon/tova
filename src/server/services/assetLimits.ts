@@ -29,8 +29,6 @@ export const ALLOWED_CONTENT_TYPES = new Set([
 //   format (issue #68 hard rule) — uploads are direct browser→Spaces PUTs of
 //   single files, and no upload path ever reads archive contents.
 
-// Filenames become the last path segment of the object key: no path
-// separators, control chars or whitespace-only names.
 // Issue #115: images attach as real `image_url` content parts on the turn,
 // so "is this asset an image" is judged by content type (never filename).
 // The image branches of the allowlist above are exactly these.

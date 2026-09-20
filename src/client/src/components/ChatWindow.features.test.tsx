@@ -284,6 +284,27 @@ describe('Composer library-pick (issue #51)', () => {
     });
     expect(screen.getByTestId('attachment-chip')).toHaveTextContent('photo.png');
     expect(toast.info).not.toHaveBeenCalled();
+    expect(
+      document.querySelector('[data-testid="attachment-chip"] svg.lucide-file-image'),
+    ).toBeInTheDocument();
+  });
+
+  // #115 critic pass: only image attachments get the image icon; plain files
+  // keep the paperclip (regression guard against the unconditional swap).
+  it('keeps the paperclip icon for a non-image attachment', () => {
+    const onPickedConsumed = vi.fn();
+    renderChat([], false, {
+      incomingAsset: {
+        id: 'a10',
+        filename: 'report.pdf',
+        contentType: 'application/pdf',
+        hasText: true,
+      },
+      onPickedConsumed,
+    });
+    const chip = screen.getByTestId('attachment-chip');
+    expect(chip.querySelector('svg.lucide-file-image')).not.toBeInTheDocument();
+    expect(chip.querySelector('svg.lucide-paperclip')).toBeInTheDocument();
   });
 
   it('shows no toast when the picked asset has text', () => {
