@@ -293,6 +293,63 @@ describe('Chat streaming route', () => {
     expect(persisted?.sources).toBeUndefined();
   });
 
+  it('maps result counts per tool (#114): list_files files.length, MCP single-array field, no count otherwise', async () => {
+    const cookies = await registerUser('stream-tool-counts@example.com');
+    mockAgentStream.mockImplementation(async () => ({
+      fullStream: (async function* () {
+        yield { type: 'tool-call', payload: { toolName: 'list_files', args: {} } };
+        yield {
+          type: 'tool-result',
+          payload: { toolName: 'list_files', result: { files: ['a.txt', 'b.txt'] } },
+        };
+        yield { type: 'tool-call', payload: { toolName: 'list_repositories', args: {} } };
+        yield {
+          type: 'tool-result',
+          payload: { toolName: 'list_repositories', result: { repositories: [1, 2, 3, 4] } },
+        };
+        yield { type: 'tool-call', payload: { toolName: 'read_file', args: {} } };
+        yield {
+          type: 'tool-result',
+          payload: { toolName: 'read_file', result: { content: 'hello', path: 'x.txt' } },
+        };
+      })(),
+    }));
+
+    const app = createApp();
+    const response = await request(app)
+      .post('/api/chat/stream')
+      .set('Cookie', cookies)
+      .send({ content: 'list things' });
+
+    const toolEvents = response.text
+      .split('\n\n')
+      .filter((part) => part.includes('event: tool'))
+      .map((part) =>
+        JSON.parse(
+          part
+            .split('\n')
+            .find((l) => l.startsWith('data: '))!
+            .slice(6),
+        ),
+      )
+      .filter((e) => e.phase === 'result');
+    expect(toolEvents).toEqual([
+      expect.objectContaining({
+        name: 'list_files',
+        status: 'ok',
+        resultCount: 2,
+      }),
+      expect.objectContaining({
+        name: 'list_repositories',
+        status: 'ok',
+        resultCount: 4,
+      }),
+      expect.objectContaining({ name: 'read_file', status: 'ok' }),
+    ]);
+    expect(toolEvents[0].domains).toBeUndefined();
+    expect(toolEvents[2].resultCount).toBeUndefined();
+  });
+
   it('delivers follow-up suggestions on done and persists them on the message', async () => {
     const cookies = await registerUser('stream-suggestions@example.com');
     mockAgentStream.mockImplementation(async () => ({

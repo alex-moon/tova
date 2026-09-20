@@ -160,10 +160,20 @@ const SourcesBlock: React.FC<{ message: Message }> = ({ message }) => {
 // Tool feedback chip (#33): spinner → check / warning with a compact result
 // summary. Detail toggle exposes the query and result domains. Stateless —
 // the tool events arrive in order while streaming.
+// Issue #114: a zero count is only meaningful for tools whose output IS a
+// results list (web_search, list_files). Legacy persisted events from other
+// tools carried the old universal `resultCount: 0` artifact — suppress its
+// display there instead of migrating stored data.
+const countDisplay = (event: ToolEvent): number | null => {
+  if (event.resultCount == null) return null;
+  const showZero = event.name === 'web_search' || event.name === 'list_files';
+  return event.resultCount === 0 && !showZero ? null : event.resultCount;
+};
+
 const detailText = (event: ToolEvent): string | null =>
   event.phase === 'result'
     ? [
-        event.resultCount != null ? `${event.resultCount} result(s)` : null,
+        countDisplay(event) != null ? `${countDisplay(event)} result(s)` : null,
         ...(event.domains ?? []),
       ]
         .filter(Boolean)
@@ -193,8 +203,8 @@ const ToolChip: React.FC<{ event: ToolEvent }> = ({ event }) => {
         <span className="truncate">
           {event.label}
           {event.query ? ` “${event.query}”` : ''}
-          {event.phase === 'result' && event.resultCount != null
-            ? ` — ${event.resultCount} results`
+          {event.phase === 'result' && countDisplay(event) != null
+            ? ` — ${countDisplay(event)} results`
             : ''}
         </span>
         {detail && <ChevronDown size={12} aria-hidden />}
