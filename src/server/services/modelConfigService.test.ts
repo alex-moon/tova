@@ -190,19 +190,28 @@ describe('Model Config Service', () => {
       // assertion below can only fail if the mutation itself was lost (an
       // infra-level stale-read/lost-write), not if updateOne silently
       // matched nothing.
+      // The flip is scoped to the DeepInfra small-tier row: the Groq guard row
+      // carries the same model name (`openai/gpt-oss-20b`), and an unscoped
+      // match under unordered seeding would sometimes flip the guard row
+      // instead, leaving the pool row untouched (seen as a CI flake).
       const flipped = (await ProviderRouting.findOneAndUpdate(
-        { model: 'openai/gpt-oss-20b' },
+        { provider: 'deepinfra', tier: 'small', model: 'openai/gpt-oss-20b' },
         { $set: { tools: false } },
         { new: true },
       ).lean<{ tools?: boolean }>()) as { tools?: boolean } | null;
       expect(flipped).not.toBeNull();
       expect(flipped?.tools).toBe(false);
       try {
+        const untouched = await ProviderRouting.countDocuments({ tools: false });
+        expect(untouched).toBe(1);
         const models = (await completionsPoolFor('small')).map(({ model }) => model);
         expect(models).not.toContain('openai/gpt-oss-20b');
         expect(models).toContain('google/gemma-3-4b-it');
       } finally {
-        await ProviderRouting.updateOne({ model: 'openai/gpt-oss-20b' }, { tools: true });
+        await ProviderRouting.updateOne(
+          { provider: 'deepinfra', tier: 'small', model: 'openai/gpt-oss-20b' },
+          { tools: true },
+        );
       }
     });
 
