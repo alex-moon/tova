@@ -23,7 +23,9 @@ export interface AdminUser {
 // is one `providerroutings` document — a provider/model pair can repeat
 // across tiers, so `id` is the Mongo _id and rows are per-tier. `stats`
 // carries the feedback tallies captured in ModelMetricStat (up/down), keyed
-// by model name.
+// by model name. #115 badge fields: `tools` is schema-defaulted to true;
+// `vision` is only ever true when the row explicitly claims it;
+// `contextLength` is the advertised limit (omitted when none is known).
 export interface AdminModel {
   id: string;
   provider: string;

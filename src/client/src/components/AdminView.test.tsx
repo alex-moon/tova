@@ -144,6 +144,45 @@ describe('AdminView models table (issue #33/#104)', () => {
     expect(await screen.findByText('No models configured.')).toBeInTheDocument();
   });
 
+  // #115: capabilities are surfaced as read-only badges per row.
+  it('renders vision/tools capability badges with the context length', async () => {
+    listModels.mockResolvedValue([
+      {
+        id: 'r1',
+        provider: 'groq',
+        model: 'test-large',
+        tier: 'large',
+        eligible: true,
+        tools: true,
+        vision: false,
+        contextLength: 131072,
+        stats: [],
+      },
+      {
+        id: 'r2',
+        provider: 'deepinfra',
+        model: 'Qwen/Qwen3-VL-8B-Instruct',
+        tier: 'small',
+        eligible: true,
+        tools: true,
+        vision: true,
+        contextLength: 262144,
+        stats: [],
+      },
+    ]);
+    render(<AdminView />);
+    expect(await screen.findByTestId('admin-view')).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('admin-tab-models'));
+    const plain = await screen.findByTestId('admin-model-caps-r1');
+    expect(plain.querySelector('[data-testid="admin-model-vision-r1"]')).toHaveTextContent(
+      'vision ✗',
+    );
+    expect(plain).toHaveTextContent('tools ✓');
+    expect(plain).toHaveTextContent('131,072 tok');
+    const vl = screen.getByTestId('admin-model-caps-r2');
+    expect(vl.querySelector('[data-testid="admin-model-vision-r2"]')).toHaveTextContent('vision ✓');
+  });
+
   it('disables a model via the eligibility checkbox and refetches', async () => {
     setup();
     fireEvent.click(await screen.findByTestId('admin-tab-models'));

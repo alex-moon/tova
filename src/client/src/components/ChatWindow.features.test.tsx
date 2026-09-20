@@ -372,12 +372,54 @@ describe('Composer library-pick (issue #51)', () => {
   it('turns a picked asset into the attachment chip and fires the no-text toast when hasText is false', () => {
     const onPickedConsumed = vi.fn();
     renderChat([], false, {
-      incomingAsset: { id: 'a9', filename: 'scan.png', hasText: false },
+      incomingAsset: {
+        id: 'a9',
+        filename: 'scan.dat',
+        contentType: 'application/octet-stream',
+        hasText: false,
+      },
       onPickedConsumed,
     });
-    expect(screen.getByTestId('attachment-chip')).toHaveTextContent('scan.png');
+    expect(screen.getByTestId('attachment-chip')).toHaveTextContent('scan.dat');
     expect(onPickedConsumed).toHaveBeenCalledTimes(1);
     expect(toast.info).toHaveBeenCalledWith(NO_TEXT_TOAST);
+  });
+
+  // Issue #115: images are first-class attachments — no no-text toast.
+  it('shows no toast for an image pick and marks the chip with the image icon', () => {
+    const onPickedConsumed = vi.fn();
+    renderChat([], false, {
+      incomingAsset: {
+        id: 'a9',
+        filename: 'photo.png',
+        contentType: 'image/png',
+        hasText: false,
+      },
+      onPickedConsumed,
+    });
+    expect(screen.getByTestId('attachment-chip')).toHaveTextContent('photo.png');
+    expect(toast.info).not.toHaveBeenCalled();
+    expect(
+      document.querySelector('[data-testid="attachment-chip"] svg.lucide-file-image'),
+    ).toBeInTheDocument();
+  });
+
+  // #115 critic pass: only image attachments get the image icon; plain files
+  // keep the paperclip (regression guard against the unconditional swap).
+  it('keeps the paperclip icon for a non-image attachment', () => {
+    const onPickedConsumed = vi.fn();
+    renderChat([], false, {
+      incomingAsset: {
+        id: 'a10',
+        filename: 'report.pdf',
+        contentType: 'application/pdf',
+        hasText: true,
+      },
+      onPickedConsumed,
+    });
+    const chip = screen.getByTestId('attachment-chip');
+    expect(chip.querySelector('svg.lucide-file-image')).not.toBeInTheDocument();
+    expect(chip.querySelector('svg.lucide-paperclip')).toBeInTheDocument();
   });
 
   it('shows no toast when the picked asset has text', () => {

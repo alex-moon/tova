@@ -86,11 +86,18 @@ const SEED_ENTRIES = (): SeedEntry[] => [
     tools: true,
     contextLength: 131072,
   },
+  /*
+   * gemma-3-4b-it: the user vetoed it for ALL turns (#115, 2026-09-20):
+   * "too small to be useful for anything at all". The row exists so the seed
+   * set stays self-documenting, but `eligible: false` drops it from every
+   * pool (listByTier filters eligibility); its vision capability is now
+   * decorative. The up-migration matches this for upgraded deployments.
+   */
   {
     provider: 'deepinfra',
     model: 'google/gemma-3-4b-it',
     tier: 'small',
-    eligible: true,
+    eligible: false,
     tools: true,
     vision: true,
     contextLength: 131072,
@@ -102,6 +109,32 @@ const SEED_ENTRIES = (): SeedEntry[] => [
     eligible: true,
     tools: true,
     contextLength: 40960,
+  },
+  /*
+   * #115 image pool: the user routed ALL image turns through the large tier
+   * (2026-09-20) and wants two vision models there to compare. Both entries
+   * are live-probed on DeepInfra (accept image_url parts and tool calls).
+   * Qwen3-VL-8B moved from the small tier here; DeepInfra has no 8B listing
+   * — the alias is served by the Qwen3-VL-235B backend, hence the context
+   * length.
+   */
+  {
+    provider: 'deepinfra',
+    model: 'Qwen/Qwen3-VL-8B-Instruct',
+    tier: 'large',
+    eligible: true,
+    tools: true,
+    vision: true,
+    contextLength: 262144,
+  },
+  {
+    provider: 'deepinfra',
+    model: 'Qwen/Qwen3-VL-30B-A3B-Instruct',
+    tier: 'large',
+    eligible: true,
+    tools: true,
+    vision: true,
+    contextLength: 262144,
   },
   {
     provider: TIER_PROVIDER.large,

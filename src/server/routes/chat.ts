@@ -6,6 +6,8 @@ import { Message } from '../models/Message';
 import { User } from '../models/User';
 import { Asset } from '../models/Asset';
 import { buildAttachmentEnvelope } from '../services/attachmentEnvelope';
+import { isImageContentType } from '../services/assetLimits';
+import { isStorageConfigured, presignGetUrl } from '../services/storageService';
 import { routeQuery } from '../services/routerService';
 import { generateChatTitle } from '../services/titleService';
 import { hasPermission, ROUTING_PERMISSION } from '../services/userService';
@@ -14,7 +16,7 @@ import { ensureUserLocation } from '../services/geoLocationService';
 import { deleteObject } from '../services/storageService';
 import { inferenceService } from '../services/inferenceService';
 import { outputTokensFor, promptCharsFrom } from '../services/outputTokenCap';
-import type { NeutralStreamChunk } from '../services/llmTypes';
+import type { MessageContentPart, NeutralStreamChunk } from '../services/llmTypes';
 import { classifyAndPersistPromptDimensions, isTriviallyNeutral } from '../services/metricsService';
 import { computeDeterministicMetrics } from '../services/promptMetrics';
 import { generateFollowups } from '../services/followupService';
@@ -27,9 +29,9 @@ const NO_ROUTING_PERMISSION = "You don't have permission to use the model router
 type AssetDoc = {
   _id: unknown;
   filename: string;
+  key: string;
   contentType: string;
   size: number;
-  key: string;
   ephemeral?: boolean;
   textExtracted?: string | null;
   markdownExtracted?: string | null;
@@ -56,7 +58,7 @@ const loadAttachedAsset = async (
 // <user_content> block. Stored/persisted user message stays the raw user
 // text so the UI and metrics are unaffected.
 const appendAssetBlock = (
-  messages: { role: 'system' | 'user' | 'assistant'; content: string }[],
+  messages: { role: 'system' | 'user' | 'assistant'; content: string | MessageContentPart[] }[],
   asset: AssetDoc | null,
 ): void => {
   const last = messages[messages.length - 1];
@@ -70,6 +72,28 @@ const appendAssetBlock = (
       textExtracted: asset.textExtracted ?? asset.markdownExtracted ?? null,
     });
   }
+};
+
+// Issue #115: image attachments become real content parts on the current
+// user turn instead of the filename-only envelope. The image rides in as a
+// presigned Spaces GET URL (same mechanism `GET /assets/:id/url` serves);
+// the <user_content> envelope is deliberately skipped for images — its
+// "text" is binary noise. Returns true when the pixels flow this turn.
+// Without storage configured the pre-#115 degradation holds: envelope with
+// `text_extracted="false"`, no image part, no vision routing.
+const buildImageTurn = async (
+  messages: { role: 'system' | 'user' | 'assistant'; content: string | MessageContentPart[] }[],
+  asset: AssetDoc,
+): Promise<boolean> => {
+  if (!isImageContentType(asset.contentType) || !isStorageConfigured()) return false;
+  const last = messages[messages.length - 1];
+  if (last?.role !== 'user') return false;
+  const url = await presignGetUrl(asset.key);
+  last.content = [
+    { type: 'text', text: typeof last.content === 'string' ? last.content : '' },
+    { type: 'image_url', image_url: { url } },
+  ];
+  return true;
 };
 
 // Provenance extraction (issue #16): web_search tool results arrive as
@@ -267,14 +291,14 @@ const createSessionWithUser = async (userId: string, content: string) => {
 const buildZdrMessages = (
   history: { role: 'user' | 'assistant'; content: string }[],
   content: string,
-): { role: 'system' | 'user' | 'assistant'; content: string }[] => [
+): { role: 'system' | 'user' | 'assistant'; content: string | MessageContentPart[] }[] => [
   ...history,
   { role: 'user', content },
 ];
 
 const messagesFromPersistedHistory = (
   history: { role: string; content: string }[],
-): { role: 'system' | 'user' | 'assistant'; content: string }[] =>
+): { role: 'system' | 'user' | 'assistant'; content: string | MessageContentPart[] }[] =>
   history.reverse().map((m) => ({
     role: m.role as 'user' | 'assistant',
     content: m.content as string,
@@ -437,8 +461,16 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
     // it must be computed before the router sees the turn (decision 4).
     const routingBand = buildRoutingBand(userMessage.metrics);
 
-    // Determine model
-    const routingResult = await routeQuery(content, undefined, undefined, { band: routingBand });
+    // Determine model. Image turns (#115) route vision-first only when the
+    // presign path is actually available; otherwise the turn degrades to the
+    // legacy text envelope and normal routing applies.
+    const hasImage =
+      Boolean(attachedAsset && isImageContentType(attachedAsset.contentType)) &&
+      isStorageConfigured();
+    const routingResult = await routeQuery(content, undefined, undefined, {
+      band: routingBand,
+      hasImage,
+    });
 
     // Get chat history for context
     const history = await Message.find({ sessionId: session._id })
@@ -450,7 +482,10 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
     // service itself never throws, so chat cannot block hard on it.
     await ensureUserLocation(userDoc, req.ip);
     messages.unshift({ role: 'system', content: buildSystemContent(userDoc) });
-    appendAssetBlock(messages, attachedAsset);
+    if (attachedAsset) {
+      const imageAttached = hasImage ? await buildImageTurn(messages, attachedAsset) : false;
+      if (!imageAttached) appendAssetBlock(messages, attachedAsset);
+    }
 
     const chatCompletion = await inferenceService.createCompletion({
       messages,
@@ -568,14 +603,26 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
 
     let routingBand: string;
     let routingResult;
-    let messages: { role: 'system' | 'user' | 'assistant'; content: string }[];
+    let messages: {
+      role: 'system' | 'user' | 'assistant';
+      content: string | MessageContentPart[];
+    }[];
+
+    // Image turns (#115): gate on both the content type and a configured
+    // presign path; the image part replaces the filename envelope this turn.
+    const hasImage =
+      Boolean(attachedAsset && isImageContentType(attachedAsset.contentType)) &&
+      isStorageConfigured();
 
     await ensureUserLocation(streamUserDoc, req.ip);
     if (zdr) {
       // Continuity comes from the client replay (#116); nothing is read back.
       routingBand = buildRoutingBand(computeDeterministicMetrics(content));
       messages = buildZdrMessages(zdrHistory, content);
-      routingResult = await routeQuery(content, undefined, undefined, { band: routingBand });
+      routingResult = await routeQuery(content, undefined, undefined, {
+        band: routingBand,
+        hasImage,
+      });
     } else {
       // Save user message
       const userMessage = await saveUserMessageWithMetrics(
@@ -588,8 +635,11 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
       // so it must be computed before the router sees the turn (decision 4).
       routingBand = buildRoutingBand(userMessage.metrics);
 
-      // Determine model
-      routingResult = await routeQuery(content, undefined, undefined, { band: routingBand });
+      // Determine model. Same image-turn gating as the non-streaming route (#115).
+      routingResult = await routeQuery(content, undefined, undefined, {
+        band: routingBand,
+        hasImage,
+      });
 
       // Get chat history for context
       const history = await Message.find({ sessionId: session!._id })
@@ -599,7 +649,10 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
     }
 
     messages.unshift({ role: 'system', content: buildSystemContent(streamUserDoc) });
-    appendAssetBlock(messages, attachedAsset);
+    if (attachedAsset) {
+      const imageAttached = hasImage ? await buildImageTurn(messages, attachedAsset) : false;
+      if (!imageAttached) appendAssetBlock(messages, attachedAsset);
+    }
 
     // Set SSE headers
     res.setHeader('Content-Type', 'text/event-stream');

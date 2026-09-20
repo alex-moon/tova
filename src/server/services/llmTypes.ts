@@ -26,10 +26,22 @@ export interface TraceContext {
   metadata?: Record<string, unknown>;
 }
 
+/*
+ * Multimodal message content (#115): OpenAI-style content parts. The image
+ * part carries an HTTPS URL the provider fetches (presigned Spaces GET URL
+ * from the chat route); text-only callers keep passing plain strings and the
+ * union stays invisible to them.
+ */
+export type MessageContentPart =
+  { type: 'text'; text: string } | { type: 'image_url'; image_url: { url: string } };
+
 export interface CompletionOptions {
   provider?: LlmProvider;
   model: string;
-  messages: { role: 'system' | 'user' | 'assistant'; content: string }[];
+  messages: {
+    role: 'system' | 'user' | 'assistant';
+    content: string | MessageContentPart[];
+  }[];
   /*
    * Calling user id for this turn (set by the chat routes). Rides into
    * Mastra's request context (mastraService's `callOptionsFrom`) so

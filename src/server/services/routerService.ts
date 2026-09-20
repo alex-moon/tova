@@ -42,6 +42,15 @@ export interface RoutingResult {
 // needed.
 export interface RouterDeps {
   band?: string;
+  /*
+   * #115: true when this turn carries an image attachment. The large pool is
+   * then restricted to `vision: true` rows before any pick, and the text-only
+   * guard classifier is skipped (it is blind to the pixels anyway) — image
+   * turns are large-tier-only by user decision. An empty large vision pool
+   * is a loud failure — routing an image to a non-vision model would be
+   * worse than failing the turn.
+   */
+  hasImage?: boolean;
   getFitWeight?: (band: string, model: string) => Promise<FitWeight>;
 }
 
@@ -198,6 +207,30 @@ export const routeQuery = async (
   const epsilon = epsilonFromEnv();
   const readWeight = deps.getFitWeight ?? defaultGetFitWeight;
   const band = deps.band ?? '';
+
+  // Image turns (#115): capability first — only `vision: true` rows in the
+  // LARGE tier survive, the classifier (text-only) is skipped. The user
+  // routed all image chats to the large tier (2026-09-20) so the two vision
+  // models seeded there can be compared; small vision rows never serve
+  // image turns. Empty large vision pool is a loud failure — routing an
+  // image to a non-vision model would be worse than failing the turn.
+  if (deps.hasImage) {
+    const visionLarge = largePool.filter((ref) => ref.vision === true);
+    if (visionLarge.length === 0) {
+      throw new Error('No vision-capable models configured for image attachments');
+    }
+    const {
+      pool: ordered,
+      forced,
+      reasonSuffix,
+    } = await orderPoolByFit(visionLarge, band, readWeight);
+    const modelRef = forced ?? pickModelRef(ordered, 'large', epsilon, random);
+    return {
+      model: modelRef.model,
+      reason: `image-attachment${reasonSuffix}`,
+      provider: modelRef.provider,
+    };
+  }
 
   // Tier 1: Deterministic Rules
 

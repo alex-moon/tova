@@ -33,6 +33,23 @@ jest.mock('../services/titleService', () => ({
   generateChatTitle: jest.fn().mockResolvedValue('Hello'),
 }));
 
+// #115: image turns presign a Spaces GET URL inside the chat route. Storage
+// is mocked so the tests can pin both paths (configured / unconfigured)
+// without real Spaces credentials.
+const mockIsStorageConfigured = jest.fn();
+const mockPresignGetUrl = jest.fn();
+
+jest.mock('../services/storageService', () => ({
+  isStorageConfigured: (...args: unknown[]) => mockIsStorageConfigured(...args),
+  presignGetUrl: (...args: unknown[]) => mockPresignGetUrl(...args),
+  presignPutUrl: jest.fn(),
+  putObject: jest.fn(),
+  headObject: jest.fn(),
+  getObjectBuffer: jest.fn(),
+  getObjectStream: jest.fn(),
+  deleteObject: jest.fn(),
+}));
+
 jest.mock('../services/followupService', () => ({
   generateFollowups: jest.fn().mockResolvedValue([]),
 }));
@@ -204,5 +221,112 @@ describe('Chat attach-to-message (issue #34)', () => {
     expect(messages[messages.length - 1].content).toBe('hi');
     const userMessage = await Message.findOne({ role: 'user' }).sort({ _id: -1 });
     expect(userMessage?.assetId).toBeUndefined();
+  });
+});
+
+describe('Chat image turn (#115)', () => {
+  const seedImageAsset = async (email: string) => {
+    const user = await User.findOne({ email });
+    const id = new Types.ObjectId();
+    await Asset.create({
+      _id: id,
+      userId: user?._id,
+      filename: 'photo.png',
+      key: `k/${String(id)}/photo.png`,
+      contentType: 'image/png',
+      size: 4321,
+      status: 'ready',
+      textExtracted: null,
+    });
+    return String(id);
+  };
+
+  beforeEach(() => {
+    jest.resetAllMocks();
+    (classifyAndPersistPromptDimensions as jest.Mock).mockResolvedValue(undefined);
+    mockAgentStream.mockImplementation(async () => fullStreamFrom(['ok']));
+    mockRouteQuery.mockReset().mockResolvedValue(MOCK_ROUTING);
+    mockIsStorageConfigured.mockReset().mockReturnValue(true);
+    mockPresignGetUrl.mockReset().mockResolvedValue('https://spaces.example.com/signed-get-url');
+  });
+
+  it('builds the current user turn as text + image_url parts on a vision-routed turn', async () => {
+    const email = 'image-turn@example.com';
+    const cookies = await registerUser(email);
+    const assetId = await seedImageAsset(email);
+
+    const response = await streamMessage(cookies, {
+      content: 'what is in this image?',
+      assetId,
+    });
+
+    expect(response.status).toBe(200);
+    // Routing sees the image explicitly and skips the text-only envelope.
+    const [routingOpts] = (mockRouteQuery.mock.calls[0]?.slice(3) ?? []) as unknown as [
+      { band?: string; hasImage: boolean },
+    ];
+    expect(routingOpts.hasImage).toBe(true);
+    expect(mockPresignGetUrl).toHaveBeenCalledWith(expect.stringContaining('photo.png'));
+
+    const [callOptions] = mockAgentStream.mock.calls[0] as [
+      { messages: { role: string; content: string | unknown[] }[] },
+      unknown,
+    ];
+    const last = callOptions.messages[callOptions.messages.length - 1];
+    expect(last.role).toBe('user');
+    expect(last.content).toEqual([
+      { type: 'text', text: 'what is in this image?' },
+      { type: 'image_url', image_url: { url: 'https://spaces.example.com/signed-get-url' } },
+    ]);
+    // No binary-noise envelope on the image turn.
+    const parts = last.content as Array<Record<string, unknown>>;
+    expect(parts.some((part) => String(part.text ?? '').includes('<user_content>'))).toBe(false);
+    // Stored content stays the plain text; the asset FK rides on the message.
+    const stored = await Message.findOne({ role: 'user' }).sort({ _id: -1 });
+    expect(stored?.content).toBe('what is in this image?');
+    expect(String(stored?.assetId)).toBe(assetId);
+  });
+
+  it('degrades to the legacy filename-only envelope when storage is not configured', async () => {
+    mockIsStorageConfigured.mockReturnValue(false);
+    const email = 'image-nostorage@example.com';
+    const cookies = await registerUser(email);
+    const assetId = await seedImageAsset(email);
+
+    const response = await streamMessage(cookies, { content: 'what is in it?', assetId });
+    expect(response.status).toBe(200);
+    expect(mockPresignGetUrl).not.toHaveBeenCalled();
+    const [routingOpts] = (mockRouteQuery.mock.calls[0]?.slice(3) ?? []) as unknown as [
+      { band?: string; hasImage: boolean },
+    ];
+    expect(routingOpts.hasImage).toBe(false);
+    const [callOptions] = mockAgentStream.mock.calls[0] as [
+      { messages: { role: string; content: string }[] },
+      unknown,
+    ];
+    const last = callOptions.messages[callOptions.messages.length - 1];
+    expect(last.role).toBe('user');
+    expect(String(last.content)).toContain('<user_content>');
+    expect(String(last.content)).toContain('photo.png');
+  });
+
+  it('keeps the text envelope and normal routing for non-image assets', async () => {
+    const email = 'image-nonimage@example.com';
+    const cookies = await registerUser(email);
+    const assetId = await seedReadyAsset(email, 'FILE CONTENTS');
+
+    const response = await streamMessage(cookies, { content: 'summarize my file', assetId });
+    expect(response.status).toBe(200);
+    expect(mockPresignGetUrl).not.toHaveBeenCalled();
+    const [routingOpts] = (mockRouteQuery.mock.calls[0]?.slice(3) ?? []) as unknown as [
+      { band?: string; hasImage: boolean },
+    ];
+    expect(routingOpts.hasImage).toBe(false);
+    const [callOptions] = mockAgentStream.mock.calls[0] as [
+      { messages: { role: string; content: string }[] },
+      unknown,
+    ];
+    const last = callOptions.messages[callOptions.messages.length - 1];
+    expect(String(last.content)).toContain('FILE CONTENTS');
   });
 });
