@@ -4,10 +4,10 @@ import { Message } from '../models/Message';
 import { Asset } from '../models/Asset';
 import { purgeUserChats } from './profile';
 
-// Direct unit coverage for `purgeUserChats` (plan 136, T5). The route-level
-// first-enable behaviour lives in profile.test.ts (issue #116); this file adds
-// what that file does not assert: the bulk-op shape (no per-doc loops), the
-// user scoping, and the "assets survive a purge" shipped decision.
+// Coverage for `purgeUserChats` (plan 136, T5). profile.test.ts (issue #116)
+// only asserts the zdr flag flip; this file adds the data-level assertions:
+// the bulk-op shape (no per-doc loops), the user scoping, the first-enable
+// route behaviour, and the "assets survive a purge" shipped decision.
 
 const userId = () => new mongoose.Types.ObjectId();
 
@@ -137,6 +137,70 @@ describe('purgeUserChats (plan 136 T5)', () => {
     const assets = await Asset.find({ userId: uid }).lean();
     expect(assets).toHaveLength(1);
     expect(assets[0].filename).toBe('notes.md');
+  });
+});
+
+// Route-level coverage for T5 item 2: the first-enable purge as the route
+// actually triggers it (profile.test.ts asserts the flag flip, never the data).
+import request from 'supertest';
+import { createApp } from '../index';
+import { User } from '../models/User';
+
+describe('PATCH /api/profile zdr enable purge (plan 136 T5 item 2)', () => {
+  const registerUser = async (email: string) => {
+    const app = createApp();
+    const response = await request(app)
+      .post('/api/auth/register')
+      .send({ email, password: 'password123' });
+    return {
+      app,
+      userId: await User.findOne({ email }).then((u) => u?._id as mongoose.Types.ObjectId),
+      cookie: response.headers['set-cookie'],
+    };
+  };
+
+  it('first zdr enable soft-deletes sessions and hard-deletes messages', async () => {
+    const { app, userId, cookie } = await registerUser('purge-route@example.com');
+    await seedUserChat(userId, 2);
+
+    const res = await request(app).patch('/api/profile').set('Cookie', cookie).send({ zdr: true });
+    expect(res.status).toBe(200);
+
+    expect(await Session.find({ userId, deletedAt: null }).lean()).toHaveLength(0);
+    expect(
+      await Message.countDocuments({
+        sessionId: {
+          $in: await Session.find({ userId })
+            .select('_id')
+            .lean()
+            .then((docs) => docs.map((d) => d._id)),
+        },
+      }),
+    ).toBe(0);
+    expect(await Message.countDocuments()).toBe(0);
+  });
+
+  it('false→false never purges', async () => {
+    const { app, userId, cookie } = await registerUser('purge-route-false@example.com');
+    await seedUserChat(userId, 1);
+
+    const res = await request(app).patch('/api/profile').set('Cookie', cookie).send({ zdr: false });
+    expect(res.status).toBe(200);
+
+    expect(await Session.find({ userId, deletedAt: null }).lean()).toHaveLength(1);
+    expect(await Message.countDocuments()).toBe(2);
+  });
+
+  it('true→true is not a second purge opportunity', async () => {
+    const { app, userId, cookie } = await registerUser('purge-route-true@example.com');
+    await request(app).patch('/api/profile').set('Cookie', cookie).send({ zdr: true });
+    await seedUserChat(userId, 1);
+
+    const res = await request(app).patch('/api/profile').set('Cookie', cookie).send({ zdr: true });
+    expect(res.status).toBe(200);
+
+    expect(await Session.find({ userId, deletedAt: null }).lean()).toHaveLength(1);
+    expect(await Message.countDocuments()).toBe(2);
   });
 });
 
