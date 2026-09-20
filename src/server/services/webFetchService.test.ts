@@ -2,6 +2,7 @@ import dns from 'dns';
 import { fetchPage } from './webFetchService';
 import { muteConsoleError } from '../test/muteConsole';
 
+<<<<<<< HEAD
 // The checker's unit tests live in safeLinkService.test.ts; here it is a
 // controllable stub so the fetch flow (initial URL, redirect hops, gate
 // ordering) is testable in isolation.
@@ -11,6 +12,8 @@ jest.mock('./safeLinkService', () => ({
   assertSafeUrl: (url: string) => mockAssertSafeUrl(url),
 }));
 
+=======
+>>>>>>> feat/113-fetch-web
 const consoleErrorSpy = muteConsoleError();
 
 const realFetch = global.fetch;
@@ -32,7 +35,10 @@ afterAll(() => {
 describe('Web Fetch Service', () => {
   beforeEach(() => {
     consoleErrorSpy.mockClear();
+<<<<<<< HEAD
     mockAssertSafeUrl.mockReset().mockResolvedValue(undefined);
+=======
+>>>>>>> feat/113-fetch-web
     global.fetch = jest.fn();
     dns.promises.lookup = jest.fn() as unknown as typeof dns.promises.lookup;
   });
@@ -284,6 +290,7 @@ describe('Web Fetch Service', () => {
     });
   });
 
+<<<<<<< HEAD
   describe('safe link checking (#120, checker stubbed)', () => {
     const publicHost = () => {
       (dns.promises.lookup as jest.Mock).mockResolvedValue([
@@ -339,6 +346,8 @@ describe('Web Fetch Service', () => {
     });
   });
 
+=======
+>>>>>>> feat/113-fetch-web
   describe('surrogate-safe truncation', () => {
     it('does not split an emoji pair straddling the 8k cut', async () => {
       (dns.promises.lookup as jest.Mock).mockResolvedValue([

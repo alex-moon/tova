@@ -2,7 +2,10 @@ import dns from 'dns';
 import net from 'net';
 import { isPrivateIp } from './geoLocationService';
 import { htmlToMarkdown } from './markdownConversion';
+<<<<<<< HEAD
 import { assertSafeUrl } from './safeLinkService';
+=======
+>>>>>>> feat/113-fetch-web
 
 // Direct URL fetching for the `fetch_url` tool (issue #113): a parseable URL
 // the user pasted is a direct link, not a search query, so the agent should
@@ -163,7 +166,10 @@ export const fetchPage = async (url: string): Promise<FetchedPage | null> => {
     throw new Error(`unsupported URL scheme: ${parsed.protocol}`);
   }
   await assertPublicHost(parsed.hostname);
+<<<<<<< HEAD
   await assertSafeUrl(parsed.toString());
+=======
+>>>>>>> feat/113-fetch-web
 
   const requestOnce = (target: URL): Promise<Response> =>
     fetch(target.toString(), {
@@ -182,7 +188,10 @@ export const fetchPage = async (url: string): Promise<FetchedPage | null> => {
   let response: Response | undefined;
   for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
     await assertPublicHost(target.hostname);
+<<<<<<< HEAD
     await assertSafeUrl(target.toString());
+=======
+>>>>>>> feat/113-fetch-web
     response = await requestOnce(target);
     if (REDIRECT_STATUSES.has(response.status)) {
       const location = response.headers.get('location');
