@@ -11,12 +11,14 @@ import { generateChatTitle } from '../services/titleService';
 import { hasPermission, ROUTING_PERMISSION } from '../services/userService';
 import { buildSystemContent } from '../services/promptAssembly';
 import { ensureUserLocation } from '../services/geoLocationService';
+import { deleteObject } from '../services/storageService';
 import { inferenceService } from '../services/inferenceService';
 import { outputTokensFor, promptCharsFrom } from '../services/outputTokenCap';
 import type { NeutralStreamChunk } from '../services/llmTypes';
 import { classifyAndPersistPromptDimensions, isTriviallyNeutral } from '../services/metricsService';
 import { computeDeterministicMetrics } from '../services/promptMetrics';
 import { generateFollowups } from '../services/followupService';
+import { zdrHistorySchema } from '../validation';
 
 const router = express.Router();
 
@@ -27,6 +29,8 @@ type AssetDoc = {
   filename: string;
   contentType: string;
   size: number;
+  key: string;
+  ephemeral?: boolean;
   textExtracted?: string | null;
   markdownExtracted?: string | null;
 };
@@ -252,6 +256,50 @@ const createSessionWithUser = async (userId: string, content: string) => {
   return Session.create({ userId, title });
 };
 
+/*
+ * Zero-data retention (#116): with the account setting on, the chat routes
+ * keep nothing — no Session row, no Message rows, no fire-and-forget
+ * classification, no title generation. Continuity within an ephemeral chat is
+ * the client's replay: a bounded, validated `history` array rides each turn
+ * and is assembled below, mirroring what a persisted session's
+ * `Message.find({ sessionId })` would return.
+ */
+const buildZdrMessages = (
+  history: { role: 'user' | 'assistant'; content: string }[],
+  content: string,
+): { role: 'system' | 'user' | 'assistant'; content: string }[] => [
+  ...history,
+  { role: 'user', content },
+];
+
+const messagesFromPersistedHistory = (
+  history: { role: string; content: string }[],
+): { role: 'system' | 'user' | 'assistant'; content: string }[] =>
+  history.reverse().map((m) => ({
+    role: m.role as 'user' | 'assistant',
+    content: m.content as string,
+  }));
+
+// Throwaway chat attachments (#116): as soon as the turn that consumed them
+// completes, the row and its Spaces object go. Never throws — cleanup must
+// not turn a finished answer into an error.
+const cleanupEphemeralAsset = async (asset: AssetDoc | null | 'invalid' | 'missing') => {
+  if (!asset || asset === 'invalid' || asset === 'missing' || !asset.ephemeral) return;
+  try {
+    await Asset.deleteOne({ _id: asset._id });
+    await deleteObject(asset.key);
+  } catch (err) {
+    console.error('Ephemeral asset cleanup error:', err);
+  }
+};
+
+const parseZdrHistory = (
+  history: unknown,
+): { ok: true; value: { role: 'user' | 'assistant'; content: string }[] } | { ok: false } => {
+  const parsed = zdrHistorySchema.safeParse(history ?? []);
+  return parsed.success ? { ok: true, value: parsed.data } : { ok: false };
+};
+
 // Persist the user turn with its metrics. Trivially neutral prompts record
 // llmSkipReason 'trivial' so the skip gate is distinguishable in the DB from
 // failed ('parse'/'error') classification; non-trivial prompts get a
@@ -285,6 +333,9 @@ const saveUserMessageWithMetrics = async (
 
 // Chat endpoint (non-streaming, preserved for compatibility)
 router.post('/', authenticate, async (req: AuthRequest, res) => {
+  // Held outside try so the catch can erase a throwaway attachment on any
+  // failure path (#116). Null until the asset is loaded.
+  let attachedAsset: AssetDoc | null = null;
   try {
     const { sessionId, content } = req.body;
     const userId = req.user?.id;
@@ -304,7 +355,67 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
     if (attachResult === 'missing') {
       return res.status(404).json({ message: 'Asset not found' });
     }
-    const attachedAsset = attachResult;
+    attachedAsset = attachResult;
+
+    const userDoc = await User.findById(userId);
+    if (!userDoc) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    // Abort the provider call when the client disconnects before the response
+    // lands. Shared by the ZDR and persisted paths; symmetric with the
+    // streaming route's wiring.
+    const abortController = new AbortController();
+    req.on('close', () => {
+      if (!res.writableEnded) abortController.abort();
+    });
+
+    if (userDoc.settings?.zdr) {
+      // Zero-data retention (#116): nothing about the turn is written — no
+      // Session row, no Message rows, no classification, no title. The
+      // conversation continuity is the client's replayed `history` payload
+      // (validation-gated). A ZDR turn must not continue a persisted chat:
+      // writing there would contradict the retention promise.
+      if (sessionId) {
+        await cleanupEphemeralAsset(attachedAsset);
+        return res.status(409).json({
+          message:
+            'Zero-data-retention is on — new turns are never stored, so they cannot continue a saved chat. Start a new chat instead.',
+        });
+      }
+      const zdrHistory = parseZdrHistory(req.body.history);
+      if (!zdrHistory.ok) {
+        // The turn is rejected before it consumes anything, so the throwaway
+        // attachment does not outlive the request either (#116).
+        await cleanupEphemeralAsset(attachedAsset);
+        return res.status(400).json({ message: 'Invalid chat history' });
+      }
+      const messages = buildZdrMessages(zdrHistory.value, content);
+      await ensureUserLocation(userDoc, req.ip);
+      messages.unshift({ role: 'system', content: buildSystemContent(userDoc) });
+      appendAssetBlock(messages, attachedAsset);
+
+      const routingResult = await routeQuery(content, undefined, undefined, {
+        band: buildRoutingBand(computeDeterministicMetrics(content)),
+      });
+      const chatCompletion = await inferenceService.createCompletion({
+        messages,
+        model: routingResult.model,
+        provider: routingResult.provider,
+        userId,
+        abortSignal: abortController.signal,
+      });
+      const zdrAssistantContent = chatCompletion.choices[0]?.message?.content ?? '';
+      await cleanupEphemeralAsset(attachedAsset);
+      return res.json({
+        routing: routingResult,
+        message: {
+          role: 'assistant',
+          content: zdrAssistantContent,
+          modelName: routingResult.model,
+        },
+      });
+    }
 
     let session;
     if (sessionId) {
@@ -317,7 +428,7 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
     }
     // Save user message
     const userMessage = await saveUserMessageWithMetrics(
-      String(session._id),
+      String(session!._id),
       content,
       attachedAsset,
     );
@@ -326,13 +437,6 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
     // it must be computed before the router sees the turn (decision 4).
     const routingBand = buildRoutingBand(userMessage.metrics);
 
-    // Abort the provider call when the client disconnects before the JSON
-    // response lands. Symmetric with the streaming route's 6c wiring.
-    const abortController = new AbortController();
-    req.on('close', () => {
-      if (!res.writableEnded) abortController.abort();
-    });
-
     // Determine model
     const routingResult = await routeQuery(content, undefined, undefined, { band: routingBand });
 
@@ -340,17 +444,11 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
     const history = await Message.find({ sessionId: session._id })
       .sort({ timestamp: -1 })
       .limit(10);
-    const messages: { role: 'system' | 'user' | 'assistant'; content: string }[] = history
-      .reverse()
-      .map((m) => ({
-        role: m.role as 'user' | 'assistant',
-        content: m.content as string,
-      }));
-    const userDoc = await User.findById(userId);
+    const messages = messagesFromPersistedHistory(history as { role: string; content: string }[]);
     // Coarse geolocation (#50): awaited so this turn's prompt can include the
     // country; cheap when cached (fresh/cooldown returns immediately) and the
     // service itself never throws, so chat cannot block hard on it.
-    if (userDoc) await ensureUserLocation(userDoc, req.ip);
+    await ensureUserLocation(userDoc, req.ip);
     messages.unshift({ role: 'system', content: buildSystemContent(userDoc) });
     appendAssetBlock(messages, attachedAsset);
 
@@ -382,7 +480,7 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
 
     // Save assistant message
     const assistantMessage = new Message({
-      sessionId: session._id,
+      sessionId: session!._id,
       role: 'assistant',
       content: assistantContent,
       modelName: routingResult.model,
@@ -390,23 +488,30 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
       routingBand,
       ...(sources.length > 0 ? { sources } : {}),
       ...(sourceTitles.length > 0 ? { sourceTitles } : {}),
-      metrics: await buildMessageMetrics(String(session._id), assistantContent),
+      metrics: await buildMessageMetrics(String(session!._id), assistantContent),
     });
     await assistantMessage.save();
 
     res.json({
-      sessionId: session._id,
+      sessionId: session!._id,
       message: assistantMessage,
       routing: routingResult,
     });
   } catch (err) {
     console.error('Chat error:', err);
+    // A ZDR turn that fails mid-flight (routing, provider, geo, metrics) still
+    // erases its throwaway attachment — cleanup is a no-op for durable
+    // assets, so the persisted path is untouched (#116).
+    await cleanupEphemeralAsset(attachedAsset);
     res.status(500).json({ message: 'Error processing chat' });
   }
 });
 
 // Chat streaming endpoint (SSE)
 router.post('/stream', authenticate, async (req: AuthRequest, res) => {
+  // Held outside try so the catch can erase a throwaway attachment on any
+  // failure path (#116); Safe: cleanup is a no-op for durable assets.
+  let attachedAsset: AssetDoc | null = null;
   try {
     const { sessionId, content } = req.body;
     const userId = req.user?.id;
@@ -426,10 +531,33 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
     if (attachResult === 'missing') {
       return res.status(404).json({ message: 'Asset not found' });
     }
-    const attachedAsset = attachResult;
+    attachedAsset = attachResult;
+
+    const streamUserDoc = await User.findById(userId);
+    if (!streamUserDoc) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+    const zdr = Boolean(streamUserDoc.settings?.zdr);
 
     let session;
-    if (sessionId) {
+    let zdrHistory: { role: 'user' | 'assistant'; content: string }[] = [];
+    if (zdr) {
+      // Zero-data retention (#116): see the non-streaming route's rationale —
+      // no session is created, and saved chats cannot be continued.
+      if (sessionId) {
+        await cleanupEphemeralAsset(attachedAsset);
+        return res.status(409).json({
+          message:
+            'Zero-data-retention is on — new turns are never stored, so they cannot continue a saved chat. Start a new chat instead.',
+        });
+      }
+      const parsedHistory = parseZdrHistory(req.body.history);
+      if (!parsedHistory.ok) {
+        await cleanupEphemeralAsset(attachedAsset);
+        return res.status(400).json({ message: 'Invalid chat history' });
+      }
+      zdrHistory = parsedHistory.value;
+    } else if (sessionId) {
       session = await Session.findOne({ _id: sessionId, userId, deletedAt: null });
       if (!session) {
         return res.status(404).json({ message: 'Session not found' });
@@ -438,34 +566,38 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
       session = await createSessionWithUser(userId as string, content);
     }
 
-    // Save user message
-    const userMessage = await saveUserMessageWithMetrics(
-      String(session._id),
-      content,
-      attachedAsset,
-    );
+    let routingBand: string;
+    let routingResult;
+    let messages: { role: 'system' | 'user' | 'assistant'; content: string }[];
 
-    // Feedback aggregation happens under the band captured at route time, so
-    // it must be computed before the router sees the turn (decision 4).
-    const routingBand = buildRoutingBand(userMessage.metrics);
+    await ensureUserLocation(streamUserDoc, req.ip);
+    if (zdr) {
+      // Continuity comes from the client replay (#116); nothing is read back.
+      routingBand = buildRoutingBand(computeDeterministicMetrics(content));
+      messages = buildZdrMessages(zdrHistory, content);
+      routingResult = await routeQuery(content, undefined, undefined, { band: routingBand });
+    } else {
+      // Save user message
+      const userMessage = await saveUserMessageWithMetrics(
+        String(session!._id),
+        content,
+        attachedAsset,
+      );
 
-    // Determine model
-    const routingResult = await routeQuery(content, undefined, undefined, { band: routingBand });
+      // Feedback aggregation happens under the band captured at route time,
+      // so it must be computed before the router sees the turn (decision 4).
+      routingBand = buildRoutingBand(userMessage.metrics);
 
-    // Get chat history for context
-    const history = await Message.find({ sessionId: session._id })
-      .sort({ timestamp: -1 })
-      .limit(10);
-    const messages: { role: 'system' | 'user' | 'assistant'; content: string }[] = history
-      .reverse()
-      .map((m) => ({
-        role: m.role as 'user' | 'assistant',
-        content: m.content as string,
-      }));
-    const streamUserDoc = await User.findById(userId);
-    // Same geo wiring as the non-streaming route (#50): awaited so the
-    // streamed prompt is deterministic, cheap when cached.
-    if (streamUserDoc) await ensureUserLocation(streamUserDoc, req.ip);
+      // Determine model
+      routingResult = await routeQuery(content, undefined, undefined, { band: routingBand });
+
+      // Get chat history for context
+      const history = await Message.find({ sessionId: session!._id })
+        .sort({ timestamp: -1 })
+        .limit(10);
+      messages = messagesFromPersistedHistory(history as { role: string; content: string }[]);
+    }
+
     messages.unshift({ role: 'system', content: buildSystemContent(streamUserDoc) });
     appendAssetBlock(messages, attachedAsset);
 
@@ -481,7 +613,9 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
     };
 
     sendEvent('meta', {
-      sessionId: session._id,
+      // ZDR (#116): no sessionId is minted — nothing the replay could point
+      // at exists.
+      ...(zdr ? {} : { sessionId: session!._id }),
       routing: routingResult,
     });
 
@@ -530,6 +664,7 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
       console.error('Streaming error for %s/%s:', routingResult.provider, routingResult.model, err);
       sendEvent('error', { message: streamingErrorMessage(err) });
       sendEvent('done', { complete: false });
+      await cleanupEphemeralAsset(attachedAsset);
       res.end();
       return;
     }
@@ -537,11 +672,48 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
     // Save assistant message. A provider stream that yields no (or only
     // empty) deltas still persists a turn with content: '' — the empty
     // response stays visible as '(no content returned)' in the UI (#4 J).
+    // ZDR turns (#116) save nothing: the answer rides the 'done' event only,
+    // and the ephemeral attachment, if any, is erased with it.
     const sourceTitleList = sources
       .filter((url) => titles.has(url))
       .map((url) => ({ url, title: titles.get(url) as string }));
+    if (zdr) {
+      if (!isTriviallyNeutral(content) && assistantContent) {
+        // Suggestions are still generated (cheap guard model) — they are
+        // delivered without ever being written anywhere.
+        const suggestions = await generateFollowups(content, assistantContent);
+        sendEvent('done', {
+          complete: true,
+          message: {
+            role: 'assistant',
+            content: assistantContent,
+            modelName: routingResult.model,
+            routingBand,
+            ...(suggestions.length > 0 ? { suggestions } : {}),
+          },
+          ...(sourceTitleList.length > 0 ? { sourceTitles: sourceTitleList } : {}),
+        });
+        await cleanupEphemeralAsset(attachedAsset);
+        res.end();
+        return;
+      }
+      sendEvent('done', {
+        complete: true,
+        message: {
+          role: 'assistant',
+          content: assistantContent,
+          modelName: routingResult.model,
+          routingBand,
+        },
+        ...(sourceTitleList.length > 0 ? { sourceTitles: sourceTitleList } : {}),
+      });
+      await cleanupEphemeralAsset(attachedAsset);
+      res.end();
+      return;
+    }
+
     const assistantMessage = new Message({
-      sessionId: session._id,
+      sessionId: session!._id,
       role: 'assistant',
       provider: routingResult.provider,
       content: assistantContent,
@@ -549,7 +721,7 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
       routingBand,
       ...(sources.length > 0 ? { sources } : {}),
       ...(sourceTitleList.length > 0 ? { sourceTitles: sourceTitleList } : {}),
-      metrics: await buildMessageMetrics(String(session._id), assistantContent),
+      metrics: await buildMessageMetrics(String(session!._id), assistantContent),
     });
     await assistantMessage.save();
 
@@ -574,6 +746,9 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
     res.end();
   } catch (err) {
     console.error('Chat stream error:', err);
+    // A ZDR turn that fails before or during streaming still erases its
+    // throwaway attachment (#116); no-op for durable assets.
+    await cleanupEphemeralAsset(attachedAsset);
     if (!res.headersSent) {
       res.status(500).json({ message: 'Error processing chat' });
     } else {

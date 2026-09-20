@@ -83,6 +83,10 @@ const ProfileView = () => {
     file: user?.confirmDeletes?.file ?? true,
   };
   const [confirmDeletes, setConfirmDeletes] = useState(initialConfirmDeletes);
+  // Zero-data retention (issue #116): off unless the account explicitly
+  // enabled it; enabling is forward-looking — saved chats stay until deleted.
+  const initialZdr = Boolean(user?.zdr);
+  const [zdr, setZdr] = useState(initialZdr);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -108,6 +112,7 @@ const ProfileView = () => {
         confirmDeletes.file !== initialConfirmDeletes.file
           ? { confirmDeletes }
           : {}),
+        ...(zdr !== initialZdr ? { zdr } : {}),
       });
       // The saved choice rides the mirror immediately so pre-auth pages and
       // reloads paint it without waiting on the profile round-trip.
@@ -196,6 +201,27 @@ const ProfileView = () => {
                 Ask before deleting {target === 'chat' ? 'chats' : 'files'}
               </label>
             ))}
+          </fieldset>
+          <fieldset className="text-sm" data-testid="profile-privacy">
+            <legend className="mb-1 block">Privacy</legend>
+            <p className="mb-2 text-muted-foreground">
+              Your chats and files are never used to train models — by anyone, ever.
+            </p>
+            <label className="mt-1 flex items-center gap-2">
+              <input
+                type="checkbox"
+                data-testid="profile-zdr"
+                checked={zdr}
+                onChange={(e) => setZdr(e.target.checked)}
+              />
+              Zero data retention
+            </label>
+            <p className="mt-1 text-muted-foreground">
+              When on, nothing sent or attached in chat is stored — chats and attached files vanish
+              when the conversation ends. Files uploaded in Assets are kept so you can reuse them;
+              they are deleted only when you delete them. Turning this on removes your existing
+              chats and chat messages from storage.
+            </p>
           </fieldset>
         </div>
         <div className="mt-4 flex justify-end">

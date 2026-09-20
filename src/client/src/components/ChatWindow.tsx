@@ -1,3 +1,4 @@
+import { useContext } from 'react';
 import React, { useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -18,6 +19,9 @@ import {
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import AssetService from '@/services/assets';
+// Tolerant context read (not the throwing useAuth hook): standalone renders
+// of ChatWindow (tests, storybook-style usage) have no AuthProvider.
+import { AuthContext } from '../context/AuthContext';
 import type { Message, ToolEvent } from '../App';
 
 interface ChatWindowProps {
@@ -278,6 +282,8 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
   incomingAsset,
   onPickedConsumed,
 }) => {
+  const auth = useContext(AuthContext);
+  const zdr = Boolean(auth?.user?.zdr);
   const [input, setInput] = useState('');
   const [placeholder] = useState(pickPlaceholder);
   const textareaRef = React.useRef<HTMLTextAreaElement>(null);
@@ -375,7 +381,10 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
     if (!file || uploading) return;
     setUploading(true);
     try {
-      const asset = await AssetService.upload(file);
+      // Issue #116: composer uploads are always tagged 'chat' — the server
+      // turns that tag into throwaway (ephemeral) uploads only for accounts
+      // with zero-data retention on.
+      const asset = await AssetService.upload(file, undefined, 'chat');
       setAttachment({ id: asset.id, filename: asset.filename });
       if (!asset.hasText) toastForAsset(asset.markdownStatus);
     } catch (err) {
@@ -633,6 +642,10 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
             </div>
           </div>
         </form>
+        <p className="mt-2 text-center text-xs text-muted-foreground" data-testid="privacy-note">
+          Your chats and files are never used to train models — by anyone, ever.
+          {zdr ? ' Zero-data retention is on: nothing sent or attached in chat is stored.' : ''}
+        </p>
       </footer>
     </section>
   );

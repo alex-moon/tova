@@ -2,6 +2,7 @@ import express from 'express';
 import archiver from 'archiver';
 import { isValidObjectId } from 'mongoose';
 import { Asset, type AssetDocument } from '../models/Asset';
+import { User } from '../models/User';
 import { authenticate, AuthRequest } from '../middleware/auth';
 import {
   assetBulkConfirmSchema,
@@ -112,6 +113,7 @@ type PresignResult =
 const presignItemForUser = async (
   userId: string,
   { filename, contentType, size }: PresignItem,
+  opts: { ephemeral?: boolean } = {},
 ): Promise<PresignResult> => {
   if (!ALLOWED_CONTENT_TYPES.has(contentType)) {
     return { status: 'rejected', code: 400, message: 'File type is not allowed' };
@@ -127,6 +129,9 @@ const presignItemForUser = async (
     contentType,
     size,
     status: 'pending',
+    // ZDR chat attachments (#116): an ephemeral row is deleted together with
+    // its Spaces object once the turn that consumes it completes.
+    ...(opts.ephemeral ? { ephemeral: true } : {}),
   });
 
   const key = `${userId}/${asset._id}/${sanitizeFilename(filename)}`;
@@ -148,8 +153,19 @@ router.post('/presign', authenticate, async (req: AuthRequest, res) => {
         message: parsed.error.issues[0]?.message ?? 'Invalid upload request',
       });
     }
+    // Needed to gate ephemeral chat uploads (#116) on the account's own
+    // zero-data-retention setting.
+    const user = await User.findById(req.user?.id);
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
 
-    const result = await presignItemForUser(req.user?.id as string, parsed.data);
+    const result = await presignItemForUser(req.user?.id as string, parsed.data, {
+      // ZDR (#116): chat-composer uploads from a ZDR user are kept out of
+      // durable storage — the row is dropped after the turn consumes it. The
+      // account setting, not the client tag alone, decides.
+      ephemeral: parsed.data.scope === 'chat' && Boolean(user?.settings?.zdr),
+    });
     if (result.status === 'rejected') {
       return res.status(result.code).json({ message: result.message });
     }
@@ -275,11 +291,14 @@ const confirmAsset = async (asset: AssetDocument): Promise<ConfirmResult> => {
   }
 
   asset.status = 'ready';
+  // Ephemeral assets (#116) never queue conversion: the job would keep the
+  // extracted markdown alive in storage after the turn deletes the row and
+  // bytes. Fast-path extraction already covers the turn's prompt needs.
   // Issue #67: fast-path extraction won, nothing to convert. Otherwise
   // queue a background conversion job — the response latency of /confirm
   // stays low, conversion retries under the job cap, and a failed
   // conversion never fails the asset (the binary is fine).
-  if (text === null && isConvertible(asset.filename)) {
+  if (text === null && isConvertible(asset.filename) && !asset.ephemeral) {
     asset.markdownStatus = 'pending';
     asset.markdownFailureReason = null;
     await asset.save();
@@ -372,7 +391,9 @@ router.post('/bulk-confirm', authenticate, async (req: AuthRequest, res) => {
 router.get('/', authenticate, async (req: AuthRequest, res) => {
   try {
     const userId = req.user?.id;
-    const query: Record<string, unknown> = { userId };
+    // Ephemeral ZDR chat attachments (#116) live for one turn at most; the
+    // library view is for durable files, so they never appear here.
+    const query: Record<string, unknown> = { userId, ephemeral: { $ne: true } };
     const cursor = req.query.cursor;
     if (typeof cursor === 'string' && isValidObjectId(cursor)) {
       query._id = { $lt: cursor };

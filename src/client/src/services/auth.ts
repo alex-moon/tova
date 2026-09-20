@@ -56,6 +56,7 @@ const AuthService = {
     customInstructions?: string;
     theme?: string;
     startupChat?: 'recent' | 'new';
+    zdr?: boolean;
     confirmDeletes?: { chat?: boolean; file?: boolean };
   }): Promise<AuthUser> {
     try {

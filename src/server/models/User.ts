@@ -69,6 +69,14 @@ const userSchema = new mongoose.Schema(
             enum: ['recent', 'new'],
             default: null,
           },
+          // Zero-data-retention preference (issue #116): when true, chat
+          // turns and file attachments made in chat are never persisted to
+          // Mongo/S3; Assets-page uploads are unaffected. Forward-looking
+          // only: it stops new writes and does not purge pre-existing data.
+          zdr: {
+            type: Boolean,
+            default: false,
+          },
           // Delete-confirmation preferences (issue #59): only `false` is ever
           // written explicitly ("Always" or a Profile toggle); absent keys
           // default to true, so legacy docs need no backfill.
@@ -131,6 +139,7 @@ export interface UserSettings {
   // literals (`{ customInstructions }`) keep typechecking.
   theme?: 'light' | 'dark';
   startupChat?: 'recent' | 'new';
+  zdr?: boolean;
   confirmDeletes?: { chat: boolean; file: boolean } | null;
 }
 

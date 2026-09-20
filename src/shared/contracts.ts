@@ -73,6 +73,9 @@ export interface AuthUser {
   customInstructions?: string;
   theme?: 'light' | 'dark';
   startupChat?: 'recent' | 'new';
+  // Zero-data-retention opt-in (issue #116): omitted until the user enabled
+  // it, so the client only branches on the flag once it is explicitly true.
+  zdr?: boolean;
   confirmDeletes?: { chat: boolean; file: boolean };
   location?: AuthUserLocation;
 }
