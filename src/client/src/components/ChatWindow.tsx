@@ -8,6 +8,7 @@ import {
   Check,
   ChevronDown,
   ExternalLink,
+  FileImage,
   Loader2,
   Menu,
   Paperclip,
@@ -33,6 +34,7 @@ interface ChatWindowProps {
   incomingAsset?: {
     id: string;
     filename: string;
+    contentType?: string;
     hasText: boolean;
     markdownStatus?: string;
   } | null;
@@ -292,7 +294,11 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
   // Attached file (issue #34): a single asset per message; uploaded
   // immediately on selection (presign → direct PUT → confirm) and referenced
   // by id when the message is sent.
-  const [attachment, setAttachment] = useState<{ id: string; filename: string } | null>(null);
+  const [attachment, setAttachment] = useState<{
+    id: string;
+    filename: string;
+    contentType?: string;
+  } | null>(null);
   const [uploading, setUploading] = useState(false);
   // Follow-to-bottom: pinned while the user sits at (or near) the bottom;
   // scrolling up releases the pin, sending/deltas restore it (#33 item 3).
@@ -304,11 +310,18 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
   const toastNoText = () =>
     toast.info('No text could be extracted from this file type — Tova will see the filename only.');
 
+  // Issue #115: images are first-class now (they attach as real image parts
+  // to the model), so the no-text toast is for genuinely unrewarded file
+  // types only — judged by content type, never the filename extension.
+  const isImageAttachment = (asset: { contentType?: string }): boolean =>
+    typeof asset.contentType === 'string' && asset.contentType.startsWith('image/');
+
   // Issue #83: a pending conversion is a legitimate wait state, not a
   // textless file — word it as such instead of firing the false-negative
   // no-text toast. Only reached when `hasText` is already false.
-  const toastForAsset = (markdownStatus?: string) => {
-    if (markdownStatus === 'pending')
+  const toastForAsset = (asset: { contentType?: string; markdownStatus?: string }) => {
+    if (isImageAttachment(asset)) return;
+    if (asset.markdownStatus === 'pending')
       toast.info('Still extracting text — try attaching again shortly.');
     else toastNoText();
   };
@@ -385,8 +398,13 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
       // turns that tag into throwaway (ephemeral) uploads only for accounts
       // with zero-data retention on.
       const asset = await AssetService.upload(file, undefined, 'chat');
-      setAttachment({ id: asset.id, filename: asset.filename });
-      if (!asset.hasText) toastForAsset(asset.markdownStatus);
+      setAttachment({
+        id: asset.id,
+        filename: asset.filename,
+        // #115: the image chip needs the content type to show the right icon.
+        contentType: asset.contentType,
+      });
+      if (!asset.hasText) toastForAsset(asset);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Upload failed');
     } finally {
@@ -403,8 +421,12 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
     if (!incomingAsset) return;
     if (!uploading) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
-      setAttachment({ id: incomingAsset.id, filename: incomingAsset.filename });
-      if (!incomingAsset.hasText) toastForAsset(incomingAsset.markdownStatus);
+      setAttachment({
+        id: incomingAsset.id,
+        filename: incomingAsset.filename,
+        contentType: incomingAsset.contentType,
+      });
+      if (!incomingAsset.hasText) toastForAsset(incomingAsset);
     }
     onPickedConsumed?.();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -578,7 +600,11 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
                 className="mb-1.5 flex items-center gap-2 rounded-md border border-border bg-muted px-2.5 py-1.5 text-xs text-muted-foreground"
                 data-testid="attachment-chip"
               >
-                <Paperclip className="size-3.5 shrink-0" aria-hidden />
+                {isImageAttachment(attachment) ? (
+                  <FileImage className="size-3.5 shrink-0" aria-hidden />
+                ) : (
+                  <Paperclip className="size-3.5 shrink-0" aria-hidden />
+                )}
                 <span className="min-w-0 flex-1 truncate">{attachment.filename}</span>
                 <button
                   type="button"

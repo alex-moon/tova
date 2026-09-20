@@ -451,6 +451,7 @@ const AdminView = () => {
                       <th className="px-4 py-3 font-medium">Tier</th>
                       <th className="px-4 py-3 font-medium">Context</th>
                       <th className="px-4 py-3 font-medium">Eligible</th>
+                      <th className="px-4 py-3 font-medium">Capabilities</th>
                       <th className="px-4 py-3 font-medium">Feedback</th>
                       <th className="px-4 py-3" />
                     </tr>
@@ -473,6 +474,32 @@ const AdminView = () => {
                             checked={model.eligible}
                             onChange={() => toggleModelEligible(model)}
                           />
+                        </td>
+                        <td className="px-4 py-3" data-testid={`admin-model-caps-${model.id}`}>
+                          <span
+                            className={`mr-1.5 inline-block rounded-full border px-2 py-0.5 text-xs ${
+                              model.vision
+                                ? 'border-primary text-primary'
+                                : 'border-border text-muted-foreground'
+                            }`}
+                            data-testid={`admin-model-vision-${model.id}`}
+                          >
+                            vision {model.vision ? '✓' : '✗'}
+                          </span>
+                          <span
+                            className={`mr-1.5 inline-block rounded-full border px-2 py-0.5 text-xs ${
+                              model.tools
+                                ? 'border-primary text-primary'
+                                : 'border-border text-muted-foreground'
+                            }`}
+                          >
+                            tools {model.tools ? '✓' : '✗'}
+                          </span>
+                          <span className="inline-block px-2 py-0.5 text-xs text-muted-foreground">
+                            {model.contextLength
+                              ? `${model.contextLength.toLocaleString()} tok`
+                              : ''}
+                          </span>
                         </td>
                         <td className="px-4 py-3 text-muted-foreground">
                           {model.stats.length === 0
@@ -499,7 +526,7 @@ const AdminView = () => {
                     ))}
                     {models?.length === 0 && (
                       <tr>
-                        <td className="px-4 py-3 text-muted-foreground" colSpan={7}>
+                        <td className="px-4 py-3 text-muted-foreground" colSpan={8}>
                           No models configured.
                         </td>
                       </tr>

@@ -327,6 +327,60 @@ describe('Router Service', () => {
     });
   });
 
+  describe('Vision-aware routing (#115)', () => {
+    const vlSmall: ModelRef = { provider: 'deepinfra', model: 'vl-small', vision: true };
+    const vlLarge: ModelRef = { provider: 'deepinfra', model: 'vl-large', vision: true };
+    const vlConfig = {
+      small: [groqSmall, vlSmall],
+      large: [groqLarge, vlLarge],
+      guardModel: 'test-guard-model',
+    };
+
+    it('routes an image turn into the large vision pool only', async () => {
+      const result = await routeQuery('what is in this picture?', vlConfig, () => 0, {
+        hasImage: true,
+      });
+      expect(result).toEqual({
+        model: 'vl-large',
+        reason: 'image-attachment',
+        provider: 'deepinfra',
+      });
+    });
+
+    it('never calls the text-only classifier for an image turn', async () => {
+      mockGenerate.mockClear();
+      await routeQuery('a long detailed question about the diagram', vlConfig, () => 0.1, {
+        hasImage: true,
+      });
+      expect(mockGenerate).not.toHaveBeenCalled();
+    });
+
+    it('never falls back to a small vision model even when it is the only one', async () => {
+      const smallOnlyConfig = { small: [vlSmall], large: [groqLarge], guardModel: 'x' };
+      await expect(
+        routeQuery('what is this?', smallOnlyConfig, () => 0, { hasImage: true }),
+      ).rejects.toThrow('No vision-capable models configured for image attachments');
+    });
+
+    it('fails the turn loudly when no vision-capable model exists anywhere', async () => {
+      const noVisionConfig = {
+        small: [groqSmall],
+        large: [groqLarge],
+        guardModel: 'test-guard-model',
+      };
+      await expect(
+        routeQuery('what is this?', noVisionConfig, () => 0, { hasImage: true }),
+      ).rejects.toThrow('No vision-capable models configured for image attachments');
+    });
+
+    it('keeps deterministic rules and classifier behaviour for text-only turns', async () => {
+      classifyAs('simple');
+      const result = await routeQuery('Hello', vlConfig, () => 0.1);
+      expect(result.model).toBe(groqSmall.model);
+      expect(result.reason).toBe('deterministic-short');
+    });
+  });
+
   describe('contextLength propagation (#104)', () => {
     // #104: the chat routes size `max_tokens` against the routed model's
     // window, so every RoutingResult must carry (or omit) `contextLength`

@@ -10,8 +10,22 @@ const PROMPT_TOKEN_SLACK = 512;
 const FLOOR = 1024;
 const CHARS_PER_TOKEN = 4;
 
-export const promptCharsFrom = (messages: { content: string }[]): number =>
-  messages.reduce((sum, m) => sum + m.content.length, 0);
+export const promptCharsFrom = (
+  messages: {
+    content: string | { type: string; text?: string; image_url?: { url: string } }[];
+  }[],
+): number =>
+  messages.reduce(
+    (sum, m) =>
+      sum +
+      (typeof m.content === 'string'
+        ? m.content.length
+        : m.content.reduce(
+            (inner, part) => inner + (part.type === 'text' ? (part.text?.length ?? 0) : 0),
+            0,
+          )),
+    0,
+  );
 
 export const outputTokensFor = (contextLength: number | undefined, promptChars: number): number => {
   const envRaw = process.env.CHAT_MAX_OUTPUT_TOKENS;
