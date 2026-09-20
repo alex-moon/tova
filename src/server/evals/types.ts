@@ -26,6 +26,10 @@ export interface EvalRun {
 
 export type Assertion =
   | { type: 'tool_called'; tool: string; argsSubset?: Record<string, unknown> }
+  | {
+      type: 'tool_matching';
+      /** Substring match, for fuzzy MCP tool names (#112). */ nameContains: string;
+    }
   | { type: 'tool_not_called'; tool: string }
   | { type: 'tool_sequence'; tools: string[] }
   | { type: 'content_equals'; expected: string }

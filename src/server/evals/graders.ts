@@ -11,6 +11,8 @@ const evaluateAssertion = (run: EvalRun, assertion: Assertion): boolean => {
       return run.toolCalls.some(
         (call) => call.name === assertion.tool && argsMatch(call, assertion.argsSubset),
       );
+    case 'tool_matching':
+      return run.toolCalls.some((call) => call.name.includes(assertion.nameContains));
     case 'tool_not_called':
       return run.toolCalls.every((call) => call.name !== assertion.tool);
     case 'tool_sequence': {
