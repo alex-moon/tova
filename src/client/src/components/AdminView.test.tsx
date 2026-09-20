@@ -12,6 +12,7 @@ const createModel = vi.fn();
 const updateModel = vi.fn();
 const deleteModel = vi.fn();
 const listLogs = vi.fn();
+const compareModels = vi.fn();
 
 vi.mock('../services/admin', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../services/admin')>();
@@ -27,6 +28,7 @@ vi.mock('../services/admin', async (importOriginal) => {
       createModel: (...args: unknown[]) => createModel(...args),
       updateModel: (...args: unknown[]) => updateModel(...args),
       deleteModel: (...args: unknown[]) => deleteModel(...args),
+      compareModels: (...args: unknown[]) => compareModels(...args),
     },
     AdminLogsService: { listLogs: (...args: unknown[]) => listLogs(...args) },
   };
@@ -331,5 +333,105 @@ describe('AdminView logs section (issue #76)', () => {
     await waitFor(() =>
       expect(listLogs).toHaveBeenCalledWith({ level: undefined, q: '/api/chat', cursor: 0 }),
     );
+  });
+});
+
+describe('AdminView model comparison (issue #129)', () => {
+  afterEach(cleanup);
+
+  const sampleRow = (overrides = {}) => ({
+    id: 'r1',
+    provider: 'deepinfra',
+    model: 'Qwen/Qwen3-14B',
+    tier: 'small',
+    eligible: true,
+    tools: true,
+    vision: false,
+    contextLength: 131072,
+    stats: [],
+    ...overrides,
+  });
+
+  beforeEach(() => {
+    listUsers.mockReset().mockResolvedValue([admin()]);
+    updatePermissions.mockReset();
+    updateRole.mockReset();
+    updateModel.mockReset();
+    createModel.mockReset();
+    deleteModel.mockReset();
+    compareModels.mockReset();
+  });
+
+  const setup = (rows = [sampleRow()]) => {
+    listModels.mockResolvedValue(rows);
+    render(<AdminView />);
+    return screen.findByTestId('admin-view');
+  };
+
+  const switchToCompare = async () => {
+    await setup();
+    fireEvent.click(screen.getByTestId('admin-tab-compare'));
+    await screen.findByTestId('compare-run');
+  };
+
+  it('lists eligible non-guard models with checkboxes', async () => {
+    await switchToCompare();
+    expect(screen.getByTestId('compare-model-Qwen/Qwen3-14B')).not.toBeChecked();
+  });
+
+  it('disables the run button until a prompt and at least one model are set', async () => {
+    await switchToCompare();
+    expect(screen.getByTestId('compare-run')).toBeDisabled();
+    fireEvent.click(screen.getByTestId('compare-model-Qwen/Qwen3-14B'));
+    expect(screen.getByTestId('compare-run')).toBeDisabled();
+    fireEvent.change(screen.getByTestId('compare-prompt'), { target: { value: 'Hello there' } });
+    expect(screen.getByTestId('compare-run')).toBeEnabled();
+  });
+
+  it('runs the selection through the admin API and renders answers side by side', async () => {
+    compareModels.mockResolvedValue({
+      prompt: 'Hello there',
+      results: [
+        {
+          provider: 'deepinfra',
+          model: 'Qwen/Qwen3-14B',
+          answer: 'conversational answer',
+          latencyMs: 1200,
+        },
+        {
+          provider: 'groq',
+          model: 'openai/gpt-oss-20b',
+          answer: null,
+          latencyMs: 300,
+          error: 'boom',
+        },
+      ],
+    });
+    await setup([
+      sampleRow(),
+      sampleRow({ id: 'r2', provider: 'groq', model: 'openai/gpt-oss-20b', tier: 'large' }),
+    ]);
+    fireEvent.click(screen.getByTestId('admin-tab-compare'));
+    fireEvent.click(screen.getByTestId('compare-model-Qwen/Qwen3-14B'));
+    fireEvent.click(screen.getByTestId('compare-model-openai/gpt-oss-20b'));
+    fireEvent.change(screen.getByTestId('compare-prompt'), { target: { value: 'Hello there' } });
+    fireEvent.click(screen.getByTestId('compare-run'));
+    await screen.findByTestId('compare-results');
+    expect(compareModels).toHaveBeenCalledWith('Hello there', [
+      { provider: 'deepinfra', model: 'Qwen/Qwen3-14B', contextLength: 131072 },
+      { provider: 'groq', model: 'openai/gpt-oss-20b', contextLength: 131072 },
+    ]);
+    expect(screen.getByTestId('compare-answer-Qwen/Qwen3-14B')).toBeInTheDocument();
+    expect(screen.getByText('conversational answer')).toBeInTheDocument();
+    expect(screen.getByText(/boom/)).toBeInTheDocument();
+  });
+
+  it('shows the API error message when the comparison run fails', async () => {
+    compareModels.mockRejectedValue(new AdminError('Models unavailable.'));
+    await switchToCompare();
+    fireEvent.click(screen.getByTestId('compare-model-Qwen/Qwen3-14B'));
+    fireEvent.change(screen.getByTestId('compare-prompt'), { target: { value: 'Hello there' } });
+    fireEvent.click(screen.getByTestId('compare-run'));
+    expect(await screen.findByTestId('compare-error')).toHaveTextContent('Models unavailable.');
   });
 });

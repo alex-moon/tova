@@ -541,3 +541,57 @@ describe('admin logs endpoint (issue #76)', () => {
     expect(Number(first.body.nextCursor)).toBeGreaterThanOrEqual(0);
   });
 });
+
+/*
+ * POST /api/admin/model-compare (issue #129): shared-core direct model
+ * comparison behind the admin guard. Only validation is asserted here —
+ * the runner itself (connectors, agent path) is unit-tested in
+ * services/modelCompare.test.ts, so this suite never pays for a real
+ * completion call.
+ */
+describe('POST /api/admin/model-compare (issue #129)', () => {
+  it('rejects the unauthenticated and non-admin', async () => {
+    const app = createApp();
+    const user = await registerUser(app, 'nocmp@example.com');
+    expect((await request(app).post('/api/admin/model-compare').send({})).status).toBe(401);
+    const res = await request(app)
+      .post('/api/admin/model-compare')
+      .set('Cookie', user)
+      .send({ prompt: 'hi', models: [{ provider: 'deepinfra', model: 'x' }] });
+    expect(res.status).toBe(403);
+  });
+
+  it('validates prompt and model rows before running anything', async () => {
+    const app = createApp();
+    const cookie = await registerAdmin(app, 'cmpadmin@example.com');
+    const call = (body: object) =>
+      request(app).post('/api/admin/model-compare').set('Cookie', cookie).send(body);
+
+    const noPrompt = await call({ models: [{ provider: 'deepinfra', model: 'x' }] });
+    expect(noPrompt.status).toBe(400);
+
+    const emptyModels = await call({ prompt: 'hi', models: [] });
+    expect(emptyModels.status).toBe(400);
+
+    const badProvider = await call({
+      prompt: 'hi',
+      models: [{ provider: 'openai', model: 'x' }],
+    });
+    expect(badProvider.status).toBe(400);
+
+    const blankModel = await call({ prompt: 'hi', models: [{ provider: 'groq', model: ' ' }] });
+    expect(blankModel.status).toBe(400);
+
+    const badContext = await call({
+      prompt: 'hi',
+      models: [{ provider: 'groq', model: 'x', contextLength: 0 }],
+    });
+    expect(badContext.status).toBe(400);
+
+    const tooManyRows = await call({
+      prompt: 'hi',
+      models: Array.from({ length: 7 }, () => ({ provider: 'groq', model: 'x' })),
+    });
+    expect(tooManyRows.status).toBe(400);
+  });
+});

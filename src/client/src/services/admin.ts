@@ -1,5 +1,5 @@
 import axios from 'axios';
-import type { AdminModel, AdminUser, AdminLogsPayload } from '../types/admin';
+import type { AdminModel, AdminUser, AdminLogsPayload, ModelComparisonRun } from '../types/admin';
 
 // Normalised admin failure: message comes from the server response when one
 // arrived, otherwise the call's fallback. Views catch AdminError and read
@@ -94,7 +94,25 @@ const deleteModel = async (id: string): Promise<void> => {
   }
 };
 
-const AdminModelsService = { listModels, createModel, updateModel, deleteModel };
+// Direct model comparison (issue #129): one prompt through the existing
+// agent on chosen model rows. Row shape mirrors the models payload so the
+// view can forward selections straight from the inventory table.
+const compareModels = async (
+  prompt: string,
+  models: { provider: string; model: string; contextLength?: number }[],
+): Promise<ModelComparisonRun> => {
+  try {
+    const res = await axios.post<ModelComparisonRun>('/api/admin/model-compare', {
+      prompt,
+      models,
+    });
+    return res.data;
+  } catch (err) {
+    throw toAdminError(err, 'Failed to run model comparison.');
+  }
+};
+
+const AdminModelsService = { listModels, createModel, updateModel, deleteModel, compareModels };
 
 export interface ListLogsParams {
   level?: 'info' | 'warn' | 'error';
