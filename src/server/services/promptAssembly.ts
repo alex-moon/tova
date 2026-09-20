@@ -99,8 +99,25 @@ const profileContextBlock = (
     .trim();
 };
 
+const KEY_INTRO =
+  'You also have context from the user’s past chats, below — durable people, places, ' +
+  'projects and commitments they have mentioned. Use it only where relevant to the ' +
+  'current question to connect what they are asking about with what they already told ' +
+  'you; it may be stale, so do not assert it as fact if the chat contradicts it.';
+
+// Pre-retrieved entity-graph block (issue #138, plan task 4). The caller does
+// the Mongo retrieval and the flag check; this function only decides layout
+// and whether the block is worth a slot at all — an empty/garbage block must
+// not shift an otherwise identical prompt (plan decision 4's regression guard).
+const entityGraphBlock = (block: string | null | undefined): string => {
+  const trimmed = block?.trim();
+  if (!trimmed) return '';
+  return ['<user:knowledge_graph>', KEY_INTRO, '', trimmed, '</user:knowledge_graph>'].join('\n');
+};
+
 export const buildSystemContent = (
   user: Pick<UserDocument, 'name' | 'preferredName' | 'location' | 'settings'> | null,
+  knowledgeBlock: string | null | undefined = undefined,
 ): string => {
   const parts = [
     resolveSystemPrompt(),
@@ -109,6 +126,7 @@ export const buildSystemContent = (
     // the system prompt as a belt to the `current_datetime` tool braces.
     `Today's date is ${new Date().toISOString().slice(0, 10)} (UTC).`,
     profileContextBlock(user),
+    entityGraphBlock(knowledgeBlock),
     customInstructionsBlock(user?.settings ?? null),
   ].filter(Boolean);
   return parts.join('\n\n');

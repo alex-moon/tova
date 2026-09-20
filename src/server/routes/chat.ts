@@ -12,6 +12,10 @@ import { routeQuery } from '../services/routerService';
 import { generateChatTitle } from '../services/titleService';
 import { hasPermission, ROUTING_PERMISSION } from '../services/userService';
 import { buildSystemContent } from '../services/promptAssembly';
+import {
+  isEntityInjectionEnabled,
+  retrieveKnowledgeBlock,
+} from '../services/entityRetrievalService';
 import { ensureUserLocation } from '../services/geoLocationService';
 import { deleteObject } from '../services/storageService';
 import { inferenceService } from '../services/inferenceService';
@@ -359,6 +363,22 @@ const saveUserMessageWithMetrics = async (
   return userMessage;
 };
 
+/*
+ * Entity-graph retrieval (#138, plan task 4): read-only, bounded "what we
+ * know about you" block for the system prompt, only when
+ * ENTITY_GRAPH_PROMPT_INJECTION is set. Never throws — graph enrichment,
+ * like extraction, must not degrade a chat turn.
+ */
+const knowledgeBlockFor = async (prompt: string, userId: string): Promise<string> => {
+  if (!isEntityInjectionEnabled()) return '';
+  try {
+    return await retrieveKnowledgeBlock(prompt, userId);
+  } catch (err) {
+    console.error('Entity graph retrieval error:', err);
+    return '';
+  }
+};
+
 // Chat endpoint (non-streaming, preserved for compatibility)
 router.post('/', authenticate, async (req: AuthRequest, res) => {
   // Held outside try so the catch can erase a throwaway attachment on any
@@ -485,7 +505,11 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
     // country; cheap when cached (fresh/cooldown returns immediately) and the
     // service itself never throws, so chat cannot block hard on it.
     await ensureUserLocation(userDoc, req.ip);
-    messages.unshift({ role: 'system', content: buildSystemContent(userDoc) });
+    const entityBlock = await knowledgeBlockFor(content, userId as string);
+    messages.unshift({
+      role: 'system',
+      content: buildSystemContent(userDoc, entityBlock),
+    });
     if (attachedAsset) {
       const imageAttached = hasImage ? await buildImageTurn(messages, attachedAsset) : false;
       if (!imageAttached) appendAssetBlock(messages, attachedAsset);
@@ -667,7 +691,11 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
       messages = messagesFromPersistedHistory(history as { role: string; content: string }[]);
     }
 
-    messages.unshift({ role: 'system', content: buildSystemContent(streamUserDoc) });
+    const streamEntityBlock = await knowledgeBlockFor(content, userId as string);
+    messages.unshift({
+      role: 'system',
+      content: buildSystemContent(streamUserDoc, streamEntityBlock),
+    });
     if (attachedAsset) {
       const imageAttached = hasImage ? await buildImageTurn(messages, attachedAsset) : false;
       if (!imageAttached) appendAssetBlock(messages, attachedAsset);

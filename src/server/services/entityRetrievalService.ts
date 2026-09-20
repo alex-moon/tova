@@ -11,6 +11,11 @@ import { normalizeName } from './entityExtractionService';
  * unit-testable without Mongo.
  */
 
+// Plan decision 6: injection has its own flag so prompt growth can be turned
+// off (or never turned on) without touching extraction.
+export const isEntityInjectionEnabled = (): boolean =>
+  Boolean(process.env.ENTITY_GRAPH_PROMPT_INJECTION);
+
 export type ScoredEntity = {
   _id: mongoose.Types.ObjectId;
   name: string;
@@ -127,8 +132,8 @@ export const buildKnowledgeBlock = (
       `- ${nameById.get(edge.fromId) ?? edge.fromName} —${edge.kind}→ ` +
       `${nameById.get(edge.toId) ?? edge.toName}` +
       (edge.summary ? ` (${oneLine(edge.summary, 80)})` : '');
-    // Other-endpoint nodes outside the selected set still surface (their
-    // name came from the Mongo fetch below); skip dangling names entirely.
+    // A missing name on either endpoint (deleted node or truncated fetch)
+    // renders an empty bullet — drop the edge line instead.
     if (!nameById.get(edge.fromId) && !edge.fromName) continue;
     if (!nameById.get(edge.toId) && !edge.toName) continue;
     if (used + edgeLine.length > cap) break;
