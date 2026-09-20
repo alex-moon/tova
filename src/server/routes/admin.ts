@@ -252,7 +252,6 @@ router.delete('/models/:id', ...adminGuard, async (req, res) => {
   }
 });
 
-<<<<<<< HEAD
 // Issue #129: direct model comparison — one prompt through the existing
 // agent on chosen routing rows. Shares `runModelComparison` with the
 // one-off CLI (`scripts/eval-model-compare.ts`) so both lanes exercise the
@@ -297,8 +296,6 @@ router.post('/model-compare', ...adminGuard, async (req, res) => {
   }
 });
 
-=======
->>>>>>> feat/104-new-errors
 // Issue #76: read-only tail of the in-memory log buffer for the admin
 // logs view / API consumers. Supports incremental polling via cursor.
 router.get('/logs', ...adminGuard, (req, res) => {

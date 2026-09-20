@@ -28,10 +28,7 @@ vi.mock('../services/admin', async (importOriginal) => {
       createModel: (...args: unknown[]) => createModel(...args),
       updateModel: (...args: unknown[]) => updateModel(...args),
       deleteModel: (...args: unknown[]) => deleteModel(...args),
-<<<<<<< HEAD
       compareModels: (...args: unknown[]) => compareModels(...args),
-=======
->>>>>>> feat/104-new-errors
     },
     AdminLogsService: { listLogs: (...args: unknown[]) => listLogs(...args) },
   };
@@ -124,7 +121,6 @@ describe('AdminView models table (issue #33/#104)', () => {
     deleteModel.mockReset().mockResolvedValue(undefined);
   });
 
-<<<<<<< HEAD
   const setup = () => {
     listModels.mockReset().mockResolvedValueOnce([sampleRow()]);
     return render(<AdminView />);
@@ -137,24 +133,6 @@ describe('AdminView models table (issue #33/#104)', () => {
     expect(await screen.findByTestId('admin-models')).toBeInTheDocument();
     expect(screen.getByTestId('admin-model-r1')).toHaveTextContent('test-large');
     expect(screen.getByTestId('admin-models')).toHaveTextContent('131,072');
-=======
-  it('renders configured models as a read-only table', async () => {
-    listModels.mockResolvedValue([
-      {
-        id: 'deepinfra/test-large',
-        provider: 'deepinfra',
-        model: 'test-large',
-        tiers: ['small', 'large'],
-        stats: [{ band: 'short|prose', up: 3, down: 1 }],
-      },
-    ]);
-    render(<AdminView />);
-    expect(await screen.findByTestId('admin-view')).toBeInTheDocument();
-    fireEvent.click(screen.getByTestId('admin-tab-models'));
-    expect(await screen.findByTestId('admin-models')).toBeInTheDocument();
-    expect(screen.getByTestId('admin-model-deepinfra/test-large')).toHaveTextContent('test-large');
-    expect(screen.getByTestId('admin-models')).toHaveTextContent('small, large');
->>>>>>> feat/109-no-mcp
     expect(screen.getByTestId('admin-models')).toHaveTextContent('short|prose: 3↑ 1↓');
     expect(screen.queryByText('Loading users...')).not.toBeInTheDocument();
   });
@@ -166,7 +144,6 @@ describe('AdminView models table (issue #33/#104)', () => {
     expect(await screen.findByText('No models configured.')).toBeInTheDocument();
   });
 
-<<<<<<< HEAD
   // #115: capabilities are surfaced as read-only badges per row.
   it('renders vision/tools capability badges with the context length', async () => {
     listModels.mockResolvedValue([
@@ -206,8 +183,6 @@ describe('AdminView models table (issue #33/#104)', () => {
     expect(vl.querySelector('[data-testid="admin-model-vision-r2"]')).toHaveTextContent('vision ✓');
   });
 
-=======
->>>>>>> feat/104-new-errors
   it('disables a model via the eligibility checkbox and refetches', async () => {
     setup();
     fireEvent.click(await screen.findByTestId('admin-tab-models'));

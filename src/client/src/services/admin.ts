@@ -94,7 +94,6 @@ const deleteModel = async (id: string): Promise<void> => {
   }
 };
 
-<<<<<<< HEAD
 // Direct model comparison (issue #129): one prompt through the existing
 // agent on chosen model rows. Row shape mirrors the models payload so the
 // view can forward selections straight from the inventory table.
@@ -114,9 +113,6 @@ const compareModels = async (
 };
 
 const AdminModelsService = { listModels, createModel, updateModel, deleteModel, compareModels };
-=======
-const AdminModelsService = { listModels, createModel, updateModel, deleteModel };
->>>>>>> feat/104-new-errors
 
 export interface ListLogsParams {
   level?: 'info' | 'warn' | 'error';
