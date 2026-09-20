@@ -78,4 +78,32 @@ describe('ChatWindow feedback thumbs', () => {
     expect(screen.getByLabelText('Good response').getAttribute('aria-pressed')).toBe('true');
     expect(screen.getByLabelText('Poor response').getAttribute('aria-pressed')).toBe('false');
   });
+
+  it("renders 'provider · model' in the footer when provider is present (#117)", () => {
+    render(
+      <ChatWindow
+        messages={[{ ...msg(), provider: 'deepinfra' }]}
+        onSendMessage={vi.fn()}
+        isLoading={false}
+        onOpenSidebar={vi.fn()}
+        onFeedback={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText('deepinfra · test-model')).toBeTruthy();
+  });
+
+  it('renders model name alone when provider is absent (old turns, #117)', () => {
+    render(
+      <ChatWindow
+        messages={[msg()]}
+        onSendMessage={vi.fn()}
+        isLoading={false}
+        onOpenSidebar={vi.fn()}
+        onFeedback={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText('test-model')).toBeTruthy();
+  });
 });

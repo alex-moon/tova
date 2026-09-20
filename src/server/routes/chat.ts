@@ -340,6 +340,7 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
       role: 'assistant',
       content: assistantContent,
       modelName: routingResult.model,
+      provider: routingResult.provider,
       routingBand,
       ...(sources.length > 0 ? { sources } : {}),
       ...(sourceTitles.length > 0 ? { sourceTitles } : {}),
@@ -493,6 +494,7 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
     const assistantMessage = new Message({
       sessionId: session._id,
       role: 'assistant',
+      provider: routingResult.provider,
       content: assistantContent,
       modelName: routingResult.model,
       routingBand,
