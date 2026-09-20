@@ -340,6 +340,34 @@ describe('Chat image turn (#115)', () => {
     expect(routingOpts.hasImage).toBe(false);
   });
 
+  it('degrades a failed image asset the same as a pending one (#115)', async () => {
+    const email = 'image-failed@example.com';
+    const cookies = await registerUser(email);
+    const user = await User.findOne({ email });
+    const id = new Types.ObjectId();
+    await Asset.create({
+      _id: id,
+      userId: user?._id,
+      filename: 'photo.png',
+      key: `k/${String(id)}/photo.png`,
+      contentType: 'image/png',
+      size: 4321,
+      status: 'failed',
+      failureReason: 'upload-missed-window',
+    });
+
+    const response = await streamMessage(cookies, {
+      content: 'what is in this image?',
+      assetId: String(id),
+    });
+    expect(response.status).toBe(200);
+    expect(mockPresignGetUrl).not.toHaveBeenCalled();
+    const [routingOpts] = (mockRouteQuery.mock.calls[0]?.slice(3) ?? []) as unknown as [
+      { band?: string; hasImage: boolean },
+    ];
+    expect(routingOpts.hasImage).toBe(false);
+  });
+
   it('keeps the text envelope and normal routing for non-image assets', async () => {
     const email = 'image-nonimage@example.com';
     const cookies = await registerUser(email);
