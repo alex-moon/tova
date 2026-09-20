@@ -6,6 +6,11 @@ import { AdminUser } from '../../shared/contracts';
 import { ProviderRouting } from '../models/ProviderRouting';
 import { ModelMetricStat } from '../models/ModelMetricStat';
 import { getLogs, LogLevel } from '../services/logService';
+import {
+  MAX_COMPARE_MODELS,
+  runModelComparison,
+  type CompareModelRef,
+} from '../services/modelCompare';
 
 const router = express.Router();
 
@@ -244,6 +249,50 @@ router.delete('/models/:id', ...adminGuard, async (req, res) => {
     res.status(204).end();
   } catch (_err) {
     res.status(500).json({ message: 'Error deleting model' });
+  }
+});
+
+// Issue #129: direct model comparison — one prompt through the existing
+// agent on chosen routing rows. Shares `runModelComparison` with the
+// one-off CLI (`scripts/eval-model-compare.ts`) so both lanes exercise the
+// identical agent path; see services/modelCompare.ts.
+router.post('/model-compare', ...adminGuard, async (req, res) => {
+  const b = req.body as { prompt?: unknown; models?: unknown };
+  if (typeof b?.prompt !== 'string' || !b.prompt.trim()) {
+    return res.status(400).json({ message: 'prompt is required' });
+  }
+  if (!Array.isArray(b.models) || b.models.length === 0 || b.models.length > MAX_COMPARE_MODELS) {
+    return res.status(400).json({ message: `models must be 1–${MAX_COMPARE_MODELS} rows` });
+  }
+  const models: CompareModelRef[] = [];
+  for (const entry of b.models) {
+    if (!entry || typeof entry !== 'object') {
+      return res.status(400).json({ message: 'Invalid model row' });
+    }
+    const m = entry as { provider?: unknown; model?: unknown; contextLength?: unknown };
+    if (typeof m.provider !== 'string' || !PROVIDER_SET.includes(m.provider as 'groq')) {
+      return res.status(400).json({ message: 'Invalid provider' });
+    }
+    if (typeof m.model !== 'string' || !m.model.trim()) {
+      return res.status(400).json({ message: 'Invalid model' });
+    }
+    if (m.contextLength !== undefined) {
+      const n = Number(m.contextLength);
+      if (!Number.isInteger(n) || n <= 0) {
+        return res.status(400).json({ message: 'Invalid contextLength' });
+      }
+    }
+    models.push({
+      provider: m.provider as 'groq',
+      model: m.model.trim(),
+      ...(m.contextLength !== undefined ? { contextLength: Number(m.contextLength) } : {}),
+    });
+  }
+  try {
+    const run = await runModelComparison(b.prompt.trim(), models);
+    res.json(run);
+  } catch (_err) {
+    res.status(500).json({ message: 'Error running model comparison' });
   }
 });
 

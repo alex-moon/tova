@@ -48,6 +48,13 @@ Do cleanup-as-we-go, but only with explicit confirmation:
 - Do not silently expand scope by default. If you notice a neighbouring issue worth fixing, raise it as a suggestion in your report/PR comment and wait for the user to confirm.
 - Never use a ticket as cover for drive-by refactors of untouched subsystems.
 
+### Model routing decisions
+
+Any change to routing policy (tier boundaries, guard classification, pool defaults) must be evidence-first, not instinct:
+
+- Compare candidate models directly with the one-off eval script (`scripts/eval-model-compare.ts`): `npx tsx scripts/eval-model-compare.ts "<prompt>" --models deepinfra/Qwen/Qwen3-14B,groq/openai/gpt-oss-20b`. It runs a single prompt through the existing agent on each model, printing answers side by side. The admin view's "Compare" tab does the exact same thing in the browser (it shares the same server code).
+- Read LangSmith traces liberally before judging a routing change (read-only): project `tova-dev` via the `LANGCHAIN_*` credentials in `.env`. Real traces are the best evidence for which tier a conversational prompt belongs in — e.g. ticket #129 was diagnosed entirely from a trace showing the guard model returning empty replies.
+
 ### Local MongoDB
 
 A local MongoDB is available at `mongodb://localhost:27017/tova` at any time. If it is not running, start the stack with `npm run stack:up`.

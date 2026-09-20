@@ -150,6 +150,44 @@ const defaultConfig = async (): Promise<RouterConfig> => {
   };
 };
 
+/*
+ * Tier 2 classifier prompt (#129). Evidence first: LangSmith traces from
+ * `tova-dev` (2026-09-20, all retained classify runs) show the guard model —
+ * a reasoning model (`openai/gpt-oss-20b`) — spending its entire token
+ * budget on reasoning and returning an EMPTY text answer (`text: ''`) at the
+ * old `max_tokens: 10`. Every such empty reply classifies as "simple" and
+ * routes conversational turns to the small tier. Two changes follow:
+ *   1. the prompt now spells out what counts as complex (narrative /
+ *      conversational prose, multiple distinct questions, references to
+ *      prior context or personal experience) so the guard does not need to
+ *      spend tokens deciding criteria;
+ *   2. the token budget is env-tunable (`ROUTER_GUARD_MAX_TOKENS`) and
+ *      defaults to 256 — reasoning content is emitted ahead of the answer
+ *      word, so the reply contract (a single lowercase word) is unchanged
+ *      but the answer is no longer truncated away.
+ */
+
+export const classifyPrompt = (query: string): string =>
+  `Classify the user query below into "simple" or "complex".
+
+A query is "complex" when ANY of these apply:
+- it is conversational or narrative prose: the user shares context, tells a story, or writes several sentences in a personal tone
+- it asks more than one distinct question, even casually embedded in the prose
+- it refers to prior conversation, personal experience, named places, people, or events
+- it wants a recommendation, comparison, or multi-part answer
+
+A query is "simple" only when it is a short, single factual question, a one-line command, or a greeting/thanks.
+
+Reply with only one word: complex or simple.
+
+Query: ${query}`;
+
+const guardMaxTokens = (): number => {
+  const raw = process.env.ROUTER_GUARD_MAX_TOKENS;
+  const parsed = raw === undefined || raw === '' ? NaN : Number(raw);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 256;
+};
+
 export const routeQuery = async (
   query: string,
   config: RouterConfig | null = null,
@@ -189,14 +227,23 @@ export const routeQuery = async (
       messages: [
         {
           role: 'user',
-          content: `Classify the following user query into "simple" or "complex". Reply with only one word.\n\nQuery: ${query}`,
+          content: classifyPrompt(query),
         },
       ],
       temperature: 0,
-      max_tokens: 10,
+      max_tokens: guardMaxTokens(),
     });
 
-    const classification = response.choices[0]?.message?.content?.trim().toLowerCase();
+    // Take the LAST word-boundary match: some guard models emit their
+    // reasoning ahead of the verdict in `content` (or reply with trailing
+    // punctuation), so an exact-equality check would misclassify that as
+    // simple. A reply with NO verdict at all is exactly the LangSmith-
+    // observed failure mode (reasoning consumed the budget, `text: ''`) —
+    // treat it like a classifier error and fall back to the large tier
+    // instead of silently defaulting to small.
+    const content = response.choices[0]?.message?.content ?? '';
+    const matches = [...content.toLowerCase().matchAll(/\b(complex|simple)\b/g)];
+    const classification = matches.length ? matches[matches.length - 1][1] : null;
 
     if (classification === 'complex') {
       const { pool, forced, reasonSuffix } = await orderPoolByFit(largePool, band, readWeight);
@@ -207,6 +254,26 @@ export const routeQuery = async (
         ...spreadRef(modelRef),
       };
     }
+    if (classification === 'simple') {
+      const { pool, forced, reasonSuffix } = await orderPoolByFit(smallPoolRaw, band, readWeight);
+      const modelRef = forced ?? pickModelRef(pool, 'small', epsilon, random);
+      return {
+        model: modelRef.model,
+        reason: `classifier-simple${reasonSuffix}`,
+        ...spreadRef(modelRef),
+      };
+    }
+    // Unparseable reply (empty, or no verdict word anywhere): route large as
+    // the safe default — defaulting verdict-less replies to small is what
+    // pushed the Ad Gefrin conversation to the small tier (issue #129).
+    console.error('Classifier unparseable reply:', content || '(empty)');
+    const { pool, forced, reasonSuffix } = await orderPoolByFit(largePool, band, readWeight);
+    const modelRef = forced ?? pickModelRef(pool, 'large', epsilon, random);
+    return {
+      model: modelRef.model,
+      reason: `classifier-unparseable${reasonSuffix}`,
+      ...spreadRef(modelRef),
+    };
   } catch (err) {
     console.error('Classifier error:', err);
     // Fallback to large model on error for safety (raw pool order — the
@@ -214,12 +281,4 @@ export const routeQuery = async (
     const modelRef = pickModelRef(largePool, 'large', epsilon, random);
     return { model: modelRef.model, reason: 'classifier-error', ...spreadRef(modelRef) };
   }
-
-  const { pool, forced, reasonSuffix } = await orderPoolByFit(smallPoolRaw, band, readWeight);
-  const modelRef = forced ?? pickModelRef(pool, 'small', epsilon, random);
-  return {
-    model: modelRef.model,
-    reason: `classifier-simple${reasonSuffix}`,
-    ...spreadRef(modelRef),
-  };
 };

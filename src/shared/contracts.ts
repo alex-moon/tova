@@ -45,6 +45,22 @@ export interface AdminLogEntry {
   msg: string;
 }
 
+// Direct model comparison (issue #129): one prompt run against the existing
+// agent on chosen routing rows. `answer` is null with `error` set when that
+// model's completion failed; `latencyMs` covers the full agent call.
+export interface ModelComparisonResult {
+  provider: string;
+  model: string;
+  answer: string | null;
+  latencyMs: number;
+  error?: string;
+}
+
+export interface ModelComparisonRun {
+  prompt: string;
+  results: ModelComparisonResult[];
+}
+
 // Response of GET /api/admin/logs (issue #76).
 export interface AdminLogsPayload {
   logs: AdminLogEntry[];
