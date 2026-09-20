@@ -398,7 +398,6 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
       // turns that tag into throwaway (ephemeral) uploads only for accounts
       // with zero-data retention on.
       const asset = await AssetService.upload(file, undefined, 'chat');
-<<<<<<< HEAD
       setAttachment({
         id: asset.id,
         filename: asset.filename,
@@ -406,10 +405,6 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
         contentType: asset.contentType,
       });
       if (!asset.hasText) toastForAsset(asset);
-=======
-      setAttachment({ id: asset.id, filename: asset.filename });
-      if (!asset.hasText) toastForAsset(asset.markdownStatus);
->>>>>>> feat/116-zdr-option
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Upload failed');
     } finally {

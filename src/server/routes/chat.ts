@@ -32,11 +32,7 @@ type AssetDoc = {
   key: string;
   contentType: string;
   size: number;
-<<<<<<< HEAD
   status?: 'pending' | 'ready' | 'failed';
-=======
-  key: string;
->>>>>>> feat/116-zdr-option
   ephemeral?: boolean;
   textExtracted?: string | null;
   markdownExtracted?: string | null;
@@ -316,22 +312,14 @@ const createSessionWithUser = async (userId: string, content: string) => {
 const buildZdrMessages = (
   history: { role: 'user' | 'assistant'; content: string }[],
   content: string,
-<<<<<<< HEAD
 ): { role: 'system' | 'user' | 'assistant'; content: string | MessageContentPart[] }[] => [
-=======
-): { role: 'system' | 'user' | 'assistant'; content: string }[] => [
->>>>>>> feat/116-zdr-option
   ...history,
   { role: 'user', content },
 ];
 
 const messagesFromPersistedHistory = (
   history: { role: string; content: string }[],
-<<<<<<< HEAD
 ): { role: 'system' | 'user' | 'assistant'; content: string | MessageContentPart[] }[] =>
-=======
-): { role: 'system' | 'user' | 'assistant'; content: string }[] =>
->>>>>>> feat/116-zdr-option
   history.reverse().map((m) => ({
     role: m.role as 'user' | 'assistant',
     content: m.content as string,
@@ -494,7 +482,6 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
     // it must be computed before the router sees the turn (decision 4).
     const routingBand = buildRoutingBand(userMessage.metrics);
 
-<<<<<<< HEAD
     // Determine model. Image turns (#115) route vision-first only when the
     // presign path is actually available; otherwise the turn degrades to the
     // legacy text envelope and normal routing applies.
@@ -503,10 +490,6 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
       band: routingBand,
       hasImage,
     });
-=======
-    // Determine model
-    const routingResult = await routeQuery(content, undefined, undefined, { band: routingBand });
->>>>>>> feat/116-zdr-option
 
     // Get chat history for context
     const history = await Message.find({ sessionId: session._id })
@@ -639,7 +622,6 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
 
     let routingBand: string;
     let routingResult;
-<<<<<<< HEAD
     let messages: {
       role: 'system' | 'user' | 'assistant';
       content: string | MessageContentPart[];
@@ -666,38 +648,15 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
         attachedAsset,
       );
 
-=======
-    let messages: { role: 'system' | 'user' | 'assistant'; content: string }[];
-
-    await ensureUserLocation(streamUserDoc, req.ip);
-    if (zdr) {
-      // Continuity comes from the client replay (#116); nothing is read back.
-      routingBand = buildRoutingBand(computeDeterministicMetrics(content));
-      messages = buildZdrMessages(zdrHistory, content);
-      routingResult = await routeQuery(content, undefined, undefined, { band: routingBand });
-    } else {
-      // Save user message
-      const userMessage = await saveUserMessageWithMetrics(
-        String(session!._id),
-        content,
-        attachedAsset,
-      );
-
->>>>>>> feat/116-zdr-option
       // Feedback aggregation happens under the band captured at route time,
       // so it must be computed before the router sees the turn (decision 4).
       routingBand = buildRoutingBand(userMessage.metrics);
 
-<<<<<<< HEAD
       // Determine model. Same image-turn gating as the non-streaming route (#115).
       routingResult = await routeQuery(content, undefined, undefined, {
         band: routingBand,
         hasImage,
       });
-=======
-      // Determine model
-      routingResult = await routeQuery(content, undefined, undefined, { band: routingBand });
->>>>>>> feat/116-zdr-option
 
       // Get chat history for context
       const history = await Message.find({ sessionId: session!._id })
