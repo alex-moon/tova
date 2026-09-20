@@ -222,13 +222,32 @@ describe('Web Fetch Service', () => {
       );
     });
 
-    it('refuses a redirect that resolves to a private address', async () => {
+    it('refuses a redirect whose target host resolves to a private address', async () => {
+      // assertPublicHost runs twice for the ORIGINAL host (pre-loop and at
+      // hop 0), then once for the redirect target: public, public, private.
       (dns.promises.lookup as jest.Mock)
         .mockResolvedValueOnce([{ address: '93.184.216.34', family: 4 }])
+        .mockResolvedValueOnce([{ address: '93.184.216.34', family: 4 }])
         .mockResolvedValueOnce([{ address: '10.0.0.7', family: 4 }]);
+      (global.fetch as jest.Mock).mockResolvedValueOnce(
+        redirectResponse('http://intranet.example.com/here'),
+      );
+      await expect(fetchPage('https://example.com/rebind')).rejects.toThrow('private address');
+      // the redirect was followed and only the TARGET check refused, after one fetch
+      expect((global.fetch as jest.Mock).mock.calls[0][0]).toBe('https://example.com/rebind');
+      expect((dns.promises.lookup as jest.Mock).mock.calls.map((c) => c[0])).toEqual([
+        'example.com',
+        'example.com',
+        'intranet.example.com',
+      ]);
+    });
+
+    it('refuses a redirect to a private IP literal without any DNS lookup', async () => {
+      publicHost();
       (global.fetch as jest.Mock).mockResolvedValueOnce(redirectResponse('http://10.0.0.7/here'));
       await expect(fetchPage('https://example.com/rebind')).rejects.toThrow('private address');
-      expect(global.fetch).not.toHaveBeenCalled(); // target host checked before any fetch
+      expect(dns.promises.lookup as jest.Mock).not.toHaveBeenCalledWith('10.0.0.7');
+      expect(global.fetch as jest.Mock).toHaveBeenCalledTimes(1);
     });
 
     it('refuses a redirect to a non-http scheme', async () => {
