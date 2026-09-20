@@ -94,7 +94,7 @@ const MarkdownLink = ({ href, children }: { href?: string; children?: React.Reac
 // Favicons come from the public s2 service (third-party request, accepted in
 // the issue); a failed load simply hides the image.
 const SourceItem: React.FC<{ url: string; title?: string }> = ({ url, title }) => (
-  <li className="shrink-0">
+  <li>
     <a
       href={url}
       target="_blank"
@@ -130,7 +130,7 @@ const SourcesBlock: React.FC<{ message: Message }> = ({ message }) => {
   return (
     <div data-testid="sources-block" className="mt-2 px-4 text-muted-foreground md:px-5">
       <div className="mb-1 text-xs font-medium uppercase tracking-wide">Sources</div>
-      <ul className="flex gap-3 overflow-x-auto">
+      <ul className="space-y-1">
         {visibleUrls.map((url) => (
           <SourceItem key={url} url={url} title={titles.find((t) => t.url === url)?.title} />
         ))}
