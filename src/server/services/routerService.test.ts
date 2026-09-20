@@ -144,12 +144,41 @@ describe('Router Service', () => {
       );
     });
 
-    it('should fall back to the smaller model on an unrecognized classification', async () => {
+    it('should normalize classifier output embedded in reasoning text', async () => {
+      // Some guard models include their reasoning in `content` ahead of the
+      // verdict; the LAST word-boundary match decides.
+      classifyAs('This query is multi-part, so not simple: my verdict is complex.');
+      const result = await routeQueryWithCfg('Advise a go-to-market plan for a new SaaS product');
+      expect(result.reason).toBe('classifier-complex');
+    });
+
+    it('should accept a punctuated verdict', async () => {
+      classifyAs('complex.');
+      const result = await routeQueryWithCfg('Tell me about classic cars');
+      expect(result.reason).toBe('classifier-complex');
+    });
+
+    it('should fall back to the larger model on an unrecognized classification', async () => {
+      // A verdict-less reply is the exact LangSmith-observed failure that
+      // routed the #129 conversation to the small tier: never default small.
       classifyAs('unsure');
       const result = await routeQueryWithCfg('Tell me about classic cars');
       expect(result).toEqual({
-        model: 'test-small-model',
-        reason: 'classifier-simple',
+        model: 'test-large-model',
+        reason: 'classifier-unparseable',
+        provider: 'groq',
+      });
+      expect(consoleErrorSpy).toHaveBeenCalledWith('Classifier unparseable reply:', 'unsure');
+    });
+
+    it('should fall back to the larger model on an empty classification', async () => {
+      // #129: the guard model consumed its whole token budget on reasoning
+      // and returned `text: ''` on every retained trace.
+      classifyAs('');
+      const result = await routeQueryWithCfg('Hello there, how are you doing today?');
+      expect(result).toEqual({
+        model: 'test-large-model',
+        reason: 'classifier-unparseable',
         provider: 'groq',
       });
     });

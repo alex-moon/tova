@@ -234,7 +234,16 @@ export const routeQuery = async (
       max_tokens: guardMaxTokens(),
     });
 
-    const classification = response.choices[0]?.message?.content?.trim().toLowerCase();
+    // Take the LAST word-boundary match: some guard models emit their
+    // reasoning ahead of the verdict in `content` (or reply with trailing
+    // punctuation), so an exact-equality check would misclassify that as
+    // simple. A reply with NO verdict at all is exactly the LangSmith-
+    // observed failure mode (reasoning consumed the budget, `text: ''`) —
+    // treat it like a classifier error and fall back to the large tier
+    // instead of silently defaulting to small.
+    const content = response.choices[0]?.message?.content ?? '';
+    const matches = [...content.toLowerCase().matchAll(/\b(complex|simple)\b/g)];
+    const classification = matches.length ? matches[matches.length - 1][1] : null;
 
     if (classification === 'complex') {
       const { pool, forced, reasonSuffix } = await orderPoolByFit(largePool, band, readWeight);
@@ -245,6 +254,26 @@ export const routeQuery = async (
         ...spreadRef(modelRef),
       };
     }
+    if (classification === 'simple') {
+      const { pool, forced, reasonSuffix } = await orderPoolByFit(smallPoolRaw, band, readWeight);
+      const modelRef = forced ?? pickModelRef(pool, 'small', epsilon, random);
+      return {
+        model: modelRef.model,
+        reason: `classifier-simple${reasonSuffix}`,
+        ...spreadRef(modelRef),
+      };
+    }
+    // Unparseable reply (empty, or no verdict word anywhere): route large as
+    // the safe default — defaulting verdict-less replies to small is what
+    // pushed the Ad Gefrin conversation to the small tier (issue #129).
+    console.error('Classifier unparseable reply:', content || '(empty)');
+    const { pool, forced, reasonSuffix } = await orderPoolByFit(largePool, band, readWeight);
+    const modelRef = forced ?? pickModelRef(pool, 'large', epsilon, random);
+    return {
+      model: modelRef.model,
+      reason: `classifier-unparseable${reasonSuffix}`,
+      ...spreadRef(modelRef),
+    };
   } catch (err) {
     console.error('Classifier error:', err);
     // Fallback to large model on error for safety (raw pool order — the
@@ -252,12 +281,4 @@ export const routeQuery = async (
     const modelRef = pickModelRef(largePool, 'large', epsilon, random);
     return { model: modelRef.model, reason: 'classifier-error', ...spreadRef(modelRef) };
   }
-
-  const { pool, forced, reasonSuffix } = await orderPoolByFit(smallPoolRaw, band, readWeight);
-  const modelRef = forced ?? pickModelRef(pool, 'small', epsilon, random);
-  return {
-    model: modelRef.model,
-    reason: `classifier-simple${reasonSuffix}`,
-    ...spreadRef(modelRef),
-  };
 };
