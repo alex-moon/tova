@@ -488,3 +488,39 @@ describe('streamingErrorMessage (#77, #117)', () => {
     expect(streamingErrorMessage({ statusCode: 500 })).toBe('Error streaming from model');
   });
 });
+
+describe('pre-stream 429 surfacing (#117)', () => {
+  it('the non-stream route surfaces the rate-limit detail additively on failure', async () => {
+    const app = createApp();
+    mockGenerate.mockResolvedValue({ text: 'e2e-ok' });
+    mockRouteQuery.mockRejectedValueOnce(
+      Object.assign(new Error('Rate limit reached on tokens per minute (TPM)'), {
+        statusCode: 429,
+      }),
+    );
+    const cookie = await registerUser(app, 'prestream-nonstream-429@example.com');
+    const res = await request(app).post('/api/chat').set('Cookie', cookie).send({
+      content: 'Give me restaurant ideas near Bandra in Mumbai',
+    });
+    expect(res.status).toBe(500);
+    expect(res.body.message).toBe('Error processing chat');
+    expect(res.body.detail).toMatch(/Rate limited/);
+  });
+
+  it('the stream route surfaces the rate-limit detail when it fails before any SSE event', async () => {
+    const app = createApp();
+    mockGenerate.mockResolvedValue({ text: 'e2e-ok' });
+    mockRouteQuery.mockRejectedValueOnce(
+      Object.assign(new Error('Rate limit reached on tokens per minute (TPM)'), {
+        statusCode: 429,
+      }),
+    );
+    const cookie = await registerUser(app, 'prestream-stream-429@example.com');
+    const res = await request(app).post('/api/chat/stream').set('Cookie', cookie).send({
+      content: 'Give me restaurant ideas near Bandra in Mumbai',
+    });
+    expect(res.status).toBe(500);
+    expect(res.body.message).toBe('Error processing chat');
+    expect(res.body.detail).toMatch(/Rate limited/);
+  });
+});
