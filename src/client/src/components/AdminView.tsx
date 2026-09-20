@@ -57,6 +57,7 @@ const AdminView = () => {
     }
   }, []);
 
+<<<<<<< HEAD
   // Direct model comparison (issue #129): pick rows from the inventory, type
   // a prompt, and run it through the existing agent on each selection side
   // by side. Server-mirrored cap on selections (MAX_COMPARE_MODELS = 6).
@@ -100,6 +101,8 @@ const AdminView = () => {
     }
   };
 
+=======
+>>>>>>> feat/104-new-errors
   // CRUD for routing rows (issue #104). Mutations refetch the authoritative
   // list rather than trusting the (id-only) response bodies.
   const [editingModelId, setEditingModelId] = useState<string | null>(null);
@@ -451,7 +454,10 @@ const AdminView = () => {
                       <th className="px-4 py-3 font-medium">Tier</th>
                       <th className="px-4 py-3 font-medium">Context</th>
                       <th className="px-4 py-3 font-medium">Eligible</th>
+<<<<<<< HEAD
                       <th className="px-4 py-3 font-medium">Capabilities</th>
+=======
+>>>>>>> feat/104-new-errors
                       <th className="px-4 py-3 font-medium">Feedback</th>
                       <th className="px-4 py-3" />
                     </tr>
@@ -475,6 +481,7 @@ const AdminView = () => {
                             onChange={() => toggleModelEligible(model)}
                           />
                         </td>
+<<<<<<< HEAD
                         <td className="px-4 py-3" data-testid={`admin-model-caps-${model.id}`}>
                           <span
                             className={`mr-1.5 inline-block rounded-full border px-2 py-0.5 text-xs ${
@@ -501,6 +508,8 @@ const AdminView = () => {
                               : ''}
                           </span>
                         </td>
+=======
+>>>>>>> feat/104-new-errors
                         <td className="px-4 py-3 text-muted-foreground">
                           {model.stats.length === 0
                             ? '—'
@@ -526,7 +535,11 @@ const AdminView = () => {
                     ))}
                     {models?.length === 0 && (
                       <tr>
+<<<<<<< HEAD
                         <td className="px-4 py-3 text-muted-foreground" colSpan={8}>
+=======
+                        <td className="px-4 py-3 text-muted-foreground" colSpan={7}>
+>>>>>>> feat/104-new-errors
                           No models configured.
                         </td>
                       </tr>
