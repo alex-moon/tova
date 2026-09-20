@@ -7,6 +7,8 @@ import Sidebar from './components/Sidebar';
 import ChatWindow from './components/ChatWindow';
 import Login from './components/Login';
 import AdminView from './components/AdminView';
+import ProfileView from './components/ProfileView';
+import BackToChatLink from './components/BackToChatLink';
 
 export interface ToolEvent {
   phase: 'call' | 'result';
@@ -28,6 +30,7 @@ export interface Message {
   role: 'user' | 'assistant';
   content: string;
   modelName?: string;
+  provider?: string;
   isError?: boolean;
   feedback?: { value: 'up' | 'down' | string | null; updatedAt?: Date | string | null };
   sources?: string[];
@@ -50,9 +53,16 @@ export function isAdminRoute() {
   return typeof window !== 'undefined' && window.location.pathname.startsWith('/admin');
 }
 
+// Profile has the same separate-URL view treatment as admin (issue #95);
+// both helpers sit together for the deferred app-wide router ticket.
+export function isProfileRoute() {
+  return typeof window !== 'undefined' && window.location.pathname.startsWith('/profile');
+}
+
 function App() {
   const { user, loading } = useAuth();
   const showAdminView = isAdminRoute();
+  const showProfileView = isProfileRoute();
   const [sessions, setSessions] = useState<Session[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -214,6 +224,15 @@ function App() {
               setActiveSessionId(newSessionId);
               fetchSessions();
             }
+            // Provider visibility (#117): show which provider serves the turn
+            // as soon as the router resolves, including mid-stream.
+            const routing = data.routing as { provider?: string } | undefined;
+            if (routing?.provider) {
+              const prov = routing.provider;
+              setMessages((prev) =>
+                prev.map((m) => (m._id === streamId ? { ...m, provider: prov } : m)),
+              );
+            }
           } else if (event === 'delta') {
             const delta = (data.content as string) || '';
             setMessages((prev) =>
@@ -253,6 +272,7 @@ function App() {
                       _id: saved._id || m._id,
                       content: saved.content,
                       modelName: saved.modelName,
+                      provider: saved.provider,
                       feedback: saved.feedback,
                       sources: saved.sources,
                       sourceTitles: saved.sourceTitles ?? sourceTitles,
@@ -347,16 +367,14 @@ function App() {
   return (
     <main className="relative flex h-dvh w-full overflow-hidden">
       <Toaster position="bottom-center" richColors />
-      {showAdminView && user.role === 'admin' ? (
+      {showProfileView ? (
         <>
-          <div className="absolute right-4 top-4 z-10 flex flex-col items-start gap-2">
-            <a
-              href="/"
-              className="text-sm text-muted-foreground underline-offset-4 transition-colors hover:text-foreground hover:underline"
-            >
-              Back to chat
-            </a>
-          </div>
+          <BackToChatLink />
+          <ProfileView />
+        </>
+      ) : showAdminView && user.role === 'admin' ? (
+        <>
+          <BackToChatLink />
           <AdminView />
         </>
       ) : (

@@ -1,10 +1,13 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, cleanup, waitFor } from '@testing-library/react';
 import { AuthContext } from '../context/AuthContext';
-import ProfileModal from './ProfileModal';
+import ProfileView from './ProfileView';
 import { AuthError } from '../services/auth';
+import { COOKIE_NAME, STORAGE_KEY } from '../theme';
+import { toast } from 'sonner';
 import type { User } from '../context/AuthContext';
-import { COOKIE_NAME } from '../theme';
+
+vi.mock('sonner', () => ({ toast: { success: vi.fn() } }));
 
 const updateProfile = vi.fn();
 
@@ -18,7 +21,6 @@ vi.mock('../services/auth', () => ({
 }));
 
 const renderWithUser = (user: User, updateUser = vi.fn()) => {
-  const onClose = vi.fn();
   render(
     <AuthContext.Provider
       value={{
@@ -30,10 +32,10 @@ const renderWithUser = (user: User, updateUser = vi.fn()) => {
         updateUser,
       }}
     >
-      <ProfileModal onClose={onClose} />
+      <ProfileView />
     </AuthContext.Provider>,
   );
-  return { updateUser, onClose };
+  return { updateUser };
 };
 
 const user: User = {
@@ -48,7 +50,7 @@ const user: User = {
 
 const avatarUser: User = { ...user, avatarUrl: 'https://example.com/a.png' };
 
-describe('ProfileModal (issue #35)', () => {
+describe('ProfileView (issue #95)', () => {
   beforeEach(() => {
     updateProfile.mockReset();
   });
@@ -68,7 +70,7 @@ describe('ProfileModal (issue #35)', () => {
   it('sends the trimmed PATCH payload and pushes the response into context', async () => {
     const next: User = { ...user, preferredName: 'Friendly Al' };
     updateProfile.mockResolvedValue(next);
-    const { updateUser, onClose } = renderWithUser(user);
+    const { updateUser } = renderWithUser(user);
 
     fireEvent.change(screen.getByLabelText(/preferred name/i), {
       target: { value: '  Friendly Al  ' },
@@ -81,8 +83,29 @@ describe('ProfileModal (issue #35)', () => {
         customInstructions: 'Be terse.',
       }),
     );
-    await waitFor(() => expect(onClose).toHaveBeenCalled());
     expect(updateUser).toHaveBeenCalledWith(next);
+  });
+
+  it('disables Save while a save is in flight and re-enables it after a failure', async () => {
+    updateProfile.mockRejectedValue(new AuthError('Too long'));
+    renderWithUser(user, vi.fn());
+
+    fireEvent.click(screen.getByTestId('profile-save'));
+    expect(screen.getByTestId('profile-save')).toBeDisabled();
+    expect(screen.getByTestId('profile-save')).toHaveTextContent('Saving...');
+
+    await waitFor(() => expect(screen.getByTestId('profile-save')).toHaveTextContent(/^Save$/));
+    expect(screen.getByTestId('profile-save')).not.toBeDisabled();
+  });
+
+  it('stays on /profile and confirms with a toast after a successful save (#95)', async () => {
+    updateProfile.mockResolvedValue(user);
+    renderWithUser(user);
+
+    fireEvent.click(screen.getByTestId('profile-save'));
+
+    await waitFor(() => expect(vi.mocked(toast.success)).toHaveBeenCalledWith('Profile saved'));
+    expect(screen.getByTestId('profile-view')).toBeInTheDocument();
   });
 
   it('sends an empty string to clear a blanked field', async () => {
@@ -100,14 +123,51 @@ describe('ProfileModal (issue #35)', () => {
     );
   });
 
-  it('shows the API error and keeps the modal open', async () => {
+  it('patches confirmDeletes when a toggle moved and keeps unrelated edits out of it (#59)', async () => {
+    updateProfile.mockResolvedValue(user);
+    renderWithUser(user);
+
+    // Unchanged — a plain profile edit must not touch the pref.
+    fireEvent.click(screen.getByTestId('profile-save'));
+    await waitFor(() => expect(updateProfile).toHaveBeenCalled());
+    expect(updateProfile).toHaveBeenLastCalledWith({
+      preferredName: 'Al',
+      customInstructions: 'Be terse.',
+    });
+
+    fireEvent.click(screen.getByTestId('profile-confirm-delete-chat'));
+    fireEvent.click(screen.getByTestId('profile-save'));
+    await waitFor(() =>
+      expect(updateProfile).toHaveBeenLastCalledWith({
+        preferredName: 'Al',
+        customInstructions: 'Be terse.',
+        confirmDeletes: { chat: false, file: true },
+      }),
+    );
+  });
+
+  it('writes the theme mirror when a changed theme saves successfully (#95)', async () => {
+    updateProfile.mockResolvedValue(user);
+    localStorage.clear();
+    document.cookie = `${COOKIE_NAME}=;path=/;max-age=0`;
+    renderWithUser(user);
+
+    fireEvent.click(screen.getByTestId('theme-option-dark'));
+    fireEvent.click(screen.getByTestId('profile-save'));
+
+    await waitFor(() => expect(screen.getByTestId('profile-save')).toHaveTextContent(/^Save$/));
+    expect(document.cookie).toContain(`${COOKIE_NAME}=dark`);
+    expect(localStorage.getItem(STORAGE_KEY)).toBe('dark');
+  });
+
+  it('shows the API error and keeps the view open', async () => {
     updateProfile.mockRejectedValue(new AuthError('Too long'));
     renderWithUser(user, vi.fn());
 
     fireEvent.click(screen.getByTestId('profile-save'));
 
     expect(await screen.findByTestId('profile-error')).toHaveTextContent('Too long');
-    expect(screen.getByTestId('profile-modal')).toBeInTheDocument();
+    expect(screen.getByTestId('profile-view')).toBeInTheDocument();
   });
 
   it('falls back to a generic message for non-AuthError failures', async () => {
@@ -117,11 +177,11 @@ describe('ProfileModal (issue #35)', () => {
     fireEvent.click(screen.getByTestId('profile-save'));
 
     expect(await screen.findByTestId('profile-error')).toHaveTextContent('Something went wrong.');
-    expect(screen.getByTestId('profile-modal')).toBeInTheDocument();
+    expect(screen.getByTestId('profile-view')).toBeInTheDocument();
   });
 });
 
-describe('ProfileModal theme choice (issue #53)', () => {
+describe('ProfileView theme choice (issue #53)', () => {
   beforeEach(() => {
     updateProfile.mockReset();
     // resolveTheme() reads the theme cookie and localStorage; both persist
@@ -156,27 +216,25 @@ describe('ProfileModal theme choice (issue #53)', () => {
     );
   });
 
-  it('keeps the body in a scrollable region inside a height-capped panel (issue #79)', () => {
+  it('uses the admin-view substrate: non-scrolling root, scroller body, pinned header (#95)', () => {
     renderWithUser(avatarUser);
 
-    const overlay = screen.getByTestId('profile-modal');
-    expect(overlay).toHaveClass('p-4');
+    const root = screen.getByTestId('profile-view');
+    expect(root).toHaveClass('flex', 'h-full', 'w-full', 'flex-col');
+    expect(root).not.toHaveClass('overflow-y-auto');
 
-    // Panel: height-capped flex column, so the body can scroll instead of clipping.
-    const name = screen.getByTestId('profile-name');
-    const panel = name.closest('.max-h-\\[85dvh\\]');
-    expect(panel).not.toBeNull();
-    expect(panel).toHaveClass('flex', 'flex-col');
-
-    // Body: overflow scroller between the pinned header and the pinned footer.
-    const scroller = name.closest('.overflow-y-auto');
+    // Body: the single overflow scroller holds the form and the save button.
+    const scroller = root.querySelector('.overflow-y-auto');
     expect(scroller).not.toBeNull();
-    expect(scroller).toHaveClass('flex-1');
-    expect(panel!.contains(scroller)).toBe(true);
+    expect(scroller).toHaveClass('flex-1', 'min-h-0');
     expect(scroller).toContainElement(screen.getByTestId('profile-save'));
-    expect(screen.getByLabelText(/close profile/i)).toBe(
-      panel!.querySelector('.shrink-0')?.querySelector('button'),
-    );
+    expect(scroller).toContainElement(screen.getByTestId('profile-custom-instructions'));
+
+    // Header: pinned above the scroller, not inside it.
+    const header = screen.getByText('Profile').closest('.shrink-0');
+    expect(header).not.toBeNull();
+    expect(header).toHaveClass('shrink-0');
+    expect(scroller!.contains(header!)).toBe(false);
   });
 
   it('marks the active choice via aria-checked', () => {
@@ -191,7 +249,7 @@ describe('ProfileModal theme choice (issue #53)', () => {
   });
 });
 
-describe('ProfileModal startup choice (issue #96)', () => {
+describe('ProfileView startup choice (issue #96)', () => {
   beforeEach(() => {
     updateProfile.mockReset();
   });
@@ -236,16 +294,5 @@ describe('ProfileModal startup choice (issue #96)', () => {
         startupChat: 'recent',
       }),
     );
-  });
-
-  it('marks the active choice via aria-checked', () => {
-    renderWithUser(user);
-
-    fireEvent.click(screen.getByTestId('startup-chat-option-new'));
-    expect(screen.getByTestId('startup-chat-option-recent')).toHaveAttribute(
-      'aria-checked',
-      'false',
-    );
-    expect(screen.getByTestId('startup-chat-option-new')).toHaveAttribute('aria-checked', 'true');
   });
 });

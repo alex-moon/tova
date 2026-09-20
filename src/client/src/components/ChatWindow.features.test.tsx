@@ -13,7 +13,7 @@ vi.mock('../services/assets', async (importOriginal) => {
 
 import AssetService from '../services/assets';
 import ChatWindow from './ChatWindow';
-import type { Message } from '../App';
+import type { Message, ToolEvent } from '../App';
 
 const NO_TEXT_TOAST =
   'No text could be extracted from this file type — Tova will see the filename only.';
@@ -107,6 +107,66 @@ describe('Tool chip (issue #33)', () => {
   });
 });
 
+describe('Tool chip result counts (issue #114)', () => {
+  afterEach(cleanup);
+
+  const resultMessage = (tools: ToolEvent[]): Message[] => [
+    { _id: 'm1', role: 'assistant', content: 'answer', tools },
+  ];
+
+  it('shows the file count for list_files results', () => {
+    renderChat(
+      resultMessage([
+        {
+          phase: 'result',
+          name: 'list_files',
+          label: 'Listed your files',
+          status: 'ok',
+          resultCount: 3,
+        },
+      ]),
+    );
+    expect(screen.getByTestId('tool-chip-list_files')).toHaveTextContent('3 results');
+  });
+
+  it('shows no results text when the event carries no count', () => {
+    renderChat(
+      resultMessage([{ phase: 'result', name: 'read_file', label: 'Read a file', status: 'ok' }]),
+    );
+    expect(screen.getByTestId('tool-chip-read_file')).not.toHaveTextContent('results');
+  });
+
+  it('suppresses the legacy resultCount 0 artifact on unknown tools', () => {
+    renderChat(
+      resultMessage([
+        {
+          phase: 'result',
+          name: 'list_repositories',
+          label: 'Listed repositories',
+          status: 'ok',
+          resultCount: 0,
+        },
+      ]),
+    );
+    expect(screen.getByTestId('tool-chip-list_repositories')).not.toHaveTextContent('results');
+  });
+
+  it('keeps a real 0 visible for web_search', () => {
+    renderChat(
+      resultMessage([
+        {
+          phase: 'result',
+          name: 'web_search',
+          label: 'Searched the web',
+          status: 'empty',
+          resultCount: 0,
+        },
+      ]),
+    );
+    expect(screen.getByTestId('tool-chip-web_search')).toHaveTextContent('0 results');
+  });
+});
+
 describe('Message content links (issue #33)', () => {
   afterEach(cleanup);
 
@@ -189,6 +249,57 @@ describe('Message content links (issue #33)', () => {
     ]);
     expect(screen.getByTestId('sources-block').querySelectorAll('a')).toHaveLength(3);
     expect(screen.queryByTestId('sources-show-all')).not.toBeInTheDocument();
+  });
+});
+
+describe('Horizontal overflow (issue #118)', () => {
+  afterEach(cleanup);
+
+  const overflow = (el: Element) => /overflow-x-auto|overflow-x-hidden/.test(el.className);
+
+  it('scrolls the chat container horizontally only via overflow-x-hidden', () => {
+    renderChat([base()]);
+    const scroller = document.querySelector('.overflow-y-auto');
+    expect(scroller).not.toBeNull();
+    expect(overflow(scroller!)).toBe(true);
+    expect(scroller!.className).toContain('overflow-x-hidden');
+  });
+
+  it('renders the sources block as a single horizontally scrollable strip', () => {
+    renderChat([base({ sources: ['https://a.example.com', 'https://b.example.com'] })]);
+    const ul = screen.getByTestId('sources-block').querySelector('ul')!;
+    expect(ul.className).toContain('flex');
+    expect(overflow(ul)).toBe(true);
+    for (const li of ul.querySelectorAll('li')) {
+      expect(li.className).toContain('shrink-0');
+    }
+  });
+
+  it('renders follow-up chips as one non-wrapping scrollable row', () => {
+    renderChat([
+      { _id: 'u1', role: 'user', content: 'question' },
+      { _id: 'm1', role: 'assistant', content: 'answer', suggestions: ['a', 'b'] },
+    ]);
+    const chips = screen.getAllByTestId('suggestion-chips')[0];
+    expect(chips.className).toContain('flex-nowrap');
+    expect(overflow(chips)).toBe(true);
+    for (const btn of chips.querySelectorAll('button')) {
+      expect(btn.className).toContain('shrink-0');
+    }
+  });
+
+  it('truncates a long attachment filename inside the user bubble', () => {
+    renderChat([
+      {
+        _id: 'u1',
+        role: 'user',
+        content: 'question',
+        assetFilename: 'a'.repeat(300) + '.png',
+      },
+    ]);
+    const chip = screen.getByTestId('message-attachment-chip');
+    expect(chip.className).toContain('max-w-[92%]');
+    expect(chip.querySelector('span')!.className).toContain('truncate');
   });
 });
 

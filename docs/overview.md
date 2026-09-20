@@ -2,13 +2,13 @@
 
 ## Product Intent
 
-`Tova` is a Groq-focused chat application that aims to feel like an application-layer “Heroku for Groq”. The product should let authenticated users chat through a clean web interface while the backend chooses the most appropriate Groq model for each request.
+`Tova` is a chat application that aims to feel like an application-layer service for inference providers. The product should let authenticated users chat through a clean web interface while the backend chooses the most appropriate model for each request from eligible provider model pools.
 
 ## Core Outcomes
 
 - Authenticated user accounts with secure session handling
 - Persistent chat sessions and message history stored in MongoDB
-- Intelligent backend routing that selects Groq models based on prompt complexity
+- Intelligent backend routing that selects models based on prompt complexity
 - A React frontend served through a unified local development experience
 
 ## Product Scope
@@ -24,7 +24,7 @@
 
 - Multimodal input and file analysis in the first release
 - Team collaboration features
-- Replacing Groq with a provider-agnostic orchestration layer in this phase
+- Locking any single provider in (routing already treats providers as interchangeable pool members)
 
 ## User Experience Summary
 

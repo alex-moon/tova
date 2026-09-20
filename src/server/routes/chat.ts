@@ -13,6 +13,7 @@ import { buildSystemContent } from '../services/promptAssembly';
 import { ensureUserLocation } from '../services/geoLocationService';
 import { deleteObject } from '../services/storageService';
 import { inferenceService } from '../services/inferenceService';
+import { outputTokensFor, promptCharsFrom } from '../services/outputTokenCap';
 import type { NeutralStreamChunk } from '../services/llmTypes';
 import { classifyAndPersistPromptDimensions, isTriviallyNeutral } from '../services/metricsService';
 import { computeDeterministicMetrics } from '../services/promptMetrics';
@@ -105,11 +106,13 @@ const collectSourcesInto = (
 const toolLabelFrom = (name: string): string =>
   name === 'web_search'
     ? 'Searched the web'
-    : name === 'list_files'
-      ? 'Listed your files'
-      : name === 'read_file'
-        ? 'Read a file'
-        : name || 'Tool run';
+    : name === 'fetch_url'
+      ? 'Fetched the page'
+      : name === 'list_files'
+        ? 'Listed your files'
+        : name === 'read_file'
+          ? 'Read a file'
+          : name || 'Tool run';
 
 const toolCallEvent = (call: NonNullable<NeutralStreamChunk['toolCall']>) => ({
   phase: 'call' as const,
@@ -134,6 +137,19 @@ export const streamingErrorMessage = (err: unknown): string => {
       'may have added many tools to the request. Try again shortly or remove MCP servers in settings.'
     );
   }
+  /*
+   * #117: a 429 (or its Groq-style message body that Mastra rethrows without a
+   * status code) is actionable — the suggestion is simply to retry — so it is
+   * surfaced as such instead of the generic streaming message.
+   */
+  if (
+    statusCode === 429 ||
+    /rate[ _-]?limit/i.test(message) ||
+    /(tokens per minute|requests per minute)/i.test(message) ||
+    /\bTPM\b|\bRPM\b/.test(message)
+  ) {
+    return 'Rate limited by the model provider — please retry in a moment.';
+  }
   return 'Error streaming from model';
 };
 
@@ -149,20 +165,60 @@ const domainsFrom = (urls: string[]): string[] => {
   return [...hosts].slice(0, 5);
 };
 
+// Result chip counts (#114): per-tool counting semantics instead of a
+// universal "count every array" heuristic — the universal one produced
+// misleading "0 results" on tools without a results list.
+//   web_search: count of results, domains from URL-bearing entries.
+//   list_files: count of matched files (empty files + error = degraded, no count).
+//   anything else (user-connected MCP etc.): a meaningful count only when the
+//   top-level result has exactly one array-valued field; otherwise no count
+//   and status 'ok' — absence of a count is not absence of success.
+const singleArrayFieldLength = (result: unknown): number | null => {
+  if (typeof result !== 'object' || result === null || Array.isArray(result)) return null;
+  const arrayFields = Object.values(result).filter((value) => Array.isArray(value));
+  return arrayFields.length === 1 ? (arrayFields[0] as unknown[]).length : null;
+};
+
 const toolResultEvent = (result: { name: string; result: unknown }) => {
-  const items = Array.isArray((result.result as { results?: unknown })?.results)
-    ? (result.result as { results: unknown[] }).results
-    : [];
-  const urls = items
-    .map((item) => (item as { url?: unknown } | null)?.url)
-    .filter((url): url is string => typeof url === 'string' && url !== '');
-  return {
+  const base = {
     phase: 'result' as const,
     name: result.name,
     label: toolLabelFrom(result.name),
-    status: urls.length > 0 ? ('ok' as const) : ('empty' as const),
-    resultCount: urls.length,
-    ...(urls.length > 0 ? { domains: domainsFrom(urls) } : {}),
+  };
+  if (result.name === 'web_search' || result.name === 'fetch_url') {
+    const items = Array.isArray((result.result as { results?: unknown })?.results)
+      ? (result.result as { results: unknown[] }).results
+      : [];
+    const urls = items
+      .map((item) => (item as { url?: unknown } | null)?.url)
+      .filter((url): url is string => typeof url === 'string' && url !== '');
+    const hasResults = Array.isArray((result.result as { results?: unknown })?.results);
+    return {
+      ...base,
+      status: urls.length > 0 ? ('ok' as const) : ('empty' as const),
+      ...(hasResults ? { resultCount: items.length } : {}),
+      ...(urls.length > 0 ? { domains: domainsFrom(urls) } : {}),
+    };
+  }
+  if (result.name === 'list_files') {
+    const payload = result.result as { files?: unknown; error?: unknown } | null;
+    const files = Array.isArray(payload?.files) ? (payload?.files as unknown[]) : null;
+    if (payload && typeof payload.error === 'string' && (!files || files.length === 0)) {
+      // Degraded: empty files + error → no count (issue #114 plan task 1).
+      return { ...base, status: 'empty' as const };
+    }
+    const count = files?.length ?? 0;
+    return {
+      ...base,
+      status: count > 0 ? ('ok' as const) : ('empty' as const),
+      resultCount: count,
+    };
+  }
+  const count = singleArrayFieldLength(result.result);
+  return {
+    ...base,
+    status: 'ok' as const,
+    ...(count !== null ? { resultCount: count } : {}),
   };
 };
 
@@ -393,6 +449,9 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
       messages,
       model: routingResult.model,
       provider: routingResult.provider,
+      // #104: always send an output-token budget so the provider cannot
+      // default it to the model's whole context window.
+      max_tokens: outputTokensFor(routingResult.contextLength, promptCharsFrom(messages)),
       userId,
       abortSignal: abortController.signal,
     });
@@ -418,6 +477,7 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
       role: 'assistant',
       content: assistantContent,
       modelName: routingResult.model,
+      provider: routingResult.provider,
       routingBand,
       ...(sources.length > 0 ? { sources } : {}),
       ...(sourceTitles.length > 0 ? { sourceTitles } : {}),
@@ -560,6 +620,9 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
         messages,
         model: routingResult.model,
         provider: routingResult.provider,
+        // #104: always send an output-token budget so the provider cannot
+        // default it to the model's whole context window.
+        max_tokens: outputTokensFor(routingResult.contextLength, promptCharsFrom(messages)),
         userId,
         abortSignal: abortController.signal,
       });
@@ -582,7 +645,7 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
         }
       }
     } catch (err) {
-      console.error('Groq streaming error:', err);
+      console.error('Streaming error for %s/%s:', routingResult.provider, routingResult.model, err);
       sendEvent('error', { message: streamingErrorMessage(err) });
       sendEvent('done', { complete: false });
       await cleanupEphemeralAsset(attachedAsset);
@@ -636,6 +699,7 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
     const assistantMessage = new Message({
       sessionId: session!._id,
       role: 'assistant',
+      provider: routingResult.provider,
       content: assistantContent,
       modelName: routingResult.model,
       routingBand,

@@ -1,7 +1,7 @@
 {
   "name": "tova",
   "version": "1.0.0",
-  "description": "Groq-focused chat application workspace",
+  "description": "Chat application with intelligent multi-provider model routing",
   "main": "dist/index.js",
   "scripts": {
     "build": "tsc -p tsconfig.json",
@@ -19,6 +19,7 @@
     "deploy": "bash scripts/deploy.sh",
     "db:migrate": "tsx migrations/index.ts up",
     "db:migrate:down": "tsx migrations/index.ts down --last",
+    "evals": "tsx scripts/run-evals.ts",
     "test": "NODE_OPTIONS=--experimental-vm-modules jest --runInBand",
     "lint": "eslint src migrations --ext .ts,.tsx",
     "lint:fix": "npm run lint -- --fix",

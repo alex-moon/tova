@@ -19,14 +19,20 @@ export interface AdminUser {
   updatedAt: string;
 }
 
-// Read-only model inventory row, GET /api/admin/models (issue #33).
-// `id` is '<provider>/<model>' for stable React keys; `stats` carries the
-// feedback tallies captured in ModelMetricStat (up/down).
+// Model inventory row, GET /api/admin/models (issues #33/#104). Each entry
+// is one `providerroutings` document — a provider/model pair can repeat
+// across tiers, so `id` is the Mongo _id and rows are per-tier. `stats`
+// carries the feedback tallies captured in ModelMetricStat (up/down), keyed
+// by model name.
 export interface AdminModel {
   id: string;
   provider: string;
   model: string;
-  tiers: string[];
+  tier: 'small' | 'large' | 'guard';
+  eligible: boolean;
+  tools: boolean;
+  vision: boolean;
+  contextLength?: number;
   stats: { band: string; up: number; down: number }[];
 }
 

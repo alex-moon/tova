@@ -27,6 +27,14 @@ const messageSchema = new mongoose.Schema({
     type: String,
   },
   /*
+   * Provider that served this turn's completion (issue #117 user visibility:
+   * 'deepinfra · openai/gpt-oss-120b' in the message footer). Additive and
+   * optional — old turns have no provider and render italics models only.
+   */
+  provider: {
+    type: String,
+  },
+  /*
    * Provenance URLs from web_search tool runs (issue #16), attached to the
    * assistant message only when non-empty — one message per turn stays true;
    * tool internals are trace artifacts, not separate messages.
