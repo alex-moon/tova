@@ -30,6 +30,13 @@ describe('Model Config Service', () => {
           },
           {
             provider: 'deepinfra',
+            model: 'Qwen/Qwen3-VL-8B-Instruct',
+            tools: true,
+            vision: true,
+            contextLength: 262144,
+          },
+          {
+            provider: 'deepinfra',
             model: 'Qwen/Qwen3-14B',
             tools: true,
             vision: false,
@@ -72,7 +79,7 @@ describe('Model Config Service', () => {
       expect(await listByTier('guard')).toEqual([
         { provider: 'groq', model: 'openai/gpt-oss-20b', tools: true, vision: false },
       ]);
-      expect(await ProviderRouting.countDocuments()).toBe(8);
+      expect(await ProviderRouting.countDocuments()).toBe(9);
     });
 
     it('completions never seed Groq rows (#94)', async () => {
@@ -85,7 +92,7 @@ describe('Model Config Service', () => {
       await listByTier('small');
       await listByTier('large');
       await listByTier('small');
-      expect(await ProviderRouting.countDocuments()).toBe(8);
+      expect(await ProviderRouting.countDocuments()).toBe(9);
     });
   });
 
@@ -209,7 +216,7 @@ describe('Model Config Service', () => {
     it('filters on vision so future VLM routing can require image-capable rows', async () => {
       await listByTier('small');
       const visionModels = (await listByTier('small', { vision: true })).map(({ model }) => model);
-      expect(visionModels).toEqual(['google/gemma-3-4b-it']);
+      expect(visionModels).toEqual(['Qwen/Qwen3-VL-8B-Instruct', 'google/gemma-3-4b-it']);
     });
 
     it('a missing capability field rules nothing out under schema defaults', async () => {
@@ -250,7 +257,7 @@ describe('Model Config Service', () => {
   describe('concurrent first reads', () => {
     it('survives concurrent seeding without duplicates or errors', async () => {
       await Promise.all([listByTier('small'), listByTier('small'), listByTier('small')]);
-      expect(await ProviderRouting.countDocuments()).toBe(8);
+      expect(await ProviderRouting.countDocuments()).toBe(9);
     });
   });
 });

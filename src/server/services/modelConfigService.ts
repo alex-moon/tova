@@ -88,6 +88,20 @@ const SEED_ENTRIES = (): SeedEntry[] => [
     tools: true,
     contextLength: 40960,
   },
+  /*
+   * Vision-capable pool entry for #115 (live-probed on DeepInfra: accepts
+   * image_url parts and tool calls). DeepInfra has no 8B listing — the alias
+   * is served by the Qwen3-VL-235B backend, hence the 235B context length.
+   */
+  {
+    provider: 'deepinfra',
+    model: 'Qwen/Qwen3-VL-8B-Instruct',
+    tier: 'small',
+    eligible: true,
+    tools: true,
+    vision: true,
+    contextLength: 262144,
+  },
   {
     provider: TIER_PROVIDER.large,
     model: envModel(DEFAULT_MODEL_ENV.large),
