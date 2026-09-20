@@ -102,11 +102,13 @@ const collectSourcesInto = (
 const toolLabelFrom = (name: string): string =>
   name === 'web_search'
     ? 'Searched the web'
-    : name === 'list_files'
-      ? 'Listed your files'
-      : name === 'read_file'
-        ? 'Read a file'
-        : name || 'Tool run';
+    : name === 'fetch_url'
+      ? 'Fetched the page'
+      : name === 'list_files'
+        ? 'Listed your files'
+        : name === 'read_file'
+          ? 'Read a file'
+          : name || 'Tool run';
 
 const toolCallEvent = (call: NonNullable<NeutralStreamChunk['toolCall']>) => ({
   phase: 'call' as const,

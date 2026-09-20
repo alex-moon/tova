@@ -1,5 +1,5 @@
 import { RequestContext } from '@mastra/core/request-context';
-import { webSearchTool } from './mastraService';
+import { webSearchTool, fetchUrlTool } from './mastraService';
 import {
   degradedToolError,
   markToolFailed,
@@ -12,10 +12,15 @@ import { muteConsoleError } from '../test/muteConsole';
 jest.mock('./webSearchService', () => ({
   webSearch: jest.fn(),
 }));
+jest.mock('./webFetchService', () => ({
+  fetchPage: jest.fn(),
+}));
 
+import { fetchPage } from './webFetchService';
 import { webSearch } from './webSearchService';
 
 const mockedSearch = webSearch as unknown as jest.Mock;
+const mockedFetch = fetchPage as unknown as jest.Mock;
 const consoleErrorSpy = muteConsoleError();
 
 const asCtx = (userId?: string) => {
@@ -124,5 +129,58 @@ describe('web_search tool degradation (#82)', () => {
     mockedSearch.mockResolvedValue([]);
     expect(await searchExecute({ query: 'q2' }, ctx)).toEqual({ results: [] });
     expect(toolIsFailed(ctx, 'web_search')).toBe(false);
+  });
+});
+
+describe('fetch_url tool degradation (#113)', () => {
+  beforeEach(() => {
+    mockedFetch.mockReset();
+  });
+
+  const fetchExecute = (
+    fetchUrlTool as unknown as {
+      execute: (args: { url: string }, ctx: unknown) => Promise<unknown>;
+    }
+  ).execute;
+
+  it('degrades a failing fetch with a descriptive error and marks the tool failed', async () => {
+    mockedFetch.mockRejectedValue(new Error('offline'));
+    const ctx = asCtx();
+    const first = (await fetchExecute({ url: 'https://example.com' }, ctx)) as {
+      results: unknown[];
+      error?: string;
+    };
+    expect(first.results).toEqual([]);
+    expect(first.error).toContain('fetch_url');
+    expect(first.error).toContain('offline');
+    expect(toolIsFailed(ctx, 'fetch_url')).toBe(true);
+  });
+
+  it('short-circuits the rest of the completion once marked failed', async () => {
+    mockedFetch.mockRejectedValue(new Error('offline'));
+    const ctx = asCtx();
+    await fetchExecute({ url: 'https://example.com' }, ctx);
+    const second = (await fetchExecute({ url: 'https://again.dev' }, ctx)) as { error?: string };
+    expect(mockedFetch).toHaveBeenCalledTimes(1);
+    expect(second.error).toContain('fetch_url');
+  });
+
+  it('returns page content and provenance on success, error on non-fetchable type', async () => {
+    mockedFetch.mockResolvedValue({ url: 'https://example.com', title: 'Ex', content: 'hi' });
+    const ok = (await fetchExecute({ url: 'https://example.com' }, asCtx())) as {
+      content?: string;
+      results: unknown[];
+    };
+    expect(ok.content).toBe('hi');
+    expect(ok.results[0]).toMatchObject({ url: 'https://example.com', title: 'Ex' });
+    mockedFetch.mockReset();
+    mockedFetch.mockResolvedValue(null);
+    const unsupported = (await fetchExecute({ url: 'https://example.com' }, asCtx())) as {
+      results: unknown[];
+      error?: string;
+    };
+    expect(unsupported.results).toEqual([]);
+    expect(unsupported.error).toContain('could not be retrieved');
+    expect(toolIsFailed(asCtx(), 'fetch_url')).toBe(false);
   });
 });

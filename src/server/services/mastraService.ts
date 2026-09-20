@@ -27,6 +27,7 @@ import {
   TraceContext,
 } from './llmTypes';
 import { webSearch } from './webSearchService';
+import { fetchPage } from './webFetchService';
 import { createSystemAsset } from './systemAssetService';
 import { isStorageConfigured } from './storageService';
 
@@ -262,6 +263,57 @@ export const webSearchTool = createTool({
 });
 
 /*
+ * Fetch-url tool (issue #113): a parseable URL the user pasted is a direct
+ * link, not a search query, so the agent reads the actual page. Execution
+ * is `webFetchService.fetchPage`; like web_search, any failure degrades to
+ * a typed error instead of throwing (a tool call must never fail the turn).
+ * Unconditionally attached — it needs no API key.
+ */
+export const fetchUrlTool = createTool({
+  id: 'fetch_url',
+  description:
+    'Fetch the content of a web page at a specific URL (e.g. one the user pasted), ' +
+    'returning its title and readable text. Use it whenever the user provides a ' +
+    'complete http(s) URL; prefer it over web_search for any such link.',
+  inputSchema: z.object({ url: z.string().min(1).describe('Full http(s) URL to fetch') }),
+  outputSchema: z.object({
+    url: z.string().optional(),
+    title: z.string().optional(),
+    content: z.string().optional(),
+    results: z.array(z.object({ title: z.string(), snippet: z.string(), url: z.string() })),
+    error: z.string().optional(),
+  }),
+  execute: async ({ url }, ctx) => {
+    // #82: retry-within-completion short-circuit for a previously failed call.
+    if (toolIsFailed(ctx, 'fetch_url'))
+      return {
+        results: [],
+        error: degradedToolError('fetch_url', toolDegradeReason(ctx, 'fetch_url')),
+      };
+    try {
+      const page = await fetchPage(url);
+      if (!page)
+        return {
+          results: [],
+          error:
+            'The page could not be retrieved (unsupported content type); ' +
+            'fall back to web_search or answer from your own knowledge.',
+        };
+      // `results` mirrors web_search's provenance shape so the sources
+      // block picks up the fetched page for free.
+      return {
+        title: page.title,
+        content: page.content,
+        results: [{ title: page.title, snippet: '', url: page.url }],
+      };
+    } catch (error) {
+      markToolFailed(ctx, 'fetch_url', reasonFrom(error));
+      return { results: [], error: degradedToolError('fetch_url', reasonFrom(error)) };
+    }
+  },
+});
+
+/*
  * Asset-library tools (issue #58). Per-user scoping comes from the request
  * context (never closed over — agents are memoised per provider/model/mode);
  * a missing userId degrades to an explicit `unavailable` result instead of
@@ -485,6 +537,9 @@ export const currentDatetimeTool = createTool({
 
 const TOOL_INSTRUCTIONS =
   'You may call the `web_search` tool to find current or external information. ' +
+  'When the user message contains a complete http(s) URL, do not search — call ' +
+  'the `fetch_url` tool with that exact URL and read the returned page content ' +
+  'before answering; use it whenever you need the substance of a specific page. ' +
   'When the user asks about the current date or time, call the `current_datetime` ' +
   'tool instead of guessing; it reports UTC only, do not convert to local time. ' +
   'Write the query as focused keywords. When search results arrive, answer with ' +
@@ -538,6 +593,7 @@ const agentFor = (provider: LlmProvider, model: string, tools?: boolean): Agent 
             // degrades to empty results without one); current_datetime has no
             // such dependency (#52).
             ...(hasSearchKey() ? { web_search: webSearchTool } : {}),
+            fetch_url: fetchUrlTool,
             current_datetime: currentDatetimeTool,
             list_files: listFilesTool,
             read_file: readFileTool,
