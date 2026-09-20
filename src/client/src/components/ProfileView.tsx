@@ -219,7 +219,8 @@ const ProfileView = () => {
             <p className="mt-1 text-muted-foreground">
               When on, nothing sent or attached in chat is stored — chats and attached files vanish
               when the conversation ends. Files uploaded in Assets are kept so you can reuse them;
-              they are deleted only when you delete them.
+              they are deleted only when you delete them. Turning this on removes your existing
+              chats and chat messages from storage.
             </p>
           </fieldset>
         </div>
