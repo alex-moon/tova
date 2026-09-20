@@ -2,6 +2,15 @@ import dns from 'dns';
 import { fetchPage } from './webFetchService';
 import { muteConsoleError } from '../test/muteConsole';
 
+// The checker's unit tests live in safeLinkService.test.ts; here it is a
+// controllable stub so the fetch flow (initial URL, redirect hops, gate
+// ordering) is testable in isolation.
+const mockAssertSafeUrl = jest.fn<Promise<void>, [string]>();
+
+jest.mock('./safeLinkService', () => ({
+  assertSafeUrl: (url: string) => mockAssertSafeUrl(url),
+}));
+
 const consoleErrorSpy = muteConsoleError();
 
 const realFetch = global.fetch;
@@ -23,6 +32,7 @@ afterAll(() => {
 describe('Web Fetch Service', () => {
   beforeEach(() => {
     consoleErrorSpy.mockClear();
+    mockAssertSafeUrl.mockReset().mockResolvedValue(undefined);
     global.fetch = jest.fn();
     dns.promises.lookup = jest.fn() as unknown as typeof dns.promises.lookup;
   });
@@ -271,6 +281,61 @@ describe('Web Fetch Service', () => {
       publicHost();
       (global.fetch as jest.Mock).mockResolvedValueOnce(redirectResponse(''));
       await expect(fetchPage('https://example.com/lost')).rejects.toThrow('no location header');
+    });
+  });
+
+  describe('safe link checking (#120, checker stubbed)', () => {
+    const publicHost = () => {
+      (dns.promises.lookup as jest.Mock).mockResolvedValue([
+        { address: '93.184.216.34', family: 4 },
+      ]);
+    };
+    const redirectResponse = (location: string) => ({
+      ok: false,
+      status: 302,
+      headers: new Headers({ location }),
+      body: {},
+      text: () => Promise.resolve(''),
+    });
+
+    it('refuses the initial URL before any page fetch when unsafe', async () => {
+      publicHost();
+      mockAssertSafeUrl.mockRejectedValue(
+        new Error(
+          'link blocked by Safe Browsing: https://phish.example.com/x (SOCIAL_ENGINEERING)',
+        ),
+      );
+      await expect(fetchPage('https://phish.example.com/x')).rejects.toThrow('link blocked');
+      expect(global.fetch).not.toHaveBeenCalled();
+      // Screened once, for the initial URL.
+      expect(mockAssertSafeUrl).toHaveBeenCalledWith('https://phish.example.com/x');
+    });
+
+    it('screens the initial URL and then each redirect hop', async () => {
+      publicHost();
+      (global.fetch as jest.Mock)
+        .mockResolvedValueOnce(redirectResponse('https://moved.example.com/finally'))
+        .mockResolvedValueOnce(okResponse('<html><title>ok</title></html>'));
+      await fetchPage('https://example.com/hop-chain');
+      expect(mockAssertSafeUrl.mock.calls.map((c) => c[0])).toEqual([
+        'https://example.com/hop-chain',
+        'https://example.com/hop-chain', // hop 0 re-check shares the initial call's verdict
+        'https://moved.example.com/finally',
+      ]);
+    });
+
+    it('blocks a redirect whose hop target is flagged', async () => {
+      publicHost();
+      (global.fetch as jest.Mock).mockResolvedValueOnce(
+        redirectResponse('https://bait.example.com/final'),
+      );
+      mockAssertSafeUrl.mockImplementation((url) =>
+        url.includes('bait.example.com')
+          ? Promise.reject(new Error(`link blocked by Safe Browsing: ${url}`))
+          : Promise.resolve(),
+      );
+      await expect(fetchPage('https://example.com/redirects-bad')).rejects.toThrow('link blocked');
+      expect(global.fetch).toHaveBeenCalledTimes(1); // bait page never fetched
     });
   });
 

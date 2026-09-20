@@ -186,7 +186,17 @@ describe('Model Config Service', () => {
   describe('capability matching (#94)', () => {
     it('rules out models flagged tools:false from the completions pool', async () => {
       await listByTier('small');
-      await ProviderRouting.updateOne({ model: 'openai/gpt-oss-20b' }, { tools: false });
+      // Read-back flip: findOneAndUpdate returns the mutated doc, so the
+      // assertion below can only fail if the mutation itself was lost (an
+      // infra-level stale-read/lost-write), not if updateOne silently
+      // matched nothing.
+      const flipped = (await ProviderRouting.findOneAndUpdate(
+        { model: 'openai/gpt-oss-20b' },
+        { $set: { tools: false } },
+        { new: true },
+      ).lean<{ tools?: boolean }>()) as { tools?: boolean } | null;
+      expect(flipped).not.toBeNull();
+      expect(flipped?.tools).toBe(false);
       try {
         const models = (await completionsPoolFor('small')).map(({ model }) => model);
         expect(models).not.toContain('openai/gpt-oss-20b');
