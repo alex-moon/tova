@@ -13,10 +13,11 @@ import { deepinfraConnector, groqConnector } from '../src/server/services/mastra
  * the plan doc).
  *
  * Usage: npx tsx scripts/smokeImageTurn.ts [model]
- *   model defaults to Qwen/Qwen3-VL-8B-Instruct (seeded small-tier vision).
+ *   model defaults to Qwen/Qwen3-VL-30B-A3B-Instruct (seeded large-tier
+ *   vision; all image turns route large-only per the #115 user decision).
  */
 
-const MODEL = process.argv[2] ?? 'Qwen/Qwen3-VL-8B-Instruct';
+const MODEL = process.argv[2] ?? 'Qwen/Qwen3-VL-30B-A3B-Instruct';
 
 const crc32 = (buf: Buffer): number => zlib.crc32(buf) >>> 0;
 

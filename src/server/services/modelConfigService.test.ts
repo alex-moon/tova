@@ -12,6 +12,8 @@ describe('Model Config Service', () => {
   describe('seeding', () => {
     it('seeds DeepInfra completion pools plus the Groq guard on first read', async () => {
       const small = await listByTier('small');
+      // gemma-3-4b-it is seeded ineligible (user veto, #115): the row exists
+      // for history coherence but must never appear in any pool.
       expect(small).toEqual(
         expect.arrayContaining([
           {
@@ -20,20 +22,6 @@ describe('Model Config Service', () => {
             tools: true,
             contextLength: 131072,
             vision: false,
-          },
-          {
-            provider: 'deepinfra',
-            model: 'google/gemma-3-4b-it',
-            tools: true,
-            vision: true,
-            contextLength: 131072,
-          },
-          {
-            provider: 'deepinfra',
-            model: 'Qwen/Qwen3-VL-8B-Instruct',
-            tools: true,
-            vision: true,
-            contextLength: 262144,
           },
           {
             provider: 'deepinfra',
@@ -74,12 +62,37 @@ describe('Model Config Service', () => {
             vision: false,
             contextLength: 1048576,
           },
+          // #115 image pool: all image turns route through the large tier,
+          // both vision rows probed on DeepInfra (image parts + tool calls).
+          {
+            provider: 'deepinfra',
+            model: 'Qwen/Qwen3-VL-8B-Instruct',
+            tools: true,
+            vision: true,
+            contextLength: 262144,
+          },
+          {
+            provider: 'deepinfra',
+            model: 'Qwen/Qwen3-VL-30B-A3B-Instruct',
+            tools: true,
+            vision: true,
+            contextLength: 262144,
+          },
         ]),
       );
       expect(await listByTier('guard')).toEqual([
         { provider: 'groq', model: 'openai/gpt-oss-20b', tools: true, vision: false },
       ]);
-      expect(await ProviderRouting.countDocuments()).toBe(9);
+      expect(await ProviderRouting.countDocuments()).toBe(10);
+    });
+
+    it('gemma-3-4b-it never appears in any pool (user veto, #115)', async () => {
+      await listByTier('small');
+      await listByTier('large');
+      const smallModels = (await listByTier('small')).map(({ model }) => model);
+      const largeModels = (await listByTier('large')).map(({ model }) => model);
+      expect(smallModels).not.toContain('google/gemma-3-4b-it');
+      expect(largeModels).not.toContain('google/gemma-3-4b-it');
     });
 
     it('completions never seed Groq rows (#94)', async () => {
@@ -92,7 +105,7 @@ describe('Model Config Service', () => {
       await listByTier('small');
       await listByTier('large');
       await listByTier('small');
-      expect(await ProviderRouting.countDocuments()).toBe(9);
+      expect(await ProviderRouting.countDocuments()).toBe(10);
     });
   });
 
@@ -207,7 +220,8 @@ describe('Model Config Service', () => {
       try {
         const models = (await completionsPoolFor('small')).map(({ model }) => model);
         expect(models).not.toContain('openai/gpt-oss-20b');
-        expect(models).toContain('google/gemma-3-4b-it');
+        expect(models).not.toContain('google/gemma-3-4b-it');
+        expect(models).toContain('Qwen/Qwen3-14B');
       } finally {
         await ProviderRouting.updateOne({ model: 'openai/gpt-oss-20b' }, { tools: true });
       }
@@ -223,10 +237,11 @@ describe('Model Config Service', () => {
       }
     });
 
-    it('filters on vision so future VLM routing can require image-capable rows', async () => {
-      await listByTier('small');
-      const visionModels = (await listByTier('small', { vision: true })).map(({ model }) => model);
-      expect(visionModels).toEqual(['Qwen/Qwen3-VL-8B-Instruct', 'google/gemma-3-4b-it']);
+    it('filters on vision for the #115 image pool (large tier)', async () => {
+      await listByTier('large');
+      const visionModels = (await listByTier('large', { vision: true })).map(({ model }) => model);
+      // Sorted `provider, model`; all image turns route through this pool.
+      expect(visionModels).toEqual(['Qwen/Qwen3-VL-30B-A3B-Instruct', 'Qwen/Qwen3-VL-8B-Instruct']);
     });
 
     it('a missing capability field rules nothing out under schema defaults', async () => {
@@ -326,7 +341,7 @@ describe('Model Config Service', () => {
   describe('concurrent first reads', () => {
     it('survives concurrent seeding without duplicates or errors', async () => {
       await Promise.all([listByTier('small'), listByTier('small'), listByTier('small')]);
-      expect(await ProviderRouting.countDocuments()).toBe(9);
+      expect(await ProviderRouting.countDocuments()).toBe(10);
     });
   });
 });

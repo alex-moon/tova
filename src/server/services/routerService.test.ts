@@ -336,12 +336,12 @@ describe('Router Service', () => {
       guardModel: 'test-guard-model',
     };
 
-    it('routes an image turn into the vision pool only (non-vision rows excluded)', async () => {
+    it('routes an image turn into the large vision pool only', async () => {
       const result = await routeQuery('what is in this picture?', vlConfig, () => 0, {
         hasImage: true,
       });
       expect(result).toEqual({
-        model: 'vl-small',
+        model: 'vl-large',
         reason: 'image-attachment',
         provider: 'deepinfra',
       });
@@ -355,13 +355,11 @@ describe('Router Service', () => {
       expect(mockGenerate).not.toHaveBeenCalled();
     });
 
-    it('falls back to a large vision model when the small vision pool is empty', async () => {
-      const largeOnlyConfig = { small: [groqSmall], large: [vlLarge], guardModel: 'x' };
-      const result = await routeQuery('what is this?', largeOnlyConfig, () => 0, {
-        hasImage: true,
-      });
-      expect(result.model).toBe('vl-large');
-      expect(result.reason).toBe('image-attachment');
+    it('never falls back to a small vision model even when it is the only one', async () => {
+      const smallOnlyConfig = { small: [vlSmall], large: [groqLarge], guardModel: 'x' };
+      await expect(
+        routeQuery('what is this?', smallOnlyConfig, () => 0, { hasImage: true }),
+      ).rejects.toThrow('No vision-capable models configured for image attachments');
     });
 
     it('fails the turn loudly when no vision-capable model exists anywhere', async () => {
