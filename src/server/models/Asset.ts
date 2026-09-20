@@ -67,6 +67,15 @@ const assetSchema = new mongoose.Schema(
       type: String,
       default: null,
     },
+    // Zero-data retention (issue #116): chat-composer uploads from a ZDR user
+    // are throwaway — the bytes and row are removed as soon as the turn that
+    // used them completes. Assets-page uploads are never ephemeral, so a
+    // saved library file can still be attached to a ZDR chat without being
+    // deleted.
+    ephemeral: {
+      type: Boolean,
+      default: false,
+    },
   },
   {
     timestamps: true,

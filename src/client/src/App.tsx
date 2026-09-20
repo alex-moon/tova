@@ -106,7 +106,9 @@ function App() {
     if (startupSessionRef.current || sessions.length === 0) return;
     startupSessionRef.current = true;
     // 'new' starts with a blank composer; 'recent' (the default when unset)
-    // opens the newest session once sessions have loaded.
+    // opens the newest session once sessions have loaded. ZDR users (#116)
+    // never open a saved chat by default — their turns are stateless.
+    if (user?.zdr) return;
     if ((user?.startupChat ?? 'recent') === 'recent') {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setActiveSessionId(sessions[0]._id);
@@ -132,15 +134,36 @@ function App() {
     ]);
     const streamId = `stream-${Date.now()}`;
     setMessages((prev) => [...prev, { _id: streamId, role: 'assistant', content: '' }]);
+    // Zero-data retention (#116): the setting decides the request shape; the
+    // stream path above replays recent turns instead of a session id.
+    const zdr = Boolean(user?.zdr);
     try {
       const res = await fetch('/api/chat/stream', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
         body: JSON.stringify({
-          sessionId: activeSessionId,
           content,
           ...(assetId ? { assetId } : {}),
+          // Zero-data retention (#116): with the setting on, no sessionId is
+          // sent and recent turns are replayed as a bounded history payload —
+          // the server keeps nothing, so continuity lives on the client.
+          ...(zdr
+            ? {
+                history: messages
+                  .filter(
+                    (m) =>
+                      (m.role === 'user' || m.role === 'assistant') &&
+                      !m.isError &&
+                      m.content &&
+                      m._id !== streamId,
+                  )
+                  .slice(-20)
+                  .map((m) => ({ role: m.role, content: m.content })),
+              }
+            : activeSessionId
+              ? { sessionId: activeSessionId }
+              : {}),
         }),
       });
 

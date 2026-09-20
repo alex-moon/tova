@@ -77,7 +77,29 @@ export const assetPresignSchema = z.object({
     .number({ message: 'Size is required' })
     .int({ message: 'Size must be an integer' })
     .positive({ message: 'Size must be positive' }),
+  // Upload origin (issue #116): the chat composer tags its uploads so a ZDR
+  // user's chat attachments can be kept out of long-term storage, while
+  // Assets-page uploads (no scope) live on until deleted. The server still
+  // decides from the account's own zdr setting — the tag alone never changes
+  // storage behavior for other users.
+  scope: z.enum(['chat'], { message: 'scope must be "chat"' }).optional(),
 });
+
+// ZDR chats (issue #116) are stateless per turn: with persistence off, the
+// client replays the conversation so far and the server keeps nothing. Bound
+// the replay hard — recent turns only, and the same 4000-char cap the profile
+// custom-instructions field uses.
+export const zdrHistoryEntrySchema = z.object({
+  role: z.enum(['user', 'assistant'], { message: 'history role must be user or assistant' }),
+  content: z
+    .string({ message: 'history content must be a string' })
+    .min(1, { message: 'history content must not be empty' })
+    .max(4000, { message: 'history content must be 4000 characters or fewer' }),
+});
+
+export const zdrHistorySchema = z
+  .array(zdrHistoryEntrySchema, { message: 'history must be an array' })
+  .max(20, { message: 'history may contain at most 20 entries' });
 
 // GET /api/assets/bulk-download query (issue #69). Express 5's default query
 // parser returns an array for repeated `?id=` params but a scalar string for
