@@ -350,6 +350,40 @@ describe('Chat streaming route', () => {
     expect(toolEvents[2].resultCount).toBeUndefined();
   });
 
+  it('suppresses the count on a degraded list_files result (empty files + error)', async () => {
+    const cookies = await registerUser('stream-degraded-list@example.com');
+    mockAgentStream.mockImplementation(async () => ({
+      fullStream: (async function* () {
+        yield { type: 'tool-call', payload: { toolName: 'list_files', args: {} } };
+        yield {
+          type: 'tool-result',
+          payload: { toolName: 'list_files', result: { files: [], error: 'assets unavailable' } },
+        };
+      })(),
+    }));
+
+    const app = createApp();
+    const response = await request(app)
+      .post('/api/chat/stream')
+      .set('Cookie', cookies)
+      .send({ content: 'list things' });
+
+    const toolEvent = response.text
+      .split('\n\n')
+      .filter((part) => part.includes('event: tool'))
+      .map((part) =>
+        JSON.parse(
+          part
+            .split('\n')
+            .find((l) => l.startsWith('data: '))!
+            .slice(6),
+        ),
+      )
+      .find((e) => e.phase === 'result');
+    expect(toolEvent).toEqual(expect.objectContaining({ name: 'list_files', status: 'empty' }));
+    expect(toolEvent.resultCount).toBeUndefined();
+  });
+
   it('delivers follow-up suggestions on done and persists them on the message', async () => {
     const cookies = await registerUser('stream-suggestions@example.com');
     mockAgentStream.mockImplementation(async () => ({

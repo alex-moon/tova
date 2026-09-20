@@ -183,7 +183,8 @@ const toolResultEvent = (result: { name: string; result: unknown }) => {
   if (result.name === 'list_files') {
     const payload = result.result as { files?: unknown; error?: unknown } | null;
     const files = Array.isArray(payload?.files) ? (payload?.files as unknown[]) : null;
-    if (!files && payload && typeof payload.error === 'string') {
+    if (payload && typeof payload.error === 'string' && (!files || files.length === 0)) {
+      // Degraded: empty files + error → no count (issue #114 plan task 1).
       return { ...base, status: 'empty' as const };
     }
     const count = files?.length ?? 0;
