@@ -557,7 +557,9 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
     // erases its throwaway attachment — cleanup is a no-op for durable
     // assets, so the persisted path is untouched (#116).
     await cleanupEphemeralAsset(attachedAsset);
-    res.status(500).json({ message: 'Error processing chat' });
+    // Same 429/413 surfacing as the stream route (#117): the detail rides
+    // additively so existing JSON consumers keep their shape.
+    res.status(500).json({ message: 'Error processing chat', detail: streamingErrorMessage(err) });
   }
 });
 
@@ -820,7 +822,9 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
     // throwaway attachment (#116); no-op for durable assets.
     await cleanupEphemeralAsset(attachedAsset);
     if (!res.headersSent) {
-      res.status(500).json({ message: 'Error processing chat' });
+      res
+        .status(500)
+        .json({ message: 'Error processing chat', detail: streamingErrorMessage(err) });
     } else {
       res.end();
     }
