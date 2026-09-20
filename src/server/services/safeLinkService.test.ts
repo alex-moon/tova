@@ -1,4 +1,5 @@
 import { checkUrl, isCheckerEnabled } from './safeLinkService';
+import { SafeBrowsingCache } from '../models/SafeBrowsingCache';
 import { muteConsoleWarn } from '../test/muteConsole';
 
 const consoleWarnSpy = muteConsoleWarn();
@@ -114,6 +115,70 @@ describe('Safe Link Service', () => {
         source: 'cache',
       });
       expect(global.fetch).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('cache degradation (Mongo failure must not green-light a flagged URL)', () => {
+    beforeEach(() => {
+      process.env[KEY_ENV] = 'k-test';
+    });
+
+    it('falls through to the API when the cache read fails', async () => {
+      const findOneSpy = jest
+        .spyOn(SafeBrowsingCache, 'findOne')
+        .mockImplementation(
+          () => ({ lean: () => Promise.reject(new Error('mongo down')) }) as never,
+        );
+      (global.fetch as jest.Mock).mockResolvedValue(emptyResponse());
+      await expect(checkUrl('https://example.com/db-outage')).resolves.toMatchObject({
+        enabled: true,
+        safe: true,
+        source: 'api',
+      });
+      expect(global.fetch).toHaveBeenCalledTimes(1);
+      findOneSpy.mockRestore();
+    });
+
+    it('still consults the API and enforces unsafe even if cache read fails', async () => {
+      const findOneSpy = jest
+        .spyOn(SafeBrowsingCache, 'findOne')
+        .mockImplementation(
+          () => ({ lean: () => Promise.reject(new Error('mongo down')) }) as never,
+        );
+      (global.fetch as jest.Mock).mockResolvedValue(matchesResponse(['MALWARE']));
+      await expect(checkUrl('https://flagged.example.com/x')).resolves.toMatchObject({
+        enabled: true,
+        safe: false,
+        source: 'api',
+      });
+      findOneSpy.mockRestore();
+    });
+
+    it('enforces the unsafe verdict even when the cache write fails', async () => {
+      const updateOneSpy = jest
+        .spyOn(SafeBrowsingCache, 'updateOne')
+        .mockRejectedValue(new Error('mongo down'));
+      (global.fetch as jest.Mock).mockResolvedValue(matchesResponse(['SOCIAL_ENGINEERING']));
+      await expect(checkUrl('https://phish.example.org/steal')).resolves.toMatchObject({
+        enabled: true,
+        safe: false,
+        source: 'api',
+        threats: ['SOCIAL_ENGINEERING'],
+      });
+      updateOneSpy.mockRestore();
+    });
+
+    it('still reports safe from the API when the cache write fails', async () => {
+      const updateOneSpy = jest
+        .spyOn(SafeBrowsingCache, 'updateOne')
+        .mockRejectedValue(new Error('mongo down'));
+      (global.fetch as jest.Mock).mockResolvedValue(emptyResponse());
+      await expect(checkUrl('https://fine.example.org/ok')).resolves.toMatchObject({
+        enabled: true,
+        safe: true,
+        source: 'api',
+      });
+      updateOneSpy.mockRestore();
     });
   });
 

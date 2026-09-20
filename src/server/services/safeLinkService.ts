@@ -78,32 +78,47 @@ const cacheKey = (url: string): string | null => {
   }
 };
 
+// A cache-read failure is recoverable: fall through to the live API call
+// instead of reporting the URL unchecked.
 const readCache = async (host: string): Promise<string | null> => {
-  const entry = await SafeBrowsingCache.findOne({ host }).lean<{ verdict?: string }>();
-  return entry?.verdict ?? null;
+  try {
+    const entry = await SafeBrowsingCache.findOne({ host }).lean<{ verdict?: string }>();
+    return entry?.verdict ?? null;
+  } catch (err) {
+    warnOutage(`cache read for ${host}`, err);
+    return null;
+  }
 };
 
-// Screens a URL. Never throws: API errors log a warning and report
-// safe=true with source='unchecked' (fail-open). Returns
-// { enabled: false } when no key is configured — callers proceed.
+const writeCache = async (host: string, verdict: 'safe' | 'unsafe'): Promise<void> => {
+  try {
+    await SafeBrowsingCache.updateOne(
+      { host },
+      { verdict, checkedAt: new Date() },
+      { upsert: true },
+    );
+  } catch (err) {
+    warnOutage(`cache write for ${host}`, err);
+  }
+};
+
+// Screens a URL. Never throws: only API-call errors report safe=true with
+// source='unchecked' (fail-open); a Mongo cache failure is degraded to
+// losing the cache — the authoritative API verdict is still enforced, so a
+// database outage can never green-light a URL Google flagged.
+// Returns { enabled: false } when no key is configured — callers proceed.
 export const checkUrl = async (url: string): Promise<SafeLinkVerdict> => {
   const apiKey = safeBrowsingApiKey();
   if (!apiKey) return { enabled: false, safe: true, source: 'disabled' };
   const host = cacheKey(url);
+  if (host) {
+    const verdict = await readCache(host);
+    if (verdict === 'unsafe') return { enabled: true, safe: false, source: 'cache' };
+    if (verdict === 'safe') return { enabled: true, safe: true, source: 'cache' };
+  }
   try {
-    if (host) {
-      const verdict = await readCache(host);
-      if (verdict === 'unsafe') return { enabled: true, safe: false, source: 'cache' };
-      if (verdict === 'safe') return { enabled: true, safe: true, source: 'cache' };
-    }
     const threats = await callThreatMatches(url, apiKey);
-    if (host) {
-      await SafeBrowsingCache.updateOne(
-        { host },
-        { verdict: threats.length > 0 ? 'unsafe' : 'safe', checkedAt: new Date() },
-        { upsert: true },
-      );
-    }
+    if (host) await writeCache(host, threats.length > 0 ? 'unsafe' : 'safe');
     if (threats.length > 0) {
       return { enabled: true, safe: false, source: 'api', threats };
     }
