@@ -472,6 +472,9 @@ describe('streamingErrorMessage (#77, #117)', () => {
       ),
     ).toMatch(/Rate limited/);
     expect(streamingErrorMessage(new Error('helpful nudge: TPM exceeded'))).toMatch(/Rate limited/);
+    // Slug-form bodies rethrown without a status code (DeepInfra-style
+    // `rate_limit_exceeded`) must match too — separators are not just spaces.
+    expect(streamingErrorMessage(new Error('rate_limit_exceeded'))).toMatch(/Rate limited/);
     // 413 takes precedence — it is the more specific diagnosis of the same
     // "tokens" family, and #117 must not unlink #77's message.
     expect(streamingErrorMessage({ statusCode: 413, message: 'TPM exceeded' })).toMatch(

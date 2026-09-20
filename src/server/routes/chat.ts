@@ -137,7 +137,7 @@ export const streamingErrorMessage = (err: unknown): string => {
    */
   if (
     statusCode === 429 ||
-    /rate limit/i.test(message) ||
+    /rate[ _-]?limit/i.test(message) ||
     /(tokens per minute|requests per minute)/i.test(message) ||
     /\bTPM\b|\bRPM\b/.test(message)
   ) {
