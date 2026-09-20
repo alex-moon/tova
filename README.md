@@ -1,5 +1,6 @@
 # Tova
 
+<<<<<<< HEAD
 Tova is a chat application with authenticated users, persistent MongoDB-backed chat sessions, and an intelligent router that picks the best model for each prompt from eligible multi-provider model pools — with a built-in tool-calling agent, an asset library, and per-user MCP extensions. Think of it as an application layer that puts model routing, tools, and storage behind a single chat product.
 
 ## Features
@@ -14,6 +15,16 @@ Tova is a chat application with authenticated users, persistent MongoDB-backed c
 - **Modern UI**: React chat interface with drag-drop asset panel and markdown rendering.
 
 Optional features degrade gracefully: unset env keys simply disable the feature (no search tool, no asset library, no tracing), plain chat keeps working.
+=======
+Tova is an intelligent model router and chat interface for LLMs: Groq serves the fast, cheap auxiliary tasks (routing, classification, summarisation, follow-up suggestions) while DeepInfra frontier models handle chat completions. Think of it as the application layer over Groq and DeepInfra.
+
+## Features
+
+- **Intelligent Routing**: Automatically selects between small and large DeepInfra models based on query complexity, with capability matching (tool use, vision) so unsuitable models are ruled out deterministically.
+- **Persistent Chat**: Session-based chat history stored in MongoDB.
+- **Secure Auth**: JWT-based authentication with HTTP-only cookies.
+- **Modern UI**: Semantic React-based chat interface.
+>>>>>>> feat/94-better-model
 
 ## Local Development (recommended)
 
@@ -23,7 +34,12 @@ Backing services (MongoDB) run in Docker Compose; the backend and frontend run d
 
 - Node.js (v22+) and npm
 - Docker with the Compose plugin (for MongoDB only)
+<<<<<<< HEAD
 - Provider API keys: Groq (routing/classifier) and the Google OAuth credentials described below
+=======
+- A Groq API key (routing and auxiliary tasks)
+- A DeepInfra API key (chat completions)
+>>>>>>> feat/94-better-model
 
 ### Setup
 
@@ -61,7 +77,11 @@ Backing services (MongoDB) run in Docker Compose; the backend and frontend run d
 7. **Test end to end**
    - Open http://localhost:5173
    - Log in with the admin email from step 4. Password: `ADMIN_PASSWORD` from `.env` (default `admin`).
+<<<<<<< HEAD
    - Send a chat message. You get a streamed reply from the routed model.
+=======
+   - Send a chat message. You get a reply from a DeepInfra model; Groq runs the routing and auxiliary tasks behind the scenes.
+>>>>>>> feat/94-better-model
 
 Admin password comes from `ADMIN_PASSWORD` in `.env` (defaults to `admin` — change it before seeding a shared environment). The seeded user (`formsatz@gmail.com`, hardcoded in migrations) has `role: admin` and the `routing` permission. New users do not have the `routing` permission, so they cannot use the model router until it is granted.
 
@@ -95,7 +115,13 @@ Required: set `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, and `GOOGLE_CALLBACK_U
 
 `npm run deploy` pushes and runs the full containerized stack on the configured server via `scripts/deploy.sh`: it SSHes to `SSH_HOST` (default baked into the script, override with e.g. `SSH_HOST=user@host npm run deploy`) and sets the app up under `/opt/tova`, where `.env` (modeled on `.env.example`) is loaded by `docker-compose.live.yml`. The compose file runs MongoDB, backend, and frontend as one self-contained deployment. On the host, the backend is reachable at port `15000` (container port 5000) and the frontend at port `15173` (container port 4173); the deployed Google OAuth callback must therefore use the frontend host port.
 
+<<<<<<< HEAD
 `docker-compose.local.yml` is the MongoDB-only file used by the local workflow above.
+=======
+```bash
+JWT_SECRET=your_secret_key GROQ_API_KEY=your_groq_key DEEPINFRA_API_KEY=your_deepinfra_key docker compose -f docker-compose.live.yml up
+```
+>>>>>>> feat/94-better-model
 
 ## Routing & Inference
 
