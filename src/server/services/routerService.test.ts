@@ -169,6 +169,52 @@ describe('Router Service', () => {
       expect(messages[0].content).toMatch(/simple|complex/i);
     });
 
+    it('classifies conversational narrative prose with the new prompt (#129)', async () => {
+      classifyAs('simple');
+      await routeQueryWithCfg(
+        `Hello! We are going to Ad Gefrin this morning - last time I went it was literally just a plaque, now they have a whole museum. While we're up that way are there any other super cool historical sites we should swing past? That's the Cheviots if I'm not mistaken?`,
+      );
+      const [messages] = mockGenerate.mock.calls[0] as unknown as [
+        { role: string; content: string }[],
+      ];
+      expect(messages[0].role).toBe('user');
+      expect(messages[0].content).toContain('complex');
+      expect(messages[0].content).toContain('conversational or narrative prose');
+      expect(messages[0].content).toContain('more than one distinct question');
+      expect(messages[0].content).toContain('prior conversation, personal experience');
+      expect(messages[0].content).toContain('one word');
+      expect(messages[0].content).toContain('Ad Gefrin');
+    });
+
+    it('gives reasoning guard models room for the answer word (#129)', async () => {
+      classifyAs('simple');
+      await routeQueryWithCfg('Give me investment advice');
+      const [, options] = mockGenerate.mock.calls[0] as unknown as [
+        { role: string; content: string }[],
+        { modelSettings: { temperature: number; maxOutputTokens: number } },
+      ];
+      // LangSmith evidence: the reasoning guard model returned an EMPTY
+      // answer at the old 10-token budget. Default must be far above it.
+      expect(options.modelSettings.maxOutputTokens).not.toBe(10);
+      expect(options.modelSettings.maxOutputTokens).toBe(256);
+      expect(options.modelSettings.temperature).toBe(0);
+    });
+
+    it('honors ROUTER_GUARD_MAX_TOKENS when set', async () => {
+      process.env.ROUTER_GUARD_MAX_TOKENS = '64';
+      classifyAs('simple');
+      try {
+        await routeQueryWithCfg('Give me investment advice');
+        const [, options] = mockGenerate.mock.calls[0] as unknown as [
+          { role: string; content: string }[],
+          { modelSettings: { maxOutputTokens: number } },
+        ];
+        expect(options.modelSettings.maxOutputTokens).toBe(64);
+      } finally {
+        delete process.env.ROUTER_GUARD_MAX_TOKENS;
+      }
+    });
+
     it('#77: builds the classifier from a tool-free agent', async () => {
       classifyAs('simple');
       await routeQueryWithCfg('Give me investment advice');

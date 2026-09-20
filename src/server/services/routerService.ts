@@ -150,6 +150,44 @@ const defaultConfig = async (): Promise<RouterConfig> => {
   };
 };
 
+/*
+ * Tier 2 classifier prompt (#129). Evidence first: LangSmith traces from
+ * `tova-dev` (2026-09-20, all retained classify runs) show the guard model —
+ * a reasoning model (`openai/gpt-oss-20b`) — spending its entire token
+ * budget on reasoning and returning an EMPTY text answer (`text: ''`) at the
+ * old `max_tokens: 10`. Every such empty reply classifies as "simple" and
+ * routes conversational turns to the small tier. Two changes follow:
+ *   1. the prompt now spells out what counts as complex (narrative /
+ *      conversational prose, multiple distinct questions, references to
+ *      prior context or personal experience) so the guard does not need to
+ *      spend tokens deciding criteria;
+ *   2. the token budget is env-tunable (`ROUTER_GUARD_MAX_TOKENS`) and
+ *      defaults to 256 — reasoning content is emitted ahead of the answer
+ *      word, so the reply contract (a single lowercase word) is unchanged
+ *      but the answer is no longer truncated away.
+ */
+
+export const classifyPrompt = (query: string): string =>
+  `Classify the user query below into "simple" or "complex".
+
+A query is "complex" when ANY of these apply:
+- it is conversational or narrative prose: the user shares context, tells a story, or writes several sentences in a personal tone
+- it asks more than one distinct question, even casually embedded in the prose
+- it refers to prior conversation, personal experience, named places, people, or events
+- it wants a recommendation, comparison, or multi-part answer
+
+A query is "simple" only when it is a short, single factual question, a one-line command, or a greeting/thanks.
+
+Reply with only one word: complex or simple.
+
+Query: ${query}`;
+
+const guardMaxTokens = (): number => {
+  const raw = process.env.ROUTER_GUARD_MAX_TOKENS;
+  const parsed = raw === undefined || raw === '' ? NaN : Number(raw);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 256;
+};
+
 export const routeQuery = async (
   query: string,
   config: RouterConfig | null = null,
@@ -189,11 +227,11 @@ export const routeQuery = async (
       messages: [
         {
           role: 'user',
-          content: `Classify the following user query into "simple" or "complex". Reply with only one word.\n\nQuery: ${query}`,
+          content: classifyPrompt(query),
         },
       ],
       temperature: 0,
-      max_tokens: 10,
+      max_tokens: guardMaxTokens(),
     });
 
     const classification = response.choices[0]?.message?.content?.trim().toLowerCase();
