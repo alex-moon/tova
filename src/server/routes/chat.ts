@@ -130,6 +130,19 @@ export const streamingErrorMessage = (err: unknown): string => {
       'may have added many tools to the request. Try again shortly or remove MCP servers in settings.'
     );
   }
+  /*
+   * #117: a 429 (or its Groq-style message body that Mastra rethrows without a
+   * status code) is actionable — the suggestion is simply to retry — so it is
+   * surfaced as such instead of the generic streaming message.
+   */
+  if (
+    statusCode === 429 ||
+    /rate limit/i.test(message) ||
+    /(tokens per minute|requests per minute)/i.test(message) ||
+    /\bTPM\b|\bRPM\b/.test(message)
+  ) {
+    return 'Rate limited by the model provider — please retry in a moment.';
+  }
   return 'Error streaming from model';
 };
 
@@ -464,7 +477,7 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
         }
       }
     } catch (err) {
-      console.error('Groq streaming error:', err);
+      console.error(`Streaming error for ${routingResult.provider}/${routingResult.model}:`, err);
       sendEvent('error', { message: streamingErrorMessage(err) });
       sendEvent('done', { complete: false });
       res.end();
