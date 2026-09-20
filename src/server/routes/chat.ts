@@ -181,7 +181,7 @@ const toolResultEvent = (result: { name: string; result: unknown }) => {
     name: result.name,
     label: toolLabelFrom(result.name),
   };
-  if (result.name === 'web_search') {
+  if (result.name === 'web_search' || result.name === 'fetch_url') {
     const items = Array.isArray((result.result as { results?: unknown })?.results)
       ? (result.result as { results: unknown[] }).results
       : [];
@@ -527,7 +527,7 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
         }
       }
     } catch (err) {
-      console.error(`Streaming error for ${routingResult.provider}/${routingResult.model}:`, err);
+      console.error('Streaming error for %s/%s:', routingResult.provider, routingResult.model, err);
       sendEvent('error', { message: streamingErrorMessage(err) });
       sendEvent('done', { complete: false });
       res.end();
