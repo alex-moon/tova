@@ -7,8 +7,9 @@
  */
 
 /*
- * Provider toggle carried on options; un-tagged callers default to
- * `deepinfra` (#109: Groq does no completion work — see `inferenceService`).
+ * Provider toggle carried on options; un-tagged callers default to `groq`
+ * (see `inferenceService`). DeepInfra callers get tagged during routing
+ * work in #4.
  */
 export type LlmProvider = 'groq' | 'deepinfra';
 

@@ -248,14 +248,14 @@ describe('admin routes', () => {
       const cookie = await registerAdmin(app, 'models-admin@example.com');
 
       await ProviderRouting.create({
-        provider: 'deepinfra',
+        provider: 'groq',
         model: 'test-large',
-        tier: 'small',
+        tier: 'large',
         eligible: true,
         contextLength: 131072,
       });
       await ProviderRouting.create({
-        provider: 'deepinfra',
+        provider: 'groq',
         model: 'test-large',
         tier: 'guard',
         eligible: false,

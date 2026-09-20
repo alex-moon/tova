@@ -25,8 +25,8 @@ export interface RoutingResult {
   /*
    * Provider rides beside the model, never inside it (env default model
    * strings contain slashes — Mastra's router parses ids on the first slash
-   * only). The provider comes from the picked `ModelRef`, so it is always
-   * the DeepInfra completion pools' provider (#94, #109).
+   * only). The provider comes from the picked `ModelRef`, so un-tagged env
+   * path entries resolve to `groq` (they are seeded that way).
    */
   provider: LlmProvider;
   /*
@@ -144,9 +144,8 @@ export const pickModelRef = (
  * and now names DeepInfra models only.
  *
  * The guard-model choice is not part of the pools: the classifier call stays
- * env-bound to a small aux model (`ROUTER_GUARD_MODEL`, #94) resolved
- * through the deepinfra provider fallback (#109) — aux tasks only,
- * tool-free by construction of `createToolFreeCompletion`.
+ * env-bound to a Groq small model (#94) — aux tasks only, tool-free by
+ * construction of `createToolFreeCompletion`.
  */
 const defaultConfig = async (): Promise<RouterConfig> => {
   const [small, large] = await Promise.all([

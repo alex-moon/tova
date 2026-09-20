@@ -3,8 +3,8 @@ import { inferenceService } from './inferenceService';
 /*
  * Tests the provider dispatch in the delegating service. The connectors now
  * live in `mastraService` (the single `@mastra/*` boundary, whose mapping is
- * pins that options dispatch to the right connector and that un-tagged
- * callers default to `deepinfra` (#109: Groq does no completion work).
+ * pinned in `mastraService.test.ts`); this suite pins that options dispatch
+ * to the right connector and that un-tagged callers default to `groq`.
  */
 
 const mockGroqCompletion = jest.fn();
@@ -31,18 +31,18 @@ describe('Inference Service provider dispatch', () => {
     mockDeepinfraStream.mockReset();
   });
 
-  it('defaults un-tagged calls to the deepinfra connector', async () => {
-    mockDeepinfraCompletion.mockResolvedValueOnce({ choices: [] });
+  it('defaults un-tagged calls to the groq connector', async () => {
+    mockGroqCompletion.mockResolvedValueOnce({ choices: [] });
     await inferenceService.createCompletion({ model: 'x', messages: [] });
-    expect(mockDeepinfraCompletion).toHaveBeenCalledWith({ model: 'x', messages: [] });
-    expect(mockGroqCompletion).not.toHaveBeenCalled();
+    expect(mockGroqCompletion).toHaveBeenCalledWith({ model: 'x', messages: [] });
+    expect(mockDeepinfraCompletion).not.toHaveBeenCalled();
   });
 
-  it('dispatches streaming defaults to deepinfra as well', async () => {
-    mockDeepinfraStream.mockResolvedValueOnce((async function* () {})());
+  it('dispatches streaming defaults to groq as well', async () => {
+    mockGroqStream.mockResolvedValueOnce((async function* () {})());
     await inferenceService.createStreamingCompletion({ model: 'x', messages: [] });
-    expect(mockDeepinfraStream).toHaveBeenCalledWith({ model: 'x', messages: [] });
-    expect(mockGroqStream).not.toHaveBeenCalled();
+    expect(mockGroqStream).toHaveBeenCalledWith({ model: 'x', messages: [] });
+    expect(mockDeepinfraStream).not.toHaveBeenCalled();
   });
 
   it('dispatches provider deepinfra to the deepinfra connector', async () => {
@@ -79,7 +79,7 @@ describe('Inference Service provider dispatch', () => {
     const neutral = {
       choices: [{ message: { content: 'ok' } }],
     };
-    mockDeepinfraCompletion.mockResolvedValueOnce(neutral);
+    mockGroqCompletion.mockResolvedValueOnce(neutral);
     await expect(inferenceService.createCompletion({ model: 'x', messages: [] })).resolves.toBe(
       neutral,
     );
