@@ -42,6 +42,11 @@ export const profilePatchSchema = z.strictObject({
       message: 'startupChat must be "recent" or "new"',
     })
     .optional(),
+  // Zero-data-retention preference (issue #116): opts the account out of all
+  // chat persistence. Boolean-only and forward-looking — enabling it never
+  // deletes data saved before it was turned on (that decision is tracked
+  // separately in the plan's open questions).
+  zdr: z.boolean({ message: 'zdr must be a boolean' }).optional(),
   // Granular delete-confirmation prefs (issue #59). Strict sub-object: an
   // unknown delete target is a 400, not a silently dropped key.
   confirmDeletes: z

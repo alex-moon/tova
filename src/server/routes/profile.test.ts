@@ -292,6 +292,58 @@ describe('PATCH /api/profile (issue #35)', () => {
     expect(user.settings?.startupChat ?? null).toBeNull();
   });
 
+  it('saves the zdr preference and reports it on PATCH and /me (issue #116)', async () => {
+    const { app, cookie } = await registerUser('patch-zdr@example.com');
+
+    // Before any save the field is absent from the wire payload (same
+    // convention as theme: false is the default, never explicitly sent).
+    const before = await request(app).get('/api/auth/me').set('Cookie', cookie);
+    expect(before.body.user).not.toHaveProperty('zdr');
+
+    const res = await patchProfile(app, cookie, { zdr: true });
+    expect(res.status).toBe(200);
+    expect(res.body.user.zdr).toBe(true);
+
+    const me = await request(app).get('/api/auth/me').set('Cookie', cookie);
+    expect(me.body.user).toEqual(res.body.user);
+
+    const user = await getUser('patch-zdr@example.com');
+    expect(user.settings?.zdr).toBe(true);
+
+    // Turning it back off persists false but keeps the payload omitted
+    // (truthy-only delivery, same as theme/startupChat).
+    const off = await patchProfile(app, cookie, { zdr: false });
+    expect(off.status).toBe(200);
+    expect(off.body.user).not.toHaveProperty('zdr');
+    const user2 = await getUser('patch-zdr@example.com');
+    expect(user2.settings?.zdr).toBe(false);
+  });
+
+  it('leaves zdr untouched when absent from the body (issue #116)', async () => {
+    const { app, cookie } = await registerUser('patch-zdr-partial@example.com');
+    await patchProfile(app, cookie, { zdr: true });
+
+    const res = await patchProfile(app, cookie, { preferredName: 'Alex' });
+    expect(res.status).toBe(200);
+    expect(res.body.user.zdr).toBe(true);
+    const user = await getUser('patch-zdr-partial@example.com');
+    expect(user.settings?.zdr).toBe(true);
+  });
+
+  it('rejects non-boolean zdr values with 400 (issue #116)', async () => {
+    const { app, cookie } = await registerUser('patch-zdr-invalid@example.com');
+
+    for (const bad of ['yes', 1, null, 0]) {
+      const res = await patchProfile(app, cookie, { zdr: bad });
+      expect(res.status).toBe(400);
+    }
+
+    // Unset on a fresh user: settings stays null (lazily created), so a
+    // rejected body must never have materialized a preference.
+    const user = await getUser('patch-zdr-invalid@example.com');
+    expect(user.settings?.zdr ?? null).toBeNull();
+  });
+
   it('rejects unauthenticated requests with 401', async () => {
     const app = createApp();
     const res = await request(app).patch('/api/profile').send({ preferredName: 'Alex' });

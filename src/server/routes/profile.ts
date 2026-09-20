@@ -47,7 +47,8 @@ router.patch('/', authenticate, async (req: AuthRequest, res) => {
       'customInstructions' in parsed.data ||
       parsed.data.theme !== undefined ||
       parsed.data.startupChat !== undefined ||
-      parsed.data.confirmDeletes !== undefined
+      parsed.data.confirmDeletes !== undefined ||
+      parsed.data.zdr !== undefined
     ) {
       if (!user.settings) {
         // Mongoose applies the schema default (null) for any field omitted
@@ -96,6 +97,13 @@ router.patch('/', authenticate, async (req: AuthRequest, res) => {
           chat: confirmDeletesPatch.chat ?? existing?.chat ?? true,
           file: confirmDeletesPatch.file ?? existing?.file ?? true,
         };
+      }
+      const zdrPatch = parsed.data.zdr;
+      if (zdrPatch !== undefined) {
+        // Boolean-validated in profilePatchSchema. Written only when the key
+        // is present (absent = untouched), mirroring `theme`/`startupChat`.
+        // Forward-looking: turning zdr on never purges pre-existing sessions.
+        settings.zdr = zdrPatch;
       }
     }
 
