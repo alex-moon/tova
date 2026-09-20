@@ -20,6 +20,10 @@ import type { MessageContentPart, NeutralStreamChunk } from '../services/llmType
 import { classifyAndPersistPromptDimensions, isTriviallyNeutral } from '../services/metricsService';
 import { computeDeterministicMetrics } from '../services/promptMetrics';
 import { generateFollowups } from '../services/followupService';
+import {
+  extractAndPersistFromTurn,
+  isEntityExtractionEnabled,
+} from '../services/entityExtractionService';
 import { zdrHistorySchema } from '../validation';
 
 const router = express.Router();
@@ -527,6 +531,21 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
     });
     await assistantMessage.save();
 
+    // Entity graph extraction (#138): one extra LLM call after the turn is
+    // served, fire-and-forget like title generation. Never runs for ZDR
+    // chats (handled above), and only when ENTITY_GRAPH_ENABLED is set —
+    // extraction is enrichment, so failures log and everything else
+    // continues from here.
+    if (isEntityExtractionEnabled()) {
+      extractAndPersistFromTurn({
+        userId: String(userDoc!._id),
+        sessionId: String(session!._id),
+        messageId: String(assistantMessage._id),
+        userText: content,
+        assistantText: assistantContent,
+      }).catch((err) => console.error('Entity extraction error:', err));
+    }
+
     res.json({
       sessionId: session!._id,
       message: assistantMessage,
@@ -777,6 +796,16 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
       metrics: await buildMessageMetrics(String(session!._id), assistantContent),
     });
     await assistantMessage.save();
+
+    if (isEntityExtractionEnabled()) {
+      extractAndPersistFromTurn({
+        userId: String(streamUserDoc!._id),
+        sessionId: String(session!._id),
+        messageId: String(assistantMessage._id),
+        userText: content,
+        assistantText: assistantContent,
+      }).catch((err) => console.error('Entity extraction error:', err));
+    }
 
     // Follow-up suggestions (issue #33): generated with the cheap guard
     // model, reusing the title/classification service pattern. Skipped for
