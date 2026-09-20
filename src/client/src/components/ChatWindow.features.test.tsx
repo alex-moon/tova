@@ -274,6 +274,9 @@ describe('Horizontal overflow (issue #118)', () => {
     for (const li of ul.querySelectorAll('li')) {
       expect(li.className).not.toContain('shrink-0');
     }
+    for (const span of ul.querySelectorAll('span')) {
+      expect(span.className).toContain('truncate');
+    }
   });
 
   it('renders follow-up chips as one non-wrapping scrollable row', () => {
