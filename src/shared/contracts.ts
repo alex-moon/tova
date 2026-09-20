@@ -63,6 +63,51 @@ export interface ModelComparisonRun {
   results: ModelComparisonResult[];
 }
 
+// Per-user entity graph read view (issue #138). Wire types for the admin
+// "Graph" tab: `AdminGraphEntity` is one node with its `sourceRefs` kept as
+// plain id strings for audit linking; `AdminGraphEdge` links two entities by
+// id plus a human summary; the detail response pairs an entity with the
+// edges touching it (either side), with the other endpoint's name resolved
+// so the tab can render without a second lookup.
+export interface AdminGraphSourceRef {
+  sessionId: string;
+  messageId?: string;
+}
+
+export interface AdminGraphEntity {
+  id: string;
+  userId: string;
+  name: string;
+  kind: string;
+  summary?: string;
+  mentionCount: number;
+  lastMentionedAt: string;
+  sourceRefs: AdminGraphSourceRef[];
+}
+
+export interface AdminGraphEdge {
+  id: string;
+  kind: string;
+  summary?: string;
+  fromEntityId: string;
+  toEntityId: string;
+  fromName: string;
+  toName: string;
+  sourceRefs: AdminGraphSourceRef[];
+}
+
+export interface AdminGraphEntitiesPayload {
+  entities: AdminGraphEntity[];
+  page: number;
+  limit: number;
+  total: number;
+}
+
+export interface AdminGraphEntityDetail {
+  entity: AdminGraphEntity;
+  edges: AdminGraphEdge[];
+}
+
 // Response of GET /api/admin/logs (issue #76).
 export interface AdminLogsPayload {
   logs: AdminLogEntry[];

@@ -11,6 +11,15 @@ import {
   runModelComparison,
   type CompareModelRef,
 } from '../services/modelCompare';
+import { Entity } from '../models/Entity';
+import { EntityEdge } from '../models/EntityEdge';
+import type {
+  AdminGraphEdge,
+  AdminGraphEntity,
+  AdminGraphEntityDetail,
+  AdminGraphEntitiesPayload,
+  AdminGraphSourceRef,
+} from '../../shared/contracts';
 
 const router = express.Router();
 
@@ -295,6 +304,110 @@ router.post('/model-compare', ...adminGuard, async (req, res) => {
     res.status(500).json({ message: 'Error running model comparison' });
   }
 });
+
+/*
+ * Per-user entity graph read view (issue #138, plan task 5): list a user's
+ * nodes with pagination, and fetch one node's detail with the edges touching
+ * it (either direction) and the other endpoint's name resolved. Every list
+ * item/detail carries `sourceRefs` back into the originating session/message
+ * so each inferred fact is auditable. Read-only; writes come from the
+ * extraction service, never from this tab.
+ */
+const toGraphSourceRefs = (refs: mongoose.AnyObject[]): AdminGraphSourceRef[] =>
+  refs.map((r) => ({
+    sessionId: String(r.sessionId),
+    ...(r.messageId ? { messageId: String(r.messageId) } : {}),
+  }));
+
+const toGraphEntity = (e: mongoose.AnyObject): AdminGraphEntity => ({
+  id: String(e._id),
+  userId: String(e.userId),
+  name: e.name,
+  kind: e.kind,
+  ...(e.summary ? { summary: e.summary } : {}),
+  mentionCount: e.mentionCount ?? 1,
+  lastMentionedAt: new Date(e.lastMentionedAt).toISOString(),
+  sourceRefs: toGraphSourceRefs(e.sourceRefs ?? []),
+});
+
+router.get(
+  '/graph/entities',
+  ...adminGuard,
+  async (req: express.Request, res: express.Response) => {
+    const userId = req.query.userId as string | undefined;
+    if (!userId || !mongoose.isValidObjectId(userId)) {
+      return res.status(400).json({ message: 'userId is required' });
+    }
+    const page = Math.max(1, Number(req.query.page) || 1);
+    const limit = Math.min(50, Math.max(1, Number(req.query.limit) || 20));
+    try {
+      const filter = { userId: new mongoose.Types.ObjectId(userId) };
+      const [docs, total] = await Promise.all([
+        Entity.find(filter)
+          .sort({ lastMentionedAt: -1 })
+          .skip((page - 1) * limit)
+          .limit(limit),
+        Entity.countDocuments(filter),
+      ]);
+      const payload: AdminGraphEntitiesPayload = {
+        entities: docs.map((d) => toGraphEntity(d.toObject())),
+        page,
+        limit,
+        total,
+      };
+      res.json(payload);
+    } catch (_err) {
+      res.status(500).json({ message: 'Error listing graph entities' });
+    }
+  },
+);
+
+router.get(
+  '/graph/entities/:id',
+  ...adminGuard,
+  async (req: express.Request, res: express.Response) => {
+    const id = String(req.params.id);
+    if (!mongoose.isValidObjectId(id)) {
+      return res.status(404).json({ message: 'Entity not found' });
+    }
+    try {
+      const entity = await Entity.findById(id);
+      if (!entity) return res.status(404).json({ message: 'Entity not found' });
+      const userId = entity.userId;
+      const edges = await EntityEdge.find({
+        userId,
+        $or: [{ fromEntityId: id }, { toEntityId: id }],
+      });
+      const neighbours = await Entity.find({
+        _id: {
+          $in: [...new Set(edges.flatMap((e) => [e.fromEntityId, e.toEntityId]).map(String))],
+        },
+      })
+        .select('name')
+        .lean();
+      const names = new Map<string, string>(
+        neighbours.map((n: mongoose.AnyObject) => [String(n._id), n.name]),
+      );
+      const edgeList: AdminGraphEdge[] = edges.map((e) => ({
+        id: e.id,
+        kind: e.kind,
+        ...(e.summary ? { summary: e.summary } : {}),
+        fromEntityId: String(e.fromEntityId),
+        toEntityId: String(e.toEntityId),
+        fromName: names.get(String(e.fromEntityId)) ?? String(e.fromEntityId),
+        toName: names.get(String(e.toEntityId)) ?? String(e.toEntityId),
+        sourceRefs: toGraphSourceRefs(e.sourceRefs as mongoose.AnyObject[]),
+      }));
+      const payload: AdminGraphEntityDetail = {
+        entity: toGraphEntity(entity.toObject()),
+        edges: edgeList,
+      };
+      res.json(payload);
+    } catch (_err) {
+      res.status(500).json({ message: 'Error reading graph entity' });
+    }
+  },
+);
 
 // Issue #76: read-only tail of the in-memory log buffer for the admin
 // logs view / API consumers. Supports incremental polling via cursor.

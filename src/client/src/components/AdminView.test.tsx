@@ -13,6 +13,8 @@ const updateModel = vi.fn();
 const deleteModel = vi.fn();
 const listLogs = vi.fn();
 const compareModels = vi.fn();
+const listGraphEntities = vi.fn();
+const getGraphEntity = vi.fn();
 
 vi.mock('../services/admin', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../services/admin')>();
@@ -31,6 +33,10 @@ vi.mock('../services/admin', async (importOriginal) => {
       compareModels: (...args: unknown[]) => compareModels(...args),
     },
     AdminLogsService: { listLogs: (...args: unknown[]) => listLogs(...args) },
+    AdminGraphService: {
+      listGraphEntities: (...args: unknown[]) => listGraphEntities(...args),
+      getGraphEntity: (...args: unknown[]) => getGraphEntity(...args),
+    },
   };
 });
 
@@ -472,5 +478,102 @@ describe('AdminView model comparison (issue #129)', () => {
     fireEvent.change(screen.getByTestId('compare-prompt'), { target: { value: 'Hello there' } });
     fireEvent.click(screen.getByTestId('compare-run'));
     expect(await screen.findByTestId('compare-error')).toHaveTextContent('Models unavailable.');
+  });
+});
+
+/*
+ * AdminView graph section (issue #138 plan task 5): pick a user, list their
+ * entity nodes paginated, drill into one node for its edges.
+ */
+describe('AdminView graph section (issue #138)', () => {
+  afterEach(cleanup);
+
+  beforeEach(() => {
+    listUsers.mockReset().mockResolvedValue([admin()]);
+    listModels.mockReset().mockResolvedValue([]);
+    updatePermissions.mockReset();
+    updateRole.mockReset();
+    listLogs.mockReset();
+  });
+
+  it('lists graph entities after selecting a user and opens their detail', async () => {
+    listGraphEntities.mockResolvedValue({
+      entities: [
+        {
+          id: 'e1',
+          userId: 'u1',
+          name: 'Taj Hotel',
+          kind: 'place',
+          summary: 'Mumbai hotel the user looked at',
+          mentionCount: 3,
+          lastMentionedAt: '2026-09-20T00:00:00.000Z',
+          sourceRefs: [{ sessionId: 's1' }, { sessionId: 's2' }],
+        },
+      ],
+      page: 1,
+      limit: 20,
+      total: 1,
+    });
+    getGraphEntity.mockResolvedValue({
+      entity: {
+        id: 'e1',
+        userId: 'u1',
+        name: 'Taj Hotel',
+        kind: 'place',
+        summary: 'Mumbai hotel the user looked at',
+        mentionCount: 3,
+        lastMentionedAt: '2026-09-20T00:00:00.000Z',
+        sourceRefs: [{ sessionId: 's1' }],
+      },
+      edges: [
+        {
+          id: 'g1',
+          kind: 'located-near',
+          summary: 'restaurant near the hotel',
+          fromEntityId: 'e2',
+          toEntityId: 'e1',
+          fromName: 'Trishna',
+          toName: 'Taj Hotel',
+          sourceRefs: [],
+        },
+      ],
+    });
+
+    render(<AdminView />);
+    fireEvent.click(await screen.findByTestId('admin-tab-graph'));
+    const select = screen.getByTestId('graph-user-select');
+    fireEvent.change(select, { target: { value: 'u1' } });
+    await waitFor(() => expect(listGraphEntities).toHaveBeenCalledWith('u1', 1));
+    expect(await screen.findByTestId('graph-entity-e1')).toHaveTextContent('Taj Hotel');
+    expect(screen.getByTestId('admin-graph-entities')).toHaveTextContent('3');
+
+    fireEvent.click(screen.getByTestId('graph-open-e1'));
+    await waitFor(() => expect(getGraphEntity).toHaveBeenCalledWith('e1'));
+    expect(await screen.findByTestId('admin-graph-detail')).toBeInTheDocument();
+    expect(screen.getByTestId('graph-detail-edges')).toHaveTextContent(
+      'Trishna — located-near → Taj Hotel',
+    );
+    expect(screen.getByTestId('graph-detail-sources')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId('graph-detail-close'));
+    expect(screen.queryByTestId('admin-graph-detail')).not.toBeInTheDocument();
+  });
+
+  it('shows an empty state for a user with no entities', async () => {
+    listGraphEntities.mockResolvedValue({ entities: [], page: 1, limit: 20, total: 0 });
+    render(<AdminView />);
+    fireEvent.click(await screen.findByTestId('admin-tab-graph'));
+    fireEvent.change(screen.getByTestId('graph-user-select'), { target: { value: 'u1' } });
+    expect(await screen.findByText('No entities for this user yet.')).toBeInTheDocument();
+  });
+
+  it('shows the API error message inline when the graph fetch fails', async () => {
+    listGraphEntities.mockRejectedValue(new AdminError('Failed to load graph entities.'));
+    render(<AdminView />);
+    fireEvent.click(await screen.findByTestId('admin-tab-graph'));
+    fireEvent.change(screen.getByTestId('graph-user-select'), { target: { value: 'u1' } });
+    expect(await screen.findByTestId('graph-error')).toHaveTextContent(
+      'Failed to load graph entities.',
+    );
   });
 });

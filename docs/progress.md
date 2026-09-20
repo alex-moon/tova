@@ -12,6 +12,23 @@ unchanged, first-enable soft-deletes prior sessions and hard-deletes their messa
 and copy states chats/files are never used to train models. Turned off, chat behaves
 exactly as before.
 
+#138 Productivity app (in flight, branch `feat/138-productivity-app`): the data
+substrate for a per-user entity graph so Tova can reason over entities accumulated
+across chats. Minimal back-end per the ticket's "most minimal implementation" —
+`entities`/`entityEdges` MongoDB collections with a loose schema (`kind`, `attrs`,
+`sourceRefs`) while the ontology is still being settled; post-hoc fire-and-forget LLM
+extraction after assistant replies (`entityExtractionService.ts`, titleService-style,
+`entity-graph-extract` LangSmith span, degrade-to-log on junk JSON); exact
+normalised-name node identity, edges only for stated relationships; retrieval injects
+a capped (~1500 char) "what we know about you" block into the system prompt
+(`entityRetrievalService.ts` + promptAssembly); admin read-only "Graph" tab lists a
+user's nodes paginated and drills into a node's edges with source refs for audit.
+Everything is behind `ENTITY_GRAPH_ENABLED` / `ENTITY_GRAPH_PROMPT_INJECTION`
+(default off) — no prompt-path behaviour change until the flags are flipped.
+Preference inference, fuzzy disambiguation, ontology enforcement, files feeding the
+graph and tool-based querying are deliberately deferred; open questions in the plan
+doc.
+
 No outstanding local tasks. Planning and tracking happen on GitHub (`alex-moon/tova`):
 issues for open work, PRs for changes; plans live in `docs/plan-<ticket>-<summary>.md`
 per `docs/workflow.md`.

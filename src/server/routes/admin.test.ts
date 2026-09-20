@@ -4,6 +4,8 @@ import { createApp } from '../index';
 import { User } from '../models/User';
 import { ProviderRouting } from '../models/ProviderRouting';
 import { ModelMetricStat } from '../models/ModelMetricStat';
+import { Entity } from '../models/Entity';
+import { EntityEdge } from '../models/EntityEdge';
 import { clearLogs, pushLog } from '../services/logService';
 
 const cookieOf = (res: request.Response) => {
@@ -593,5 +595,146 @@ describe('POST /api/admin/model-compare (issue #129)', () => {
       models: Array.from({ length: 7 }, () => ({ provider: 'groq', model: 'x' })),
     });
     expect(tooManyRows.status).toBe(400);
+  });
+});
+
+/*
+ * GET /api/admin/graph/* (issue #138 plan task 5): read-only per-user entity
+ * graph for the admin Graph tab. Seeding uses Entity/EntityEdge directly —
+ * extraction is unit-tested in its own service suite.
+ */
+describe('GET /api/admin/graph (issue #138)', () => {
+  it('rejects the unauthenticated and non-admin', async () => {
+    const app = createApp();
+    const cookie = await registerUser(app, 'nograph@example.com');
+    expect((await request(app).get('/api/admin/graph/entities')).status).toBe(401);
+    const res = await request(app)
+      .get('/api/admin/graph/entities?userId=507f1f77bcf86cd799439011')
+      .set('Cookie', cookie);
+    expect(res.status).toBe(403);
+  });
+
+  it('validates userId and pagination params', async () => {
+    const app = createApp();
+    const cookie = await registerAdmin(app, 'graphadmin@example.com');
+    expect((await request(app).get('/api/admin/graph/entities').set('Cookie', cookie)).status).toBe(
+      400,
+    );
+    const badId = await request(app)
+      .get('/api/admin/graph/entities?userId=not-an-id')
+      .set('Cookie', cookie);
+    expect(badId.status).toBe(400);
+    const badPage = await request(app)
+      .get('/api/admin/graph/entities?userId=507f1f77bcf86cd799439011&page=-2')
+      .set('Cookie', cookie);
+    expect(badPage.status).toBe(200);
+    expect(badPage.body.page).toBe(1);
+  });
+
+  it('lists a user entities paginated, most recent first, without other users data', async () => {
+    const app = createApp();
+    const cookie = await registerAdmin(app, 'graphadmin2@example.com');
+    const member = await request(app)
+      .post('/api/auth/register')
+      .send({ email: 'graphmember@example.com', password: 'password123' });
+    const userId = new mongoose.Types.ObjectId(member.body.user.id);
+    const other = new mongoose.Types.ObjectId();
+    const old = new Date(Date.now() - 60_000);
+    const session = new mongoose.Types.ObjectId();
+    const message = new mongoose.Types.ObjectId();
+    await Entity.create([
+      {
+        userId,
+        name: 'Taj Hotel',
+        normalizedName: 'taj hotel',
+        kind: 'place',
+        sourceRefs: [{ sessionId: session, messageId: message }],
+      },
+      {
+        userId,
+        name: 'Priya',
+        normalizedName: 'priya',
+        kind: 'person',
+        summary: 'daughter',
+        mentionCount: 2,
+        sourceRefs: [{ sessionId: session }],
+      },
+      { userId, name: 'Old', normalizedName: 'old', kind: 'project', lastMentionedAt: old },
+      { userId: other, name: 'Other', normalizedName: 'other', kind: 'place' },
+    ]);
+    const res = await request(app)
+      .get(`/api/admin/graph/entities?userId=${userId}`)
+      .set('Cookie', cookie);
+    expect(res.status).toBe(200);
+    expect(res.body.total).toBe(3);
+    expect(res.body.limit).toBe(20);
+    expect(res.body.page).toBe(1);
+    const names = res.body.entities.map((e: { name: string }) => e.name);
+    expect(names).toEqual(['Priya', 'Taj Hotel', 'Old']);
+    expect(res.body.entities[0]).not.toHaveProperty('passwordHash');
+    const taj = res.body.entities[1];
+    expect(taj.sourceRefs[0].sessionId).toBeTruthy();
+    // Pagination: limit=1&page=2 returns the second most recent only.
+    const page2 = await request(app)
+      .get(`/api/admin/graph/entities?userId=${userId}&limit=1&page=2`)
+      .set('Cookie', cookie);
+    expect(page2.body.entities.map((e: { name: string }) => e.name)).toEqual(['Taj Hotel']);
+    expect(page2.body.total).toBe(3);
+    // Never leaks the other user's node.
+    expect(names.join()).not.toContain('Other');
+  });
+
+  it('returns entity detail with resolved edge names for edges on either side', async () => {
+    const app = createApp();
+    const cookie = await registerAdmin(app, 'graphadmin3@example.com');
+    const a = await Entity.create({
+      userId: new mongoose.Types.ObjectId(),
+      name: 'Priya',
+      normalizedName: 'priya',
+      kind: 'person',
+    });
+    const b = await Entity.create({
+      userId: a.userId,
+      name: 'Taj Hotel',
+      normalizedName: 'taj hotel',
+      kind: 'place',
+    });
+    const c = await Entity.create({
+      userId: a.userId,
+      name: 'Booking',
+      normalizedName: 'booking',
+      kind: 'commitment',
+    });
+    await EntityEdge.create([
+      {
+        userId: a.userId,
+        fromEntityId: b._id,
+        toEntityId: a._id,
+        kind: 'located-near',
+        summary: 'places near the hotel',
+      },
+      { userId: a.userId, fromEntityId: a._id, toEntityId: c._id, kind: 'committed-to' },
+    ]);
+    const res = await request(app).get(`/api/admin/graph/entities/${a.id}`).set('Cookie', cookie);
+    expect(res.status).toBe(200);
+    expect(res.body.entity.name).toBe('Priya');
+    expect(res.body.edges).toHaveLength(2);
+    const kinds = res.body.edges.map((e: { kind: string }) => e.kind).sort();
+    expect(kinds).toEqual(['committed-to', 'located-near']);
+    for (const edge of res.body.edges) {
+      const { fromName, toName } = edge;
+      expect([fromName, toName]).toContain('Priya');
+    }
+    expect(res.body.edges.find((e: { kind: string }) => e.kind === 'located-near').fromName).toBe(
+      'Taj Hotel',
+    );
+    // Unknown / malformed id → 404.
+    expect(
+      (await request(app).get('/api/admin/graph/entities/not-an-id').set('Cookie', cookie)).status,
+    ).toBe(404);
+    const missing = await request(app)
+      .get('/api/admin/graph/entities/507f1f77bcf86cd799439011')
+      .set('Cookie', cookie);
+    expect(missing.status).toBe(404);
   });
 });
