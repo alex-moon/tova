@@ -265,13 +265,17 @@ describe('Horizontal overflow (issue #118)', () => {
     expect(scroller!.className).toContain('overflow-x-hidden');
   });
 
-  it('renders the sources block as a single horizontally scrollable strip', () => {
+  it('expands the sources block vertically (issue #127 reverts #118 for sources)', () => {
     renderChat([base({ sources: ['https://a.example.com', 'https://b.example.com'] })]);
     const ul = screen.getByTestId('sources-block').querySelector('ul')!;
-    expect(ul.className).toContain('flex');
-    expect(overflow(ul)).toBe(true);
+    expect(ul.className).toContain('space-y-1');
+    expect(ul.className).not.toContain('overflow-x');
+    expect(ul.className).not.toContain('flex');
     for (const li of ul.querySelectorAll('li')) {
-      expect(li.className).toContain('shrink-0');
+      expect(li.className).not.toContain('shrink-0');
+    }
+    for (const span of ul.querySelectorAll('span')) {
+      expect(span.className).toContain('truncate');
     }
   });
 
