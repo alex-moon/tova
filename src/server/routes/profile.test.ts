@@ -344,6 +344,34 @@ describe('PATCH /api/profile (issue #35)', () => {
     expect(user.settings?.zdr ?? null).toBeNull();
   });
 
+  it('applies zdr alongside other settings keys in one PATCH without clobbering them (issue #116)', async () => {
+    const { app, cookie } = await registerUser('patch-zdr-multi@example.com');
+
+    const res = await patchProfile(app, cookie, {
+      theme: 'dark',
+      preferredName: 'Alex',
+      confirmDeletes: { chat: false },
+      zdr: true,
+    });
+    expect(res.status).toBe(200);
+    expect(res.body.user.zdr).toBe(true);
+    expect(res.body.user.theme).toBe('dark');
+    expect(res.body.user.confirmDeletes).toEqual({ chat: false, file: true });
+
+    // The reverse order: zdr off together with an unrelated key must not
+    // resurrect any other persisted field (order-dependence guard).
+    const off = await patchProfile(app, cookie, { preferredName: 'A', zdr: false });
+    expect(off.status).toBe(200);
+    expect(off.body.user).not.toHaveProperty('zdr');
+    expect(off.body.user.theme).toBe('dark');
+    expect(off.body.user.confirmDeletes).toEqual({ chat: false, file: true });
+    expect(off.body.user.preferredName).toBe('A');
+
+    const user = await getUser('patch-zdr-multi@example.com');
+    expect(user.settings?.zdr).toBe(false);
+    expect(user.settings?.theme).toBe('dark');
+  });
+
   it('rejects unauthenticated requests with 401', async () => {
     const app = createApp();
     const res = await request(app).patch('/api/profile').send({ preferredName: 'Alex' });
