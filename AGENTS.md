@@ -4,14 +4,14 @@ This repository keeps shared, agent-agnostic project coordination documents in `
 
 ### Project intent
 
-`Tova` is building a Groq-focused chat application with:
+`Tova` is building a chat application with:
 
 - authenticated users
 - persistent chat sessions stored in MongoDB
-- an intelligent router that selects Groq models based on prompt complexity
+- an intelligent router that selects models based on prompt complexity
 - a React frontend served through a unified local development experience
 
-In short: it is aiming to be an application-layer “Heroku for Groq” with a built-in chat product.
+In short: it is aiming to be an application-layer service for inference providers with a built-in chat product.
 
 ### Documentation structure
 
@@ -47,6 +47,13 @@ Do cleanup-as-we-go, but only with explicit confirmation:
 - If the current ticket/PR exposes an issue in its own scope (e.g. a PR review comment), fixing that issue broadly — related files sharing the same defect — is defensible and fine.
 - Do not silently expand scope by default. If you notice a neighbouring issue worth fixing, raise it as a suggestion in your report/PR comment and wait for the user to confirm.
 - Never use a ticket as cover for drive-by refactors of untouched subsystems.
+
+### Model routing decisions
+
+Any change to routing policy (tier boundaries, guard classification, pool defaults) must be evidence-first, not instinct:
+
+- Compare candidate models directly with the one-off eval script (`scripts/eval-model-compare.ts`): `npx tsx scripts/eval-model-compare.ts "<prompt>" --models deepinfra/Qwen/Qwen3-14B,groq/openai/gpt-oss-20b`. It runs a single prompt through the existing agent on each model, printing answers side by side. The admin view's "Compare" tab does the exact same thing in the browser (it shares the same server code).
+- Read LangSmith traces liberally before judging a routing change (read-only): project `tova-dev` via the `LANGCHAIN_*` credentials in `.env`. Real traces are the best evidence for which tier a conversational prompt belongs in — e.g. ticket #129 was diagnosed entirely from a trace showing the guard model returning empty replies.
 
 ### Local MongoDB
 

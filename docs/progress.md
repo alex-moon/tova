@@ -2,6 +2,16 @@
 
 ## Status (current)
 
+#116 ZDR option (merged via PR #124): a per-user "Zero data retention" toggle
+(`settings.zdr`, ProfileModal → `PATCH /api/profile`). With it on: chat turns are
+session-less (no Session/Message rows, no title/classification writes), continuity is a
+client-replayed capped `history` payload, a request carrying a `sessionId` is rejected
+with 409, chat-composer attachments ride a throwaway `ephemeral` flag (row + Spaces
+object erased with the turn, including on error paths), Assets-page uploads are
+unchanged, first-enable soft-deletes prior sessions and hard-deletes their messages,
+and copy states chats/files are never used to train models. Turned off, chat behaves
+exactly as before.
+
 No outstanding local tasks. Planning and tracking happen on GitHub (`alex-moon/tova`):
 issues for open work, PRs for changes; plans live in `docs/plan-<ticket>-<summary>.md`
 per `docs/workflow.md`.
@@ -12,8 +22,14 @@ per `docs/workflow.md`.
 - Per-message prompt metrics: fixed as of this entry. Every new turn gets a `metrics` subdocument (deterministic for user + assistant; LLM-classified dimensions for user messages, fire-and-forget post-save). Inspect with:
   `npx tsx scripts/mongo.ts "await db.collection('messages').find({ 'metrics': { $exists: true, $ne: null } }).sort({ timestamp: -1 }).limit(3).toArray()"` — or filter for pending LLM classification with `{ 'metrics.llm': null, role: 'user' }`.
 
-7. **Plan 004/#4 — Mastra + DeepInfra + DB-based tier routing (complete).**
-   All LLM calls go through `mastraService` (sole `@mastra/*` importer) with
+#112 Evals (in flight): deterministic tool-use grader (`src/server/evals/`), golden
+set in `cases.ts` (GitHub README two-tool chain, Bupa policy list-then-read,
+PM-announcements web search, plus wrong-tool/save-file extras), temporary Mongo
+source seeded by `mongoSource.ts`, runner `scripts/run-evals.ts` (`npm run evals`)
+streaming the real agent and grading pass/partial/fail, LangSmith export to the
+`tova-evals` dataset when `LANGSMITH_API_KEY` is set. No client changes.
+
+7. **Plan 004/#4 — Mastra + DeepInfra + DB-based tier routing (complete).** All LLM calls go through `mastraService` (sole `@mastra/*` importer) with
    thin Groq/DeepInfra connectors behind `inferenceService`; tier pools live
    in MongoDB (`providerRouting`, seeded from `ROUTER_*` envs once, DB
    authoritative after); `routerService` picks ε-uniformly within a tier

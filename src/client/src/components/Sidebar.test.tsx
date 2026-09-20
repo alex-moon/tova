@@ -69,10 +69,11 @@ describe('Sidebar footer avatar (issue #35)', () => {
     expect(screen.queryByTestId('avatar-fallback')).not.toBeInTheDocument();
   });
 
-  it('opens the profile modal from the footer', () => {
+  it('links the profile view from the footer (issue #95)', () => {
     renderSidebar(user);
-    fireEvent.click(screen.getByRole('button', { name: 'Open profile' }));
-    expect(screen.getByTestId('profile-modal')).toBeInTheDocument();
+    const link = screen.getByRole('link', { name: 'Open profile' });
+    expect(link.getAttribute('href')).toBe('/profile');
+    expect(screen.queryByTestId('profile-modal')).not.toBeInTheDocument();
   });
 });
 

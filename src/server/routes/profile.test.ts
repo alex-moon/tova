@@ -1,6 +1,8 @@
 import request from 'supertest';
 import { createApp } from '../index';
 import { User } from '../models/User';
+import { Session } from '../models/Session';
+import { Message } from '../models/Message';
 
 const registerUser = async (email: string) => {
   const app = createApp();
@@ -290,6 +292,160 @@ describe('PATCH /api/profile (issue #35)', () => {
     // rejected body must never have materialized a preference.
     const user = await getUser('patch-startup-invalid@example.com');
     expect(user.settings?.startupChat ?? null).toBeNull();
+  });
+
+  it('saves the zdr preference and reports it on PATCH and /me (issue #116)', async () => {
+    const { app, cookie } = await registerUser('patch-zdr@example.com');
+
+    // Before any save the field is absent from the wire payload (same
+    // convention as theme: false is the default, never explicitly sent).
+    const before = await request(app).get('/api/auth/me').set('Cookie', cookie);
+    expect(before.body.user).not.toHaveProperty('zdr');
+
+    const res = await patchProfile(app, cookie, { zdr: true });
+    expect(res.status).toBe(200);
+    expect(res.body.user.zdr).toBe(true);
+
+    const me = await request(app).get('/api/auth/me').set('Cookie', cookie);
+    expect(me.body.user).toEqual(res.body.user);
+
+    const user = await getUser('patch-zdr@example.com');
+    expect(user.settings?.zdr).toBe(true);
+
+    // Turning it back off persists false but keeps the payload omitted
+    // (truthy-only delivery, same as theme/startupChat).
+    const off = await patchProfile(app, cookie, { zdr: false });
+    expect(off.status).toBe(200);
+    expect(off.body.user).not.toHaveProperty('zdr');
+    const user2 = await getUser('patch-zdr@example.com');
+    expect(user2.settings?.zdr).toBe(false);
+  });
+
+  it('leaves zdr untouched when absent from the body (issue #116)', async () => {
+    const { app, cookie } = await registerUser('patch-zdr-partial@example.com');
+    await patchProfile(app, cookie, { zdr: true });
+
+    const res = await patchProfile(app, cookie, { preferredName: 'Alex' });
+    expect(res.status).toBe(200);
+    expect(res.body.user.zdr).toBe(true);
+    const user = await getUser('patch-zdr-partial@example.com');
+    expect(user.settings?.zdr).toBe(true);
+  });
+
+  it('rejects non-boolean zdr values with 400 (issue #116)', async () => {
+    const { app, cookie } = await registerUser('patch-zdr-invalid@example.com');
+
+    for (const bad of ['yes', 1, null, 0]) {
+      const res = await patchProfile(app, cookie, { zdr: bad });
+      expect(res.status).toBe(400);
+    }
+
+    // Unset on a fresh user: settings stays null (lazily created), so a
+    // rejected body must never have materialized a preference.
+    const user = await getUser('patch-zdr-invalid@example.com');
+    expect(user.settings?.zdr ?? null).toBeNull();
+  });
+
+  describe('first-enable auto-purge (issue #116 Q5)', () => {
+    const seedChats = async (email: string, sessions: number, withMessages = true) => {
+      const user = await getUser(email);
+      const docIds = [];
+      for (let i = 0; i < sessions; i++) {
+        const session = await Session.create({ userId: user._id, title: `Chat ${i}` });
+        if (withMessages) {
+          await Message.create([
+            { sessionId: session._id, role: 'user', content: `question ${i}` },
+            { sessionId: session._id, role: 'assistant', content: `answer ${i}` },
+          ]);
+        }
+        docIds.push(session._id);
+      }
+      return { user, docIds };
+    };
+
+    it('purges sessions and messages when zdr flips false → true', async () => {
+      const { app, cookie } = await registerUser('patch-zdr-purge@example.com');
+      const { docIds } = await seedChats('patch-zdr-purge@example.com', 2);
+
+      const res = await patchProfile(app, cookie, { zdr: true });
+      expect(res.status).toBe(200);
+
+      const purged = await Session.find({ _id: { $in: docIds } }).lean();
+      expect(purged).toHaveLength(2);
+      // Soft delete only: every session still exists but is now unlisted.
+      expect(purged.every((s) => s.deletedAt instanceof Date)).toBe(true);
+      // Messages are hard-deleted so the contents are truly gone (Q5).
+      expect(await Message.countDocuments({ sessionId: { $in: docIds } })).toBe(0);
+    });
+
+    it('purges messages of already-soft-deleted sessions too, and is safe with zero sessions', async () => {
+      const { app, cookie } = await registerUser('patch-zdr-purge-empty@example.com');
+      const { docIds } = await seedChats('patch-zdr-purge-empty@example.com', 1);
+      await Session.findByIdAndUpdate(docIds[0], { deletedAt: new Date() });
+
+      const res = await patchProfile(app, cookie, { zdr: true });
+      expect(res.status).toBe(200);
+      expect(await Message.countDocuments({ sessionId: { $in: docIds } })).toBe(0);
+
+      // A user with no chats at all: the PATCH must still succeed (no throw).
+      const { app: app2, cookie: cookie2 } = await registerUser('patch-zdr-purge-none@example.com');
+      const res2 = await patchProfile(app2, cookie2, { zdr: true });
+      expect(res2.status).toBe(200);
+    });
+
+    it('does not re-purge on toggle-off/on: the second enable changes nothing', async () => {
+      const { app, cookie } = await registerUser('patch-zdr-purge-again@example.com');
+      await patchProfile(app, cookie, { zdr: true });
+      const before = await Session.find({}).lean();
+      expect(before.every((s) => s.deletedAt !== null)).toBe(true);
+
+      // Off is a normal toggle…
+      const off = await patchProfile(app, cookie, { zdr: false });
+      expect(off.status).toBe(200);
+
+      // …and on again fires no second purge (after the first, nothing is left).
+      // The prior purge's effect stands; previously deleted data stays gone.
+      await patchProfile(app, cookie, { zdr: true });
+      expect(await Message.countDocuments()).toBe(0);
+    });
+
+    it('a failed PATCH body (400) never triggers a purge', async () => {
+      const { app, cookie } = await registerUser('patch-zdr-purge-invalid@example.com');
+      await seedChats('patch-zdr-purge-invalid@example.com', 1);
+
+      await patchProfile(app, cookie, { zdr: 'yes', theme: 'dark' });
+
+      expect(await Session.countDocuments({ deletedAt: null })).toBe(1);
+      expect(await Message.countDocuments()).toBe(2);
+    });
+  });
+
+  it('applies zdr alongside other settings keys in one PATCH without clobbering them (issue #116)', async () => {
+    const { app, cookie } = await registerUser('patch-zdr-multi@example.com');
+
+    const res = await patchProfile(app, cookie, {
+      theme: 'dark',
+      preferredName: 'Alex',
+      confirmDeletes: { chat: false },
+      zdr: true,
+    });
+    expect(res.status).toBe(200);
+    expect(res.body.user.zdr).toBe(true);
+    expect(res.body.user.theme).toBe('dark');
+    expect(res.body.user.confirmDeletes).toEqual({ chat: false, file: true });
+
+    // The reverse order: zdr off together with an unrelated key must not
+    // resurrect any other persisted field (order-dependence guard).
+    const off = await patchProfile(app, cookie, { preferredName: 'A', zdr: false });
+    expect(off.status).toBe(200);
+    expect(off.body.user).not.toHaveProperty('zdr');
+    expect(off.body.user.theme).toBe('dark');
+    expect(off.body.user.confirmDeletes).toEqual({ chat: false, file: true });
+    expect(off.body.user.preferredName).toBe('A');
+
+    const user = await getUser('patch-zdr-multi@example.com');
+    expect(user.settings?.zdr).toBe(false);
+    expect(user.settings?.theme).toBe('dark');
   });
 
   it('rejects unauthenticated requests with 401', async () => {

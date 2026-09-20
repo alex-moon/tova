@@ -9,3 +9,6 @@ export type { AdminModel } from '@shared/contracts';
 // Public shape of a log buffer row and the logs response, as returned by
 // GET /api/admin/logs (issue #76). Re-exported from the shared contract.
 export type { AdminLogEntry, AdminLogsPayload } from '@shared/contracts';
+// Model comparison shapes (issue #129), as returned by
+// POST /api/admin/model-compare. Re-exported from the shared contract.
+export type { ModelComparisonRun, ModelComparisonResult } from '@shared/contracts';

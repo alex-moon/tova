@@ -193,7 +193,17 @@ describe('Model Config Service', () => {
   describe('capability matching (#94)', () => {
     it('rules out models flagged tools:false from the completions pool', async () => {
       await listByTier('small');
-      await ProviderRouting.updateOne({ model: 'openai/gpt-oss-20b' }, { tools: false });
+      // Read-back flip: findOneAndUpdate returns the mutated doc, so the
+      // assertion below can only fail if the mutation itself was lost (an
+      // infra-level stale-read/lost-write), not if updateOne silently
+      // matched nothing.
+      const flipped = (await ProviderRouting.findOneAndUpdate(
+        { model: 'openai/gpt-oss-20b' },
+        { $set: { tools: false } },
+        { new: true },
+      ).lean<{ tools?: boolean }>()) as { tools?: boolean } | null;
+      expect(flipped).not.toBeNull();
+      expect(flipped?.tools).toBe(false);
       try {
         const models = (await completionsPoolFor('small')).map(({ model }) => model);
         expect(models).not.toContain('openai/gpt-oss-20b');
@@ -228,6 +238,65 @@ describe('Model Config Service', () => {
         expect(await listByTier('guard', { tools: true })).toEqual([
           { provider: 'groq', model: 'openai/gpt-oss-20b' },
         ]);
+      }
+    });
+  });
+
+  describe('completion provider pinning (#117)', () => {
+    const seedStaleGroqRow = async (tier: 'small' | 'large') => {
+      await listByTier('guard'); // ensure the guard seed exists too
+      await ProviderRouting.create({
+        provider: 'groq',
+        model: 'openai/gpt-oss-20b',
+        tier,
+        eligible: true,
+        tools: true,
+      });
+    };
+
+    it('completionsPoolFor excludes Groq rows entirely', async () => {
+      await seedStaleGroqRow('small');
+      try {
+        const pool = await completionsPoolFor('small');
+        expect(pool.length).toBeGreaterThan(0);
+        expect(pool.map(({ provider }) => provider)).toEqual(expect.not.arrayContaining(['groq']));
+      } finally {
+        await ProviderRouting.deleteMany({ provider: 'groq', tier: 'small' });
+      }
+    });
+
+    it.each(['small', 'large'] as const)(
+      'completionsPoolFor never returns Groq rows, even seeded stale ones (%s)',
+      async (tier: 'small' | 'large') => {
+        await seedStaleGroqRow(tier);
+        try {
+          const refs = await completionsPoolFor(tier);
+          expect(refs.map(({ provider }) => provider)).toEqual(
+            expect.not.arrayContaining(['groq']),
+          );
+        } finally {
+          await ProviderRouting.deleteMany({ provider: 'groq', tier });
+        }
+      },
+    );
+
+    it('the guard tier still reads Groq rows with the same read path', async () => {
+      await listByTier('guard');
+      const refs = await listByTier('guard');
+      expect(refs.length).toBeGreaterThan(0);
+      expect(refs.every(({ provider }) => provider === 'groq')).toBe(true);
+    });
+
+    it('an all-Groq completion tier yields an empty pool, never a Groq fallback', async () => {
+      await seedStaleGroqRow('small');
+      await ProviderRouting.updateMany(
+        { tier: 'small', provider: 'deepinfra' },
+        { eligible: false },
+      );
+      try {
+        expect(await completionsPoolFor('small')).toEqual([]);
+      } finally {
+        await ProviderRouting.deleteMany({ tier: 'small' });
       }
     });
   });

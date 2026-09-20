@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import AdminService, { AdminError, AdminModelsService, AdminLogsService } from '../services/admin';
-import type { AdminLogEntry, AdminModel, AdminUser } from '../types/admin';
+import type { AdminLogEntry, AdminModel, AdminUser, ModelComparisonRun } from '../types/admin';
 
 const KNOWN_PERMISSIONS = ['routing'];
 
@@ -16,7 +16,9 @@ const AdminView = () => {
   const [logs, setLogs] = useState<AdminLogEntry[]>([]);
   const cursorRef = useRef(0);
   const [error, setError] = useState<string | null>(null);
-  const [activeSection, setActiveSection] = useState<'users' | 'models' | 'logs'>('users');
+  const [activeSection, setActiveSection] = useState<'users' | 'models' | 'logs' | 'compare'>(
+    'users',
+  );
 
   // Issue #76: incremental polling via the monotonic log cursor. A filter
   // change resets the cursor because the server filters by level/text, so
@@ -49,10 +51,138 @@ const AdminView = () => {
     try {
       const res = await AdminModelsService.listModels();
       setModels(res);
+      setError(null);
     } catch (err) {
       setError(err instanceof AdminError ? err.message : 'Something went wrong.');
     }
   }, []);
+
+  // Direct model comparison (issue #129): pick rows from the inventory, type
+  // a prompt, and run it through the existing agent on each selection side
+  // by side. Server-mirrored cap on selections (MAX_COMPARE_MODELS = 6).
+  const [comparePrompt, setComparePrompt] = useState('');
+  const [selectedModelIds, setSelectedModelIds] = useState<Set<string>>(new Set());
+  const [comparison, setComparison] = useState<ModelComparisonRun | null>(null);
+  const [comparing, setComparing] = useState(false);
+  const [compareError, setCompareError] = useState<string | null>(null);
+
+  const toggleModelSelected = (id: string) => {
+    setSelectedModelIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const runComparison = async () => {
+    const selected = (models ?? []).filter((m) => selectedModelIds.has(m.id));
+    if (!comparePrompt.trim() || selected.length === 0) return;
+    setComparing(true);
+    setCompareError(null);
+    try {
+      const run = await AdminModelsService.compareModels(
+        comparePrompt.trim(),
+        selected.map((m) => ({
+          provider: m.provider,
+          model: m.model,
+          ...(m.contextLength !== undefined ? { contextLength: m.contextLength } : {}),
+        })),
+      );
+      // Selection order in the view is the checkbox order in the table; the
+      // response preserves the server's sequential execution order, so render
+      // directly from it.
+      setComparison(run);
+    } catch (err) {
+      setCompareError(err instanceof AdminError ? err.message : 'Something went wrong.');
+    } finally {
+      setComparing(false);
+    }
+  };
+
+  // CRUD for routing rows (issue #104). Mutations refetch the authoritative
+  // list rather than trusting the (id-only) response bodies.
+  const [editingModelId, setEditingModelId] = useState<string | null>(null);
+  const [form, setForm] = useState<{
+    provider: string;
+    model: string;
+    tier: string;
+    contextLength: string;
+    tools: boolean;
+    vision: boolean;
+  }>({
+    provider: 'deepinfra',
+    model: '',
+    tier: 'small',
+    contextLength: '',
+    tools: true,
+    vision: false,
+  });
+
+  const formDataFor = (m: AdminModel) => ({
+    provider: m.provider,
+    model: m.model,
+    tier: m.tier as string,
+    contextLength: m.contextLength === undefined ? '' : String(m.contextLength),
+    tools: m.tools,
+    vision: m.vision,
+  });
+
+  const startEdit = (m: AdminModel) => {
+    setEditingModelId(m.id);
+    setForm(formDataFor(m));
+  };
+
+  const submitForm = async () => {
+    const payload = {
+      provider: form.provider,
+      model: form.model,
+      tier: form.tier as AdminModel['tier'],
+      ...(form.contextLength ? { contextLength: Number(form.contextLength) } : {}),
+      tools: form.tools,
+      vision: form.vision,
+    };
+    try {
+      if (editingModelId) {
+        await AdminModelsService.updateModel(
+          editingModelId,
+          form.contextLength ? payload : { ...payload, contextLength: null },
+        );
+      } else {
+        await AdminModelsService.createModel(payload);
+      }
+      setEditingModelId(null);
+      setForm({
+        provider: 'deepinfra',
+        model: '',
+        tier: 'small',
+        contextLength: '',
+        tools: true,
+        vision: false,
+      });
+      await loadModels();
+    } catch (err) {
+      setError(err instanceof AdminError ? err.message : 'Something went wrong.');
+    }
+  };
+
+  const toggleModelEligible = async (m: AdminModel) => {
+    try {
+      await AdminModelsService.updateModel(m.id, { eligible: !m.eligible });
+      await loadModels();
+    } catch (err) {
+      setError(err instanceof AdminError ? err.message : 'Something went wrong.');
+    }
+  };
+
+  const deleteModel = async (m: AdminModel) => {
+    try {
+      await AdminModelsService.deleteModel(m.id);
+      await loadModels();
+    } catch (err) {
+      setError(err instanceof AdminError ? err.message : 'Something went wrong.');
+    }
+  };
 
   const loadUsers = useCallback(async () => {
     try {
@@ -114,9 +244,13 @@ const AdminView = () => {
     return () => clearInterval(timer);
   }, [loadLogs, logLevel, logQuery, activeSection]);
 
-  const sectionContent: { id: 'users' | 'models' | 'logs'; label: string }[] = [
+  const sectionContent: {
+    id: 'users' | 'models' | 'logs' | 'compare';
+    label: string;
+  }[] = [
     { id: 'users', label: 'Users' },
     { id: 'models', label: 'Models' },
+    { id: 'compare', label: 'Compare' },
     { id: 'logs', label: 'Logs' },
   ];
 
@@ -219,8 +353,92 @@ const AdminView = () => {
             <section data-testid="admin-models-section">
               <h3 className="font-heading text-lg font-semibold">Models</h3>
               <p className="text-xs text-muted-foreground">
-                Read-only (issue #33) — routing bands and feedback tallies.
+                Routing rows (issue #33/#104) — disable, edit, add or delete; feedback tallies per
+                band.
               </p>
+              <div className="mt-4 flex flex-wrap items-end gap-3 rounded-xl border border-border bg-card p-4">
+                <label className="text-sm">
+                  <span className="mr-2 text-muted-foreground">Provider</span>
+                  <select
+                    data-testid="model-form-provider"
+                    value={form.provider}
+                    onChange={(e) => setForm((f) => ({ ...f, provider: e.target.value }))}
+                    className="rounded-lg border border-border bg-background px-2 py-1"
+                  >
+                    <option value="groq">groq</option>
+                    <option value="deepinfra">deepinfra</option>
+                  </select>
+                </label>
+                <label className="text-sm">
+                  <span className="mr-2 text-muted-foreground">Model</span>
+                  <input
+                    data-testid="model-form-model"
+                    value={form.model}
+                    onChange={(e) => setForm((f) => ({ ...f, model: e.target.value }))}
+                    placeholder="org/model-name"
+                    className="w-64 rounded-lg border border-border bg-background px-2 py-1"
+                  />
+                </label>
+                <label className="text-sm">
+                  <span className="mr-2 text-muted-foreground">Tier</span>
+                  <select
+                    data-testid="model-form-tier"
+                    value={form.tier}
+                    onChange={(e) => setForm((f) => ({ ...f, tier: e.target.value }))}
+                    className="rounded-lg border border-border bg-background px-2 py-1"
+                  >
+                    <option value="small">small</option>
+                    <option value="large">large</option>
+                    <option value="guard">guard</option>
+                  </select>
+                </label>
+                <label className="text-sm">
+                  <span className="mr-2 text-muted-foreground">Context</span>
+                  <input
+                    data-testid="model-form-context"
+                    value={form.contextLength}
+                    onChange={(e) => setForm((f) => ({ ...f, contextLength: e.target.value }))}
+                    inputMode="numeric"
+                    placeholder="e.g. 131072"
+                    className="w-28 rounded-lg border border-border bg-background px-2 py-1"
+                  />
+                </label>
+                <label className="inline-flex items-center gap-1.5 text-sm">
+                  <input
+                    type="checkbox"
+                    data-testid="model-form-tools"
+                    checked={form.tools}
+                    onChange={(e) => setForm((f) => ({ ...f, tools: e.target.checked }))}
+                  />
+                  tools
+                </label>
+                <label className="inline-flex items-center gap-1.5 text-sm">
+                  <input
+                    type="checkbox"
+                    data-testid="model-form-vision"
+                    checked={form.vision}
+                    onChange={(e) => setForm((f) => ({ ...f, vision: e.target.checked }))}
+                  />
+                  vision
+                </label>
+                <button
+                  data-testid="model-form-submit"
+                  onClick={submitForm}
+                  disabled={!form.model.trim()}
+                  className="rounded-lg border border-primary bg-primary px-3 py-1.5 text-sm text-primary-foreground transition-colors disabled:opacity-50"
+                >
+                  {editingModelId ? 'Save' : 'Add model'}
+                </button>
+                {editingModelId && (
+                  <button
+                    data-testid="model-form-cancel"
+                    onClick={() => setEditingModelId(null)}
+                    className="rounded-lg border border-border px-3 py-1.5 text-sm transition-colors hover:bg-accent"
+                  >
+                    Cancel
+                  </button>
+                )}
+              </div>
               <div
                 data-testid="admin-models"
                 className="mt-4 overflow-x-auto rounded-xl border border-border bg-card"
@@ -230,9 +448,12 @@ const AdminView = () => {
                     <tr className="border-b border-border text-left text-muted-foreground">
                       <th className="px-4 py-3 font-medium">Model</th>
                       <th className="px-4 py-3 font-medium">Provider</th>
-                      <th className="px-4 py-3 font-medium">Bands</th>
+                      <th className="px-4 py-3 font-medium">Tier</th>
+                      <th className="px-4 py-3 font-medium">Context</th>
+                      <th className="px-4 py-3 font-medium">Eligible</th>
                       <th className="px-4 py-3 font-medium">Capabilities</th>
                       <th className="px-4 py-3 font-medium">Feedback</th>
+                      <th className="px-4 py-3" />
                     </tr>
                   </thead>
                   <tbody>
@@ -242,7 +463,18 @@ const AdminView = () => {
                           {model.model}
                         </td>
                         <td className="px-4 py-3 text-muted-foreground">{model.provider}</td>
-                        <td className="px-4 py-3">{model.tiers.join(', ')}</td>
+                        <td className="px-4 py-3">{model.tier}</td>
+                        <td className="px-4 py-3 text-muted-foreground">
+                          {model.contextLength?.toLocaleString() ?? '—'}
+                        </td>
+                        <td className="px-4 py-3">
+                          <input
+                            type="checkbox"
+                            data-testid={`model-eligible-${model.id}`}
+                            checked={model.eligible}
+                            onChange={() => toggleModelEligible(model)}
+                          />
+                        </td>
                         <td className="px-4 py-3" data-testid={`admin-model-caps-${model.id}`}>
                           <span
                             className={`mr-1.5 inline-block rounded-full border px-2 py-0.5 text-xs ${
@@ -274,17 +506,110 @@ const AdminView = () => {
                             ? '—'
                             : model.stats.map((s) => `${s.band}: ${s.up}↑ ${s.down}↓`).join(' · ')}
                         </td>
+                        <td className="px-4 py-3">
+                          <button
+                            data-testid={`model-edit-${model.id}`}
+                            onClick={() => startEdit(model)}
+                            className="mr-2 rounded-lg border border-border px-2 py-1 text-xs transition-colors hover:bg-accent"
+                          >
+                            Edit
+                          </button>
+                          <button
+                            data-testid={`model-delete-${model.id}`}
+                            onClick={() => deleteModel(model)}
+                            className="rounded-lg border border-destructive px-2 py-1 text-xs text-destructive transition-colors hover:bg-destructive/10"
+                          >
+                            Delete
+                          </button>
+                        </td>
                       </tr>
                     ))}
                     {models?.length === 0 && (
                       <tr>
-                        <td className="px-4 py-3 text-muted-foreground" colSpan={5}>
+                        <td className="px-4 py-3 text-muted-foreground" colSpan={8}>
                           No models configured.
                         </td>
                       </tr>
                     )}
                   </tbody>
                 </table>
+              </div>
+            </section>
+          )}
+          {activeSection === 'compare' && (
+            <section data-testid="admin-compare-section">
+              <h3 className="font-heading text-lg font-semibold">Compare</h3>
+              <p className="text-xs text-muted-foreground">
+                One prompt through the existing agent on selected models (issue #129) — same path as
+                the ticket's eval script. Sequential runs; picks inform routing decisions.
+              </p>
+              <div className="mt-4 flex flex-col gap-4 rounded-xl border border-border bg-card p-4">
+                <textarea
+                  data-testid="compare-prompt"
+                  value={comparePrompt}
+                  onChange={(e) => setComparePrompt(e.target.value)}
+                  rows={4}
+                  placeholder="Prompt to run against each selected model…"
+                  className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
+                />
+                <div className="flex flex-wrap gap-3">
+                  {models
+                    ?.filter((m) => m.tier !== 'guard')
+                    .map((model) => (
+                      <label key={model.id} className="inline-flex items-center gap-1.5 text-sm">
+                        <input
+                          type="checkbox"
+                          data-testid={`compare-model-${model.model}`}
+                          checked={selectedModelIds.has(model.id)}
+                          onChange={() => toggleModelSelected(model.id)}
+                        />
+                        {model.provider}/{model.model}
+                        <span className="text-muted-foreground">({model.tier})</span>
+                      </label>
+                    ))}
+                </div>
+                <button
+                  data-testid="compare-run"
+                  onClick={runComparison}
+                  disabled={comparing || !comparePrompt.trim() || selectedModelIds.size === 0}
+                  className="self-start rounded-lg border border-primary bg-primary px-3 py-1.5 text-sm text-primary-foreground transition-colors disabled:opacity-50"
+                >
+                  {comparing ? 'Running…' : 'Run comparison'}
+                </button>
+                {compareError && (
+                  <div
+                    data-testid="compare-error"
+                    className="rounded-lg border border-destructive bg-destructive/10 p-3 text-sm text-destructive"
+                  >
+                    {compareError}
+                  </div>
+                )}
+                {comparison && (
+                  <div
+                    data-testid="compare-results"
+                    className="flex flex-col divide-y divide-border"
+                  >
+                    {comparison.results.map((res) => (
+                      <div key={`${res.provider}/${res.model}`} className="py-3">
+                        <div className="mb-1 flex items-center gap-2 text-sm">
+                          <span className="font-medium" data-testid={`compare-answer-${res.model}`}>
+                            {res.provider}/{res.model}
+                          </span>
+                          <span
+                            className={`text-xs ${res.error ? 'text-destructive' : 'text-muted-foreground'}`}
+                          >
+                            {res.error
+                              ? `error · ${res.error}`
+                              : `${(res.latencyMs / 1000).toFixed(1)}s`}
+                          </span>
+                        </div>
+                        {res.answer && (
+                          <pre className="whitespace-pre-wrap text-sm">{res.answer}</pre>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             </section>
           )}

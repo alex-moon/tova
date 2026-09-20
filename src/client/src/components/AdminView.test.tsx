@@ -8,7 +8,11 @@ const listUsers = vi.fn();
 const updatePermissions = vi.fn();
 const updateRole = vi.fn();
 const listModels = vi.fn();
+const createModel = vi.fn();
+const updateModel = vi.fn();
+const deleteModel = vi.fn();
 const listLogs = vi.fn();
+const compareModels = vi.fn();
 
 vi.mock('../services/admin', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../services/admin')>();
@@ -19,7 +23,13 @@ vi.mock('../services/admin', async (importOriginal) => {
       updatePermissions: (...args: unknown[]) => updatePermissions(...args),
       updateRole: (...args: unknown[]) => updateRole(...args),
     },
-    AdminModelsService: { listModels: (...args: unknown[]) => listModels(...args) },
+    AdminModelsService: {
+      listModels: (...args: unknown[]) => listModels(...args),
+      createModel: (...args: unknown[]) => createModel(...args),
+      updateModel: (...args: unknown[]) => updateModel(...args),
+      deleteModel: (...args: unknown[]) => deleteModel(...args),
+      compareModels: (...args: unknown[]) => compareModels(...args),
+    },
     AdminLogsService: { listLogs: (...args: unknown[]) => listLogs(...args) },
   };
 });
@@ -87,79 +97,148 @@ describe('AdminView', () => {
   });
 });
 
-describe('AdminView models table (issue #33)', () => {
+describe('AdminView models table (issue #33/#104)', () => {
   afterEach(cleanup);
+
+  const sampleRow = () => ({
+    id: 'r1',
+    provider: 'groq',
+    model: 'test-large',
+    tier: 'large',
+    eligible: true,
+    tools: true,
+    vision: false,
+    contextLength: 131072,
+    stats: [{ band: 'short|prose', up: 3, down: 1 }],
+  });
 
   beforeEach(() => {
     listUsers.mockReset().mockResolvedValue([admin()]);
     updatePermissions.mockReset().mockResolvedValue(admin());
     updateRole.mockReset().mockResolvedValue(admin());
+    updateModel.mockReset().mockResolvedValue({ id: 'r1' });
+    createModel.mockReset().mockResolvedValue({ id: 'r2' });
+    deleteModel.mockReset().mockResolvedValue(undefined);
   });
 
-  it('renders configured models as a read-only table', async () => {
-    listModels.mockResolvedValue([
-      {
-        id: 'groq/test-large',
-        provider: 'groq',
-        model: 'test-large',
-        tiers: ['large', 'guard'],
-        stats: [{ band: 'short|prose', up: 3, down: 1 }],
-      },
-    ]);
-    render(<AdminView />);
-    expect(await screen.findByTestId('admin-view')).toBeInTheDocument();
+  const setup = () => {
+    listModels.mockReset().mockResolvedValueOnce([sampleRow()]);
+    return render(<AdminView />);
+  };
+
+  it('renders configured models rows with tiers, context and feedback tallies', async () => {
+    setup();
+    await screen.findByTestId('admin-view');
     fireEvent.click(screen.getByTestId('admin-tab-models'));
     expect(await screen.findByTestId('admin-models')).toBeInTheDocument();
-    expect(screen.getByTestId('admin-model-groq/test-large')).toHaveTextContent('test-large');
-    expect(screen.getByTestId('admin-models')).toHaveTextContent('large, guard');
+    expect(screen.getByTestId('admin-model-r1')).toHaveTextContent('test-large');
+    expect(screen.getByTestId('admin-models')).toHaveTextContent('131,072');
     expect(screen.getByTestId('admin-models')).toHaveTextContent('short|prose: 3↑ 1↓');
     expect(screen.queryByText('Loading users...')).not.toBeInTheDocument();
   });
 
   it('shows an empty state when no models are configured', async () => {
-    listModels.mockResolvedValue([]);
+    listModels.mockReset().mockResolvedValue([]);
     render(<AdminView />);
     fireEvent.click(await screen.findByTestId('admin-tab-models'));
     expect(await screen.findByText('No models configured.')).toBeInTheDocument();
   });
 
-  // #115: capabilities are surfaced as read-only badges per model row.
+  // #115: capabilities are surfaced as read-only badges per row.
   it('renders vision/tools capability badges with the context length', async () => {
     listModels.mockResolvedValue([
       {
-        id: 'deepinfra/Qwen/Qwen3-VL-8B-Instruct',
-        provider: 'deepinfra',
-        model: 'Qwen/Qwen3-VL-8B-Instruct',
-        tiers: ['small'],
+        id: 'r1',
+        provider: 'groq',
+        model: 'test-large',
+        tier: 'large',
+        eligible: true,
         tools: true,
-        vision: true,
-        contextLength: 262144,
+        vision: false,
+        contextLength: 131072,
         stats: [],
       },
       {
-        id: 'deepinfra/Qwen/Qwen3-14B',
+        id: 'r2',
         provider: 'deepinfra',
-        model: 'Qwen/Qwen3-14B',
-        tiers: ['small'],
+        model: 'Qwen/Qwen3-VL-8B-Instruct',
+        tier: 'small',
+        eligible: true,
         tools: true,
-        vision: false,
-        contextLength: 40960,
+        vision: true,
+        contextLength: 262144,
         stats: [],
       },
     ]);
     render(<AdminView />);
     expect(await screen.findByTestId('admin-view')).toBeInTheDocument();
     fireEvent.click(screen.getByTestId('admin-tab-models'));
-    const vl = await screen.findByTestId('admin-model-caps-deepinfra/Qwen/Qwen3-VL-8B-Instruct');
-    expect(
-      vl.querySelector('[data-testid="admin-model-vision-deepinfra/Qwen/Qwen3-VL-8B-Instruct"]'),
-    ).toHaveTextContent('vision ✓');
-    expect(vl).toHaveTextContent('tools ✓');
-    expect(vl).toHaveTextContent('262,144 tok');
-    const plain = screen.getByTestId('admin-model-caps-deepinfra/Qwen/Qwen3-14B');
-    expect(
-      plain.querySelector('[data-testid="admin-model-vision-deepinfra/Qwen/Qwen3-14B"]'),
-    ).toHaveTextContent('vision ✗');
+    const plain = await screen.findByTestId('admin-model-caps-r1');
+    expect(plain.querySelector('[data-testid="admin-model-vision-r1"]')).toHaveTextContent(
+      'vision ✗',
+    );
+    expect(plain).toHaveTextContent('tools ✓');
+    expect(plain).toHaveTextContent('131,072 tok');
+    const vl = screen.getByTestId('admin-model-caps-r2');
+    expect(vl.querySelector('[data-testid="admin-model-vision-r2"]')).toHaveTextContent('vision ✓');
+  });
+
+  it('disables a model via the eligibility checkbox and refetches', async () => {
+    setup();
+    fireEvent.click(await screen.findByTestId('admin-tab-models'));
+    const checkbox = await screen.findByTestId('model-eligible-r1');
+    expect(checkbox).toBeChecked();
+    fireEvent.click(checkbox);
+    await waitFor(() => expect(updateModel).toHaveBeenCalledWith('r1', { eligible: false }));
+    await waitFor(() => expect(listModels).toHaveBeenCalledTimes(2));
+  });
+
+  it('deletes a model and refetches', async () => {
+    setup();
+    fireEvent.click(await screen.findByTestId('admin-tab-models'));
+    fireEvent.click(await screen.findByTestId('model-delete-r1'));
+    await waitFor(() => expect(deleteModel).toHaveBeenCalledWith('r1'));
+    await waitFor(() => expect(listModels).toHaveBeenCalledTimes(2));
+  });
+
+  it('edits an existing model through the inline form', async () => {
+    setup();
+    fireEvent.click(await screen.findByTestId('admin-tab-models'));
+    fireEvent.click(await screen.findByTestId('model-edit-r1'));
+    fireEvent.change(screen.getByTestId('model-form-model'), {
+      target: { value: 'renamed-model' },
+    });
+    fireEvent.click(screen.getByTestId('model-form-submit'));
+    await waitFor(() =>
+      expect(updateModel).toHaveBeenCalledWith(
+        'r1',
+        expect.objectContaining({ model: 'renamed-model', tier: 'large' }),
+      ),
+    );
+    expect(createModel).not.toHaveBeenCalled();
+  });
+
+  it('adds a new model through the inline form', async () => {
+    setup();
+    fireEvent.click(await screen.findByTestId('admin-tab-models'));
+    fireEvent.change(screen.getByTestId('model-form-model'), {
+      target: { value: 'org/new-model' },
+    });
+    fireEvent.change(screen.getByTestId('model-form-tier'), { target: { value: 'guard' } });
+    fireEvent.change(screen.getByTestId('model-form-context'), { target: { value: '131072' } });
+    fireEvent.click(screen.getByTestId('model-form-submit'));
+    await waitFor(() =>
+      expect(createModel).toHaveBeenCalledWith({
+        provider: 'deepinfra',
+        model: 'org/new-model',
+        tier: 'guard',
+        contextLength: 131072,
+        tools: true,
+        vision: false,
+      }),
+    );
+    await waitFor(() => expect(listModels).toHaveBeenCalledTimes(2));
+    expect(updateModel).not.toHaveBeenCalled();
   });
 });
 
@@ -293,5 +372,105 @@ describe('AdminView logs section (issue #76)', () => {
     await waitFor(() =>
       expect(listLogs).toHaveBeenCalledWith({ level: undefined, q: '/api/chat', cursor: 0 }),
     );
+  });
+});
+
+describe('AdminView model comparison (issue #129)', () => {
+  afterEach(cleanup);
+
+  const sampleRow = (overrides = {}) => ({
+    id: 'r1',
+    provider: 'deepinfra',
+    model: 'Qwen/Qwen3-14B',
+    tier: 'small',
+    eligible: true,
+    tools: true,
+    vision: false,
+    contextLength: 131072,
+    stats: [],
+    ...overrides,
+  });
+
+  beforeEach(() => {
+    listUsers.mockReset().mockResolvedValue([admin()]);
+    updatePermissions.mockReset();
+    updateRole.mockReset();
+    updateModel.mockReset();
+    createModel.mockReset();
+    deleteModel.mockReset();
+    compareModels.mockReset();
+  });
+
+  const setup = (rows = [sampleRow()]) => {
+    listModels.mockResolvedValue(rows);
+    render(<AdminView />);
+    return screen.findByTestId('admin-view');
+  };
+
+  const switchToCompare = async () => {
+    await setup();
+    fireEvent.click(screen.getByTestId('admin-tab-compare'));
+    await screen.findByTestId('compare-run');
+  };
+
+  it('lists eligible non-guard models with checkboxes', async () => {
+    await switchToCompare();
+    expect(screen.getByTestId('compare-model-Qwen/Qwen3-14B')).not.toBeChecked();
+  });
+
+  it('disables the run button until a prompt and at least one model are set', async () => {
+    await switchToCompare();
+    expect(screen.getByTestId('compare-run')).toBeDisabled();
+    fireEvent.click(screen.getByTestId('compare-model-Qwen/Qwen3-14B'));
+    expect(screen.getByTestId('compare-run')).toBeDisabled();
+    fireEvent.change(screen.getByTestId('compare-prompt'), { target: { value: 'Hello there' } });
+    expect(screen.getByTestId('compare-run')).toBeEnabled();
+  });
+
+  it('runs the selection through the admin API and renders answers side by side', async () => {
+    compareModels.mockResolvedValue({
+      prompt: 'Hello there',
+      results: [
+        {
+          provider: 'deepinfra',
+          model: 'Qwen/Qwen3-14B',
+          answer: 'conversational answer',
+          latencyMs: 1200,
+        },
+        {
+          provider: 'groq',
+          model: 'openai/gpt-oss-20b',
+          answer: null,
+          latencyMs: 300,
+          error: 'boom',
+        },
+      ],
+    });
+    await setup([
+      sampleRow(),
+      sampleRow({ id: 'r2', provider: 'groq', model: 'openai/gpt-oss-20b', tier: 'large' }),
+    ]);
+    fireEvent.click(screen.getByTestId('admin-tab-compare'));
+    fireEvent.click(screen.getByTestId('compare-model-Qwen/Qwen3-14B'));
+    fireEvent.click(screen.getByTestId('compare-model-openai/gpt-oss-20b'));
+    fireEvent.change(screen.getByTestId('compare-prompt'), { target: { value: 'Hello there' } });
+    fireEvent.click(screen.getByTestId('compare-run'));
+    await screen.findByTestId('compare-results');
+    expect(compareModels).toHaveBeenCalledWith('Hello there', [
+      { provider: 'deepinfra', model: 'Qwen/Qwen3-14B', contextLength: 131072 },
+      { provider: 'groq', model: 'openai/gpt-oss-20b', contextLength: 131072 },
+    ]);
+    expect(screen.getByTestId('compare-answer-Qwen/Qwen3-14B')).toBeInTheDocument();
+    expect(screen.getByText('conversational answer')).toBeInTheDocument();
+    expect(screen.getByText(/boom/)).toBeInTheDocument();
+  });
+
+  it('shows the API error message when the comparison run fails', async () => {
+    compareModels.mockRejectedValue(new AdminError('Models unavailable.'));
+    await switchToCompare();
+    fireEvent.click(screen.getByTestId('compare-model-Qwen/Qwen3-14B'));
+    fireEvent.change(screen.getByTestId('compare-prompt'), { target: { value: 'Hello there' } });
+    fireEvent.click(screen.getByTestId('compare-run'));
+    expect(await screen.findByTestId('compare-error')).toHaveTextContent('Models unavailable.');
   });
 });

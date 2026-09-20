@@ -1,3 +1,4 @@
+import { useContext } from 'react';
 import React, { useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -19,6 +20,9 @@ import {
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import AssetService from '@/services/assets';
+// Tolerant context read (not the throwing useAuth hook): standalone renders
+// of ChatWindow (tests, storybook-style usage) have no AuthProvider.
+import { AuthContext } from '../context/AuthContext';
 import type { Message, ToolEvent } from '../App';
 
 interface ChatWindowProps {
@@ -101,7 +105,7 @@ const SourceItem: React.FC<{ url: string; title?: string }> = ({ url, title }) =
       href={url}
       target="_blank"
       rel="noopener noreferrer"
-      className="inline-flex items-center gap-1.5 text-sm text-primary underline-offset-2 hover:text-primary-hover hover:underline"
+      className="inline-flex max-w-full items-center gap-1.5 text-sm text-primary underline-offset-2 hover:text-primary-hover hover:underline"
     >
       <img
         src={`https://www.google.com/s2/favicons?domain=${hostOf(url)}&sz=32`}
@@ -112,7 +116,7 @@ const SourceItem: React.FC<{ url: string; title?: string }> = ({ url, title }) =
           e.currentTarget.style.display = 'none';
         }}
       />
-      <span className="truncate">{title || url}</span>
+      <span className="max-w-48 truncate whitespace-nowrap">{title || url}</span>
     </a>
   </li>
 );
@@ -142,7 +146,7 @@ const SourcesBlock: React.FC<{ message: Message }> = ({ message }) => {
           type="button"
           data-testid="sources-show-all"
           onClick={() => setExpanded(true)}
-          className="mt-1 text-xs underline hover:text-foreground"
+          className="mt-1 shrink-0 text-xs underline hover:text-foreground"
         >
           Show all {urls.length} sources
         </button>
@@ -150,7 +154,7 @@ const SourcesBlock: React.FC<{ message: Message }> = ({ message }) => {
         <button
           type="button"
           onClick={() => setExpanded(false)}
-          className="mt-1 text-xs underline hover:text-foreground"
+          className="mt-1 shrink-0 text-xs underline hover:text-foreground"
         >
           Show fewer sources
         </button>
@@ -162,10 +166,20 @@ const SourcesBlock: React.FC<{ message: Message }> = ({ message }) => {
 // Tool feedback chip (#33): spinner → check / warning with a compact result
 // summary. Detail toggle exposes the query and result domains. Stateless —
 // the tool events arrive in order while streaming.
+// Issue #114: a zero count is only meaningful for tools whose output IS a
+// results list (web_search, list_files). Legacy persisted events from other
+// tools carried the old universal `resultCount: 0` artifact — suppress its
+// display there instead of migrating stored data.
+const countDisplay = (event: ToolEvent): number | null => {
+  if (event.resultCount == null) return null;
+  const showZero = event.name === 'web_search' || event.name === 'list_files';
+  return event.resultCount === 0 && !showZero ? null : event.resultCount;
+};
+
 const detailText = (event: ToolEvent): string | null =>
   event.phase === 'result'
     ? [
-        event.resultCount != null ? `${event.resultCount} result(s)` : null,
+        countDisplay(event) != null ? `${countDisplay(event)} result(s)` : null,
         ...(event.domains ?? []),
       ]
         .filter(Boolean)
@@ -195,8 +209,8 @@ const ToolChip: React.FC<{ event: ToolEvent }> = ({ event }) => {
         <span className="truncate">
           {event.label}
           {event.query ? ` “${event.query}”` : ''}
-          {event.phase === 'result' && event.resultCount != null
-            ? ` — ${event.resultCount} results`
+          {event.phase === 'result' && countDisplay(event) != null
+            ? ` — ${countDisplay(event)} results`
             : ''}
         </span>
         {detail && <ChevronDown size={12} aria-hidden />}
@@ -227,13 +241,13 @@ const FollowupChips: React.FC<{ suggestions: string[]; onPick: (value: string) =
   onPick,
 }) =>
   suggestions.length > 0 ? (
-    <div className="mb-2 flex flex-wrap gap-2" data-testid="suggestion-chips">
+    <div className="mb-2 flex flex-nowrap gap-2 overflow-x-auto" data-testid="suggestion-chips">
       {suggestions.map((s) => (
         <button
           key={s}
           type="button"
           onClick={() => onPick(s)}
-          className="rounded-full border border-border bg-muted px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:border-primary hover:bg-accent hover:text-accent-foreground focus-visible:outline-2 focus-visible:outline-primary"
+          className="shrink-0 whitespace-nowrap rounded-full border border-border bg-muted px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:border-primary hover:bg-accent hover:text-accent-foreground focus-visible:outline-2 focus-visible:outline-primary"
         >
           {s}
         </button>
@@ -246,10 +260,10 @@ const MessageContent: React.FC<{ content: string; markdown: boolean }> = ({
   markdown,
 }) => {
   if (!markdown) {
-    return <>{content}</>;
+    return <div className="min-w-0 break-words">{content}</div>;
   }
   return (
-    <div className="markdown-body">
+    <div className="markdown-body min-w-0 break-words [&_pre]:max-w-full [&_pre]:overflow-x-auto">
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         rehypePlugins={[rehypeRaw, rehypeSanitize]}
@@ -270,6 +284,8 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
   incomingAsset,
   onPickedConsumed,
 }) => {
+  const auth = useContext(AuthContext);
+  const zdr = Boolean(auth?.user?.zdr);
   const [input, setInput] = useState('');
   const [placeholder] = useState(pickPlaceholder);
   const textareaRef = React.useRef<HTMLTextAreaElement>(null);
@@ -378,10 +394,14 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
     if (!file || uploading) return;
     setUploading(true);
     try {
-      const asset = await AssetService.upload(file);
+      // Issue #116: composer uploads are always tagged 'chat' — the server
+      // turns that tag into throwaway (ephemeral) uploads only for accounts
+      // with zero-data retention on.
+      const asset = await AssetService.upload(file, undefined, 'chat');
       setAttachment({
         id: asset.id,
         filename: asset.filename,
+        // #115: the image chip needs the content type to show the right icon.
         contentType: asset.contentType,
       });
       if (!asset.hasText) toastForAsset(asset);
@@ -426,7 +446,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
       <div
         ref={scrollRef}
         onScroll={handleScroll}
-        className="flex flex-1 flex-col overflow-y-auto px-3 py-4 md:px-6 md:py-6"
+        className="flex min-w-0 flex-1 flex-col overflow-x-hidden overflow-y-auto px-3 py-4 md:px-6 md:py-6"
       >
         {messages.length === 0 && !isLoading && (
           <div className="animate-message-in mx-auto my-auto max-w-full text-center">
@@ -469,26 +489,26 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
           .map((msg) => (
             <div key={msg._id} className="animate-message-in">
               {msg.isError ? (
-                <div className="mb-4 max-w-[92%] self-start rounded-lg rounded-bl-sm border border-destructive/40 bg-destructive/10 px-3 py-2.5 text-sm text-destructive md:mb-6 md:max-w-[85%] md:px-4 md:py-3">
+                <div className="mb-4 max-w-[92%] min-w-0 self-start rounded-lg rounded-bl-sm border border-destructive/40 bg-destructive/10 px-3 py-2.5 text-sm break-words text-destructive md:mb-6 md:max-w-[85%] md:px-4 md:py-3">
                   {msg.content}
                 </div>
               ) : msg.role === 'user' ? (
-                <div className="mb-4 flex flex-col items-end md:mb-6">
+                <div className="mb-4 flex min-w-0 flex-col items-end md:mb-6">
                   {msg.assetFilename && (
                     <span
-                      className="mb-1 inline-flex items-center gap-1 rounded-full border border-border bg-muted px-2 py-0.5 text-xs text-muted-foreground"
+                      className="mb-1 inline-flex max-w-[92%] min-w-0 items-center gap-1 rounded-full border border-border bg-muted px-2 py-0.5 text-xs text-muted-foreground"
                       data-testid="message-attachment-chip"
                     >
                       <Paperclip className="size-3" aria-hidden />
-                      {msg.assetFilename ?? 'Attached file'}
+                      <span className="truncate">{msg.assetFilename ?? 'Attached file'}</span>
                     </span>
                   )}
-                  <div className="max-w-[92%] rounded-lg rounded-br-sm border border-primary/25 bg-msg-user px-4 py-3 md:max-w-[85%] md:px-5 md:py-4">
+                  <div className="max-w-[92%] min-w-0 rounded-lg rounded-br-sm border border-primary/25 bg-msg-user px-4 py-3 break-words md:max-w-[85%] md:px-5 md:py-4">
                     <MessageContent content={msg.content} markdown={false} />
                   </div>
                 </div>
               ) : (
-                <div className="mb-6 max-w-[92%] md:mb-8 md:max-w-[85%]">
+                <div className="mb-6 min-w-0 max-w-[92%] md:mb-8 md:max-w-[85%]">
                   <div className="mb-1 flex items-center gap-1.5 text-xs text-muted-foreground">
                     <span className="flex size-5 items-center justify-center rounded-full bg-primary text-[10px] font-semibold text-primary-foreground">
                       <img src="/tova-logo.png" alt="Tova" className="size-5 rounded-full" />
@@ -502,7 +522,11 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
                   {msg.sources && msg.sources.length > 0 && <SourcesBlock message={msg} />}
                   {msg.modelName && (
                     <div className="mt-1 flex items-center gap-3 px-4 text-xs text-muted-foreground md:px-5">
-                      <span>{msg.modelName}</span>
+                      <span>
+                        {msg.provider && msg.modelName
+                          ? `${msg.provider} · ${msg.modelName}`
+                          : msg.modelName}
+                      </span>
                       {onFeedback && (
                         <span className="flex items-center gap-1">
                           <button
@@ -644,6 +668,10 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
             </div>
           </div>
         </form>
+        <p className="mt-2 text-center text-xs text-muted-foreground" data-testid="privacy-note">
+          Your chats and files are never used to train models — by anyone, ever.
+          {zdr ? ' Zero-data retention is on: nothing sent or attached in chat is stored.' : ''}
+        </p>
       </footer>
     </section>
   );

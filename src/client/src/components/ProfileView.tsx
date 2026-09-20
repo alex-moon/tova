@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { X } from 'lucide-react';
+import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import type { Theme } from '@/theme';
@@ -7,11 +7,6 @@ import AuthService, { AuthError } from '../services/auth';
 import { persistTheme, resolveTheme } from '../theme';
 import { useAuth } from '../hooks/useAuth';
 import McpServersSection from './McpServersSection';
-import ScrollablePanel from './ScrollablePanel';
-
-interface ProfileModalProps {
-  onClose: () => void;
-}
 
 const PREFERRED_NAME_LIMIT = 20;
 const CUSTOM_INSTRUCTIONS_LIMIT = 4000;
@@ -71,7 +66,7 @@ const StartupChatChoice: React.FC<{
   </div>
 );
 
-const ProfileModal: React.FC<ProfileModalProps> = ({ onClose }) => {
+const ProfileView = () => {
   const { user, updateUser } = useAuth();
   const initialTheme = (
     user?.theme === 'light' || user?.theme === 'dark' ? user.theme : resolveTheme()
@@ -88,6 +83,10 @@ const ProfileModal: React.FC<ProfileModalProps> = ({ onClose }) => {
     file: user?.confirmDeletes?.file ?? true,
   };
   const [confirmDeletes, setConfirmDeletes] = useState(initialConfirmDeletes);
+  // Zero-data retention (issue #116): off unless the account explicitly
+  // enabled it; enabling is forward-looking — saved chats stay until deleted.
+  const initialZdr = Boolean(user?.zdr);
+  const [zdr, setZdr] = useState(initialZdr);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -113,12 +112,15 @@ const ProfileModal: React.FC<ProfileModalProps> = ({ onClose }) => {
         confirmDeletes.file !== initialConfirmDeletes.file
           ? { confirmDeletes }
           : {}),
+        ...(zdr !== initialZdr ? { zdr } : {}),
       });
       // The saved choice rides the mirror immediately so pre-auth pages and
       // reloads paint it without waiting on the profile round-trip.
       if (theme !== initialTheme) persistTheme(theme);
       updateUser(next);
-      onClose();
+      // A view cannot "close" on save like the old modal did: stay on
+      // /profile and confirm with a toast instead.
+      toast.success('Profile saved');
     } catch (err) {
       setError(err instanceof AuthError ? err.message : 'Something went wrong.');
     } finally {
@@ -128,19 +130,21 @@ const ProfileModal: React.FC<ProfileModalProps> = ({ onClose }) => {
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
-      data-testid="profile-modal"
+      data-testid="profile-view"
+      className="flex h-full w-full flex-col bg-background text-foreground"
     >
-      <ScrollablePanel
-        title="Profile"
-        panelTestId="profile-panel"
-        panelClassName="max-w-md"
-        headerAdornment={
-          <Button variant="ghost" size="icon" aria-label="Close profile" onClick={onClose}>
-            <X />
-          </Button>
-        }
-      >
+      <div className="shrink-0 px-6 pt-6">
+        <h2 className="font-heading text-xl font-semibold">Profile</h2>
+        {error && (
+          <div
+            data-testid="profile-error"
+            className="mt-3 rounded-lg border border-destructive bg-destructive/10 p-3 text-sm text-destructive"
+          >
+            {error}
+          </div>
+        )}
+      </div>
+      <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-6 py-6">
         <dl className="mb-4 space-y-2 text-sm">
           <div className="flex justify-between gap-4">
             <dt className="text-muted-foreground">Full name</dt>
@@ -198,26 +202,36 @@ const ProfileModal: React.FC<ProfileModalProps> = ({ onClose }) => {
               </label>
             ))}
           </fieldset>
+          <fieldset className="text-sm" data-testid="profile-privacy">
+            <legend className="mb-1 block">Privacy</legend>
+            <p className="mb-2 text-muted-foreground">
+              Your chats and files are never used to train models — by anyone, ever.
+            </p>
+            <label className="mt-1 flex items-center gap-2">
+              <input
+                type="checkbox"
+                data-testid="profile-zdr"
+                checked={zdr}
+                onChange={(e) => setZdr(e.target.checked)}
+              />
+              Zero data retention
+            </label>
+            <p className="mt-1 text-muted-foreground">
+              When on, nothing sent or attached in chat is stored — chats and attached files vanish
+              when the conversation ends. Files uploaded in Assets are kept so you can reuse them;
+              they are deleted only when you delete them. Turning this on removes your existing
+              chats and chat messages from storage.
+            </p>
+          </fieldset>
         </div>
-        {error && (
-          <div
-            data-testid="profile-error"
-            className="mt-3 rounded-lg border border-destructive bg-destructive/10 p-3 text-sm text-destructive"
-          >
-            {error}
-          </div>
-        )}
-        <div className="mt-4 flex justify-end gap-2">
-          <Button variant="outline" onClick={onClose} disabled={pending}>
-            Cancel
-          </Button>
+        <div className="mt-4 flex justify-end">
           <Button onClick={save} disabled={pending} data-testid="profile-save">
             {pending ? 'Saving...' : 'Save'}
           </Button>
         </div>
-      </ScrollablePanel>
+      </div>
     </div>
   );
 };
 
-export default ProfileModal;
+export default ProfileView;

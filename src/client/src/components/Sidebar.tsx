@@ -1,7 +1,6 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { Files, LogOut, Plus, Trash2, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import ProfileModal from './ProfileModal';
 import AssetLibrary from './AssetLibrary';
 import type { AssetSummary } from '@/services/assets';
 import { cn } from '@/lib/utils';
@@ -52,7 +51,6 @@ const Sidebar: React.FC<SidebarProps> = ({
   onPickAsset,
 }) => {
   const { user, logout } = useAuth();
-  const [profileOpen, setProfileOpen] = useState(false);
   const { armedId, arm, onYes, onAlways, onNo } = useConfirmDelete('chat', onDeleteSession);
 
   return (
@@ -156,13 +154,11 @@ const Sidebar: React.FC<SidebarProps> = ({
           )}
         </div>
         <div className="flex items-center border-t border-border p-4 pb-[calc(1rem+env(safe-area-inset-bottom))]">
-          <Button
-            variant="ghost"
-            size="icon"
+          <a
+            href="/profile"
             aria-label="Open profile"
             title={user?.preferredName ?? user?.name ?? user?.email}
-            className="mr-1 shrink-0"
-            onClick={() => setProfileOpen(true)}
+            className="mr-1 flex shrink-0 items-center rounded-lg p-2 transition-colors hover:bg-accent focus-visible:outline-2 focus-visible:outline-primary"
           >
             {user?.avatarUrl ? (
               <img
@@ -179,14 +175,13 @@ const Sidebar: React.FC<SidebarProps> = ({
                 {user ? avatarInitial(user) : ''}
               </span>
             )}
-          </Button>
+          </a>
           <Button variant="ghost" className="flex-1" onClick={logout}>
             <LogOut />
             Logout
           </Button>
         </div>
       </nav>
-      {profileOpen && <ProfileModal onClose={() => setProfileOpen(false)} />}
     </>
   );
 };

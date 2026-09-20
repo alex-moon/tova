@@ -10,7 +10,8 @@ export const generateChatTitle = async (content: string): Promise<string> => {
   const trimmed = content.replace(/\s+/g, ' ').trim();
   const fallback = `${trimmed.substring(0, 30)}${trimmed.length > 30 ? '…' : ''}`;
   try {
-    const completion = await inferenceService.createCompletion({
+    const completion = await inferenceService.createToolFreeCompletion({
+      provider: 'groq',
       model: TITLE_MODEL,
       messages: [
         { role: 'system', content: TITLE_PROMPT },

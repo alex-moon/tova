@@ -19,21 +19,22 @@ export interface AdminUser {
   updatedAt: string;
 }
 
-// Read-only model inventory row, GET /api/admin/models (issue #33).
-// `id` is '<provider>/<model>' for stable React keys; `stats` carries the
-// feedback tallies captured in ModelMetricStat (up/down).
+// Model inventory row, GET /api/admin/models (issues #33/#104). Each entry
+// is one `providerroutings` document — a provider/model pair can repeat
+// across tiers, so `id` is the Mongo _id and rows are per-tier. `stats`
+// carries the feedback tallies captured in ModelMetricStat (up/down), keyed
+// by model name. #115 badge fields: `tools` is schema-defaulted to true;
+// `vision` is only ever true when the row explicitly claims it;
+// `contextLength` is the advertised limit (omitted when none is known).
 export interface AdminModel {
   id: string;
   provider: string;
   model: string;
-  tiers: string[];
-  // #115 capability badges, read-only (seeding stays the source of truth).
-  // `tools` is schema-defaulted to true; `vision` is only ever true when the
-  // seeded row explicitly claims it; `contextLength` is the widest advertised
-  // limit across tier rows (null when none is known).
+  tier: 'small' | 'large' | 'guard';
+  eligible: boolean;
   tools: boolean;
   vision: boolean;
-  contextLength: number | null;
+  contextLength?: number;
   stats: { band: string; up: number; down: number }[];
 }
 
@@ -44,6 +45,22 @@ export interface AdminLogEntry {
   ts: string;
   level: 'info' | 'warn' | 'error';
   msg: string;
+}
+
+// Direct model comparison (issue #129): one prompt run against the existing
+// agent on chosen routing rows. `answer` is null with `error` set when that
+// model's completion failed; `latencyMs` covers the full agent call.
+export interface ModelComparisonResult {
+  provider: string;
+  model: string;
+  answer: string | null;
+  latencyMs: number;
+  error?: string;
+}
+
+export interface ModelComparisonRun {
+  prompt: string;
+  results: ModelComparisonResult[];
 }
 
 // Response of GET /api/admin/logs (issue #76).
@@ -74,6 +91,9 @@ export interface AuthUser {
   customInstructions?: string;
   theme?: 'light' | 'dark';
   startupChat?: 'recent' | 'new';
+  // Zero-data-retention opt-in (issue #116): omitted until the user enabled
+  // it, so the client only branches on the flag once it is explicitly true.
+  zdr?: boolean;
   confirmDeletes?: { chat: boolean; file: boolean };
   location?: AuthUserLocation;
 }

@@ -226,7 +226,14 @@ const AssetService = {
     }
   },
 
-  async upload(file: File, onProgress?: (pct: number) => void): Promise<AssetSummary> {
+  // `scope` (issue #116): the chat composer tags its uploads as 'chat' so the
+  // server can keep a ZDR account's chat attachments out of durable storage.
+  // Assets-page uploads omit it and remain durable by default.
+  async upload(
+    file: File,
+    onProgress?: (pct: number) => void,
+    scope?: 'chat',
+  ): Promise<AssetSummary> {
     let created: { uploadUrl: string; asset: AssetSummary };
     try {
       const res = await axios.post<{ uploadUrl: string; asset: AssetSummary }>(
@@ -235,6 +242,7 @@ const AssetService = {
           filename: file.name,
           contentType: file.type || 'application/octet-stream',
           size: file.size,
+          ...(scope ? { scope } : {}),
         },
       );
       created = res.data;
