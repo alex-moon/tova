@@ -1,4 +1,5 @@
 import request from 'supertest';
+import mongoose from 'mongoose';
 import { createApp } from '../index';
 import { User } from '../models/User';
 import { ProviderRouting } from '../models/ProviderRouting';
@@ -226,6 +227,11 @@ describe('admin routes', () => {
   });
 
   describe('GET /api/admin/models (issue #33)', () => {
+    beforeEach(async () => {
+      // The DB is shared across runs — clear leftover test models.
+      await ProviderRouting.deleteMany({ model: /^test-/ });
+    });
+
     it('returns 401 without a cookie and 403 for non-admins', async () => {
       const app = createApp();
       const cookie = await registerUser(app, 'models-plain@example.com');
@@ -237,7 +243,7 @@ describe('admin routes', () => {
       expect(nonAdmin.status).toBe(403);
     });
 
-    it('lists configured models grouped with tiers and per-band feedback tallies', async () => {
+    it('lists configured models row-per-routing with eligibility and per-band feedback tallies', async () => {
       const app = createApp();
       const cookie = await registerAdmin(app, 'models-admin@example.com');
 
@@ -246,12 +252,13 @@ describe('admin routes', () => {
         model: 'test-large',
         tier: 'large',
         eligible: true,
+        contextLength: 131072,
       });
       await ProviderRouting.create({
         provider: 'groq',
         model: 'test-large',
         tier: 'guard',
-        eligible: true,
+        eligible: false,
       });
       await ModelMetricStat.findOneAndUpdate(
         { band: 'short|prose', modelName: 'test-large' },
@@ -261,10 +268,154 @@ describe('admin routes', () => {
 
       const res = await request(app).get('/api/admin/models').set('Cookie', cookie);
       expect(res.status).toBe(200);
-      const large = res.body.find((m: { model: string }) => m.model === 'test-large') as
-        Record<string, unknown> | undefined;
-      expect(large).toMatchObject({ provider: 'groq', tiers: ['large', 'guard'] });
-      expect(large?.stats).toEqual([{ band: 'short|prose', up: 3, down: 1 }]);
+      const rows = res.body.filter((m: { model: string }) => m.model === 'test-large') as Record<
+        string,
+        unknown
+      >[];
+      expect(rows).toHaveLength(2);
+      const byTier = new Map(rows.map((r) => [r.tier, r]));
+      expect(byTier.get('guard')).toMatchObject({
+        eligible: false,
+        stats: [{ band: 'short|prose', up: 3, down: 1 }],
+      });
+      expect(byTier.get('large')).toMatchObject({ eligible: true, contextLength: 131072 });
+      for (const row of rows) {
+        expect(typeof row.id).toBe('string');
+        expect(row.id).not.toBe('groq/test-large'); // per-row Mongo ids, #104
+      }
+    });
+
+    describe('CRUD (issue #104)', () => {
+      let app: ReturnType<typeof createApp>;
+      let cookie: string[];
+
+      beforeEach(async () => {
+        app = createApp();
+        cookie = await registerAdmin(app, 'models-crud@example.com');
+        await ProviderRouting.deleteMany({ model: { $in: ['org/test-crud', 'dup-model', 'upd'] } });
+      });
+
+      it('rejects unauthenticated/non-admin users for every mutating endpoint', async () => {
+        const plain = await request(app)
+          .post('/api/auth/register')
+          .send({ email: 'models-crud2@example.com', password: 'password123' })
+          .then((r) =>
+            Array.isArray(r.headers['set-cookie'])
+              ? r.headers['set-cookie']
+              : [r.headers['set-cookie']],
+          );
+        expect((await request(app).post('/api/admin/models').send({})).status).toBe(401);
+        expect(
+          (await request(app).post('/api/admin/models').send({}).set('Cookie', plain)).status,
+        ).toBe(403);
+        expect((await request(app).put('/api/admin/models/abc').send({})).status).toBe(401);
+        expect((await request(app).delete('/api/admin/models/abc')).status).toBe(401);
+      });
+
+      it('requires provider/model/tier on create and rejects invalid values', async () => {
+        const bad = await request(app)
+          .post('/api/admin/models')
+          .send({ provider: 'groq', model: 'm' })
+          .set('Cookie', cookie);
+        expect(bad.status).toBe(400);
+        expect(bad.body.message).toMatch(/tier/);
+
+        const invalidProvider = await request(app)
+          .post('/api/admin/models')
+          .send({ provider: 'openai', model: 'm', tier: 'small' })
+          .set('Cookie', cookie);
+        expect(invalidProvider.status).toBe(400);
+
+        const invalidTier = await request(app)
+          .post('/api/admin/models')
+          .send({ provider: 'groq', model: 'm', tier: 'huge' })
+          .set('Cookie', cookie);
+        expect(invalidTier.status).toBe(400);
+
+        const invalidContext = await request(app)
+          .post('/api/admin/models')
+          .send({ provider: 'groq', model: 'm', tier: 'small', contextLength: -5 })
+          .set('Cookie', cookie);
+        expect(invalidContext.status).toBe(400);
+      });
+
+      it('creates, edits, disables and deletes a routing row', async () => {
+        const created = await request(app)
+          .post('/api/admin/models')
+          .send({
+            provider: 'deepinfra',
+            model: 'org/test-crud',
+            tier: 'small',
+            contextLength: 32768,
+            tools: true,
+            vision: true,
+          })
+          .set('Cookie', cookie);
+        expect(created.status).toBe(201);
+        expect(typeof created.body.id).toBe('string');
+        const id = created.body.id as string;
+
+        let rows = await ProviderRouting.find({ model: 'org/test-crud' }).lean();
+        expect(rows).toHaveLength(1);
+        expect(rows[0]).toMatchObject({
+          tier: 'small',
+          eligible: true,
+          contextLength: 32768,
+          vision: true,
+        });
+
+        const updated = await request(app)
+          .put(`/api/admin/models/${id}`)
+          .send({ tier: 'large', eligible: false, contextLength: null })
+          .set('Cookie', cookie);
+        expect(updated.status).toBe(200);
+        rows = await ProviderRouting.find({ model: 'org/test-crud' }).lean();
+        expect(rows[0]).toMatchObject({ tier: 'large', eligible: false, contextLength: null });
+
+        const deleted = await request(app).delete(`/api/admin/models/${id}`).set('Cookie', cookie);
+        expect(deleted.status).toBe(204);
+        expect(await ProviderRouting.countDocuments({ model: 'org/test-crud' })).toBe(0);
+
+        const missing = await request(app).delete(`/api/admin/models/${id}`).set('Cookie', cookie);
+        expect(missing.status).toBe(404);
+      });
+
+      it('returns 409 on a duplicate (provider, model, tier) row', async () => {
+        await ProviderRouting.create({
+          provider: 'groq',
+          model: 'dup-model',
+          tier: 'small',
+        });
+        const created = await request(app)
+          .post('/api/admin/models')
+          .send({ provider: 'groq', model: 'dup-model', tier: 'small' })
+          .set('Cookie', cookie);
+        expect(created.status).toBe(409);
+      });
+
+      it('rejects unknown and malformed fields on update', async () => {
+        await ProviderRouting.create({ provider: 'groq', model: 'upd', tier: 'small' });
+        const row = (await ProviderRouting.findOne({ model: 'upd' }))!;
+
+        const unknown = await request(app)
+          .put(`/api/admin/models/${row.id}`)
+          .send({ tools: true, bogus: 1 })
+          .set('Cookie', cookie);
+        expect(unknown.status).toBe(400);
+        expect(unknown.body.message).toMatch(/[Uu]nknown/);
+
+        const malformed = await request(app)
+          .put(`/api/admin/models/${row.id}`)
+          .send({ eligible: 'yes' })
+          .set('Cookie', cookie);
+        expect(malformed.status).toBe(400);
+
+        const missing = await request(app)
+          .put(`/api/admin/models/${new mongoose.Types.ObjectId().toString()}`)
+          .send({ eligible: false })
+          .set('Cookie', cookie);
+        expect(missing.status).toBe(404);
+      });
     });
   });
 });

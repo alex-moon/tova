@@ -275,6 +275,82 @@ describe('Chat streaming route', () => {
     expect(done?.data.sourceTitles).toHaveLength(3);
   });
 
+  it('emits structured tool events when the agent calls fetch_url and persists the fetched page (#113)', async () => {
+    const cookies = await registerUser('stream-fetch-url@example.com');
+    // A pasted URL turn: the agent fetches the link via `fetch_url`, which
+    // mirrors web_search's `{ results: [...] }` shape so the same provenance
+    // extraction persists the fetched URL + page title as a source.
+    mockAgentStream.mockImplementation(async () => ({
+      fullStream: (async function* () {
+        yield {
+          type: 'tool-call',
+          payload: {
+            toolName: 'fetch_url',
+            args: { url: 'https://example.com/groq-docs' },
+          },
+        };
+        yield {
+          type: 'tool-result',
+          payload: {
+            toolName: 'fetch_url',
+            result: {
+              results: [
+                {
+                  title: 'Groq docs',
+                  snippet: 'Fetched page content…',
+                  url: 'https://example.com/groq-docs',
+                },
+              ],
+            },
+          },
+        };
+        yield { type: 'text-delta', payload: { text: 'Here is the page summary…' } };
+      })(),
+    }));
+
+    const app = createApp();
+    const response = await request(app)
+      .post('/api/chat/stream')
+      .set('Cookie', cookies)
+      .send({ content: 'summarise https://example.com/groq-docs' });
+
+    expect(response.status).toBe(200);
+    const events = response.text
+      .split('\n\n')
+      .filter((part) => part.trim().length > 0)
+      .map((part) => {
+        const eventLine = part.split('\n').find((l) => l.startsWith('event: '));
+        const dataLine = part.split('\n').find((l) => l.startsWith('data: '));
+        return {
+          event: eventLine?.slice(7),
+          data: dataLine ? JSON.parse(dataLine.slice(6)) : undefined,
+        };
+      });
+    const toolEvents = events.filter((e) => e.event === 'tool');
+    expect(toolEvents).toHaveLength(2);
+    expect(toolEvents[0].data).toMatchObject({
+      phase: 'call',
+      name: 'fetch_url',
+      label: 'Fetched the page',
+    });
+    expect(toolEvents[1].data).toMatchObject({
+      phase: 'result',
+      name: 'fetch_url',
+      status: 'ok',
+      resultCount: 1,
+      domains: ['example.com'],
+    });
+    const persisted = await Message.findOne({ role: 'assistant' });
+    expect(persisted?.sources).toEqual(['https://example.com/groq-docs']);
+    expect(persisted?.toObject().sourceTitles).toEqual([
+      { url: 'https://example.com/groq-docs', title: 'Groq docs' },
+    ]);
+    const done = events.find((e) => e.event === 'done');
+    expect(done?.data.sourceTitles).toEqual([
+      { url: 'https://example.com/groq-docs', title: 'Groq docs' },
+    ]);
+  });
+
   it('emits an empty-status tool result when the search returns nothing', async () => {
     const cookies = await registerUser('stream-search-empty@example.com');
     mockAgentStream.mockImplementation(async () => ({
@@ -296,6 +372,97 @@ describe('Chat streaming route', () => {
     expect(response.text).toContain('"status":"empty"');
     const persisted = await Message.findOne({ role: 'assistant' });
     expect(persisted?.sources).toBeUndefined();
+  });
+
+  it('maps result counts per tool (#114): list_files files.length, MCP single-array field, no count otherwise', async () => {
+    const cookies = await registerUser('stream-tool-counts@example.com');
+    mockAgentStream.mockImplementation(async () => ({
+      fullStream: (async function* () {
+        yield { type: 'tool-call', payload: { toolName: 'list_files', args: {} } };
+        yield {
+          type: 'tool-result',
+          payload: { toolName: 'list_files', result: { files: ['a.txt', 'b.txt'] } },
+        };
+        yield { type: 'tool-call', payload: { toolName: 'list_repositories', args: {} } };
+        yield {
+          type: 'tool-result',
+          payload: { toolName: 'list_repositories', result: { repositories: [1, 2, 3, 4] } },
+        };
+        yield { type: 'tool-call', payload: { toolName: 'read_file', args: {} } };
+        yield {
+          type: 'tool-result',
+          payload: { toolName: 'read_file', result: { content: 'hello', path: 'x.txt' } },
+        };
+      })(),
+    }));
+
+    const app = createApp();
+    const response = await request(app)
+      .post('/api/chat/stream')
+      .set('Cookie', cookies)
+      .send({ content: 'list things' });
+
+    const toolEvents = response.text
+      .split('\n\n')
+      .filter((part) => part.includes('event: tool'))
+      .map((part) =>
+        JSON.parse(
+          part
+            .split('\n')
+            .find((l) => l.startsWith('data: '))!
+            .slice(6),
+        ),
+      )
+      .filter((e) => e.phase === 'result');
+    expect(toolEvents).toEqual([
+      expect.objectContaining({
+        name: 'list_files',
+        status: 'ok',
+        resultCount: 2,
+      }),
+      expect.objectContaining({
+        name: 'list_repositories',
+        status: 'ok',
+        resultCount: 4,
+      }),
+      expect.objectContaining({ name: 'read_file', status: 'ok' }),
+    ]);
+    expect(toolEvents[0].domains).toBeUndefined();
+    expect(toolEvents[2].resultCount).toBeUndefined();
+  });
+
+  it('suppresses the count on a degraded list_files result (empty files + error)', async () => {
+    const cookies = await registerUser('stream-degraded-list@example.com');
+    mockAgentStream.mockImplementation(async () => ({
+      fullStream: (async function* () {
+        yield { type: 'tool-call', payload: { toolName: 'list_files', args: {} } };
+        yield {
+          type: 'tool-result',
+          payload: { toolName: 'list_files', result: { files: [], error: 'assets unavailable' } },
+        };
+      })(),
+    }));
+
+    const app = createApp();
+    const response = await request(app)
+      .post('/api/chat/stream')
+      .set('Cookie', cookies)
+      .send({ content: 'list things' });
+
+    const toolEvent = response.text
+      .split('\n\n')
+      .filter((part) => part.includes('event: tool'))
+      .map((part) =>
+        JSON.parse(
+          part
+            .split('\n')
+            .find((l) => l.startsWith('data: '))!
+            .slice(6),
+        ),
+      )
+      .find((e) => e.phase === 'result');
+    expect(toolEvent).toEqual(expect.objectContaining({ name: 'list_files', status: 'empty' }));
+    expect(toolEvent.resultCount).toBeUndefined();
   });
 
   it('delivers follow-up suggestions on done and persists them on the message', async () => {

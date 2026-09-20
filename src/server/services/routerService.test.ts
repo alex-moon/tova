@@ -252,6 +252,75 @@ describe('Router Service', () => {
     });
   });
 
+  describe('contextLength propagation (#104)', () => {
+    // #104: the chat routes size `max_tokens` against the routed model's
+    // window, so every RoutingResult must carry (or omit) `contextLength`
+    // exactly as its pool ref does.
+
+    const pool = (small: ModelRef[], large: ModelRef[]) => ({
+      small,
+      large,
+      guardModel: 'test-guard-model',
+    });
+
+    it('carries contextLength from the pool ref on a deterministic rule', async () => {
+      const result = await routeQuery(
+        'Hello',
+        pool([{ provider: 'deepinfra', model: 'qwen', contextLength: 40960 }], [groqLarge]),
+        () => 0.1,
+      );
+      expect(result).toMatchObject({ model: 'qwen', provider: 'deepinfra', contextLength: 40960 });
+    });
+
+    it('omits the key entirely when the ref has no contextLength (env fallback)', async () => {
+      const result = await routeQuery('Hello', pool([groqSmall], [groqLarge]), () => 0.1);
+      expect('contextLength' in result).toBe(false);
+      expect('reason' in result).toBe(true);
+    });
+
+    it('carries contextLength on the classifier-simple pool pick', async () => {
+      classifyAs('simple');
+      const result = await routeQuery(
+        'Give me a summary of this document',
+        pool([{ provider: 'groq', model: 'test-small-model', contextLength: 131072 }], [groqLarge]),
+        () => 0.9,
+      );
+      expect(result.reason).toContain('classifier-simple');
+      expect(result.contextLength).toBe(131072);
+    });
+
+    it('carries contextLength on the forced feedback pick and the classifier-error fallback', async () => {
+      classifyAs('complex');
+      const forced = await routeQuery(
+        'Design a schema migration plan',
+        pool(
+          [groqSmall],
+          [groqLarge, { provider: 'groq', model: 'test-small-model-2', contextLength: 8192 }],
+        ),
+        () => 0.9,
+        {
+          band: 'long|code',
+          getFitWeight: async (_b, m) =>
+            // FitWeight shape: weight=(ups+1)/(ups+downs+2) — see stat() below.
+            m === 'test-large-model'
+              ? { weight: 1 / 11, ups: 0, downs: 10 }
+              : { weight: 1, ups: 10, downs: 0 },
+        },
+      );
+      expect(forced.model).toBe('test-small-model-2');
+      expect(forced.contextLength).toBe(8192);
+
+      classifyAs('complex', true);
+      const errored = await routeQuery(
+        'Design a schema migration plan',
+        pool([groqSmall], [{ provider: 'groq', model: 'test-large-model', contextLength: 55000 }]),
+        () => 0.9,
+      );
+      expect(errored.reason).toContain('classifier-error');
+      expect(errored.contextLength).toBe(55000);
+    });
+  });
+
   describe('Feedback weighting (#18, re-implemented on tier pools)', () => {
     const twoPool = (
       small: ModelRef[] = [groqSmall],

@@ -12,6 +12,7 @@ import { hasPermission, ROUTING_PERMISSION } from '../services/userService';
 import { buildSystemContent } from '../services/promptAssembly';
 import { ensureUserLocation } from '../services/geoLocationService';
 import { inferenceService } from '../services/inferenceService';
+import { outputTokensFor, promptCharsFrom } from '../services/outputTokenCap';
 import type { NeutralStreamChunk } from '../services/llmTypes';
 import { classifyAndPersistPromptDimensions, isTriviallyNeutral } from '../services/metricsService';
 import { computeDeterministicMetrics } from '../services/promptMetrics';
@@ -101,11 +102,13 @@ const collectSourcesInto = (
 const toolLabelFrom = (name: string): string =>
   name === 'web_search'
     ? 'Searched the web'
-    : name === 'list_files'
-      ? 'Listed your files'
-      : name === 'read_file'
-        ? 'Read a file'
-        : name || 'Tool run';
+    : name === 'fetch_url'
+      ? 'Fetched the page'
+      : name === 'list_files'
+        ? 'Listed your files'
+        : name === 'read_file'
+          ? 'Read a file'
+          : name || 'Tool run';
 
 const toolCallEvent = (call: NonNullable<NeutralStreamChunk['toolCall']>) => ({
   phase: 'call' as const,
@@ -158,20 +161,60 @@ const domainsFrom = (urls: string[]): string[] => {
   return [...hosts].slice(0, 5);
 };
 
+// Result chip counts (#114): per-tool counting semantics instead of a
+// universal "count every array" heuristic — the universal one produced
+// misleading "0 results" on tools without a results list.
+//   web_search: count of results, domains from URL-bearing entries.
+//   list_files: count of matched files (empty files + error = degraded, no count).
+//   anything else (user-connected MCP etc.): a meaningful count only when the
+//   top-level result has exactly one array-valued field; otherwise no count
+//   and status 'ok' — absence of a count is not absence of success.
+const singleArrayFieldLength = (result: unknown): number | null => {
+  if (typeof result !== 'object' || result === null || Array.isArray(result)) return null;
+  const arrayFields = Object.values(result).filter((value) => Array.isArray(value));
+  return arrayFields.length === 1 ? (arrayFields[0] as unknown[]).length : null;
+};
+
 const toolResultEvent = (result: { name: string; result: unknown }) => {
-  const items = Array.isArray((result.result as { results?: unknown })?.results)
-    ? (result.result as { results: unknown[] }).results
-    : [];
-  const urls = items
-    .map((item) => (item as { url?: unknown } | null)?.url)
-    .filter((url): url is string => typeof url === 'string' && url !== '');
-  return {
+  const base = {
     phase: 'result' as const,
     name: result.name,
     label: toolLabelFrom(result.name),
-    status: urls.length > 0 ? ('ok' as const) : ('empty' as const),
-    resultCount: urls.length,
-    ...(urls.length > 0 ? { domains: domainsFrom(urls) } : {}),
+  };
+  if (result.name === 'web_search') {
+    const items = Array.isArray((result.result as { results?: unknown })?.results)
+      ? (result.result as { results: unknown[] }).results
+      : [];
+    const urls = items
+      .map((item) => (item as { url?: unknown } | null)?.url)
+      .filter((url): url is string => typeof url === 'string' && url !== '');
+    const hasResults = Array.isArray((result.result as { results?: unknown })?.results);
+    return {
+      ...base,
+      status: urls.length > 0 ? ('ok' as const) : ('empty' as const),
+      ...(hasResults ? { resultCount: items.length } : {}),
+      ...(urls.length > 0 ? { domains: domainsFrom(urls) } : {}),
+    };
+  }
+  if (result.name === 'list_files') {
+    const payload = result.result as { files?: unknown; error?: unknown } | null;
+    const files = Array.isArray(payload?.files) ? (payload?.files as unknown[]) : null;
+    if (payload && typeof payload.error === 'string' && (!files || files.length === 0)) {
+      // Degraded: empty files + error → no count (issue #114 plan task 1).
+      return { ...base, status: 'empty' as const };
+    }
+    const count = files?.length ?? 0;
+    return {
+      ...base,
+      status: count > 0 ? ('ok' as const) : ('empty' as const),
+      resultCount: count,
+    };
+  }
+  const count = singleArrayFieldLength(result.result);
+  return {
+    ...base,
+    status: 'ok' as const,
+    ...(count !== null ? { resultCount: count } : {}),
   };
 };
 
@@ -315,6 +358,9 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
       messages,
       model: routingResult.model,
       provider: routingResult.provider,
+      // #104: always send an output-token budget so the provider cannot
+      // default it to the model's whole context window.
+      max_tokens: outputTokensFor(routingResult.contextLength, promptCharsFrom(messages)),
       userId,
       abortSignal: abortController.signal,
     });
@@ -456,6 +502,9 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
         messages,
         model: routingResult.model,
         provider: routingResult.provider,
+        // #104: always send an output-token budget so the provider cannot
+        // default it to the model's whole context window.
+        max_tokens: outputTokensFor(routingResult.contextLength, promptCharsFrom(messages)),
         userId,
         abortSignal: abortController.signal,
       });

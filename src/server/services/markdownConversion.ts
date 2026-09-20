@@ -23,6 +23,11 @@ export const CONVERSION_TIMEOUT_MS = 30_000;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const turndownInstance = new (turndown as any)({ headingStyle: 'atx', bulletListMarker: '-' });
 
+// HTML→markdown conversion used both by asset ingestion (rawConvert below)
+// and by the `fetch_url` page fetcher (issue #113): one turndown instance,
+// owned by this module.
+export const htmlToMarkdown = (html: string): string => turndownInstance.turndown(html);
+
 const extensionOf = (filename: string): string => {
   const dot = filename.lastIndexOf('.');
   return dot === -1 ? '' : filename.slice(dot + 1).toLowerCase();
@@ -91,7 +96,7 @@ const rawConvert = async (ext: string, buffer: Buffer): Promise<string | null | 
     }
     case 'html':
     case 'htm':
-      return turndownInstance.turndown(buffer.toString('utf8'));
+      return htmlToMarkdown(buffer.toString('utf8'));
     default:
       throw new Error(`unsupported conversion type: .${ext}`);
   }

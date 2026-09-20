@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { X } from 'lucide-react';
+import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import type { Theme } from '@/theme';
@@ -7,11 +7,6 @@ import AuthService, { AuthError } from '../services/auth';
 import { persistTheme, resolveTheme } from '../theme';
 import { useAuth } from '../hooks/useAuth';
 import McpServersSection from './McpServersSection';
-import ScrollablePanel from './ScrollablePanel';
-
-interface ProfileModalProps {
-  onClose: () => void;
-}
 
 const PREFERRED_NAME_LIMIT = 20;
 const CUSTOM_INSTRUCTIONS_LIMIT = 4000;
@@ -71,7 +66,7 @@ const StartupChatChoice: React.FC<{
   </div>
 );
 
-const ProfileModal: React.FC<ProfileModalProps> = ({ onClose }) => {
+const ProfileView = () => {
   const { user, updateUser } = useAuth();
   const initialTheme = (
     user?.theme === 'light' || user?.theme === 'dark' ? user.theme : resolveTheme()
@@ -118,7 +113,9 @@ const ProfileModal: React.FC<ProfileModalProps> = ({ onClose }) => {
       // reloads paint it without waiting on the profile round-trip.
       if (theme !== initialTheme) persistTheme(theme);
       updateUser(next);
-      onClose();
+      // A view cannot "close" on save like the old modal did: stay on
+      // /profile and confirm with a toast instead.
+      toast.success('Profile saved');
     } catch (err) {
       setError(err instanceof AuthError ? err.message : 'Something went wrong.');
     } finally {
@@ -128,19 +125,21 @@ const ProfileModal: React.FC<ProfileModalProps> = ({ onClose }) => {
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
-      data-testid="profile-modal"
+      data-testid="profile-view"
+      className="flex h-full w-full flex-col bg-background text-foreground"
     >
-      <ScrollablePanel
-        title="Profile"
-        panelTestId="profile-panel"
-        panelClassName="max-w-md"
-        headerAdornment={
-          <Button variant="ghost" size="icon" aria-label="Close profile" onClick={onClose}>
-            <X />
-          </Button>
-        }
-      >
+      <div className="shrink-0 px-6 pt-6">
+        <h2 className="font-heading text-xl font-semibold">Profile</h2>
+        {error && (
+          <div
+            data-testid="profile-error"
+            className="mt-3 rounded-lg border border-destructive bg-destructive/10 p-3 text-sm text-destructive"
+          >
+            {error}
+          </div>
+        )}
+      </div>
+      <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-6 py-6">
         <dl className="mb-4 space-y-2 text-sm">
           <div className="flex justify-between gap-4">
             <dt className="text-muted-foreground">Full name</dt>
@@ -199,25 +198,14 @@ const ProfileModal: React.FC<ProfileModalProps> = ({ onClose }) => {
             ))}
           </fieldset>
         </div>
-        {error && (
-          <div
-            data-testid="profile-error"
-            className="mt-3 rounded-lg border border-destructive bg-destructive/10 p-3 text-sm text-destructive"
-          >
-            {error}
-          </div>
-        )}
-        <div className="mt-4 flex justify-end gap-2">
-          <Button variant="outline" onClick={onClose} disabled={pending}>
-            Cancel
-          </Button>
+        <div className="mt-4 flex justify-end">
           <Button onClick={save} disabled={pending} data-testid="profile-save">
             {pending ? 'Saving...' : 'Save'}
           </Button>
         </div>
-      </ScrollablePanel>
+      </div>
     </div>
   );
 };
 
-export default ProfileModal;
+export default ProfileView;
