@@ -57,7 +57,7 @@ jobs:
 
           while IFS= read -r file; do
             case "$file" in
-              src/server/*|src/shared/*|src/index.ts|migrations/*)
+              src/server/*|src/shared/*|src/index.ts|migrations/*|Dockerfile)
                 server=true ;;
               src/client/*)
                 client=true ;;
