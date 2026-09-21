@@ -422,6 +422,7 @@ const AdminView = () => {
                   >
                     <option value="groq">groq</option>
                     <option value="deepinfra">deepinfra</option>
+                    <option value="typesafe">typesafe</option>
                   </select>
                 </label>
                 <label className="text-sm">

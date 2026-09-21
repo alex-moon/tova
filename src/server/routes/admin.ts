@@ -70,7 +70,9 @@ router.get('/users', ...adminGuard, async (_req, res) => {
  * the feedback tallies captured in ModelMetricStat for the model name.
  * Read errors degrade to empty lists; the view shows a 'no data' state.
  */
-const PROVIDER_SET = ['groq', 'deepinfra'] as const;
+// #151: 'typesafe' rides along now so admin CRUD can write rows for the
+// new provider ahead of its connector landing.
+const PROVIDER_SET = ['groq', 'deepinfra', 'typesafe'] as const;
 const TIER_SET = ['small', 'large', 'guard'] as const;
 
 type ProviderRow = {
