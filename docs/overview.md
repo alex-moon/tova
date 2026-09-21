@@ -54,6 +54,12 @@
 - Keep local and production runtime claims aligned with the actual repository tooling.
 - Prefer small, reviewable implementation increments over broad speculative rewrites.
 
+## File-Storage Boundary (#149)
+
+- All Spaces (S3-compatible) object access goes through `src/server/services/workspaceStorage.ts`. Only `workspaceStorage.ts` and test files may import `storageService.ts` directly (enforced by ESLint `no-restricted-imports`).
+- The storage-agnostic surface is `WorkspaceStorage` (put/get/getStream/delete/list, keyed by userId + chatId + filename); it is the landing zone for the future workspace feature and a possible local (IndexedDB/fs) backend.
+- Chat-scoped key layout: `<userId>/chats/<chatId>/<filename>`. Asset keys keep their existing `<userId>/<assetId>/<filename>` layout, accessed via the explicit `RawKeyStorage` byKey subset (assets carry their key strings on documents and have no chatId); Spaces-only extras (presigns, config probe) live in `SpacesCapabilities`, not on the agnostic interface.
+
 ## Delivery Workflow Note
 
 This file is the stable product-intent summary.
