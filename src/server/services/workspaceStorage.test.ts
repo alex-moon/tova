@@ -64,8 +64,29 @@ describe('spacesWorkspaceStorage', () => {
 
   it('put delegates with the chat-scoped key', async () => {
     const body = Buffer.from('hello');
+    mocked.putObject.mockResolvedValue();
     await ws.put('u1', 'c1', 'notes.md', body, 'text/markdown');
     expect(mocked.putObject).toHaveBeenCalledWith('u1/chats/c1/notes.md', body, 'text/markdown');
+  });
+
+  it('put without contentType passes undefined through, not an empty string', async () => {
+    mocked.putObject.mockResolvedValue();
+    await ws.put('u1', 'c1', 'notes.md', Buffer.alloc(0));
+    expect(mocked.putObject).toHaveBeenCalledWith(
+      'u1/chats/c1/notes.md',
+      Buffer.alloc(0),
+      undefined,
+    );
+  });
+
+  it('headByKey propagates driver rejections (missing object throws)', async () => {
+    mocked.headObject.mockRejectedValue(new Error('HeadObject 404'));
+    await expect(ws.headByKey('u1/a1/missing.txt')).rejects.toThrow('HeadObject 404');
+  });
+
+  it('getByKey preserves the null-on-missing contract for asset reads', async () => {
+    mocked.getObjectBuffer.mockResolvedValue(null);
+    await expect(ws.getByKey('u1/a1/a.txt')).resolves.toBeNull();
   });
 
   it('get preserves the null-on-missing / null-on-over-cap contract', async () => {
