@@ -61,3 +61,42 @@ unreliable here because the squash merges break patch-ids.
 
 Verification: `npm run ci` fully green on `feat/98-branch-cleanup`
 (459 server tests, 128 client tests, both builds).
+
+---
+
+# Update (2026-09-20): post-squash residue sweep (issue #135)
+
+After the 2026-09-16 audit, most of the `WIP:`/`feat:` first passes from tickets
+#94–#129 had been squash-merged into `main`, while their continuation commits
+(`test/hardening: critic pass`, `fix: address PR review comments`) stayed on the
+orphaned branches. Issue #135 merged every remaining branch into current
+`main` and confirmed with `git merge-tree` that each branch now merges with an
+empty residual diff.
+
+## Residuals landed with #135
+
+- `feat/104-new-errors`: (superseded — `main`'s squash already contained the full pass).
+- `feat/113-fetch-web`: safe-link scaffold kept via `feat/120-safe-link`'s version at merge time.
+- `feat/117-no-content`: two pre-stream 429-detail tests surfaced in `chat.test.ts`.
+- `feat/120-safe-link`: pool-flip test made order-independent in `modelConfigService.test.ts`.
+- `feat/94-better-model`: `DEEPINFRA_API_KEY` documented in `.env.example`.
+- `feat/135-orphaned-branches` (this PR): image-turn degradation tests, ZDR-hardened error paths,
+  and output-token-cap multimodal tests kept over the `#115` squash.
+
+## Deleted (now fully absorbed)
+
+`feat/94-better-model`, `feat/95-profile-view`, `feat/96-start-from`,
+`feat/98-branch-cleanup`, `feat/104-new-errors`, `feat/107-update-readme`,
+`feat/109-no-mcp`, `feat/112-evals`, `feat/113-fetch-web`, `feat/114-0-results`,
+`feat/115-image-handling`, `feat/116-zdr-option`, `feat/117-no-content`,
+`feat/118-ui-tweak`, `feat/120-safe-link`, `feat/127-sources-list`,
+`feat/129-prompt-routing`, and the leftover scratch branches `merge-tree` /
+`tmp-ci-merge`.
+
+## Not taken
+
+- `feat/94-better-model`'s phase-2 "remove the `guard` routing tier from the
+  DB" (schema enum change + `20260919100000-remove-guard-groq-routings.ts`):
+  current `main` still seeds and uses a DB guard row (`TIER_PROVIDER.guard`),
+  and the admin Compare tab filters on `tier`, so removing the tier needs its
+  own evidence-first routing ticket (see AGENTS.md "Model routing decisions").
