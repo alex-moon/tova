@@ -7,8 +7,83 @@ on:
     branches: [main]
 
 jobs:
+  # Which areas of the repo a PR touched, so the `ci` job below only runs
+  # the gate steps affected by the change (issue #141: free-tier minutes).
+  # Direct CLI diff, not a vendor paths-filter action: this repo keeps a
+  # no-third-party-actions convention (see the gitleaks/osv-scanner notes).
+  # Push runs skip detection entirely — their steps run unconditionally so
+  # the deploy gate always validates the full merge result.
+  changed:
+    runs-on: ubuntu-latest
+
+    outputs:
+      server: ${{ steps.detect.outputs.server }}
+      client: ${{ steps.detect.outputs.client }}
+      deps: ${{ steps.detect.outputs.deps }}
+      tooling: ${{ steps.detect.outputs.tooling }}
+
+    steps:
+      - uses: actions/checkout@v4
+        if: github.event_name == 'pull_request'
+        with:
+          fetch-depth: 0
+
+      - name: Detect changed areas
+        id: detect
+        run: |
+          if [[ "${{ github.event_name }}" != "pull_request" ]]; then
+            # Push to main: no staging, full gate.
+            echo "server=true client=true deps=true tooling=true" |
+              tr ' ' '\n' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          git diff --name-only "$(git merge-base origin/main HEAD)" HEAD > /tmp/changed-files.txt
+
+          if [[ ! -s /tmp/changed-files.txt ]]; then
+            # Empty diff (race between dispatch and merge-base): full gate.
+            echo "server=true client=true deps=true tooling=true" |
+              tr ' ' '\n' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Config/tooling changes can affect anything: force both sides
+          # on. Dependency changes force the server gate (cheapest proxy
+          # for lockfile changes that touch runtime code).
+          server=false
+          client=false
+          deps=false
+          tooling=false
+
+          while IFS= read -r file; do
+            case "$file" in
+              src/server/*|src/shared/*|src/index.ts|migrations/*)
+                server=true ;;
+              src/client/*)
+                client=true ;;
+              package.json|package-lock.json|src/client/package.json|src/client/package-lock.json)
+                deps=true ;;
+              eslint.config.js|tsconfig.json|tsconfig.test.json|jest.config.js|.prettierrc|prettier.config.*|e2e/*|.github/*)
+                tooling=true ;;
+            esac
+          done < /tmp/changed-files.txt
+
+          if [[ "$tooling" == true ]]; then
+            server=true
+            client=true
+          fi
+          if [[ "$deps" == true ]]; then
+            server=true
+          fi
+
+          echo "server=$server" >> "$GITHUB_OUTPUT"
+          echo "client=$client" >> "$GITHUB_OUTPUT"
+          echo "deps=$deps" >> "$GITHUB_OUTPUT"
+          echo "tooling=$tooling" >> "$GITHUB_OUTPUT"
+
   ci:
     runs-on: ubuntu-latest
+    needs: changed
 
     steps:
       - uses: actions/checkout@v4
@@ -20,13 +95,42 @@ jobs:
 
       - run: npm ci
 
-      - run: npm run ci
+      - name: Server lint
+        if: needs.changed.outputs.server == 'true'
+        run: npm run lint:server
 
+      - name: Server typecheck
+        if: needs.changed.outputs.server == 'true'
+        run: npm run typecheck
+
+      - name: Server tests
+        if: needs.changed.outputs.server == 'true'
+        run: npm run test:server
+
+      # Repo-wide prettier (covers server and client, both lockfiles): runs
+      # unconditionally so a mixed PR can't slip through with one side
+      # skipped. Kept single and repo-wide instead of per-side duplications.
+      - name: Format check
+        run: npm run format:check
+
+      - name: Client lint
+        if: needs.changed.outputs.client == 'true'
+        run: npm --prefix src/client run lint
+
+      - name: Client tests
+        if: needs.changed.outputs.client == 'true'
+        run: npm --prefix src/client run test
+
+      - name: Client build
+        if: needs.changed.outputs.client == 'true'
+        run: npm --prefix src/client run build
+
+  # Security scans gated on deploy: these run on main pushes only (same
+  # workflow run as `ci`) and the gate below requires them, so deploy
+  # (triggered via workflow_run on CI success) can never race past a failed
+  # scan — they are a deploy gate, not a merge gate. PRs do not run them
+  # (issue #141: scans cease to be a merge gate; security.yml was removed).
   gitleaks:
-    # Security scans gated on deploy: these run on the same workflow run as
-    # `ci` and the gate below requires them, so deploy (triggered via
-    # workflow_run on CI success) can never race past a failed scan.
-    # PR equivalent lives in security.yml.
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
 
@@ -36,7 +140,7 @@ jobs:
           fetch-depth: 0
 
       # Direct CLI, not gitleaks-action: its v2 PR/reporting flow needs
-      # GitHub API calls this repo can't satisfy (see security.yml).
+      # GitHub API calls this repo can't satisfy.
       - name: Detect secrets in full git history
         run: |
           curl -sSfL https://github.com/gitleaks/gitleaks/releases/download/v8.24.3/gitleaks_8.24.3_linux_x64.tar.gz | tar -xz
@@ -71,12 +175,27 @@ jobs:
       - name: Audit production dependencies
         run: npm audit --omit=dev --audit-level=high --fail-on=all
 
+  # dependency-review-action needs GitHub Advanced Security on private repos,
+  # which this repository doesn't have; osv-scanner over the lockfile covers
+  # the same ground self-contained (issue #32 mentions it as the
+  # self-contained alternative). Ported here from the removed security.yml
+  # so lockfile scanning stays part of the main-side deploy gate.
+  osv-scanner:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    # Image is scratch-based (no shell), so run it directly via docker.
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Scan package-lock.json for known vulnerabilities
+        run: docker run --rm -v "$PWD:/repo" ghcr.io/google/osv-scanner:latest --lockfile=/repo/package-lock.json
+
   # `workflow_run` can report `conclusion: success` for a cancelled run
   # (known Actions quirk), which would trigger deploy. This gate always
   # runs and fails unless everything it guards succeeded — including when
   # a job was cancelled — so a cancelled run never looks successful.
   ci-gate:
-    needs: [ci, gitleaks, semgrep, npm-audit]
+    needs: [ci, gitleaks, semgrep, npm-audit, osv-scanner]
     if: always()
     runs-on: ubuntu-latest
 
@@ -86,15 +205,15 @@ jobs:
           event="${{ github.event_name }}"
           if [[ "$event" == "push" ]]; then
             # On push to main, deploy follows this run: every guard must pass.
-            for status in "${{ needs.ci.result }}" "${{ needs.gitleaks.result }}" "${{ needs.semgrep.result }}" "${{ needs.npm-audit.result }}"; do
+            for status in "${{ needs.ci.result }}" "${{ needs.gitleaks.result }}" "${{ needs.semgrep.result }}" "${{ needs.npm-audit.result }}" "${{ needs.osv-scanner.result }}"; do
               if [[ "$status" != "success" ]]; then
                 echo "guard status: $status"
                 exit 1
               fi
             done
           else
-            # PR run: deploy is gated on push-to-main runs only; the PR-side
-            # scans live in security.yml.
+            # PR run: deploy is gated on push-to-main runs only; PR-side
+            # scans were removed (scans are a deploy gate, not a merge gate).
             if [[ "${{ needs.ci.result }}" != "success" ]]; then
               echo "ci result: ${{ needs.ci.result }}"
               exit 1
