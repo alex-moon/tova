@@ -30,6 +30,7 @@ import { webSearch } from './webSearchService';
 import { fetchPage } from './webFetchService';
 import { createSystemAsset } from './systemAssetService';
 import { isStorageConfigured } from './storageService';
+import { config } from '../config';
 
 /*
  * LangSmith tracing (issue #5), via the official Mastra plugin
@@ -42,8 +43,8 @@ import { isStorageConfigured } from './storageService';
  * read from `LANGSMITH_API_KEY` (`LANGCHAIN_API_KEY` works too) and the
  * project from `LANGCHAIN_PROJECT` — see `.env.example`.
  */
-const langsmithKey = process.env.LANGSMITH_API_KEY ?? process.env.LANGCHAIN_API_KEY;
-const projectName = process.env.LANGSMITH_PROJECT ?? process.env.LANGCHAIN_PROJECT;
+const langsmithKey = config.langsmith.apiKey;
+const projectName = config.langsmith.project;
 
 // Mastra docs: storage is required for tracing even when exporting
 // externally. Application data stays in MongoDB; `InMemoryStore` only
@@ -229,7 +230,7 @@ const traceOptionsFrom = (trace?: TraceContext) => ({
  * When the Brave key is unset the tool is not attached at all: the model
  * never sees it and plain chat behaves byte-identically to pre-#16.
  */
-const hasSearchKey = (): boolean => Boolean(process.env.BRAVE_SEARCH_API_KEY);
+const hasSearchKey = (): boolean => Boolean(config.search.braveApiKey);
 
 export const webSearchTool = createTool({
   id: 'web_search',
