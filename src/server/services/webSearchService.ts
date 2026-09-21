@@ -1,3 +1,4 @@
+import { redactForLog } from './logRedaction';
 const BRAVE_ENDPOINT = 'https://api.search.brave.com/res/v1/web/search';
 const SEARCH_TIMEOUT_MS = 10_000;
 
@@ -47,7 +48,7 @@ export const webSearch = async (query: string): Promise<SearchResult[]> => {
     // graceful degradation — marking the tool failed and degrading to an
     // empty result with a descriptive error — so the turn still never
     // fails, but distinguishable from a genuinely-empty search.
-    console.error('Web search error:', err);
+    console.error('Web search error:', redactForLog(err));
     const message = err instanceof Error ? err.message : String(err);
     throw new Error(message || 'Brave search failed');
   }

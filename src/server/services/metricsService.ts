@@ -1,3 +1,4 @@
+import { redactForLog } from './logRedaction';
 import { Message } from '../models/Message';
 import { inferenceService } from './inferenceService';
 import { computeDeterministicMetrics } from './promptMetrics';
@@ -107,7 +108,7 @@ export const classifyPromptDimensions = async (
     const llm = parseLlmFlags(completion?.choices?.[0]?.message?.content);
     return { llm, skipReason: isAllNullLlm(llm) ? 'parse' : null };
   } catch (err) {
-    console.error('Prompt classification error:', err);
+    console.error('Prompt classification error:', redactForLog(err));
     return { llm: NULL_LLM, skipReason: 'error' };
   }
 };

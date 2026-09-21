@@ -1,3 +1,4 @@
+import { redactForLog } from './logRedaction';
 import { inferenceService } from './inferenceService';
 
 const TITLE_MODEL = process.env.ROUTER_SMALL_MODEL || 'openai/gpt-oss-20b';
@@ -28,7 +29,7 @@ export const generateChatTitle = async (content: string): Promise<string> => {
     if (!title) return fallback;
     return title.length > 60 ? `${title.substring(0, 60)}…` : title;
   } catch (err) {
-    console.error('Title generation error:', err);
+    console.error('Title generation error:', redactForLog(err));
     return fallback;
   }
 };

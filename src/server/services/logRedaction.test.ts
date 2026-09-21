@@ -35,6 +35,23 @@ describe('redactString', () => {
   it('treats empty string as empty', () => {
     expect(redactString('')).toBe('');
   });
+
+  it('does not corrupt prose containing apostrophes (critic finding)', () => {
+    const prose = "It doesn't seem to resolve for the user's request, oddly enough";
+    expect(redactString(prose)).toBe(prose);
+  });
+
+  it('redacts secret-shaped assignments regardless of short value (critic finding)', () => {
+    const out = redactString('auth failure: apikey=sk-abc123def456ghi789jkl');
+    expect(out).not.toContain('sk-abc123');
+    expect(out).toContain('apikey=');
+    expect(redactString('Authorization: Bearer abc123defghijk')).not.toContain('abc123defghijk');
+  });
+
+  it('still redacts genuine single-quoted payloads', () => {
+    const out = redactString("Provider said: 'the user chat message being echoed onward' 400");
+    expect(out).not.toContain('user chat message');
+  });
 });
 
 describe('redactForLog', () => {
@@ -88,5 +105,11 @@ describe('redactForLog', () => {
     const prompt = 'Here is my diary entry: Dear diary, '.concat('today '.repeat(30));
     const out = redactForLog(new Error(`Request failed: ${prompt}`));
     expect(out).not.toContain('Dear diary');
+  });
+
+  it('keeps frames readable when the message is empty (critic finding)', () => {
+    const out = redactForLog(new TypeError());
+    expect(out).toContain('TypeError');
+    expect(out).toContain('\n    at');
   });
 });

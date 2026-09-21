@@ -35,9 +35,19 @@ export const redactString = (text: string): string => {
   // JSON-ish objects/arrays spanning >= 40 chars (includes quoted request
   // bodies embedded by provider errors via stringify)
   out = out.replace(/[{[][\s\S]{40,}[}\]]/g, REDACTED);
-  // Double/single-quoted payload text (>= 16 chars) — covers embedded
-  // prompt fragments in single-line provider messages
-  out = out.replace(/(["'])((?:\\.|(?!\1).){16,})\1/g, `$1${REDACTED}$1`);
+  // Double-quoted payload text (>= 16 chars) — covers embedded prompt
+  // fragments in single-line provider messages
+  out = out.replace(/"((?:\\.|[^"]){16,})"/g, `"${REDACTED}"`);
+  // Single-quoted payload text, but only when the opening quote is not a
+  // word-internal apostrophe: contractions/possessives ("doesn't", "user's")
+  // would otherwise be matched as pairs and corrupt ordinary prose.
+  out = out.replace(/(?<![\w'])'((?:\\.|[^']){16,})'/g, `'${REDACTED}'`);
+  // Secret-shaped assignments (apikey=..., bearer token=...) — short values
+  // survive the whitespace-free threshold, so they need a dedicated rule.
+  out = out.replace(
+    /((?:api[_-]?key|token|secret|password|authorization|bearer)["'\s:=]+\s*)(["']?)[\w./+-]{8,}\2/gi,
+    `$1$2${REDACTED}$2`,
+  );
   // Long whitespace-free runs — UUIDs/b64/keys/system dumps
   out = out.replace(/[^\s'"{}[\]]{64,}/g, REDACTED);
   // Catch-all: any remaining single-line run of >= 64 chars is treated as
@@ -71,7 +81,13 @@ const redactErrorBody = (body: NonError): string => {
     // Clip the whole path anyway: raw stack text can embed message text
     // in the first line, which the message-level pass may have missed.
     const firstNewline = body.stack.indexOf('\n');
-    if (firstNewline !== -1) parts.push(body.stack.slice(firstNewline + 1).slice(0, MAX_STACK));
+    if (firstNewline !== -1) {
+      const frames = body.stack
+        .slice(firstNewline + 1)
+        .slice(0, MAX_STACK)
+        .trimEnd();
+      if (frames) parts.push(`\n${frames}`);
+    }
   }
   if (body.code) parts.push(`code: ${body.code}`);
   return parts.join(': ');
