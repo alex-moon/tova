@@ -17,7 +17,7 @@ services:
     ports:
       - '15000:5000'
     environment:
-      - MONGODB_URI=mongodb://tova:${MONGODB_PASSWORD}@mongodb:27017/tova?authSource=admin
+      - MONGODB_URL=${MONGODB_URL}
       - PORT=5000
       - NODE_ENV=production
     env_file:

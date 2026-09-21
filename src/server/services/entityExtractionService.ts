@@ -186,7 +186,7 @@ const upsertEntity = async (
     );
     return prior._id as mongoose.Types.ObjectId;
   } catch (err) {
-    console.error(`Entity upsert error for "${candidate.name}" (${candidate.kind}):`, err);
+    console.error('Entity upsert error:', candidate.name, candidate.kind, err);
     return null;
   }
 };
