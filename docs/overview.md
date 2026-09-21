@@ -50,6 +50,7 @@
 ## Long-Lived Constraints
 
 - Keep model selection abstracted away from end users.
+- Every log emission path passes shared redaction before output (`src/server/services/logRedaction.ts` governs console/admin-buffer output; `traceRedaction.ts` applies the same policy to LangSmith span payloads). Long-form prompt content never lands in stderr or the admin logs view. Note residual surfaces: traces are only sent when a dev LangSmith key is set, and very short personal fragments in error paths are not fully covered by the conservative heuristic.
 - Preserve secure auth defaults such as HTTP-only cookie handling.
 - Keep local and production runtime claims aligned with the actual repository tooling.
 - Prefer small, reviewable implementation increments over broad speculative rewrites.

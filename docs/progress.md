@@ -29,6 +29,14 @@ Preference inference, fuzzy disambiguation, ontology enforcement, files feeding 
 graph and tool-based querying are deliberately deferred; open questions in the plan
 doc.
 
+#145 Log redaction (in flight, PR #154): `logRedaction.ts` (`redactForLog`) redacts
+error message text at every user-content-adjacent `console.*` call site (verified
+hit-by-hit audit of `src/server`), protecting stdout and the admin logs buffer via the
+logService console capture; `traceRedaction.ts` applies the same policy to LangSmith
+span input/output/error via an exporter override; pino evaluated and declined (call-site
+redaction covers the actual failure mode; documented in the plan). Gate: RAG notes
+ticket can now state the no-leak constraint in `docs/overview.md`.
+
 No outstanding local tasks. Planning and tracking happen on GitHub (`alex-moon/tova`):
 issues for open work, PRs for changes; plans live in `docs/plan-<ticket>-<summary>.md`
 per `docs/workflow.md`.
