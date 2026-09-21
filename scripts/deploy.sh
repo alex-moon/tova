@@ -27,18 +27,30 @@ npm run build:client
 docker compose -f docker-compose.live.yml build
 docker compose -f docker-compose.live.yml up -d --remove-orphans
 
-# Wait until the published mongo port answers before migrating.
-ready=0
-for i in $(seq 1 30); do
-  if (exec 3<>/dev/tcp/127.0.0.1/27017) 2>/dev/null; then
-    ready=1
-    break
+# Load the project's .env so MONGODB_URL-driven logic below can see it.
+if [[ -f .env ]]; then
+  set -a
+  . ./.env
+  set +a
+fi
+
+# Wait for a mongo to be reachable before migrating — but only when using the
+# compose stack's mongo. When MONGODB_URL is set (Atlas or other remote), no
+# local port is expected; the backend upstream connects to the remote DB
+# directly and migration goes through that URL too.
+if [[ -z ${MONGODB_URL:-} ]]; then
+  ready=0
+  for i in $(seq 1 30); do
+    if (exec 3<>/dev/tcp/127.0.0.1/27017) 2>/dev/null; then
+      ready=1
+      break
+    fi
+    sleep 2
+  done
+  if [[ $ready -ne 1 ]]; then
+    echo "MongoDB did not become ready on 127.0.0.1:27017" >&2
+    exit 1
   fi
-  sleep 2
-done
-if [[ $ready -ne 1 ]]; then
-  echo "MongoDB did not become ready on 127.0.0.1:27017" >&2
-  exit 1
 fi
 
 # The backend reads the DB state on boot; run migrations after the stack is up,
