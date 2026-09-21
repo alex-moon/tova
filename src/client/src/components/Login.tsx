@@ -49,6 +49,7 @@ const Login: React.FC = () => {
               <Input
                 id="email"
                 className="mb-1"
+                data-testid="login-email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 type="email"
@@ -63,12 +64,13 @@ const Login: React.FC = () => {
                 id="password"
                 type="password"
                 className="mb-1"
+                data-testid="login-password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 required
               />
             </div>
-            <Button type="submit" className="mb-4 w-full">
+            <Button type="submit" className="mb-4 w-full" data-testid="login-submit">
               {isRegistering ? 'Register' : 'Login'}
             </Button>
             <Button

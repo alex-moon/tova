@@ -633,6 +633,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
                 }
               }}
               disabled={isLoading}
+              data-testid="chat-input"
             />
             <div className="absolute bottom-2 right-2 flex items-center gap-1">
               <input
@@ -661,7 +662,13 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
                   <Paperclip className="size-4" />
                 )}
               </Button>
-              <Button type="submit" size="sm" className="h-8" disabled={isLoading || !input.trim()}>
+              <Button
+                type="submit"
+                size="sm"
+                className="h-8"
+                disabled={isLoading || !input.trim()}
+                data-testid="chat-send"
+              >
                 <Send />
                 Send
               </Button>

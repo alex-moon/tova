@@ -2,6 +2,17 @@
 
 ## Status (current)
 
+#148 E2E expansion (branch `feat/148-e2e-expansion`): local Playwright was failing because
+`e2e/playwright.config.ts` never loaded `.env` (a one-line `import 'dotenv/config'` was the
+sole root cause — suite went 16/16 green immediately). Added stable `data-testid` hooks to
+Login and the ChatWindow composer, extracted the mocked SSE stream into
+`e2e/helpers/chatMock.ts` (shared by all chat specs), and added three specs: `auth.spec.ts`
+(login/error/reload/logout, real local endpoints, read-only), `chat.spec.ts` (send + streamed
+multi-delta reply), and `profile.spec.ts` (profile-save PATCH contract plus the ZDR request
+contract — `history` without `sessionId` on, `sessionId` without `history` off — fully
+page-mocked so no real user state is mutated). Suite is 30/30 across mobile/desktop;
+`npm run ci` exit 0.
+
 #116 ZDR option (merged via PR #124): a per-user "Zero data retention" toggle
 (`settings.zdr`, ProfileModal → `PATCH /api/profile`). With it on: chat turns are
 session-less (no Session/Message rows, no title/classification writes), continuity is a
