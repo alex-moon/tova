@@ -1,5 +1,5 @@
 import { Asset } from '../models/Asset';
-import { putObject } from './storageService';
+import { spacesWorkspaceStorage } from './workspaceStorage';
 import { MAX_ASSET_SIZE, sanitizeFilename } from './assetLimits';
 
 // Server-side write path for system-generated assets (issue #66): Tova
@@ -55,7 +55,7 @@ export const createSystemAsset = async (
   const key = `${userId}/${asset._id}/${safeName}`;
 
   try {
-    await putObject(key, buffer, contentType);
+    await spacesWorkspaceStorage.putByKey(key, buffer, contentType);
   } catch (err) {
     asset.status = 'failed';
     asset.failureReason = 'storage-error';

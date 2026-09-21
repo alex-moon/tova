@@ -29,7 +29,7 @@ import {
 import { webSearch } from './webSearchService';
 import { fetchPage } from './webFetchService';
 import { createSystemAsset } from './systemAssetService';
-import { isStorageConfigured } from './storageService';
+import { spacesWorkspaceStorage } from './workspaceStorage';
 
 /*
  * LangSmith tracing (issue #5), via the official Mastra plugin
@@ -489,7 +489,7 @@ const generateFileExecute = async (
 }> => {
   const userId = requestContext.get('userId') as string | undefined;
   if (!userId) return { error: 'unavailable' };
-  if (!isStorageConfigured()) return { error: 'unavailable' };
+  if (!spacesWorkspaceStorage.isConfigured()) return { error: 'unavailable' };
   try {
     const result = await createSystemAsset(
       userId,

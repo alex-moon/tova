@@ -7,7 +7,7 @@ import { User } from '../models/User';
 import { Asset } from '../models/Asset';
 import { buildAttachmentEnvelope } from '../services/attachmentEnvelope';
 import { isImageContentType } from '../services/assetLimits';
-import { isStorageConfigured, presignGetUrl } from '../services/storageService';
+import { spacesWorkspaceStorage } from '../services/workspaceStorage';
 import { routeQuery } from '../services/routerService';
 import { generateChatTitle } from '../services/titleService';
 import { hasPermission, ROUTING_PERMISSION } from '../services/userService';
@@ -17,7 +17,6 @@ import {
   retrieveKnowledgeBlock,
 } from '../services/entityRetrievalService';
 import { ensureUserLocation } from '../services/geoLocationService';
-import { deleteObject } from '../services/storageService';
 import { inferenceService } from '../services/inferenceService';
 import { outputTokensFor, promptCharsFrom } from '../services/outputTokenCap';
 import type { MessageContentPart, NeutralStreamChunk } from '../services/llmTypes';
@@ -58,7 +57,7 @@ const turnsWithImage = (asset: AssetDoc | null): boolean =>
     asset &&
     asset.status === 'ready' &&
     isImageContentType(asset.contentType) &&
-    isStorageConfigured(),
+    spacesWorkspaceStorage.isConfigured(),
   );
 
 const loadAttachedAsset = async (
@@ -111,13 +110,13 @@ const buildImageTurn = async (
   if (
     !isImageContentType(asset.contentType) ||
     asset.status !== 'ready' ||
-    !isStorageConfigured()
+    !spacesWorkspaceStorage.isConfigured()
   ) {
     return false;
   }
   const last = messages[messages.length - 1];
   if (last?.role !== 'user') return false;
-  const url = await presignGetUrl(asset.key);
+  const url = await spacesWorkspaceStorage.presignGetByKey(asset.key);
   last.content = [
     { type: 'text', text: typeof last.content === 'string' ? last.content : '' },
     { type: 'image_url', image_url: { url } },
@@ -340,7 +339,7 @@ const cleanupEphemeralAsset = async (asset: AssetDoc | null | 'invalid' | 'missi
   if (!asset || asset === 'invalid' || asset === 'missing' || !asset.ephemeral) return;
   try {
     await Asset.deleteOne({ _id: asset._id });
-    await deleteObject(asset.key);
+    await spacesWorkspaceStorage.deleteByKey(asset.key);
   } catch (err) {
     console.error('Ephemeral asset cleanup error:', err);
   }

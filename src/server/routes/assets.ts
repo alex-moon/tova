@@ -12,15 +12,8 @@ import {
   assetPresignSchema,
   MAX_BULK_TOTAL_SIZE,
 } from '../validation';
-import {
-  getObjectBuffer,
-  getObjectStream,
-  headObject,
-  isStorageConfigured,
-  presignGetUrl,
-  presignPutUrl,
-} from '../services/storageService';
 import { extractText, isExtractable, truncateForPrompt } from '../services/textExtraction';
+import { spacesWorkspaceStorage } from '../services/workspaceStorage';
 import { enqueueAssetJob } from '../services/assetJobService';
 import { isConvertible } from '../services/markdownConversion';
 import { ALLOWED_CONTENT_TYPES, MAX_ASSET_SIZE, sanitizeFilename } from '../services/assetLimits';
@@ -138,13 +131,13 @@ const presignItemForUser = async (
   asset.key = key;
   await asset.save();
 
-  const uploadUrl = await presignPutUrl(key, 60, contentType);
+  const uploadUrl = await spacesWorkspaceStorage.presignPutByKey(key, 60, contentType);
   return { status: 'ok', uploadUrl, asset: safeAsset(asset) };
 };
 // POST /api/assets/presign — mints the upload URL; no bytes reach Express.
 router.post('/presign', authenticate, async (req: AuthRequest, res) => {
   try {
-    if (!isStorageConfigured()) {
+    if (!spacesWorkspaceStorage.isConfigured()) {
       return res.status(503).json({ message: 'File storage is not configured' });
     }
     const parsed = assetPresignSchema.safeParse(req.body ?? {});
@@ -182,7 +175,7 @@ router.post('/presign', authenticate, async (req: AuthRequest, res) => {
 // archives are never read or unzipped anywhere.
 router.post('/bulk-presign', authenticate, async (req: AuthRequest, res) => {
   try {
-    if (!isStorageConfigured()) {
+    if (!spacesWorkspaceStorage.isConfigured()) {
       return res.status(503).json({ message: 'File storage is not configured' });
     }
     // Coarse total-size guard on the unvalidated body: over the declared cap
@@ -264,7 +257,7 @@ const confirmAsset = async (asset: AssetDocument): Promise<ConfirmResult> => {
 
   let head;
   try {
-    head = await headObject(asset.key);
+    head = await spacesWorkspaceStorage.headByKey(asset.key);
   } catch (err) {
     console.error('Asset confirm HEAD error:', err);
     asset.status = 'failed';
@@ -285,7 +278,7 @@ const confirmAsset = async (asset: AssetDocument): Promise<ConfirmResult> => {
 
   let text: string | null = null;
   if (isExtractable(asset.filename) && head.size <= MAX_EXTRACT_BYTES) {
-    const buf = await getObjectBuffer(asset.key);
+    const buf = await spacesWorkspaceStorage.getByKey(asset.key);
     if (buf) text = truncateForPrompt(extractText(asset.filename, buf) ?? '');
     if (text !== null) asset.textExtracted = text === '' ? null : text;
   }
@@ -479,7 +472,7 @@ router.get('/bulk-download', authenticate, async (req: AuthRequest, res) => {
     for (let i = 0; i < assets.length; i += 1) {
       const asset = assets[i]!;
       try {
-        const body = await getObjectStream(asset.key);
+        const body = await spacesWorkspaceStorage.getStreamByKey(asset.key);
         if (!body) {
           startResponse();
           archive.append('', { name: `${entryNames[i]}.missing` });
@@ -520,7 +513,7 @@ router.get('/:id/url', authenticate, async (req: AuthRequest, res) => {
     if (asset.status !== 'ready') {
       return res.status(409).json({ message: 'Asset is not ready for download' });
     }
-    const url = await presignGetUrl(asset.key, 300);
+    const url = await spacesWorkspaceStorage.presignGetByKey(asset.key, 300);
     return res.json({ url });
   } catch (err) {
     console.error('Asset url error:', err);
