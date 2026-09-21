@@ -346,7 +346,9 @@ router.get(
       const filter = { userId: new mongoose.Types.ObjectId(userId) };
       const [docs, total] = await Promise.all([
         Entity.find(filter)
-          .sort({ lastMentionedAt: -1 })
+          // mentionCount tiebreak: same-millisecond mentions must paginate
+          // deterministically (an unordered tie would flake between pages).
+          .sort({ lastMentionedAt: -1, mentionCount: -1, normalizedName: 1 })
           .skip((page - 1) * limit)
           .limit(limit),
         Entity.countDocuments(filter),
