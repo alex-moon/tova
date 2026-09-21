@@ -4,7 +4,8 @@ import { RequestContext } from '@mastra/core/request-context';
 import { InMemoryStore } from '@mastra/core/storage';
 import { Observability } from '@mastra/observability';
 import { buildTracingOptions } from '@mastra/observability';
-import { LangSmithExporter, withLangsmithMetadata } from '@mastra/langsmith';
+import { withLangsmithMetadata } from '@mastra/langsmith';
+import { RedactedLangSmithExporter } from './traceRedaction';
 import { createTool } from '@mastra/core/tools';
 import { z } from 'zod';
 import mongoose from 'mongoose';
@@ -40,7 +41,10 @@ import { isStorageConfigured } from './storageService';
  * with no API key no exporter is configured at all and nothing is posted —
  * the off-path is byte-identical to the pre-#5 behaviour. Credentials are
  * read from `LANGSMITH_API_KEY` (`LANGCHAIN_API_KEY` works too) and the
- * project from `LANGCHAIN_PROJECT` — see `.env.example`.
+ * project from `LANGCHAIN_PROJECT` — see `.env.example`. The exporter is
+ * wrapped by `RedactedLangSmithExporter` (traceRedaction.ts) so span
+ * input/output/error payloads are redacted before they leave the process
+ * (issue #145: LangSmith traces are a prompt-leak surface).
  */
 const langsmithKey = process.env.LANGSMITH_API_KEY ?? process.env.LANGCHAIN_API_KEY;
 const projectName = process.env.LANGSMITH_PROJECT ?? process.env.LANGCHAIN_PROJECT;
@@ -57,7 +61,10 @@ export const mastra = new Mastra({
             default: {
               serviceName: 'tova',
               exporters: [
-                new LangSmithExporter({ apiKey: langsmithKey, projectName: projectName }),
+                new RedactedLangSmithExporter({
+                  apiKey: langsmithKey,
+                  projectName,
+                }),
               ],
             },
           },

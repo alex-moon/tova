@@ -1,3 +1,4 @@
+import { redactForLog } from './logRedaction';
 import { inferenceService } from './inferenceService';
 
 const SUGGESTION_MODEL = process.env.ROUTER_GUARD_MODEL || 'openai/gpt-oss-20b';
@@ -34,7 +35,7 @@ export const generateFollowups = async (
     const raw = completion.choices[0]?.message?.content ?? '';
     return parseSuggestions(raw);
   } catch (err) {
-    console.error('Followup generation error:', err);
+    console.error('Followup generation error:', redactForLog(err));
     return [];
   }
 };
