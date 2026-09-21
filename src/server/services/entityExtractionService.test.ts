@@ -185,6 +185,84 @@ describe('extractAndPersistFromTurn', () => {
     expect((await Entity.findOne({ name: 'Taj Hotel' }))!.salience).toBe('high');
   });
 
+  it('dedupes an entity named twice within one turn (no double confidence bump)', async () => {
+    mockCreateToolFree.mockResolvedValue({
+      choices: [
+        {
+          message: {
+            content: JSON.stringify({
+              entities: [
+                { name: 'Taj Hotel', kind: 'place' },
+                { name: 'taj hotel', kind: 'place' },
+              ],
+              edges: [],
+            }),
+          },
+        },
+      ],
+    });
+    await extractAndPersistFromTurn(input);
+    const nodes = await Entity.find();
+    expect(nodes).toHaveLength(1);
+    // One merge per turn: cross-chat confirmation, not intra-chat echo.
+    expect(nodes[0].mentionCount).toBe(1);
+    expect(nodes[0].confidence).toBe(0.25);
+  });
+
+  it('plan task 9: a legacy node without salience/confidence fields never gets nulls', async () => {
+    // Insert a raw doc that skipped the schema defaults (pre-flag production
+    // write or migrated data).
+    await Entity.collection.insertOne({
+      userId: new mongoose.Types.ObjectId(userId),
+      name: 'Taj Hotel',
+      normalizedName: 'taj hotel',
+      kind: 'place',
+      mentionCount: 1,
+      sourceRefs: [],
+    });
+    mockCreateToolFree.mockResolvedValueOnce({
+      choices: [
+        {
+          message: {
+            content: JSON.stringify({
+              entities: [{ name: 'Taj Hotel', kind: 'place', salience: 'low' }],
+              edges: [],
+            }),
+          },
+        },
+      ],
+    });
+    await extractAndPersistFromTurn(input);
+    const node = await Entity.findOne({ name: 'Taj Hotel' }).lean();
+    expect(node?.salience).toBe('low'); // never null
+    // undefined confidence coalesces to LOW, then one bump: 0.4, never null.
+    expect(node?.confidence).toBeCloseTo(0.4, 10);
+  });
+
+  it('plan task 9: a Mongo write failure degrades to a log entry, resolving quietly', async () => {
+    const mute = muteConsoleError();
+    try {
+      mockCreateToolFree.mockResolvedValueOnce({
+        choices: [
+          {
+            message: {
+              content: JSON.stringify({
+                entities: [{ name: 'Taj Hotel', kind: 'place' }],
+                edges: [],
+              }),
+            },
+          },
+        ],
+      });
+      jest.spyOn(Entity, 'findOneAndUpdate').mockRejectedValueOnce(new Error('mongod down'));
+      await expect(extractAndPersistFromTurn(input)).resolves.toBeUndefined();
+      expect(await Entity.countDocuments()).toBe(0);
+    } finally {
+      mute.mockRestore();
+      jest.restoreAllMocks();
+    }
+  });
+
   it('degrades silently on junk JSON with no partial writes', async () => {
     const mute = muteConsoleError();
     try {

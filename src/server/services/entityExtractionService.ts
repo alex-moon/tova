@@ -176,7 +176,9 @@ const upsertEntity = async (
         $set: {
           lastMentionedAt: new Date(),
           confidence: bump,
-          salience: candidate.salience === 'high' ? 'high' : prior.salience,
+          // `?? 'low'`: a legacy doc without the field must not get a null
+          // salience written by $set (the schema default only runs on insert).
+          salience: candidate.salience === 'high' ? 'high' : (prior.salience ?? 'low'),
         },
         $inc: { mentionCount: 1 },
         $push: { sourceRefs: sourceRef },
@@ -253,7 +255,15 @@ export const extractAndPersistFromTurn = async (input: ExtractionInput): Promise
     // normalized name only; an ambiguous name (same name, several kinds) is
     // skipped — silently mis-linking nodes is worse than dropping an edge.
     const nodesByName = new Map<string, mongoose.Types.ObjectId[]>();
+    // A single turn may name the same entity more than once (or the model may
+    // emit it twice). Confidence bumps mean *cross-chat* confirmation ("what
+    // fires together wires together"), so a node is merged into the graph at
+    // most once per turn — dedupe on the identity key up front.
+    const seen = new Set<string>();
     for (const candidate of validEntityCandidates(parsed)) {
+      const key = `${normalizeName(candidate.name)}\u0000${candidate.kind}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
       const id = await upsertEntity(input.userId, candidate, input);
       if (!id) continue;
       const nameKey = normalizeName(candidate.name);
