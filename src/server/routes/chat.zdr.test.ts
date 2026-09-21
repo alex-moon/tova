@@ -7,6 +7,7 @@ import { UserSettings } from '../models/User';
 import { User } from '../models/User';
 import { AssetJob } from '../models/AssetJob';
 import { Asset } from '../models/Asset';
+import { Entity } from '../models/Entity';
 
 const mockAgentStream = jest.fn();
 const mockPlainGenerate = jest.fn();
@@ -81,6 +82,9 @@ const enableZdr = async (email: string) => {
 const streamMessage = (cookie: string[], body: Record<string, unknown>) =>
   request(app).post('/api/chat/stream').set('Cookie', cookie).send(body);
 
+const plainMessage = (cookie: string[], body: Record<string, unknown>) =>
+  request(app).post('/api/chat').set('Cookie', cookie).send(body);
+
 const eventsFrom = (text: string) =>
   text
     .split('\n\n')
@@ -95,6 +99,10 @@ const eventsFrom = (text: string) =>
     });
 
 describe('Zero-data retention chats (issue #116)', () => {
+  afterEach(() => {
+    delete process.env.ENTITY_GRAPH_PROMPT_INJECTION;
+  });
+
   beforeEach(() => {
     jest.clearAllMocks();
     mockAgentStream.mockImplementation(async () => fullStreamFrom(['Ephemeral answer']));
@@ -265,6 +273,67 @@ describe('Zero-data retention chats (issue #116)', () => {
 
     expect(await Asset.countDocuments({ _id: asset._id })).toBe(1);
     expect(mockDeleteObject).not.toHaveBeenCalled();
+  });
+
+  // #138 task 8: incognito turns get the graph READ-ONLY (Alex, 2026-09-21)
+  // — the block is injected, but nothing is written, ever.
+  it('injects the knowledge block into a ZDR turn read-only (plain route)', async () => {
+    mockPlainGenerate.mockResolvedValue({
+      choices: [{ message: { content: 'Plain ephemeral answer' } }],
+    });
+    process.env.ENTITY_GRAPH_PROMPT_INJECTION = 'on';
+    const email = 'zdr-graph@example.com';
+    const cookies = await registerUser(email);
+    await enableZdr(email);
+    const doc = await User.findOne({ email });
+    await Entity.create({
+      userId: doc!._id,
+      name: 'Taj Hotel',
+      normalizedName: 'taj hotel',
+      kind: 'place',
+      confidence: 0.9, // above HIGH_CONFIDENCE so it passes the gate
+    });
+
+    const response = await plainMessage(cookies, { content: 'restaurants near taj hotel' });
+    expect(response.status).toBe(200);
+    const system = mockPlainGenerate.mock.calls[0][0].messages.find(
+      (m: { role: string }) => m.role === 'system',
+    );
+    expect(system.content).toContain('<user:knowledge_graph>');
+    expect(system.content).toContain('place: Taj Hotel');
+    // Read-only: no session, message, entity, or edge writes from a ZDR turn.
+    expect(await Session.countDocuments()).toBe(0);
+    expect(await Message.countDocuments()).toBe(0);
+    expect(await Entity.countDocuments()).toBe(1);
+  });
+
+  it('injects the knowledge block into a ZDR streaming turn and writes nothing', async () => {
+    process.env.ENTITY_GRAPH_PROMPT_INJECTION = 'on';
+    const email = 'zdr-graph-stream@example.com';
+    const cookies = await registerUser(email);
+    await enableZdr(email);
+    const doc = await User.findOne({ email });
+    await Entity.create({
+      userId: doc!._id,
+      name: 'Taj Hotel',
+      normalizedName: 'taj hotel',
+      kind: 'place',
+      confidence: 0.9,
+    });
+
+    const response = await streamMessage(cookies, {
+      content: 'restaurants near taj hotel',
+      history: [],
+    });
+    expect(response.status).toBe(200);
+    const streamOpts = mockAgentStream.mock.calls[0][0];
+    const system = (streamOpts.messages as { role: string; content: string }[]).find(
+      (m) => m.role === 'system',
+    );
+    expect(system?.content).toContain('<user:knowledge_graph>');
+    expect(await Session.countDocuments()).toBe(0);
+    expect(await Message.countDocuments()).toBe(0);
+    expect(await Entity.countDocuments()).toBe(1);
   });
 
   describe('ephemeral cleanup on rejected/failed turns', () => {

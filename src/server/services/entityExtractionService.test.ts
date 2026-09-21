@@ -67,9 +67,19 @@ describe('validEntityCandidates / validEdgeCandidates', () => {
       ],
     });
     expect(candidates).toEqual([
-      { name: 'Taj Hotel', kind: 'place', summary: 'A hotel.' },
-      { name: 'spaces', kind: 'person', summary: '' },
+      { name: 'Taj Hotel', kind: 'place', summary: 'A hotel.', salience: 'low' },
+      { name: 'spaces', kind: 'person', summary: '', salience: 'low' },
     ]);
+  });
+
+  it('reads a salience hint, defaulting to low on junk values', () => {
+    const candidates = validEntityCandidates({
+      entities: [
+        { name: 'Funeral', kind: 'event', salience: 'high' },
+        { name: 'Commute', kind: 'task', salience: 'strong' },
+      ],
+    });
+    expect(candidates.map((c) => c.salience)).toEqual(['high', 'low']);
   });
 
   it('drops self-links and unkinded edges', () => {
@@ -138,6 +148,41 @@ describe('extractAndPersistFromTurn', () => {
     expect(nodes).toHaveLength(1);
     expect(nodes[0].mentionCount).toBe(2);
     expect(String(nodes[0].sourceRefs[0].messageId)).toBe(messageId);
+  });
+
+  it('plan task 7: new nodes start LOW, merges saturate below 1, salience can rise', async () => {
+    mockCreateToolFree.mockResolvedValue({
+      choices: [
+        {
+          message: {
+            content: JSON.stringify({
+              entities: [
+                { name: 'Taj Hotel', kind: 'place', salience: 'high' },
+                { name: 'Commute', kind: 'task' },
+              ],
+              edges: [],
+            }),
+          },
+        },
+      ],
+    });
+    await extractAndPersistFromTurn(input);
+    let nodes = await Entity.find();
+    expect(nodes.every((n) => n.confidence === 0.25)).toBe(true); // LOW_CONFIDENCE
+    expect(nodes.find((n) => n.name === 'Commute')!.salience).toBe('low');
+    expect(nodes.find((n) => n.name === 'Taj Hotel')!.salience).toBe('high');
+    for (let i = 0; i < 8; i += 1) {
+      await extractAndPersistFromTurn({ ...input, userText: `Mention ${i} of Taj Hotel` });
+    }
+    const taj = await Entity.findOne({ name: 'Taj Hotel' });
+    expect(taj!.mentionCount).toBe(9);
+    // Eight saturating bumps land past HIGH but never at/above 1.
+    expect(taj!.confidence).toBeCloseTo(1 - 0.8 ** 8 * 0.75, 10);
+    expect(taj!.confidence).toBeGreaterThan(0.75);
+    expect(taj!.confidence).toBeLessThan(1);
+    // Salience only ever rises: a later 'low' mention cannot demote it.
+    await extractAndPersistFromTurn({ ...input, userText: 'more Taj Hotel chat' });
+    expect((await Entity.findOne({ name: 'Taj Hotel' }))!.salience).toBe('high');
   });
 
   it('degrades silently on junk JSON with no partial writes', async () => {

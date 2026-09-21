@@ -11,7 +11,7 @@ import {
   runModelComparison,
   type CompareModelRef,
 } from '../services/modelCompare';
-import { Entity } from '../models/Entity';
+import { Entity, LOW_CONFIDENCE } from '../models/Entity';
 import { EntityEdge } from '../models/EntityEdge';
 import type {
   AdminGraphEdge,
@@ -326,6 +326,8 @@ const toGraphEntity = (e: mongoose.AnyObject): AdminGraphEntity => ({
   kind: e.kind,
   ...(e.summary ? { summary: e.summary } : {}),
   mentionCount: e.mentionCount ?? 1,
+  confidence: e.confidence ?? LOW_CONFIDENCE,
+  salience: e.salience === 'high' ? 'high' : 'low',
   lastMentionedAt: new Date(e.lastMentionedAt).toISOString(),
   sourceRefs: toGraphSourceRefs(e.sourceRefs ?? []),
 });

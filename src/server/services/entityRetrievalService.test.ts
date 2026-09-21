@@ -115,19 +115,18 @@ describe('retrieveKnowledgeBlock (integration)', () => {
     expect(await retrieveKnowledgeBlock('ideas', userId.toString())).toBe('');
   });
 
+  const createNode = (name: string, kind: string, confidence = 0.9) =>
+    Entity.create({
+      userId,
+      name,
+      normalizedName: name.toLowerCase(),
+      kind,
+      confidence,
+    });
+
   it('inlines relevant nodes plus their direct edges with resolved names', async () => {
-    const tai = await Entity.create({
-      userId,
-      name: 'Taj Hotel',
-      normalizedName: 'taj hotel',
-      kind: 'place',
-    });
-    const anaya = await Entity.create({
-      userId,
-      name: 'Anaya',
-      normalizedName: 'anaya',
-      kind: 'person',
-    });
+    const tai = await createNode('Taj Hotel', 'place');
+    const anaya = await createNode('Anaya', 'person');
     await EntityEdge.create({
       userId,
       fromEntityId: anaya._id,
@@ -135,12 +134,7 @@ describe('retrieveKnowledgeBlock (integration)', () => {
       kind: 'involved-party',
       summary: 'Anaya is visiting the hotel.',
     });
-    const other = await Entity.create({
-      userId,
-      name: 'Distant Project',
-      normalizedName: 'distant project',
-      kind: 'project',
-    });
+    const other = await createNode('Distant Project', 'project');
     await EntityEdge.create({
       userId,
       fromEntityId: other._id,
@@ -150,5 +144,26 @@ describe('retrieveKnowledgeBlock (integration)', () => {
     const block = await retrieveKnowledgeBlock('restaurants near taj hotel', userId.toString());
     expect(block).toContain('place: Taj Hotel');
     expect(block).toContain('—involved-party→ Taj Hotel');
+  });
+
+  it('plan task 7: low-confidence nodes are excluded even with keyword overlap', async () => {
+    await createNode('Gateway Hotel', 'place', 0.25); // below HIGH_CONFIDENCE
+    const block = await retrieveKnowledgeBlock('restaurants near gateway hotel', userId.toString());
+    expect(block).toBe('');
+  });
+
+  it('plan task 7: crossing the threshold brings the node back', async () => {
+    const fiveBumps = Number(1 - 0.75 * 0.8 ** 5); // saturating growth from LOW
+    expect(fiveBumps).toBeGreaterThan(0.75);
+    await createNode('Colaba Hotel', 'place', fiveBumps);
+    const block = await retrieveKnowledgeBlock('restaurants near colaba hotel', userId.toString());
+    expect(block).toContain('place: Colaba Hotel');
+  });
+
+  it('plan task 7: pre-confidence legacy docs (no field) read as low and stay out', async () => {
+    const legacy = await createNode('Legacy Hotel', 'place');
+    await Entity.updateOne({ _id: legacy._id }, { $unset: { confidence: 1 } });
+    const block = await retrieveKnowledgeBlock('restaurants near legacy hotel', userId.toString());
+    expect(block).toBe('');
   });
 });

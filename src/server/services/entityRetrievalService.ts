@@ -1,5 +1,5 @@
 import mongoose from 'mongoose';
-import { Entity } from '../models/Entity';
+import { Entity, HIGH_CONFIDENCE } from '../models/Entity';
 import { EntityEdge } from '../models/EntityEdge';
 import { normalizeName } from './entityExtractionService';
 
@@ -153,7 +153,14 @@ export const retrieveKnowledgeBlock = async (
   userId: string,
   n = 8,
 ): Promise<string> => {
-  const pool = await Entity.find({ userId: new mongoose.Types.ObjectId(userId) })
+  const pool = await Entity.find({
+    userId: new mongoose.Types.ObjectId(userId),
+    // Plan task 7: confidence-gated. Only HIGH-confidence nodes — "what fires
+    // together wires together", saturated past the threshold — reach the
+    // block; the very start of a user's graph therefore injects nothing,
+    // deliberately. Pre-confidence docs (no field) read as low and stay out.
+    confidence: { $gte: HIGH_CONFIDENCE },
+  })
     .sort({ lastMentionedAt: -1 })
     .limit(100)
     .lean();

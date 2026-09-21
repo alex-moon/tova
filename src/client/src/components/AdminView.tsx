@@ -713,6 +713,7 @@ const AdminView = () => {
                         <th className="px-4 py-3 font-medium">Name</th>
                         <th className="px-4 py-3 font-medium">Kind</th>
                         <th className="px-4 py-3 font-medium">Mentions</th>
+                        <th className="px-4 py-3 font-medium">Confidence</th>
                         <th className="px-4 py-3 font-medium">Sources</th>
                         <th className="px-4 py-3">
                           {graphEntities.total > graphEntities.limit && (
@@ -733,6 +734,10 @@ const AdminView = () => {
                           <td className="px-4 py-3 text-muted-foreground">{entity.kind}</td>
                           <td className="px-4 py-3">{entity.mentionCount}</td>
                           <td className="px-4 py-3 text-muted-foreground">
+                            {entity.confidence.toFixed(2)}
+                            {entity.salience === 'high' ? ' · salient' : ''}
+                          </td>
+                          <td className="px-4 py-3 text-muted-foreground">
                             {entity.sourceRefs.length}
                           </td>
                           <td className="px-4 py-3">
@@ -748,7 +753,7 @@ const AdminView = () => {
                       ))}
                       {graphEntities.entities.length === 0 && (
                         <tr>
-                          <td className="px-4 py-3 text-muted-foreground" colSpan={5}>
+                          <td className="px-4 py-3 text-muted-foreground" colSpan={6}>
                             No entities for this user yet.
                           </td>
                         </tr>

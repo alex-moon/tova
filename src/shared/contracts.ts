@@ -81,6 +81,10 @@ export interface AdminGraphEntity {
   kind: string;
   summary?: string;
   mentionCount: number;
+  // Plan-138 task 7: confidence is surfaced so threshold behaviour stays
+  // auditable in the tab (retrieval only admits nodes >= HIGH_CONFIDENCE).
+  confidence: number;
+  salience: 'low' | 'high';
   lastMentionedAt: string;
   sourceRefs: AdminGraphSourceRef[];
 }

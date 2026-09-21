@@ -1,6 +1,6 @@
 import mongoose from 'mongoose';
 import { inferenceService } from './inferenceService';
-import { Entity } from '../models/Entity';
+import { Entity, LOW_CONFIDENCE, bumpConfidence, type Salience } from '../models/Entity';
 import { EntityEdge } from '../models/EntityEdge';
 
 /*
@@ -25,8 +25,10 @@ const EXTRACTION_PROMPT =
   'between them. Ignore code, generic concepts, and anything the assistant merely cited. ' +
   'State a relationship ONLY when the text actually links the two entities (a plan, ' +
   'involvement, gate/signoff, preference, or location-style tie). ' +
+  'Tag each entity `salience: "high"` ONLY when it is emotionally significant to the user ' +
+  '(a family event, a strong personal preference); default to "low". ' +
   'Reply with ONLY a JSON object, no prose or code fences, shaped exactly like: ' +
-  '{"entities":[{"name":"...","kind":"person|place|organization|project|task|event|commitment|preference","summary":"one sentence"}],' +
+  '{"entities":[{"name":"...","kind":"person|place|organization|project|task|event|commitment|preference","summary":"one sentence","salience":"low|high"}],' +
   '"edges":[{"from":"entity name","to":"entity name","kind":"involved-party|plan|prefers|located-in|gate","summary":"one sentence"}]} ' +
   'If there is nothing durable, reply {"entities":[],"edges":[]}';
 
@@ -35,7 +37,7 @@ const KIND_PATTERN = /^[a-z][a-z-]*$/;
 export const normalizeName = (name: string): string =>
   name.toLowerCase().replace(/\s+/g, ' ').trim();
 
-type EntityCandidate = { name: string; kind: string; summary: string };
+type EntityCandidate = { name: string; kind: string; summary: string; salience: Salience };
 type EdgeCandidate = { from: string; to: string; kind: string; summary: string };
 
 /*
@@ -70,7 +72,7 @@ export const validEntityCandidates = (parsed: unknown): EntityCandidate[] => {
   if (!Array.isArray(list)) return [];
   return list
     .filter(
-      (item): item is { name: unknown; kind: unknown; summary?: unknown } =>
+      (item): item is { name: unknown; kind: unknown; summary?: unknown; salience?: unknown } =>
         typeof item === 'object' && item !== null,
     )
     .filter((item) => typeof item.name === 'string' && item.name.trim() !== '')
@@ -79,6 +81,7 @@ export const validEntityCandidates = (parsed: unknown): EntityCandidate[] => {
       name: (item.name as string).trim(),
       kind: (item.kind as string).trim().toLowerCase(),
       summary: cleanSummary(item.summary),
+      salience: item.salience === 'high' ? 'high' : 'low',
     }));
 };
 
@@ -122,37 +125,64 @@ export type ExtractionInput = {
  * lastMentionedAt on the match path and only sets name/kind on insert, so a
  * repeated mention reuses the existing node — never a second one. A failed
  * upsert (e.g. a race across concurrent turns) logs and skips, never throws.
+ *
+ * Confidence (plan task 7): a fresh node starts at LOW_CONFIDENCE; a merge
+ * applies the saturating bump computed from the pre-update value (read-
+ * modify-write on a tiny race window — far less frequent than it sounds,
+ * and a missed bump merely slows a node's rise, never loses data). Salience
+ * can only rise from a re-mention: a commute habit never earns salience, and
+ * using salience in retrieval is deliberately out of scope (plan task 7f).
  */
 const upsertEntity = async (
   userId: string,
   candidate: EntityCandidate,
   input: { sessionId: string; messageId: string },
 ): Promise<mongoose.Types.ObjectId | null> => {
+  const sourceRef = {
+    sessionId: new mongoose.Types.ObjectId(input.sessionId),
+    messageId: new mongoose.Types.ObjectId(input.messageId),
+  };
   try {
-    const doc = await Entity.findOneAndUpdate(
+    const prior = await Entity.findOneAndUpdate(
       {
         userId: new mongoose.Types.ObjectId(userId),
         normalizedName: normalizeName(candidate.name),
         kind: candidate.kind,
       },
       {
-        $set: { lastMentionedAt: new Date() },
-        $inc: { mentionCount: 1 },
         $setOnInsert: {
           name: candidate.name,
           kind: candidate.kind,
+          confidence: LOW_CONFIDENCE,
+          salience: candidate.salience,
           ...(candidate.summary ? { summary: candidate.summary } : {}),
-        },
-        $push: {
-          sourceRefs: {
-            sessionId: new mongoose.Types.ObjectId(input.sessionId),
-            messageId: new mongoose.Types.ObjectId(input.messageId),
-          },
+          sourceRefs: [sourceRef],
         },
       },
-      { upsert: true, new: true },
+      { upsert: true },
     );
-    return doc._id as mongoose.Types.ObjectId;
+    if (!prior) {
+      const inserted = await Entity.findOne({
+        userId: new mongoose.Types.ObjectId(userId),
+        normalizedName: normalizeName(candidate.name),
+        kind: candidate.kind,
+      });
+      return (inserted?._id as mongoose.Types.ObjectId) ?? null;
+    }
+    const bump = bumpConfidence(prior.confidence ?? LOW_CONFIDENCE);
+    await Entity.updateOne(
+      { _id: prior._id },
+      {
+        $set: {
+          lastMentionedAt: new Date(),
+          confidence: bump,
+          salience: candidate.salience === 'high' ? 'high' : prior.salience,
+        },
+        $inc: { mentionCount: 1 },
+        $push: { sourceRefs: sourceRef },
+      },
+    );
+    return prior._id as mongoose.Types.ObjectId;
   } catch (err) {
     console.error(`Entity upsert error for "${candidate.name}" (${candidate.kind}):`, err);
     return null;

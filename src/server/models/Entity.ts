@@ -18,6 +18,24 @@ const sourceRefSchema = new mongoose.Schema({
   },
 });
 
+/*
+ * Plan-138 task 7 confidence model ("what fires together wires together"):
+ * every node starts LOW; each confirmed cross-chat mention bumps it by a
+ * saturating step so a node needs several mentions to reach HIGH, and only
+ * HIGH nodes are eligible for prompt injection. Both values are guesses
+ * pending real extraction data — named here, not env-configured, so flipping
+ * the numbers is a one-commit change.
+ */
+export const LOW_CONFIDENCE = 0.25;
+export const HIGH_CONFIDENCE = 0.75;
+
+// Saturation step: 1 − (1 − c) · 0.8, i.e. diminishing returns; never exceeds 1.
+export const bumpConfidence = (confidence: number): number => confidence + 0.2 * (1 - confidence);
+
+// Extraction-time hint the LLM may attach (plan-138 task 7f). Stored but NOT
+// used by retrieval — the frequency-vs-salience question is still open.
+export type Salience = 'low' | 'high';
+
 const entitySchema = new mongoose.Schema({
   userId: {
     type: mongoose.Schema.Types.ObjectId,
@@ -50,6 +68,15 @@ const entitySchema = new mongoose.Schema({
     type: Number,
     default: 1,
   },
+  confidence: {
+    type: Number,
+    default: LOW_CONFIDENCE,
+  },
+  salience: {
+    type: String,
+    enum: ['low', 'high'],
+    default: 'low',
+  },
   lastMentionedAt: {
     type: Date,
     default: Date.now,
@@ -73,6 +100,8 @@ export type EntityDoc = mongoose.Document & {
   summary?: string;
   attrs?: Record<string, unknown>;
   mentionCount: number;
+  confidence: number;
+  salience: Salience;
   lastMentionedAt: Date;
   sourceRefs: { sessionId: mongoose.Types.ObjectId; messageId?: mongoose.Types.ObjectId }[];
 };

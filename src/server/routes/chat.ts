@@ -440,7 +440,15 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
       }
       const messages = buildZdrMessages(zdrHistory.value, content);
       await ensureUserLocation(userDoc, req.ip);
-      messages.unshift({ role: 'system', content: buildSystemContent(userDoc) });
+      // Plan task 8: ZDR/incognito turns DO retrieve the graph read-only
+      // (Alex, 2026-09-21) — but they write nothing, and this branch an early
+      // return before any persistence does exactly that. Extraction below
+      // never runs for ZDR.
+      const zdrEntityBlock = await knowledgeBlockFor(content, userId as string);
+      messages.unshift({
+        role: 'system',
+        content: buildSystemContent(userDoc, zdrEntityBlock),
+      });
       appendAssetBlock(messages, attachedAsset);
 
       const routingResult = await routeQuery(content, undefined, undefined, {
