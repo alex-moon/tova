@@ -140,7 +140,7 @@ describe('Router Service', () => {
       });
       expect(consoleErrorSpy).toHaveBeenCalledWith(
         'Classifier error:',
-        expect.objectContaining({ message: 'classifier down' }),
+        expect.stringContaining('classifier down'),
       );
     });
 

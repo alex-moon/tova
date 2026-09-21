@@ -1,6 +1,7 @@
 import mongoose from 'mongoose';
 import { inferenceService } from './inferenceService';
 import { Entity, LOW_CONFIDENCE, bumpConfidence, type Salience } from '../models/Entity';
+import { redactForLog } from './logRedaction';
 import { EntityEdge } from '../models/EntityEdge';
 
 /*
@@ -186,7 +187,12 @@ const upsertEntity = async (
     );
     return prior._id as mongoose.Types.ObjectId;
   } catch (err) {
-    console.error('Entity upsert error:', candidate.name, candidate.kind, err);
+    console.error(
+      'Entity upsert error:',
+      redactForLog(candidate.name),
+      redactForLog(candidate.kind),
+      redactForLog(err),
+    );
     return null;
   }
 };
@@ -218,7 +224,7 @@ const upsertEdge = async (
       { upsert: true },
     );
   } catch (err) {
-    console.error('Entity edge upsert error:', err);
+    console.error('Entity edge upsert error:', redactForLog(err));
   }
 };
 
@@ -282,6 +288,6 @@ export const extractAndPersistFromTurn = async (input: ExtractionInput): Promise
       await upsertEdge(input.userId, from, to, edge, input);
     }
   } catch (err) {
-    console.error('Entity extraction error:', err);
+    console.error('Entity extraction error:', redactForLog(err));
   }
 };

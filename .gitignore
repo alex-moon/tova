@@ -27,4 +27,5 @@ yarn-error.log*
 
 
 /.iteration
-/tmp/db-dumps/
+/data
+
