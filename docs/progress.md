@@ -2,6 +2,17 @@
 
 ## Status (current)
 
+#148 E2E expansion (branch `feat/148-e2e-expansion`): local Playwright was failing because
+`e2e/playwright.config.ts` never loaded `.env` (a one-line `import 'dotenv/config'` was the
+sole root cause — suite went 16/16 green immediately). Added stable `data-testid` hooks to
+Login and the ChatWindow composer, extracted the mocked SSE stream into
+`e2e/helpers/chatMock.ts` (shared by all chat specs), and added three specs: `auth.spec.ts`
+(login/error/reload/logout, real local endpoints, read-only), `chat.spec.ts` (send + streamed
+multi-delta reply), and `profile.spec.ts` (profile-save PATCH contract plus the ZDR request
+contract — `history` without `sessionId` on, `sessionId` without `history` off — fully
+page-mocked so no real user state is mutated). Suite is 30/30 across mobile/desktop;
+`npm run ci` exit 0.
+
 #116 ZDR option (merged via PR #124): a per-user "Zero data retention" toggle
 (`settings.zdr`, ProfileModal → `PATCH /api/profile`). With it on: chat turns are
 session-less (no Session/Message rows, no title/classification writes), continuity is a
@@ -28,6 +39,14 @@ Everything is behind `ENTITY_GRAPH_ENABLED` / `ENTITY_GRAPH_PROMPT_INJECTION`
 Preference inference, fuzzy disambiguation, ontology enforcement, files feeding the
 graph and tool-based querying are deliberately deferred; open questions in the plan
 doc.
+
+#145 Log redaction (in flight, PR #154): `logRedaction.ts` (`redactForLog`) redacts
+error message text at every user-content-adjacent `console.*` call site (verified
+hit-by-hit audit of `src/server`), protecting stdout and the admin logs buffer via the
+logService console capture; `traceRedaction.ts` applies the same policy to LangSmith
+span input/output/error via an exporter override; pino evaluated and declined (call-site
+redaction covers the actual failure mode; documented in the plan). Gate: RAG notes
+ticket can now state the no-leak constraint in `docs/overview.md`.
 
 No outstanding local tasks. Planning and tracking happen on GitHub (`alex-moon/tova`):
 issues for open work, PRs for changes; plans live in `docs/plan-<ticket>-<summary>.md`

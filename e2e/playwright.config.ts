@@ -1,3 +1,5 @@
+import 'dotenv/config';
+
 import { defineConfig } from '@playwright/test';
 
 process.env.E2E_BASE_URL ??= 'http://localhost:5173';
