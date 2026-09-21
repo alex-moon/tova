@@ -376,8 +376,10 @@ export const mcpToolsetsForUser = async (
     }
     if (droppedTools > 0) {
       console.warn(
-        `MCP tool budget (${toolTokenBudget()} est. tokens): dropped ${droppedTools} user tool` +
-          `${droppedTools === 1 ? '' : 's'} from this turn's chat request`,
+        'MCP tool budget (%d est. tokens): dropped %d user tool%s from this turn\u2019s chat request',
+        toolTokenBudget(),
+        droppedTools,
+        droppedTools === 1 ? '' : 's',
       );
     }
     return toolsets;

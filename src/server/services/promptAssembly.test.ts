@@ -93,4 +93,26 @@ describe('buildSystemContent / coarse location (issue #50)', () => {
       ).split('<user:location>'),
     ).toHaveLength(1);
   });
+
+  describe('buildSystemContent / entity-graph knowledge block (issue #138, plan task 4)', () => {
+    it('rides in its own envelope when the caller retrieved a non-empty block', () => {
+      const content = buildSystemContent(
+        userWith({ preferredName: 'Alex' }),
+        '- place: Mumbai — mentioned 3 times',
+      );
+      expect(content).toContain('<user:knowledge_graph>');
+      expect(content).toContain('- place: Mumbai — mentioned 3 times');
+      expect(content).toContain('</user:knowledge_graph>');
+      expect(content).toContain('Use it only where relevant');
+    });
+
+    it('emits no graph envelope when the block is empty, whitespace, or not requested', () => {
+      expect(buildSystemContent(userWith({})).split('<user:knowledge_graph>')).toHaveLength(1);
+      expect(buildSystemContent(userWith({}), '').split('<user:knowledge_graph>')).toHaveLength(1);
+      expect(
+        buildSystemContent(userWith({}), '   \n').split('<user:knowledge_graph>'),
+      ).toHaveLength(1);
+      expect(buildSystemContent(null, undefined).split('<user:knowledge_graph>')).toHaveLength(1);
+    });
+  });
 });

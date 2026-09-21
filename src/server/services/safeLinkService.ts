@@ -45,7 +45,7 @@ export const isCheckerEnabled = (): boolean => safeBrowsingApiKey() !== undefine
 
 const warnOutage = (url: string, err: unknown): void => {
   const message = err instanceof Error ? err.message : String(err);
-  console.warn(`Safe Browsing check failed for ${url}, proceeding (fail-open): ${message}`);
+  console.warn(`Safe Browsing check failed for %s, proceeding (fail-open): %O`, url, message);
 };
 
 const callThreatMatches = async (url: string, apiKey: string): Promise<string[]> => {

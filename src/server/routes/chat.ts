@@ -12,6 +12,10 @@ import { routeQuery } from '../services/routerService';
 import { generateChatTitle } from '../services/titleService';
 import { hasPermission, ROUTING_PERMISSION } from '../services/userService';
 import { buildSystemContent } from '../services/promptAssembly';
+import {
+  isEntityInjectionEnabled,
+  retrieveKnowledgeBlock,
+} from '../services/entityRetrievalService';
 import { ensureUserLocation } from '../services/geoLocationService';
 import { deleteObject } from '../services/storageService';
 import { inferenceService } from '../services/inferenceService';
@@ -20,6 +24,10 @@ import type { MessageContentPart, NeutralStreamChunk } from '../services/llmType
 import { classifyAndPersistPromptDimensions, isTriviallyNeutral } from '../services/metricsService';
 import { computeDeterministicMetrics } from '../services/promptMetrics';
 import { generateFollowups } from '../services/followupService';
+import {
+  extractAndPersistFromTurn,
+  isEntityExtractionEnabled,
+} from '../services/entityExtractionService';
 import { zdrHistorySchema } from '../validation';
 
 const router = express.Router();
@@ -376,6 +384,22 @@ const saveUserMessageWithMetrics = async (
   return userMessage;
 };
 
+/*
+ * Entity-graph retrieval (#138, plan task 4): read-only, bounded "what we
+ * know about you" block for the system prompt, only when
+ * ENTITY_GRAPH_PROMPT_INJECTION is set. Never throws — graph enrichment,
+ * like extraction, must not degrade a chat turn.
+ */
+const knowledgeBlockFor = async (prompt: string, userId: string): Promise<string> => {
+  if (!isEntityInjectionEnabled()) return '';
+  try {
+    return await retrieveKnowledgeBlock(prompt, userId);
+  } catch (err) {
+    console.error('Entity graph retrieval error:', err);
+    return '';
+  }
+};
+
 // Chat endpoint (non-streaming, preserved for compatibility)
 router.post('/', authenticate, async (req: AuthRequest, res) => {
   // Held outside try so the catch can erase a throwaway attachment on any
@@ -437,7 +461,15 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
       }
       const messages = buildZdrMessages(zdrHistory.value, content);
       await ensureUserLocation(userDoc, req.ip);
-      messages.unshift({ role: 'system', content: buildSystemContent(userDoc) });
+      // Plan task 8: ZDR/incognito turns DO retrieve the graph read-only
+      // (Alex, 2026-09-21) — but they write nothing, and this branch an early
+      // return before any persistence does exactly that. Extraction below
+      // never runs for ZDR.
+      const zdrEntityBlock = await knowledgeBlockFor(content, userId as string);
+      messages.unshift({
+        role: 'system',
+        content: buildSystemContent(userDoc, zdrEntityBlock),
+      });
       appendAssetBlock(messages, attachedAsset);
 
       const routingResult = await routeQuery(content, undefined, undefined, {
@@ -500,7 +532,11 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
     // country; cheap when cached (fresh/cooldown returns immediately) and the
     // service itself never throws, so chat cannot block hard on it.
     await ensureUserLocation(userDoc, req.ip);
-    messages.unshift({ role: 'system', content: buildSystemContent(userDoc) });
+    const entityBlock = await knowledgeBlockFor(content, userId as string);
+    messages.unshift({
+      role: 'system',
+      content: buildSystemContent(userDoc, entityBlock),
+    });
     if (attachedAsset) {
       const imageAttached = hasImage ? await buildImageTurn(messages, attachedAsset) : false;
       if (!imageAttached) appendAssetBlock(messages, attachedAsset);
@@ -545,6 +581,21 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
       metrics: await buildMessageMetrics(String(session!._id), assistantContent),
     });
     await assistantMessage.save();
+
+    // Entity graph extraction (#138): one extra LLM call after the turn is
+    // served, fire-and-forget like title generation. Never runs for ZDR
+    // chats (handled above), and only when ENTITY_GRAPH_ENABLED is set —
+    // extraction is enrichment, so failures log and everything else
+    // continues from here.
+    if (isEntityExtractionEnabled()) {
+      extractAndPersistFromTurn({
+        userId: String(userDoc!._id),
+        sessionId: String(session!._id),
+        messageId: String(assistantMessage._id),
+        userText: content,
+        assistantText: assistantContent,
+      }).catch((err) => console.error('Entity extraction error:', err));
+    }
 
     res.json({
       sessionId: session!._id,
@@ -667,7 +718,11 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
       messages = messagesFromPersistedHistory(history as { role: string; content: string }[]);
     }
 
-    messages.unshift({ role: 'system', content: buildSystemContent(streamUserDoc) });
+    const streamEntityBlock = await knowledgeBlockFor(content, userId as string);
+    messages.unshift({
+      role: 'system',
+      content: buildSystemContent(streamUserDoc, streamEntityBlock),
+    });
     if (attachedAsset) {
       const imageAttached = hasImage ? await buildImageTurn(messages, attachedAsset) : false;
       if (!imageAttached) appendAssetBlock(messages, attachedAsset);
@@ -796,6 +851,16 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
       metrics: await buildMessageMetrics(String(session!._id), assistantContent),
     });
     await assistantMessage.save();
+
+    if (isEntityExtractionEnabled()) {
+      extractAndPersistFromTurn({
+        userId: String(streamUserDoc!._id),
+        sessionId: String(session!._id),
+        messageId: String(assistantMessage._id),
+        userText: content,
+        assistantText: assistantContent,
+      }).catch((err) => console.error('Entity extraction error:', err));
+    }
 
     // Follow-up suggestions (issue #33): generated with the cheap guard
     // model, reusing the title/classification service pattern. Skipped for
