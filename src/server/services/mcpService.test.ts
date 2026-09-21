@@ -325,7 +325,12 @@ describe('#77 MCP tool budget (user-scope toolsets)', () => {
     });
     const toolsets = await mcpToolsetsForUser(USER_ID, { provider: 'deepinfra' });
     expect(toolsets).toEqual({});
-    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('dropped 1 user tool'));
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('dropped %d user tool'),
+      10,
+      1,
+      '',
+    );
   });
 
   it('#109: Groq turns keep the budget when the provider is tagged explicitly', async () => {
@@ -350,7 +355,12 @@ describe('#77 MCP tool budget (user-scope toolsets)', () => {
     });
     const toolsets = await mcpToolsetsForUser(USER_ID, { provider: 'groq' });
     expect(toolsets).toEqual({});
-    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('dropped 1 user tool'));
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('dropped %d user tool'),
+      10,
+      1,
+      '',
+    );
   });
 
   it('#77: drops user tools beyond the token budget, attaches what fits', async () => {
