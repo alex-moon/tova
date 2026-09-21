@@ -15,7 +15,8 @@ export const getJwtSecret = (): string => {
   if (!warned) {
     warned = true;
     console.warn(
-      `${JWT_SECRET_ENV_VAR} is not set; using an insecure fallback secret (development only)`,
+      '%s is not set; using an insecure fallback secret (development only)',
+      JWT_SECRET_ENV_VAR,
     );
   }
   return 'fallback_secret';

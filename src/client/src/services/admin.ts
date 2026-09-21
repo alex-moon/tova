@@ -1,5 +1,12 @@
 import axios from 'axios';
-import type { AdminModel, AdminUser, AdminLogsPayload, ModelComparisonRun } from '../types/admin';
+import type {
+  AdminModel,
+  AdminUser,
+  AdminLogsPayload,
+  ModelComparisonRun,
+  AdminGraphEntitiesPayload,
+  AdminGraphEntityDetail,
+} from '../types/admin';
 
 // Normalised admin failure: message comes from the server response when one
 // arrived, otherwise the call's fallback. Views catch AdminError and read
@@ -133,4 +140,29 @@ const listLogs = async (params: ListLogsParams = {}): Promise<AdminLogsPayload> 
 
 const AdminLogsService = { listLogs };
 
-export { AdminModelsService, AdminLogsService };
+// Per-user entity graph read view (issue #138, plan task 5): the Graph tab
+// picks a user, lists their nodes paginated, and drills into one node for
+// its edges with the other endpoint's name already resolved by the server.
+const listGraphEntities = async (userId: string, page = 1): Promise<AdminGraphEntitiesPayload> => {
+  try {
+    const res = await axios.get<AdminGraphEntitiesPayload>('/api/admin/graph/entities', {
+      params: { userId, page },
+    });
+    return res.data;
+  } catch (err) {
+    throw toAdminError(err, 'Failed to load graph entities.');
+  }
+};
+
+const getGraphEntity = async (id: string): Promise<AdminGraphEntityDetail> => {
+  try {
+    const res = await axios.get<AdminGraphEntityDetail>(`/api/admin/graph/entities/${id}`);
+    return res.data;
+  } catch (err) {
+    throw toAdminError(err, 'Failed to load graph entity.');
+  }
+};
+
+const AdminGraphService = { listGraphEntities, getGraphEntity };
+
+export { AdminModelsService, AdminLogsService, AdminGraphService };

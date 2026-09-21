@@ -13,6 +13,23 @@ describe('outputTokenCap', () => {
     it('returns 0 for an empty prompt', () => {
       expect(promptCharsFrom([])).toBe(0);
     });
+
+    it('counts only text parts of a multimodal message (#115)', () => {
+      expect(
+        promptCharsFrom([
+          {
+            content: [
+              { type: 'text', text: 'abcd' },
+              { type: 'image_url', image_url: { url: 'https://spaces.example.com/x.png' } },
+            ],
+          },
+        ]),
+      ).toBe(4);
+    });
+
+    it('treats an empty or malformed part array as zero chars, not a crash', () => {
+      expect(promptCharsFrom([{ content: [] }, { content: [{ type: 'text' }] }])).toBe(0);
+    });
   });
 
   describe('outputTokensFor', () => {

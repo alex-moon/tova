@@ -1,3 +1,5 @@
+import { redactForLog } from './logRedaction';
+
 import { SafeBrowsingCache } from '../models/SafeBrowsingCache';
 
 // Safe Browsing link checker for `fetch_url` (issue #120): every URL the
@@ -45,7 +47,11 @@ export const isCheckerEnabled = (): boolean => safeBrowsingApiKey() !== undefine
 
 const warnOutage = (url: string, err: unknown): void => {
   const message = err instanceof Error ? err.message : String(err);
-  console.warn(`Safe Browsing check failed for ${url}, proceeding (fail-open): ${message}`);
+  console.warn(
+    'Safe Browsing check failed for %s, proceeding (fail-open): %O',
+    redactForLog(url),
+    redactForLog(message),
+  );
 };
 
 const callThreatMatches = async (url: string, apiKey: string): Promise<string[]> => {

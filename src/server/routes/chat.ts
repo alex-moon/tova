@@ -12,6 +12,10 @@ import { routeQuery } from '../services/routerService';
 import { generateChatTitle } from '../services/titleService';
 import { hasPermission, ROUTING_PERMISSION } from '../services/userService';
 import { buildSystemContent } from '../services/promptAssembly';
+import {
+  isEntityInjectionEnabled,
+  retrieveKnowledgeBlock,
+} from '../services/entityRetrievalService';
 import { ensureUserLocation } from '../services/geoLocationService';
 import { deleteObject } from '../services/storageService';
 import { inferenceService } from '../services/inferenceService';
@@ -20,7 +24,12 @@ import type { MessageContentPart, NeutralStreamChunk } from '../services/llmType
 import { classifyAndPersistPromptDimensions, isTriviallyNeutral } from '../services/metricsService';
 import { computeDeterministicMetrics } from '../services/promptMetrics';
 import { generateFollowups } from '../services/followupService';
+import {
+  extractAndPersistFromTurn,
+  isEntityExtractionEnabled,
+} from '../services/entityExtractionService';
 import { zdrHistorySchema } from '../validation';
+import { redactForLog } from '../services/logRedaction';
 
 const router = express.Router();
 
@@ -32,6 +41,7 @@ type AssetDoc = {
   key: string;
   contentType: string;
   size: number;
+  status?: 'pending' | 'ready' | 'failed';
   ephemeral?: boolean;
   textExtracted?: string | null;
   markdownExtracted?: string | null;
@@ -40,6 +50,18 @@ type AssetDoc = {
 // Asset attach (issue #34): resolves the attached asset for a turn — 'none'
 // when the request sent no assetId, 'invalid' for a malformed reference,
 // 'missing' when it points at a different user's asset.
+// Turns that will actually carry pixels (#115). Mirrors buildImageTurn's
+// conditions (image content type, uploaded-and-confirmed asset, configured
+// storage) so routing and message assembly can never disagree: a turn that
+// routed vision-only must never silently degrade to the filename envelope.
+const turnsWithImage = (asset: AssetDoc | null): boolean =>
+  Boolean(
+    asset &&
+    asset.status === 'ready' &&
+    isImageContentType(asset.contentType) &&
+    isStorageConfigured(),
+  );
+
 const loadAttachedAsset = async (
   req: AuthRequest,
 ): Promise<AssetDoc | null | 'invalid' | 'missing'> => {
@@ -85,7 +107,15 @@ const buildImageTurn = async (
   messages: { role: 'system' | 'user' | 'assistant'; content: string | MessageContentPart[] }[],
   asset: AssetDoc,
 ): Promise<boolean> => {
-  if (!isImageContentType(asset.contentType) || !isStorageConfigured()) return false;
+  // `ready` matters: a pending upload has no object in Spaces yet, so the
+  // presigned GET would 404 inside the model's fetch and fail the turn.
+  if (
+    !isImageContentType(asset.contentType) ||
+    asset.status !== 'ready' ||
+    !isStorageConfigured()
+  ) {
+    return false;
+  }
   const last = messages[messages.length - 1];
   if (last?.role !== 'user') return false;
   const url = await presignGetUrl(asset.key);
@@ -313,7 +343,7 @@ const cleanupEphemeralAsset = async (asset: AssetDoc | null | 'invalid' | 'missi
     await Asset.deleteOne({ _id: asset._id });
     await deleteObject(asset.key);
   } catch (err) {
-    console.error('Ephemeral asset cleanup error:', err);
+    console.error('Ephemeral asset cleanup error:', redactForLog(err));
   }
 };
 
@@ -349,10 +379,26 @@ const saveUserMessageWithMetrics = async (
 
   if (!triviallyNeutral) {
     classifyAndPersistPromptDimensions(String(userMessage._id), content).catch((err) =>
-      console.error('Prompt classification error:', err),
+      console.error('Prompt classification error:', redactForLog(err)),
     );
   }
   return userMessage;
+};
+
+/*
+ * Entity-graph retrieval (#138, plan task 4): read-only, bounded "what we
+ * know about you" block for the system prompt, only when
+ * ENTITY_GRAPH_PROMPT_INJECTION is set. Never throws — graph enrichment,
+ * like extraction, must not degrade a chat turn.
+ */
+const knowledgeBlockFor = async (prompt: string, userId: string): Promise<string> => {
+  if (!isEntityInjectionEnabled()) return '';
+  try {
+    return await retrieveKnowledgeBlock(prompt, userId);
+  } catch (err) {
+    console.error('Entity graph retrieval error:', redactForLog(err));
+    return '';
+  }
 };
 
 // Chat endpoint (non-streaming, preserved for compatibility)
@@ -416,7 +462,15 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
       }
       const messages = buildZdrMessages(zdrHistory.value, content);
       await ensureUserLocation(userDoc, req.ip);
-      messages.unshift({ role: 'system', content: buildSystemContent(userDoc) });
+      // Plan task 8: ZDR/incognito turns DO retrieve the graph read-only
+      // (Alex, 2026-09-21) — but they write nothing, and this branch an early
+      // return before any persistence does exactly that. Extraction below
+      // never runs for ZDR.
+      const zdrEntityBlock = await knowledgeBlockFor(content, userId as string);
+      messages.unshift({
+        role: 'system',
+        content: buildSystemContent(userDoc, zdrEntityBlock),
+      });
       appendAssetBlock(messages, attachedAsset);
 
       const routingResult = await routeQuery(content, undefined, undefined, {
@@ -464,9 +518,7 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
     // Determine model. Image turns (#115) route vision-first only when the
     // presign path is actually available; otherwise the turn degrades to the
     // legacy text envelope and normal routing applies.
-    const hasImage =
-      Boolean(attachedAsset && isImageContentType(attachedAsset.contentType)) &&
-      isStorageConfigured();
+    const hasImage = turnsWithImage(attachedAsset);
     const routingResult = await routeQuery(content, undefined, undefined, {
       band: routingBand,
       hasImage,
@@ -481,7 +533,11 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
     // country; cheap when cached (fresh/cooldown returns immediately) and the
     // service itself never throws, so chat cannot block hard on it.
     await ensureUserLocation(userDoc, req.ip);
-    messages.unshift({ role: 'system', content: buildSystemContent(userDoc) });
+    const entityBlock = await knowledgeBlockFor(content, userId as string);
+    messages.unshift({
+      role: 'system',
+      content: buildSystemContent(userDoc, entityBlock),
+    });
     if (attachedAsset) {
       const imageAttached = hasImage ? await buildImageTurn(messages, attachedAsset) : false;
       if (!imageAttached) appendAssetBlock(messages, attachedAsset);
@@ -527,18 +583,35 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
     });
     await assistantMessage.save();
 
+    // Entity graph extraction (#138): one extra LLM call after the turn is
+    // served, fire-and-forget like title generation. Never runs for ZDR
+    // chats (handled above), and only when ENTITY_GRAPH_ENABLED is set —
+    // extraction is enrichment, so failures log and everything else
+    // continues from here.
+    if (isEntityExtractionEnabled()) {
+      extractAndPersistFromTurn({
+        userId: String(userDoc!._id),
+        sessionId: String(session!._id),
+        messageId: String(assistantMessage._id),
+        userText: content,
+        assistantText: assistantContent,
+      }).catch((err) => console.error('Entity extraction error:', redactForLog(err)));
+    }
+
     res.json({
       sessionId: session!._id,
       message: assistantMessage,
       routing: routingResult,
     });
   } catch (err) {
-    console.error('Chat error:', err);
+    console.error('Chat error:', redactForLog(err));
     // A ZDR turn that fails mid-flight (routing, provider, geo, metrics) still
     // erases its throwaway attachment — cleanup is a no-op for durable
     // assets, so the persisted path is untouched (#116).
     await cleanupEphemeralAsset(attachedAsset);
-    res.status(500).json({ message: 'Error processing chat' });
+    // Same 429/413 surfacing as the stream route (#117): the detail rides
+    // additively so existing JSON consumers keep their shape.
+    res.status(500).json({ message: 'Error processing chat', detail: streamingErrorMessage(err) });
   }
 });
 
@@ -610,9 +683,7 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
 
     // Image turns (#115): gate on both the content type and a configured
     // presign path; the image part replaces the filename envelope this turn.
-    const hasImage =
-      Boolean(attachedAsset && isImageContentType(attachedAsset.contentType)) &&
-      isStorageConfigured();
+    const hasImage = turnsWithImage(attachedAsset);
 
     await ensureUserLocation(streamUserDoc, req.ip);
     if (zdr) {
@@ -648,7 +719,11 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
       messages = messagesFromPersistedHistory(history as { role: string; content: string }[]);
     }
 
-    messages.unshift({ role: 'system', content: buildSystemContent(streamUserDoc) });
+    const streamEntityBlock = await knowledgeBlockFor(content, userId as string);
+    messages.unshift({
+      role: 'system',
+      content: buildSystemContent(streamUserDoc, streamEntityBlock),
+    });
     if (attachedAsset) {
       const imageAttached = hasImage ? await buildImageTurn(messages, attachedAsset) : false;
       if (!imageAttached) appendAssetBlock(messages, attachedAsset);
@@ -714,7 +789,12 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
         }
       }
     } catch (err) {
-      console.error('Streaming error for %s/%s:', routingResult.provider, routingResult.model, err);
+      console.error(
+        'Streaming error for %s/%s:',
+        routingResult.provider,
+        routingResult.model,
+        redactForLog(err),
+      );
       sendEvent('error', { message: streamingErrorMessage(err) });
       sendEvent('done', { complete: false });
       await cleanupEphemeralAsset(attachedAsset);
@@ -778,6 +858,16 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
     });
     await assistantMessage.save();
 
+    if (isEntityExtractionEnabled()) {
+      extractAndPersistFromTurn({
+        userId: String(streamUserDoc!._id),
+        sessionId: String(session!._id),
+        messageId: String(assistantMessage._id),
+        userText: content,
+        assistantText: assistantContent,
+      }).catch((err) => console.error('Entity extraction error:', redactForLog(err)));
+    }
+
     // Follow-up suggestions (issue #33): generated with the cheap guard
     // model, reusing the title/classification service pattern. Skipped for
     // trivially neutral prompts and empty turns so the 'trivial' skip gate
@@ -798,12 +888,14 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
     });
     res.end();
   } catch (err) {
-    console.error('Chat stream error:', err);
+    console.error('Chat stream error:', redactForLog(err));
     // A ZDR turn that fails before or during streaming still erases its
     // throwaway attachment (#116); no-op for durable assets.
     await cleanupEphemeralAsset(attachedAsset);
     if (!res.headersSent) {
-      res.status(500).json({ message: 'Error processing chat' });
+      res
+        .status(500)
+        .json({ message: 'Error processing chat', detail: streamingErrorMessage(err) });
     } else {
       res.end();
     }

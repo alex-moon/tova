@@ -34,6 +34,6 @@ describe('getJwtSecret', () => {
     expect(getJwtSecret()).toBe('fallback_secret');
     expect(getJwtSecret()).toBe('fallback_secret');
     expect(warnSpy).toHaveBeenCalledTimes(1);
-    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining(JWT_SECRET_ENV_VAR));
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('is not set'), JWT_SECRET_ENV_VAR);
   });
 });

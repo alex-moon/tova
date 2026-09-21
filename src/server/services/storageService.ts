@@ -7,6 +7,7 @@ import {
   S3Client,
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
+import { config } from '../config';
 
 // DigitalOcean Spaces is S3-compatible; AWS SDK v3 against a Spaces endpoint
 // is the standard integration (issue #34). Feature-gated like
@@ -14,12 +15,12 @@ import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 // returns false and callers degrade gracefully instead of crashing.
 // Read lazily (not as module constants): env may be loaded after module
 // import in some entrypoints, and tests mutate env directly.
-const bucket = (): string => process.env.DO_SPACES_BUCKET || '';
+const bucket = (): string => config.storage.bucket;
 
 let client: S3Client | null = null;
 
 export const isStorageConfigured = (): boolean =>
-  Boolean(process.env.DO_SPACES_KEY && process.env.DO_SPACES_SECRET && bucket());
+  Boolean(config.storage.key && config.storage.secret && bucket());
 
 const getClient = (): S3Client => {
   if (!isStorageConfigured()) {
@@ -30,11 +31,11 @@ const getClient = (): S3Client => {
       // Region confirmed lon1 against a real ListObjectsV2 call (open
       // question 3 in the plan is resolved; env override kept for the live
       // host to be decisive).
-      endpoint: `https://${process.env.DO_SPACES_REGION || 'lon1'}.digitaloceanspaces.com`,
-      region: process.env.DO_SPACES_REGION || 'lon1',
+      endpoint: `https://${config.storage.region}.digitaloceanspaces.com`,
+      region: config.storage.region,
       credentials: {
-        accessKeyId: process.env.DO_SPACES_KEY as string,
-        secretAccessKey: process.env.DO_SPACES_SECRET as string,
+        accessKeyId: config.storage.key as string,
+        secretAccessKey: config.storage.secret as string,
       },
     });
   }

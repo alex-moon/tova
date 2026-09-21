@@ -43,9 +43,11 @@ fi
 
 # The backend reads the DB state on boot; run migrations after the stack is up,
 # then restart the backend so it serves the migrated DB.
-# MONGODB_HOST is pinned to 127.0.0.1: .env carries MONGODB_HOST=mongodb (the
-# compose service name the backend container needs), which is unresolvable
-# from the host shell where migrations run.
+# Migrations run against the compose-local mongo: MONGODB_HOST is pinned to
+# 127.0.0.1 because .env may carry MONGODB_HOST=mongodb (the backend container's
+# service name), which is unresolvable from the host shell. If .env uses the
+# Atlas MONGODB_URL instead, migrations go straight to that URL — the local
+# mongo has nothing to migrate.
 MONGODB_HOST=127.0.0.1 npm run db:migrate
 docker compose -f docker-compose.live.yml restart backend
 

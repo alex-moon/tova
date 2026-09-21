@@ -1,14 +1,4 @@
 services:
-  mongodb:
-    image: mongo:latest
-    environment:
-      - MONGO_INITDB_ROOT_USERNAME=tova
-      - MONGO_INITDB_ROOT_PASSWORD=${MONGODB_PASSWORD}
-    ports:
-      - '27017:27017'
-    volumes:
-      - mongodb_data:/data/db
-
   backend:
     build:
       context: .
@@ -17,13 +7,11 @@ services:
     ports:
       - '15000:5000'
     environment:
-      - MONGODB_URI=mongodb://tova:${MONGODB_PASSWORD}@mongodb:27017/tova?authSource=admin
+      - MONGODB_URL=${MONGODB_URL}
       - PORT=5000
       - NODE_ENV=production
     env_file:
       - .env
-    depends_on:
-      - mongodb
 
   frontend:
     build:
@@ -34,5 +22,3 @@ services:
     depends_on:
       - backend
 
-volumes:
-  mongodb_data:

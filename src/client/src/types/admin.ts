@@ -12,3 +12,12 @@ export type { AdminLogEntry, AdminLogsPayload } from '@shared/contracts';
 // Model comparison shapes (issue #129), as returned by
 // POST /api/admin/model-compare. Re-exported from the shared contract.
 export type { ModelComparisonRun, ModelComparisonResult } from '@shared/contracts';
+// Per-user entity graph shapes (issue #138), as returned by
+// GET /api/admin/graph/*. Re-exported from the shared contract.
+export type {
+  AdminGraphEntity,
+  AdminGraphEdge,
+  AdminGraphEntitiesPayload,
+  AdminGraphEntityDetail,
+  AdminGraphSourceRef,
+} from '@shared/contracts';

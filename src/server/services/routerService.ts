@@ -1,6 +1,7 @@
 import { inferenceService } from './inferenceService';
 import { LlmProvider } from './llmTypes';
 import { completionsPoolFor, ModelRef } from './modelConfigService';
+import { redactForLog } from './logRedaction';
 import { FitWeight, getFitWeight } from './modelMetricsStatsService';
 
 /*
@@ -299,7 +300,7 @@ export const routeQuery = async (
     // Unparseable reply (empty, or no verdict word anywhere): route large as
     // the safe default — defaulting verdict-less replies to small is what
     // pushed the Ad Gefrin conversation to the small tier (issue #129).
-    console.error('Classifier unparseable reply:', content || '(empty)');
+    console.error('Classifier unparseable reply:', redactForLog(content || '(empty)'));
     const { pool, forced, reasonSuffix } = await orderPoolByFit(largePool, band, readWeight);
     const modelRef = forced ?? pickModelRef(pool, 'large', epsilon, random);
     return {
@@ -308,7 +309,7 @@ export const routeQuery = async (
       ...spreadRef(modelRef),
     };
   } catch (err) {
-    console.error('Classifier error:', err);
+    console.error('Classifier error:', redactForLog(err));
     // Fallback to large model on error for safety (raw pool order — the
     // classifier is down, so its feedback weighting waits for a retry).
     const modelRef = pickModelRef(largePool, 'large', epsilon, random);
