@@ -4,7 +4,8 @@ import { RequestContext } from '@mastra/core/request-context';
 import { InMemoryStore } from '@mastra/core/storage';
 import { Observability } from '@mastra/observability';
 import { buildTracingOptions } from '@mastra/observability';
-import { LangSmithExporter, withLangsmithMetadata } from '@mastra/langsmith';
+import { withLangsmithMetadata } from '@mastra/langsmith';
+import { RedactedLangSmithExporter } from './traceRedaction';
 import { createTool } from '@mastra/core/tools';
 import { z } from 'zod';
 import mongoose from 'mongoose';
@@ -29,7 +30,8 @@ import {
 import { webSearch } from './webSearchService';
 import { fetchPage } from './webFetchService';
 import { createSystemAsset } from './systemAssetService';
-import { isStorageConfigured } from './storageService';
+import { spacesWorkspaceStorage } from './workspaceStorage';
+import { config } from '../config';
 
 /*
  * LangSmith tracing (issue #5), via the official Mastra plugin
@@ -40,10 +42,13 @@ import { isStorageConfigured } from './storageService';
  * with no API key no exporter is configured at all and nothing is posted —
  * the off-path is byte-identical to the pre-#5 behaviour. Credentials are
  * read from `LANGSMITH_API_KEY` (`LANGCHAIN_API_KEY` works too) and the
- * project from `LANGCHAIN_PROJECT` — see `.env.example`.
+ * project from `LANGCHAIN_PROJECT` — see `.env.example`. The exporter is
+ * wrapped by `RedactedLangSmithExporter` (traceRedaction.ts) so span
+ * input/output/error payloads are redacted before they leave the process
+ * (issue #145: LangSmith traces are a prompt-leak surface).
  */
-const langsmithKey = process.env.LANGSMITH_API_KEY ?? process.env.LANGCHAIN_API_KEY;
-const projectName = process.env.LANGSMITH_PROJECT ?? process.env.LANGCHAIN_PROJECT;
+const langsmithKey = config.langsmith.apiKey;
+const projectName = config.langsmith.project;
 
 // Mastra docs: storage is required for tracing even when exporting
 // externally. Application data stays in MongoDB; `InMemoryStore` only
@@ -57,7 +62,10 @@ export const mastra = new Mastra({
             default: {
               serviceName: 'tova',
               exporters: [
-                new LangSmithExporter({ apiKey: langsmithKey, projectName: projectName }),
+                new RedactedLangSmithExporter({
+                  apiKey: langsmithKey,
+                  projectName,
+                }),
               ],
             },
           },
@@ -229,7 +237,7 @@ const traceOptionsFrom = (trace?: TraceContext) => ({
  * When the Brave key is unset the tool is not attached at all: the model
  * never sees it and plain chat behaves byte-identically to pre-#16.
  */
-const hasSearchKey = (): boolean => Boolean(process.env.BRAVE_SEARCH_API_KEY);
+const hasSearchKey = (): boolean => Boolean(config.search.braveApiKey);
 
 export const webSearchTool = createTool({
   id: 'web_search',
@@ -489,7 +497,7 @@ const generateFileExecute = async (
 }> => {
   const userId = requestContext.get('userId') as string | undefined;
   if (!userId) return { error: 'unavailable' };
-  if (!isStorageConfigured()) return { error: 'unavailable' };
+  if (!spacesWorkspaceStorage.isConfigured()) return { error: 'unavailable' };
   try {
     const result = await createSystemAsset(
       userId,

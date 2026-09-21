@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { installChatStreamMock } from './helpers/chatMock';
 
 const email = process.env.E2E_EMAIL ?? 'formsatz@gmail.com';
 const password = process.env.E2E_PASSWORD ?? 'admin';
@@ -10,24 +11,7 @@ test.beforeEach(async ({ page }) => {
     data: { email, password },
   });
   // Mock the streaming chat endpoint so e2e never depends on a live LLM.
-  await page.route('**/api/chat/stream', async (route) => {
-    const sse = [
-      'event: meta',
-      'data: {"sessionId":"e2e-mock-session"}',
-      '',
-      'event: delta',
-      'data: {"content":"OK"}',
-      '',
-      'event: done',
-      'data: {"complete":true,"message":{"_id":"e2e-mock-msg-1","content":"OK","modelName":"e2e-mock/model","role":"assistant"}}',
-      '',
-    ].join('\n');
-    await route.fulfill({
-      status: 200,
-      contentType: 'text/event-stream',
-      body: sse,
-    });
-  });
+  installChatStreamMock(page);
   await page.goto('/');
   await expect(page.getByRole('button', { name: /send/i })).toBeVisible();
 });

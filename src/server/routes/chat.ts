@@ -7,7 +7,7 @@ import { User } from '../models/User';
 import { Asset } from '../models/Asset';
 import { buildAttachmentEnvelope } from '../services/attachmentEnvelope';
 import { isImageContentType } from '../services/assetLimits';
-import { isStorageConfigured, presignGetUrl } from '../services/storageService';
+import { spacesWorkspaceStorage } from '../services/workspaceStorage';
 import { routeQuery } from '../services/routerService';
 import { generateChatTitle } from '../services/titleService';
 import { hasPermission, ROUTING_PERMISSION } from '../services/userService';
@@ -17,7 +17,6 @@ import {
   retrieveKnowledgeBlock,
 } from '../services/entityRetrievalService';
 import { ensureUserLocation } from '../services/geoLocationService';
-import { deleteObject } from '../services/storageService';
 import { inferenceService } from '../services/inferenceService';
 import { outputTokensFor, promptCharsFrom } from '../services/outputTokenCap';
 import type { MessageContentPart, NeutralStreamChunk } from '../services/llmTypes';
@@ -29,6 +28,7 @@ import {
   isEntityExtractionEnabled,
 } from '../services/entityExtractionService';
 import { zdrHistorySchema } from '../validation';
+import { redactForLog } from '../services/logRedaction';
 
 const router = express.Router();
 
@@ -58,7 +58,7 @@ const turnsWithImage = (asset: AssetDoc | null): boolean =>
     asset &&
     asset.status === 'ready' &&
     isImageContentType(asset.contentType) &&
-    isStorageConfigured(),
+    spacesWorkspaceStorage.isConfigured(),
   );
 
 const loadAttachedAsset = async (
@@ -111,13 +111,13 @@ const buildImageTurn = async (
   if (
     !isImageContentType(asset.contentType) ||
     asset.status !== 'ready' ||
-    !isStorageConfigured()
+    !spacesWorkspaceStorage.isConfigured()
   ) {
     return false;
   }
   const last = messages[messages.length - 1];
   if (last?.role !== 'user') return false;
-  const url = await presignGetUrl(asset.key);
+  const url = await spacesWorkspaceStorage.presignGetByKey(asset.key);
   last.content = [
     { type: 'text', text: typeof last.content === 'string' ? last.content : '' },
     { type: 'image_url', image_url: { url } },
@@ -340,9 +340,9 @@ const cleanupEphemeralAsset = async (asset: AssetDoc | null | 'invalid' | 'missi
   if (!asset || asset === 'invalid' || asset === 'missing' || !asset.ephemeral) return;
   try {
     await Asset.deleteOne({ _id: asset._id });
-    await deleteObject(asset.key);
+    await spacesWorkspaceStorage.deleteByKey(asset.key);
   } catch (err) {
-    console.error('Ephemeral asset cleanup error:', err);
+    console.error('Ephemeral asset cleanup error:', redactForLog(err));
   }
 };
 
@@ -378,7 +378,7 @@ const saveUserMessageWithMetrics = async (
 
   if (!triviallyNeutral) {
     classifyAndPersistPromptDimensions(String(userMessage._id), content).catch((err) =>
-      console.error('Prompt classification error:', err),
+      console.error('Prompt classification error:', redactForLog(err)),
     );
   }
   return userMessage;
@@ -395,7 +395,7 @@ const knowledgeBlockFor = async (prompt: string, userId: string): Promise<string
   try {
     return await retrieveKnowledgeBlock(prompt, userId);
   } catch (err) {
-    console.error('Entity graph retrieval error:', err);
+    console.error('Entity graph retrieval error:', redactForLog(err));
     return '';
   }
 };
@@ -594,7 +594,7 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
         messageId: String(assistantMessage._id),
         userText: content,
         assistantText: assistantContent,
-      }).catch((err) => console.error('Entity extraction error:', err));
+      }).catch((err) => console.error('Entity extraction error:', redactForLog(err)));
     }
 
     res.json({
@@ -603,7 +603,7 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
       routing: routingResult,
     });
   } catch (err) {
-    console.error('Chat error:', err);
+    console.error('Chat error:', redactForLog(err));
     // A ZDR turn that fails mid-flight (routing, provider, geo, metrics) still
     // erases its throwaway attachment — cleanup is a no-op for durable
     // assets, so the persisted path is untouched (#116).
@@ -788,7 +788,12 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
         }
       }
     } catch (err) {
-      console.error('Streaming error for %s/%s:', routingResult.provider, routingResult.model, err);
+      console.error(
+        'Streaming error for %s/%s:',
+        routingResult.provider,
+        routingResult.model,
+        redactForLog(err),
+      );
       sendEvent('error', { message: streamingErrorMessage(err) });
       sendEvent('done', { complete: false });
       await cleanupEphemeralAsset(attachedAsset);
@@ -859,7 +864,7 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
         messageId: String(assistantMessage._id),
         userText: content,
         assistantText: assistantContent,
-      }).catch((err) => console.error('Entity extraction error:', err));
+      }).catch((err) => console.error('Entity extraction error:', redactForLog(err)));
     }
 
     // Follow-up suggestions (issue #33): generated with the cheap guard
@@ -882,7 +887,7 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
     });
     res.end();
   } catch (err) {
-    console.error('Chat stream error:', err);
+    console.error('Chat stream error:', redactForLog(err));
     // A ZDR turn that fails before or during streaming still erases its
     // throwaway attachment (#116); no-op for durable assets.
     await cleanupEphemeralAsset(attachedAsset);
