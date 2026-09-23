@@ -6,6 +6,7 @@ import {
   getObjectStream,
   headObject,
   isStorageConfigured,
+  listObjectKeys,
   presignGetUrl,
   presignPutUrl,
   putObject,
@@ -69,10 +70,20 @@ export interface SpacesCapabilities {
   presignGetByKey(key: string, expiresIn?: number): Promise<string>;
 }
 
+// Issue #143 (factory reset): prefix-scoped bulk deletion by enumerating
+// filenames that no caller knows. Spaces-only (needs ListObjectsV2), so a
+// local backend need not implement it.
+export interface ChatFileSweep {
+  deleteChatFiles(userId: string, chatIds: string[]): Promise<string[]>;
+}
+
 // The single Spaces-backed implementation over the existing storageService
 // driver. Call sites (once rewired across checklist items 2-6) import only
 // this object, never the driver.
-export const spacesWorkspaceStorage: WorkspaceStorage & RawKeyStorage & SpacesCapabilities = {
+export const spacesWorkspaceStorage: WorkspaceStorage &
+  RawKeyStorage &
+  SpacesCapabilities &
+  ChatFileSweep = {
   isConfigured: isStorageConfigured,
 
   put: (userId, chatId, filename, body, contentType) =>
@@ -87,6 +98,27 @@ export const spacesWorkspaceStorage: WorkspaceStorage & RawKeyStorage & SpacesCa
   // it to a real listing when it lands.
   list: async () => {
     throw new Error('workspaceStorage.list is not implemented yet (no caller exists)');
+  },
+
+  // Bulk chat-scoped sweep (issue #143 factory reset): delete every object
+  // under each chat's prefix, filenames unknown — the only enumerating
+  // operation on this boundary. Returns the keys whose deletion failed
+  // (error or falsy); when storage is unconfigured there is nothing on the
+  // bucket to sweep, so it resolves empty.
+  deleteChatFiles: async (userId, chatIds): Promise<string[]> => {
+    const failed: string[] = [];
+    if (!isStorageConfigured()) return failed;
+    for (const chatId of chatIds) {
+      const keys = await listObjectKeys(chatScopedKey(userId, chatId, ''));
+      for (const key of keys) {
+        try {
+          if (!(await deleteObject(key))) failed.push(key);
+        } catch {
+          failed.push(key);
+        }
+      }
+    }
+    return failed;
   },
 
   putByKey: putObject,
