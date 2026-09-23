@@ -10,6 +10,9 @@ import McpServersSection from './McpServersSection';
 
 const PREFERRED_NAME_LIMIT = 20;
 const CUSTOM_INSTRUCTIONS_LIMIT = 4000;
+// Must match the server-side literal (issue #143) exactly: a typo simply
+// disables the destructive button, so there is no other failure path.
+const FACTORY_RESET_CONFIRM = 'RESET';
 
 const ThemeChoice: React.FC<{
   value: Theme;
@@ -89,8 +92,30 @@ const ProfileView = () => {
   const [zdr, setZdr] = useState(initialZdr);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Factory reset (issue #143): enabled only on the exact typed match, and the
+  // server enforces it too — the client check is just UX.
+  const [resetConfirm, setResetConfirm] = useState('');
+  const [resetting, setResetting] = useState(false);
 
   if (!user) return null;
+
+  const reset = async () => {
+    setResetting(true);
+    setError(null);
+    try {
+      const { failedObjects } = await AuthService.factoryReset(resetConfirm);
+      if (failedObjects.length > 0) {
+        toast.warning(`Factory reset: ${failedObjects.length} stored file(s) could not be deleted`);
+      } else {
+        toast.success('Factory reset complete');
+      }
+      // Full reload so every piece of app state re-reads the now-empty data.
+      window.location.reload();
+    } catch (err) {
+      setError(err instanceof AuthError ? err.message : 'Something went wrong.');
+      setResetting(false);
+    }
+  };
 
   const displayName = user.preferredName ?? user.name ?? user.email;
 
@@ -219,9 +244,32 @@ const ProfileView = () => {
             <p className="mt-1 text-muted-foreground">
               When on, nothing sent or attached in chat is stored — chats and attached files vanish
               when the conversation ends. Files uploaded in Assets are kept so you can reuse them;
-              they are deleted only when you delete them. Turning this on removes your existing
-              chats and chat messages from storage.
+              they are deleted only when you delete them.
             </p>
+          </fieldset>
+          <fieldset className="text-sm" data-testid="profile-danger-zone">
+            <legend className="mb-1 block">Danger zone</legend>
+            <p className="mb-2 text-muted-foreground">
+              Factory reset permanently wipes every chat, message, uploaded file and derived trace
+              for this account. Nothing survives — type {FACTORY_RESET_CONFIRM} to confirm.
+            </p>
+            <div className="flex items-center gap-2">
+              <Input
+                data-testid="profile-reset-confirm"
+                placeholder={FACTORY_RESET_CONFIRM}
+                value={resetConfirm}
+                onChange={(e) => setResetConfirm(e.target.value)}
+                className="max-w-40"
+              />
+              <Button
+                variant="destructive"
+                data-testid="profile-factory-reset"
+                disabled={resetConfirm !== FACTORY_RESET_CONFIRM || resetting}
+                onClick={reset}
+              >
+                {resetting ? 'Resetting...' : 'Factory reset'}
+              </Button>
+            </div>
           </fieldset>
         </div>
         <div className="mt-4 flex justify-end">

@@ -1,13 +1,17 @@
 import express from 'express';
 import { User } from '../models/User';
 import type { UserSettings } from '../models/User';
-import { Session } from '../models/Session';
-import { Message } from '../models/Message';
 import { toAuthUser } from '../services/userService';
 import { authenticate, AuthRequest } from '../middleware/auth';
-import { profilePatchSchema } from '../validation';
+import { profilePatchSchema, factoryResetSchema } from '../validation';
+import { purgeAllUserData } from '../services/userDataPurge';
 
 const router = express.Router();
+
+// First ZDR enable auto-purge (issue #116, Q5) is REMOVED (issue #143): the
+// toggle is forward-looking only now — the escape hatch for existing data is
+// the explicitly confirmed factory reset below, not a side effect of a
+// settings flag (companion decision on #144: per-user ZDR becomes obsolete).
 
 // PATCH /api/profile — user-owned profile edits (issue #35).
 //
@@ -23,22 +27,6 @@ const PREFERRED_NAME_STRIP = /[^a-zA-Z0-9 ,:'-]/g;
 
 export const sanitizePreferredName = (raw: string): string =>
   raw.replace(PREFERRED_NAME_STRIP, '').trim();
-
-// First ZDR enable (issue #116, Q5): the user chose "auto-purge — they should
-// believe their chats have been deleted". Soft-delete every session the user
-// owns (reusing the deletedAt mechanism the delete endpoint uses) and hard
-// delete all of their messages so the conversation contents are actually gone,
-// not merely unlisted. Assets are untouched: they are the user's reusable
-// library, also reachable from the Assets page. Bulk ops only — no per-doc loop.
-export const purgeUserChats = async (userId: unknown) => {
-  // Include already-soft-deleted sessions so their orphaned messages die too.
-  const sessions = await Session.find({ userId }).select('_id').lean();
-  const sessionIds = sessions.map((s) => s._id);
-  await Promise.all([
-    Session.updateMany({ userId, deletedAt: null }, { $set: { deletedAt: new Date() } }),
-    Message.deleteMany({ sessionId: { $in: sessionIds } }),
-  ]);
-};
 
 router.patch('/', authenticate, async (req: AuthRequest, res) => {
   try {
@@ -120,14 +108,10 @@ router.patch('/', authenticate, async (req: AuthRequest, res) => {
       if (zdrPatch !== undefined) {
         // Boolean-validated in profilePatchSchema. Written only when the key
         // is present (absent = untouched), mirroring `theme`/`startupChat`.
-        // First-enable only (issue #116): a false→true transition — or enabling
-        // on a fresh account whose settings never had the flag — purges the
-        // user's chats. Toggling off and back on is not a re-purge opportunity
-        // and needs no marker: after the first purge there is nothing left, and
-        // chats created while zdr is on are never persisted at all.
-        const firstEnable = zdrPatch === true && settings.zdr !== true;
+        // Forward-looking only (issue #143): the former first-enable auto-purge
+        // is gone — nothing is ever deleted as a side effect of this flag;
+        // wiping existing data is the explicit factory reset below.
         settings.zdr = zdrPatch;
-        if (firstEnable) await purgeUserChats(user._id);
       }
     }
 
@@ -135,6 +119,28 @@ router.patch('/', authenticate, async (req: AuthRequest, res) => {
     res.json({ user: toAuthUser(user) });
   } catch (_err) {
     res.status(500).json({ message: 'Error updating profile' });
+  }
+});
+
+// POST /api/profile/factory-reset (issue #143): the user-deliberate escape
+// hatch for a PII-storing app — a session-wide wipe of everything the account
+// holds (sessions, messages, assets + their Spaces bytes, chat-scoped
+// workspace files, asset-derived job rows, the entity graph, LangSmith
+// traces). Requires the typed confirmation string; nothing but the account
+// and its (non-data) preferences survives. `failedObjects` names any bucket
+// keys the Spaces sweep could not delete so the UI can warn.
+router.post('/factory-reset', authenticate, async (req: AuthRequest, res) => {
+  try {
+    const parsed = factoryResetSchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      return res
+        .status(400)
+        .json({ message: parsed.error.issues[0]?.message ?? 'Invalid payload' });
+    }
+    const { failedObjects } = await purgeAllUserData(req.user?.id ?? '');
+    res.json({ reset: true, failedObjects });
+  } catch (_err) {
+    res.status(500).json({ message: 'Error performing factory reset' });
   }
 });
 

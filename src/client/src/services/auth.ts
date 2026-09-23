@@ -66,6 +66,20 @@ const AuthService = {
       throw toAuthError(err);
     }
   },
+
+  // Factory reset (issue #143): the typed confirmation string must match the
+  // server-side literal exactly or the wipe is refused with 400.
+  async factoryReset(confirm: string): Promise<{ reset: boolean; failedObjects: string[] }> {
+    try {
+      const res = await axios.post<{
+        reset: boolean;
+        failedObjects: string[];
+      }>('/api/profile/factory-reset', { confirm });
+      return res.data;
+    } catch (err) {
+      throw toAuthError(err);
+    }
+  },
 };
 
 export default AuthService;

@@ -43,9 +43,9 @@ export const profilePatchSchema = z.strictObject({
     })
     .optional(),
   // Zero-data-retention preference (issue #116): opts the account out of all
-  // chat persistence. Boolean-only and forward-looking — enabling it never
-  // deletes data saved before it was turned on (that decision is tracked
-  // separately in the plan's open questions).
+  // chat persistence. Boolean-only and forward-looking — enabling it does not
+  // delete anything (issue #143 removed the first-enable auto-purge); wiping
+  // existing data is now the explicit /factory-reset route below.
   zdr: z.boolean({ message: 'zdr must be a boolean' }).optional(),
   // Granular delete-confirmation prefs (issue #59). Strict sub-object: an
   // unknown delete target is a 400, not a silently dropped key.
@@ -55,6 +55,17 @@ export const profilePatchSchema = z.strictObject({
       file: z.boolean().optional(),
     })
     .optional(),
+});
+
+// Factory reset (issue #143): the exact confirmation string a user must type
+// to unlock the route. A fixed product literal, not user data — copy lives on
+// the client, verification is exact-match here.
+export const FACTORY_RESET_CONFIRM = 'RESET';
+
+export const factoryResetSchema = z.strictObject({
+  confirm: z.literal(FACTORY_RESET_CONFIRM, {
+    message: `Type ${FACTORY_RESET_CONFIRM} to confirm the factory reset`,
+  }),
 });
 
 export const feedbackValueSchema = z.object({

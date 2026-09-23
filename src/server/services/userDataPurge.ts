@@ -10,8 +10,7 @@ import { purgeUserTraces } from './tracePurge';
 
 /*
  * Factory reset (issue #143): a full wipe of everything a user's account
- * holds, replacing the older chat-only `purgeUserChats` (which lives on in
- * routes/profile.ts until its caller is re-pointed here).
+ * holds, superseding the older chat-only auto-purge (removed with issue #143).
  *
  * Every user-owned, PII-bearing collection is enumerated explicitly below —
  * the sweep is deliberately flat rather than derived from a lookup table so
