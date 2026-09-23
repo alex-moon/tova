@@ -540,11 +540,14 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
     }
 
     // On the sessionId path the session is already loaded above (the decision
-    // needs the stored flag first); new chats are created either plain or —
-    // never — incognito-persisted (nothing is written for incognito turns).
+    // needs the stored flag first). New persisted chats — the only way to get
+    // here — are never incognito: an incognito turn returns in the replay
+    // branch above without touching Session, so the flag is pinned to false
+    // explicitly (a persisted incognito session would contradict the
+    // write-nothing promise this ticket keeps).
     if (!session) {
       session = await createSessionWithUser(userId as string, content, {
-        incognito: turnDecision.persistWithHistoryReplay,
+        incognito: false,
       });
     }
     // Save user message

@@ -211,6 +211,53 @@ describe('Per-chat incognito flag (issue #144)', () => {
     expect(await Message.countDocuments()).toBe(4);
   });
 
+  it('ignores a toggled-on body intent on a sessionId continuation (both routes persist)', async () => {
+    const email = 'incognito-intent-continuation@example.com';
+    const cookies = await registerUser(email);
+    const first = await plainMessage(cookies, { content: 'first turn' });
+    const sessionId = first.body.sessionId as string;
+
+    const plain = await plainMessage(cookies, { sessionId, content: 'toggle on', zdr: true });
+    const stream = await streamMessage(cookies, { sessionId, content: 'stream', zdr: true });
+
+    expect(plain.status).toBe(200);
+    expect(stream.status).toBe(200);
+    expect(plain.body.sessionId).toBe(sessionId);
+    expect(await Session.countDocuments()).toBe(1);
+    expect(await Message.countDocuments()).toBe(6);
+  });
+
+  it('rejects continuation of a stored incognito session on both routes (409)', async () => {
+    const email = 'incognito-leftover-session@example.com';
+    const cookies = await registerUser(email);
+    const user = await User.findOne({ email });
+    // No incognito session is ever created by the routes (write-nothing), so
+    // construct one directly to pin the stored-flag reject path (e.g. left
+    // over from a migration or a future temp-chat shell).
+    const session = await Session.create({
+      userId: user?._id,
+      title: 'leftover',
+      incognito: true,
+    });
+
+    const plain = await plainMessage(cookies, {
+      sessionId: String(session._id),
+      content: 'continue',
+    });
+    const stream = await streamMessage(cookies, {
+      sessionId: String(session._id),
+      content: 'continue',
+    });
+
+    // Frozen #144/#116 copy: pinned by chat.zdr.test.ts, not renamed here.
+    expect(plain.status).toBe(409);
+    expect(plain.body.message).toContain('Zero-data-retention is on');
+    expect(stream.status).toBe(409);
+    expect(stream.body.message).toContain('Zero-data-retention is on');
+    expect(mockPlainGenerate).not.toHaveBeenCalled();
+    expect(mockAgentStream).not.toHaveBeenCalled();
+  });
+
   it('rejects a malformed sessionId with 400 for a non-incognito user', async () => {
     const email = 'incognito-bad-id@example.com';
     const cookies = await registerUser(email);
