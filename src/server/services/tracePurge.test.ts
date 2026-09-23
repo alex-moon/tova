@@ -124,6 +124,38 @@ describe('purgeUserTraces', () => {
     await expect(purgeUserTraces(['sess-1'])).resolves.toBeUndefined();
   });
 
+  it('continues to the remaining sessions when one session fails mid-loop', async () => {
+    // Queries are sequential (one per session, in list order): call #2 is
+    // bravo's. Bravo's query fails with a rate-limit while the others would
+    // have worked — the later session must still be attempted.
+    let queryCalls = 0;
+    const deleteCalls: unknown[] = [];
+    fetchSpy.mockImplementation((url: string, init?: { body?: string }) => {
+      if (String(url).includes('/api/v1/sessions')) {
+        return Promise.resolve(jsonResponse(200, [{ id: 'proj-1', name: 'tova-dev' }]));
+      }
+      if (String(url).includes('/api/v1/runs/query')) {
+        queryCalls += 1;
+        return queryCalls === 2
+          ? Promise.resolve(jsonResponse(429, { detail: 'rate limited' }))
+          : Promise.resolve(jsonResponse(200, [{ trace_id: `t-${queryCalls}` }]));
+      }
+      deleteCalls.push(JSON.parse(init?.body ?? '{}'));
+      return Promise.resolve(jsonResponse(202, {}));
+    });
+
+    await expect(
+      purgeUserTraces(['sess-alpha', 'sess-bravo', 'sess-charlie']),
+    ).resolves.toBeUndefined();
+
+    expect(queryCalls).toBe(3);
+    // Alpha's and charlie's traces were deleted despite bravo failing.
+    expect(deleteCalls.map((b) => (b as { trace_ids: string[] }).trace_ids[0])).toEqual([
+      't-1',
+      't-3',
+    ]);
+  });
+
   it('never throws when fetch itself rejects (network down)', async () => {
     fetchSpy.mockImplementation(() => Promise.reject(new Error('offline')));
     await expect(purgeUserTraces(['sess-1'])).resolves.toBeUndefined();

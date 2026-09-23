@@ -156,7 +156,6 @@ describe('purgeAllUserData (issue #143: factory reset)', () => {
     mockedIsConfigured.mockReturnValue(false);
     const sessionIds = await Session.find({ userId: uid }).select('_id').lean();
     void sessionIds;
-    void session;
 
     await purgeAllUserData(uid);
 
@@ -179,11 +178,6 @@ describe('purgeAllUserData (issue #143: factory reset)', () => {
     const session = await Session.create({ userId: uid, title: 'with files' });
     await seedAssetsAndGraph(uid);
     mockedIsConfigured.mockReturnValue(true);
-    mockedListKeys
-      .mockResolvedValueOnce([`${uid}/chats/${session._id}/script.txt`])
-      .mockResolvedValue([]);
-    mockedDeleteByKey.mockResolvedValue(true);
-
     mockedListKeys
       .mockResolvedValueOnce([`${uid}/chats/${session._id}/script.txt`])
       .mockResolvedValue([]);

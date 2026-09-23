@@ -31,6 +31,50 @@ const DELETE_BATCH = 100;
 const sessionMetadataFilter = (sessionId: string): string =>
   `and(in(metadata_key, ["session_id"]), eq(metadata_value, "${sessionId}"))`;
 
+const purgeSessionTraces = async (
+  sessionId: string,
+  headers: Record<string, string>,
+  projectId: string,
+): Promise<void> => {
+  const traceIds = new Set<string>();
+  let offset = 0;
+  for (let page = 0; page < MAX_PAGES; page++) {
+    const queryRes = await fetch(`${BASE_URL}/api/v1/runs/query`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        session: [projectId],
+        filter: sessionMetadataFilter(sessionId),
+        limit: PAGE_SIZE,
+        offset,
+      }),
+    });
+    if (!queryRes.ok) {
+      throw new Error(`run query failed: HTTP ${queryRes.status}`);
+    }
+    const runs = (await queryRes.json()) as { trace_id?: string }[];
+    if (!Array.isArray(runs)) throw new Error('unexpected run query response shape');
+    for (const run of runs) if (run.trace_id) traceIds.add(run.trace_id);
+    if (runs.length < PAGE_SIZE) break;
+    offset += PAGE_SIZE;
+  }
+
+  const ids = [...traceIds];
+  for (let i = 0; i < ids.length; i += DELETE_BATCH) {
+    const deleteRes = await fetch(`${BASE_URL}/api/v1/runs/delete`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        session_id: projectId,
+        trace_ids: ids.slice(i, i + DELETE_BATCH),
+      }),
+    });
+    if (!deleteRes.ok) {
+      throw new Error(`run delete failed: HTTP ${deleteRes.status}`);
+    }
+  }
+};
+
 export const purgeUserTraces = async (sessionIds: string[]): Promise<void> => {
   const apiKey = config.langsmith.apiKey;
   const project = config.langsmith.project;
@@ -55,42 +99,13 @@ export const purgeUserTraces = async (sessionIds: string[]): Promise<void> => {
     }
 
     for (const sessionId of sessionIds) {
-      const traceIds = new Set<string>();
-      let offset = 0;
-      for (let page = 0; page < MAX_PAGES; page++) {
-        const queryRes = await fetch(`${BASE_URL}/api/v1/runs/query`, {
-          method: 'POST',
-          headers,
-          body: JSON.stringify({
-            session: [projectId],
-            filter: sessionMetadataFilter(sessionId),
-            limit: PAGE_SIZE,
-            offset,
-          }),
-        });
-        if (!queryRes.ok) {
-          throw new Error(`run query failed: HTTP ${queryRes.status}`);
-        }
-        const runs = (await queryRes.json()) as { trace_id?: string }[];
-        if (!Array.isArray(runs)) throw new Error('unexpected run query response shape');
-        for (const run of runs) if (run.trace_id) traceIds.add(run.trace_id);
-        if (runs.length < PAGE_SIZE) break;
-        offset += PAGE_SIZE;
-      }
-
-      const ids = [...traceIds];
-      for (let i = 0; i < ids.length; i += DELETE_BATCH) {
-        const deleteRes = await fetch(`${BASE_URL}/api/v1/runs/delete`, {
-          method: 'POST',
-          headers,
-          body: JSON.stringify({
-            session_id: projectId,
-            trace_ids: ids.slice(i, i + DELETE_BATCH),
-          }),
-        });
-        if (!deleteRes.ok) {
-          throw new Error(`run delete failed: HTTP ${deleteRes.status}`);
-        }
+      try {
+        await purgeSessionTraces(sessionId, headers, projectId);
+      } catch (err) {
+        // One session failing (rate limit, HTTP error) must not give up on the
+        // remaining ones — each session's traces are a separate best-effort
+        // chunk, so continue and let the failure be logged.
+        console.error('trace purge (best-effort) failed for a session:', String(err));
       }
     }
   } catch (err) {
