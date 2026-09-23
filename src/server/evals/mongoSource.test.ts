@@ -6,6 +6,7 @@ import {
   SUPPORT_PHONE_PAGE,
 } from './mongoSource';
 import { Asset } from '../models/Asset';
+import { MAX_PROMPT_TEXT_CHARS, truncateForPrompt } from '../services/textExtraction';
 
 describe('#112 temp mongo source', () => {
   const userId = evalUserId.toHexString();
@@ -47,6 +48,17 @@ describe('#112 temp mongo source', () => {
     expect(phonePages.map((u) => u.index)).toEqual([SUPPORT_PHONE_PAGE]);
     // Filler must be non-empty: a unit read must yield readable text.
     expect(units.every((u: { text: string }) => u.text.length > 0)).toBe(true);
+  });
+
+  // An agent can pass the case without unit walking only if the phone is
+  // visible in the lazy whole-file read; the filler is sized so the joined
+  // text exceeds MAX_PROMPT_TEXT_CHARS and truncation cuts off before page 58.
+  it('whole-file read of the manual truncates before the phone page', async () => {
+    await seedEvalSource();
+    const manual = await Asset.findOne({ userId, filename: 'long-manual.md' });
+    const text = manual?.textExtracted ?? '';
+    expect(text.length).toBeGreaterThan(MAX_PROMPT_TEXT_CHARS);
+    expect(truncateForPrompt(text).includes(SUPPORT_PHONE)).toBe(false);
   });
 
   it('seeds the #159 handbook with one unit per heading-2 section', async () => {

@@ -111,7 +111,7 @@ export const CASES: EvalCase[] = [
       // Strict variant: literal unit-58 read. A better-behaved agent that
       // reads a range ("55-60") fails only this assert (partial aggregate).
       { type: 'tool_called', tool: 'read_file', argsSubset: { unit: 58 } },
-      { type: 'answer_contains', text: '58' },
+      { type: 'answer_contains', text: 'page 58' },
     ],
   },
   {
@@ -131,7 +131,8 @@ export const CASES: EvalCase[] = [
     prompt:
       'Split project-handbook.md into one markdown file per heading-2 section, ' +
       'named <nn>-<slug>.md in section order (zero-padded two-digit number, e.g. ' +
-      '01-overview.md), each file containing the section heading and its body.',
+      '01-overview.md), each file starting with the section heading kept exactly ' +
+      'as a heading-2 line (## Title) followed by its body.',
     description:
       '#159 long-document structuring: the agent reads the handbook by units and ' +
       'generates one markdown file per heading-2 section under the stated filename ' +

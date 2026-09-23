@@ -43,15 +43,22 @@ const FIXTURE_FILES: { filename: string; contentType: string; text: string }[] =
 /* #159 case A fixture: a 60-page manual whose support phone number sits on
  * page 58. Units are seeded directly as pages (the PDF conversion path emits
  * exactly these on a real long document); answer material — the phone
- * number — exists only here, and every filler page is unique and free of it
- * so a lazy whole-file read cannot tell the agent which page it is on. */
+ * number — exists only here, and every filler page is unique and free of it.
+ * Filler is sized so the JOINED full text clearly exceeds MAX_PROMPT_TEXT_CHARS
+ * (12k): a lazy whole-file read truncates well before page 58 and cannot see
+ * the phone, so the case genuinely forces unit walking instead of being
+ * passable with one big read. */
 export const SUPPORT_PHONE = '+44 20 7946 0812';
 export const SUPPORT_PHONE_PAGE = 58;
 
 const manualPageText = (index: number): string =>
   `Chapter continuation, page ${index}. This page discusses routine operation ` +
   `and maintenance item ${index} of the appliance manual, with placeholders for ` +
-  'diagrams and troubleshooting tables.';
+  'diagrams and troubleshooting tables across several sub-chapters. ' +
+  `The service schedule for this interval (${index}) covers intake filters, drive ` +
+  'belts, housing seals, and control-board firmware checks in sequence, each with ' +
+  'its own torque values and inspection windows documented in the figures that ' +
+  'follow this paragraph throughout the printed edition of the manual.';
 
 const LONG_MANUAL_FILENAME = 'long-manual.md';
 const LONG_MANUAL_PAGES = 60;

@@ -72,9 +72,29 @@ describe('extractUnits — headings (#159)', () => {
   });
 
   it('keeps heading-free markdown whole', () => {
-    expect(extractUnits('doc.md', 'plain text\nmore')).toEqual([
-      { index: 1, label: 'Document', text: 'plain text\nmore' },
+    expect(extractUnits('doc.md', 'plain text, no headings')).toEqual([
+      { index: 1, label: 'Document', text: 'plain text, no headings' },
     ]);
+  });
+
+  // Regression for the review pass: a `#` line inside a fenced code block
+  // registered as the shallowest heading and collapsed the whole doc to one
+  // unit, disabling every heading split.
+  it('ignores heading-shaped lines inside fenced code blocks', () => {
+    const doc = ['## A', 'body a', '```md', '# Fake heading', '```', '## B', 'body b'].join('\n');
+    const units = extractUnits('doc.md', doc);
+    expect(units.map((u) => u.label)).toEqual(['A', 'B']);
+  });
+
+  it('ignores ~~~ fences too, and resumes at the closing fence line itself', () => {
+    const doc = ['## A', '~~~', '##### ignore me', '~~~', '## B'].join('\n');
+    const units = extractUnits('doc.md', doc);
+    expect(units.map((u) => u.label)).toEqual(['A', 'B']);
+  });
+
+  it('an unclosed fence disables splitting for the rest of the document', () => {
+    const doc = ['## A', 'body', '````', 'padded backtick fence, never closed', '## B'].join('\n');
+    expect(extractUnits('doc.md', doc)).toEqual([{ index: 1, label: 'Document', text: doc }]);
   });
 
   it('splits html via the same markdown path (turndown output)', () => {

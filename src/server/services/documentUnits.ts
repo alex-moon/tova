@@ -67,6 +67,13 @@ const headingOf = (line: string): { level: number; title: string } | null => {
   return match ? { level: match[1]!.length, title: match[2]!.trim() } : null;
 };
 
+// ``` / ~~~~ fence lines toggle an open fence (the closing fence only ends it
+// if it uses the same run of characters). Headings inside fenced code blocks
+// are examples, not document structure, and must not drive the split — a
+// doctored `# comment` inside a fence would otherwise become the shallowest
+// heading level and collapse the whole document to a single unit.
+const isFenceLine = (line: string): boolean => /^(`{3,}|~{3,})/.test(line);
+
 // md/html arrive as markdown (turndown for html): split on ATX headings at
 // the shallowest level present (H1 if any, otherwise the shallowest used),
 // so each unit is a top-level section titled by its heading. Anything
@@ -76,7 +83,13 @@ const headingOf = (line: string): { level: number; title: string } | null => {
 const headingUnits = (markdown: string): AssetUnit[] => {
   const lines = markdown.split('\n');
   const headings: { lineNo: number; level: number; title: string }[] = [];
+  let insideFence = false;
   for (let lineNo = 0; lineNo < lines.length; lineNo++) {
+    if (isFenceLine(lines[lineNo]!)) {
+      insideFence = !insideFence;
+      continue;
+    }
+    if (insideFence) continue;
     const heading = headingOf(lines[lineNo]!);
     if (heading) headings.push({ lineNo, ...heading });
   }
