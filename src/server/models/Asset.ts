@@ -58,8 +58,11 @@ const assetSchema = new mongoose.Schema(
     // heavy text fields; readers that need units must select them.
     units: {
       select: false,
+      // `_id: false`: units are derived slices re-generated on every job run,
+      // so per-unit ObjectIds are pure noise/storage.
       type: [
         {
+          _id: false,
           index: { type: Number, required: true },
           label: { type: String, required: true },
           text: { type: String, required: true },
