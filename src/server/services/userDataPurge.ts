@@ -66,13 +66,18 @@ export const purgeAllUserData = async (
 
   // Spaces sweep: the asset bytes (deleted docs left the bucket keys behind)
   // and the chat-scoped workspace files, which have no Asset row and are
-  // therefore swept by session prefix.
-  for (const key of assetKeys) {
-    try {
-      if (!(await spacesWorkspaceStorage.deleteByKey(key))) failedObjects.push(key);
-    } catch (err) {
-      console.error('factory reset: object delete failed:', String(err));
-      failedObjects.push(key);
+  // therefore swept by session prefix. Both halves gate on isConfigured for
+  // the same reason: with no Spaces credentials nothing was ever written to a
+  // bucket, so reporting the keys as failed would spuriously warn the user
+  // that data remains.
+  if (spacesWorkspaceStorage.isConfigured()) {
+    for (const key of assetKeys) {
+      try {
+        if (!(await spacesWorkspaceStorage.deleteByKey(key))) failedObjects.push(key);
+      } catch (err) {
+        console.error('factory reset: object delete failed:', String(err));
+        failedObjects.push(key);
+      }
     }
   }
   try {

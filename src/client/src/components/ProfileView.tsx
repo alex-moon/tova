@@ -106,9 +106,11 @@ const ProfileView = () => {
       const { failedObjects } = await AuthService.factoryReset(resetConfirm);
       if (failedObjects.length > 0) {
         toast.warning(`Factory reset: ${failedObjects.length} stored file(s) could not be deleted`);
-      } else {
-        toast.success('Factory reset complete');
+        // Let the warning be readable before the full reload clears the view.
+        window.setTimeout(() => window.location.reload(), 5000);
+        return;
       }
+      toast.success('Factory reset complete');
       // Full reload so every piece of app state re-reads the now-empty data.
       window.location.reload();
     } catch (err) {

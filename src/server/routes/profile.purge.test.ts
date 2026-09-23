@@ -59,15 +59,19 @@ const seedUserWorkspace = async (uid: mongoose.Types.ObjectId, count = 2) => {
     kind: 'related-to',
     summary: 'self-reference fixture',
   });
+  return { assetId: asset._id };
 };
 
 const expectNothingPIIBearingRemains = async (
   uid: mongoose.Types.ObjectId,
   sessionIds: mongoose.Types.ObjectId[] = [],
+  assetId?: mongoose.Types.ObjectId,
 ) => {
   expect(await Session.countDocuments({ userId: uid })).toBe(0);
   expect(await Message.countDocuments({ sessionId: { $in: sessionIds } })).toBe(0);
   expect(await Asset.countDocuments({ userId: uid })).toBe(0);
+  // AssetJob has no userId — it must have been swept via the user's asset ids.
+  if (assetId) expect(await AssetJob.countDocuments({ assetId })).toBe(0);
   expect(await Entity.countDocuments({ userId: uid })).toBe(0);
   expect(await EntityEdge.countDocuments({ userId: uid })).toBe(0);
 };
@@ -106,7 +110,7 @@ describe('POST /api/profile/factory-reset (issue #143)', () => {
 
   it('executes on the exact confirm string: nothing PII-bearing survives; user B untouched', async () => {
     const { app, userId, cookie } = await registerUser('reset-ok@example.com');
-    await seedUserWorkspace(userId);
+    const seeded = await seedUserWorkspace(userId);
     const other = (await registerUser('reset-other@example.com')).userId;
     await seedUserWorkspace(other);
 
@@ -121,6 +125,7 @@ describe('POST /api/profile/factory-reset (issue #143)', () => {
     await expectNothingPIIBearingRemains(
       userId,
       preReadIds.map((s) => s._id),
+      seeded.assetId,
     );
     // The account itself and its preferences survive — the user can stay
     // signed in and keep using Tova from a clean state.
@@ -131,6 +136,8 @@ describe('POST /api/profile/factory-reset (issue #143)', () => {
     // Other user: nothing changed.
     expect(await Session.countDocuments({ userId: other })).toBe(2);
     expect(await Asset.countDocuments({ userId: other })).toBe(1);
+    // Their AssetJob (no userId on it) must not have been collateral damage.
+    expect(await AssetJob.countDocuments()).toBe(1);
   });
 
   it('hard-deletes soft-deleted (unlisted) sessions too', async () => {

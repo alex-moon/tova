@@ -176,6 +176,20 @@ describe('purgeAllUserData (issue #143: factory reset)', () => {
     expect(mockedDeleteByKey).toHaveBeenCalledWith(`${uid}/chats/${session._id}/script.txt`);
   });
 
+  it('reports nothing failed when Spaces is unconfigured (no bucket ever held the keys)', async () => {
+    const uid = userId();
+    await Session.create({ userId: uid, title: 'with files' });
+    await seedAssetsAndGraph(uid);
+    mockedIsConfigured.mockReturnValue(false);
+
+    // Storage never configured → no bucket could hold the user's files, so
+    // surface no failedObjects: a spurious warning would tell the user that
+    // data remains when it cannot.
+    await expect(purgeAllUserData(uid)).resolves.toEqual({ failedObjects: [] });
+    expect(mockedDeleteByKey).not.toHaveBeenCalled();
+    expect(mockedListKeys).not.toHaveBeenCalled();
+  });
+
   it('reports a sentinel key when the workspace file sweep fails wholesale', async () => {
     const uid = userId();
     await Session.create({ userId: uid, title: 'with files' });

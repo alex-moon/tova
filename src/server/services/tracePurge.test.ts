@@ -80,6 +80,21 @@ describe('purgeUserTraces', () => {
     });
   });
 
+  it('refuses to guess the project when the name lookup does not match (no wrong-project deletes)', async () => {
+    fetchSpy.mockImplementation((url: string) => {
+      if (String(url).includes('/api/v1/sessions')) {
+        // The name filter returned an unrelated project (API drift scenario).
+        return Promise.resolve(jsonResponse(200, [{ id: 'proj-other', name: 'not-tova-dev' }]));
+      }
+      return Promise.resolve(jsonResponse(200, []));
+    });
+
+    await purgeUserTraces(['sess-1']);
+
+    // No run query or delete may fire for an unverifiable project id.
+    expect(fetchSpy.mock.calls.filter(([u]) => String(u).includes('/runs/'))).toHaveLength(0);
+  });
+
   it('paginates run queries until a short page, batching Deletes at 100', async () => {
     const fullPages = Array.from({ length: 100 }, (_, i) => ({ trace_id: `t-${i}` }));
     const deleteBodies: unknown[] = [];

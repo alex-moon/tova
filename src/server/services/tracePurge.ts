@@ -47,7 +47,9 @@ export const purgeUserTraces = async (sessionIds: string[]): Promise<void> => {
       throw new Error(`project lookup failed: HTTP ${res.status}`);
     }
     const sessions = (await res.json()) as { id?: string; name?: string }[];
-    const projectId = sessions.find((s) => s.name === project)?.id ?? sessions[0]?.id;
+    // Name-match only: falling back to the first session returned would risk
+    // issuing deletes against a project the config never named.
+    const projectId = sessions.find((s) => s.name === project)?.id;
     if (!projectId) {
       throw new Error(`project "${project}" not found`);
     }
