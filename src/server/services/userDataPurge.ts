@@ -82,6 +82,11 @@ export const purgeAllUserData = async (
     );
   } catch (err) {
     console.error('factory reset: workspace file sweep failed:', String(err));
+    // A wholesale sweep failure (listing error, transport down) cannot name
+    // individual keys, but reporting zero failures here would tell the user
+    // "everything erased" when chat files may still be on the bucket — so a
+    // sentinel key is surfaced instead.
+    failedObjects.push(`${uid}/chats/*`);
   }
 
   // Traces: best-effort LangSmith deletion into the configured project;

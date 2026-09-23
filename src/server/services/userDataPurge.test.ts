@@ -165,9 +165,29 @@ describe('purgeAllUserData (issue #143: factory reset)', () => {
       .mockResolvedValue([]);
     mockedDeleteByKey.mockResolvedValue(true);
 
+    mockedListKeys
+      .mockResolvedValueOnce([`${uid}/chats/${session._id}/script.txt`])
+      .mockResolvedValue([]);
+    mockedDeleteByKey.mockResolvedValue(true);
+
     await purgeAllUserData(uid);
 
     expect(mockedDeleteByKey).toHaveBeenCalledWith(`${uid}/asset-1/notes.md`);
     expect(mockedDeleteByKey).toHaveBeenCalledWith(`${uid}/chats/${session._id}/script.txt`);
+  });
+
+  it('reports a sentinel key when the workspace file sweep fails wholesale', async () => {
+    const uid = userId();
+    await Session.create({ userId: uid, title: 'with files' });
+    await seedAssetsAndGraph(uid);
+    mockedIsConfigured.mockReturnValue(true);
+    mockedDeleteByKey.mockResolvedValue(true);
+    // mockReset drops the previous test's queued `Once` implementations.
+    mockedListKeys.mockReset().mockRejectedValue(new Error('S3 unavailable'));
+
+    const result = await purgeAllUserData(uid);
+
+    expect(result.failedObjects).toEqual([`${uid}/chats/*`]);
+    expect(await Session.countDocuments({ userId: uid })).toBe(0);
   });
 });
