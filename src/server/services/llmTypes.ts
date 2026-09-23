@@ -8,10 +8,11 @@
 
 /*
  * Provider toggle carried on options; un-tagged callers default to `groq`
- * (see `inferenceService`). DeepInfra callers get tagged during routing
- * work in #4.
+ * today (see `inferenceService`), but #151 moves the default to `typesafe`:
+ * routing/classification/auxiliary work runs on Jev hosted on the TypeSafe
+ * API. DeepInfra callers get tagged during routing work in #4.
  */
-export type LlmProvider = 'groq' | 'deepinfra';
+export type LlmProvider = 'groq' | 'deepinfra' | 'typesafe';
 
 /*
  * LangSmith tracing context (issue #5): optional, attachable per call.

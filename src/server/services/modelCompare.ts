@@ -44,9 +44,15 @@ export interface ComparisonRun {
 
 export const MAX_COMPARE_MODELS = 6;
 
+/*
+ * #151: the typesafe connector does not exist yet (openai-compatible wiring
+ * is pending), so the entry resolves to `undefined` and compare runs against
+ * it surface the "Unknown provider" error row instead of crashing the run.
+ */
 const PROVIDERS: Record<string, (typeof groqConnector | typeof deepinfraConnector) | undefined> = {
   groq: groqConnector,
   deepinfra: deepinfraConnector,
+  typesafe: undefined,
 };
 
 /**

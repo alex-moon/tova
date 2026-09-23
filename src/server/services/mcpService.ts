@@ -254,9 +254,11 @@ const sanitizeToolsetKey = (name: string): string =>
  * default — DeepInfra models have handled full MCP tool lists without issue —
  * so on `deepinfra` turns the budget is not applied at all and every user
  * tool attaches unaudited. The 1500 default still applies to `groq` turns
- * (the enum keeps the provider for guard paths) and to turns with no
- * provider tag (un-tagged callers default to `groq` inside
- * `inferenceService`, so this matches their effective behaviour). An
+ * (the enum keeps the provider for legacy rows) and to `typesafe` turns
+ * (#151: these host the guard/tier paths, which keep today's incidental
+ * default for now). It also applies to turns with no provider tag
+ * (un-tagged callers default to `groq` inside `inferenceService`, so this
+ * matches their effective behaviour). An
  * explicit `MCP_TOOL_BUDGET_TOKENS` operator override forces the budget on
  * all providers; `0` drops every user tool on every provider (empty-string
  * or invalid values fall back to the 1500 default).

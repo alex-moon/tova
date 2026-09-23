@@ -84,4 +84,22 @@ describe('runModelComparison (issue #129)', () => {
     );
     expect(mockCreate(groqConnector)).not.toHaveBeenCalled();
   });
+
+  /*
+   * #151: 'typesafe' is listed in PROVIDERS explicitly with a `undefined`
+   * connector (pending the TypeSafe API wiring), so a compare ref naming it
+   * takes the same error-row path as a fully unknown provider rather than
+   * crashing or riding groq.
+   */
+  it('emits an error row for the typesafe provider while its connector is pending', async () => {
+    const run = await runModelComparison('hi', [{ provider: 'typesafe', model: 'jev' }]);
+    expect(run.results[0]).toEqual(
+      expect.objectContaining({
+        provider: 'typesafe',
+        answer: null,
+        error: 'Unknown provider: typesafe',
+      }),
+    );
+    expect(mockCreate(groqConnector)).not.toHaveBeenCalled();
+  });
 });

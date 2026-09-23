@@ -3,7 +3,7 @@ import mongoose from 'mongoose';
 const providerRoutingSchema = new mongoose.Schema({
   provider: {
     type: String,
-    enum: ['groq', 'deepinfra'],
+    enum: ['groq', 'deepinfra', 'typesafe'],
     required: true,
   },
   model: {

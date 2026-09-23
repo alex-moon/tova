@@ -1,6 +1,6 @@
 import type { AssetJobDocument } from '../models/AssetJob';
 import { Asset } from '../models/Asset';
-import { getObjectBuffer } from './storageService';
+import { spacesWorkspaceStorage } from './workspaceStorage';
 import { convertToMarkdown, isConvertible } from './markdownConversion';
 
 // Real processor for the conversion queue (issue #67): fetch the object with
@@ -24,7 +24,9 @@ export const processAssetConversionJob = async (job: AssetJobDocument): Promise<
     throw new Error(`asset is not a convertible type: ${asset.filename}`);
   }
 
-  const buffer = await getObjectBuffer(asset.key, MAX_CONVERSION_INPUT_BYTES);
+  const buffer = await spacesWorkspaceStorage.getByKey(asset.key, {
+    maxBytes: MAX_CONVERSION_INPUT_BYTES,
+  });
   if (!buffer) {
     throw new Error('input-not-readable: object missing or too large');
   }

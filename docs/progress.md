@@ -2,6 +2,17 @@
 
 ## Status (current)
 
+#148 E2E expansion (branch `feat/148-e2e-expansion`): local Playwright was failing because
+`e2e/playwright.config.ts` never loaded `.env` (a one-line `import 'dotenv/config'` was the
+sole root cause — suite went 16/16 green immediately). Added stable `data-testid` hooks to
+Login and the ChatWindow composer, extracted the mocked SSE stream into
+`e2e/helpers/chatMock.ts` (shared by all chat specs), and added three specs: `auth.spec.ts`
+(login/error/reload/logout, real local endpoints, read-only), `chat.spec.ts` (send + streamed
+multi-delta reply), and `profile.spec.ts` (profile-save PATCH contract plus the ZDR request
+contract — `history` without `sessionId` on, `sessionId` without `history` off — fully
+page-mocked so no real user state is mutated). Suite is 30/30 across mobile/desktop;
+`npm run ci` exit 0.
+
 #116 ZDR option (merged via PR #124): a per-user "Zero data retention" toggle
 (`settings.zdr`, ProfileModal → `PATCH /api/profile`). With it on: chat turns are
 session-less (no Session/Message rows, no title/classification writes), continuity is a
@@ -28,6 +39,14 @@ Everything is behind `ENTITY_GRAPH_ENABLED` / `ENTITY_GRAPH_PROMPT_INJECTION`
 Preference inference, fuzzy disambiguation, ontology enforcement, files feeding the
 graph and tool-based querying are deliberately deferred; open questions in the plan
 doc.
+
+#145 Log redaction (in flight, PR #154): `logRedaction.ts` (`redactForLog`) redacts
+error message text at every user-content-adjacent `console.*` call site (verified
+hit-by-hit audit of `src/server`), protecting stdout and the admin logs buffer via the
+logService console capture; `traceRedaction.ts` applies the same policy to LangSmith
+span input/output/error via an exporter override; pino evaluated and declined (call-site
+redaction covers the actual failure mode; documented in the plan). Gate: RAG notes
+ticket can now state the no-leak constraint in `docs/overview.md`.
 
 No outstanding local tasks. Planning and tracking happen on GitHub (`alex-moon/tova`):
 issues for open work, PRs for changes; plans live in `docs/plan-<ticket>-<summary>.md`
@@ -111,6 +130,7 @@ streaming the real agent and grading pass/partial/fail, LangSmith export to the
 4. **Plan 004 — Add streaming chat responses.** `POST /api/chat/stream` (SSE) with `meta`/`delta`/`done` events; the client renders replies progressively; persistence unchanged; streaming tests added.
 5. **Plan 005 — Expand router evaluation and tests.** Router test suite grew from 3 to 12 tests covering every deterministic and classifier branch plus fallbacks; `POST /api/chat` gained a routing-metadata test (`routing: { model, reason }`, `modelName` persistence); the routing contract is documented in the root `README.md`.
 6. **Plan 017 — Collect per-message prompt metrics.** `metrics` subdocument on messages (deterministic features via `promptMetrics.ts` for both roles; guard-model LLM classifications via `metricsService.ts`, fire-and-forget post-save, nulls on failure); wired into both chat endpoints; unit + route/stream integration tests. Model-eval pass on DeepInfra (20 fixed prompts, production parser): picked `google/gemma-3-4b-it` (20/20 parse, lowest latency, no truncation) for when #4 wires the DeepInfra connector; Qwen3.5-9B ruled out (100% truncation at max_tokens 100).
+7. **Plan 149 — Workspace file-storage abstraction boundary.** `WorkspaceStorage` interface + `spacesWorkspaceStorage` over the existing Spaces driver (`workspaceStorage.ts`, incl. `RawKeyStorage` for assets and `SpacesCapabilities`); all call sites rewired; ESLint `no-restricted-imports` guard makes the boundary physically enforced; chat-scoped key layout `<userId>/chats/<chatId>/<filename>` kept structurally disjoint from asset keys; no behavioural change.
 
 A more detailed historical log with artifact lists is preserved in the git history of this file. The compact summary above is the canonical narrative.
 
