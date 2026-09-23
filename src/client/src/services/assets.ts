@@ -227,12 +227,16 @@ const AssetService = {
   },
 
   // `scope` (issue #116): the chat composer tags its uploads as 'chat' so the
-  // server can keep a ZDR account's chat attachments out of durable storage.
+  // server can keep an incognito chat's attachments out of durable storage.
   // Assets-page uploads omit it and remain durable by default.
+  // `chatId`/`zdr` (:144) tell the server which per-chat incognito decision
+  // applies — an existing chat's stored flag, or a new chat's composer
+  // toggle (an upload must precede that chat's session creation).
   async upload(
     file: File,
     onProgress?: (pct: number) => void,
     scope?: 'chat',
+    chatTarget?: { chatId: string } | { zdr: boolean },
   ): Promise<AssetSummary> {
     let created: { uploadUrl: string; asset: AssetSummary };
     try {
@@ -243,6 +247,11 @@ const AssetService = {
           contentType: file.type || 'application/octet-stream',
           size: file.size,
           ...(scope ? { scope } : {}),
+          ...(chatTarget
+            ? 'chatId' in chatTarget
+              ? { chatId: chatTarget.chatId }
+              : { zdr: chatTarget.zdr }
+            : {}),
         },
       );
       created = res.data;
