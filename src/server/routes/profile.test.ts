@@ -346,7 +346,48 @@ describe('PATCH /api/profile (issue #35)', () => {
     expect(user.settings?.zdr ?? null).toBeNull();
   });
 
-  describe('zdr PATCH never purges as a side effect (issue #143 removed the auto-purge)', () => {
+  it('rejects non-boolean incognitoByDefault values with 400', async () => {
+    const { app, cookie } = await registerUser('patch-incognito-invalid@example.com');
+
+    for (const bad of ['yes', 1, null, 0]) {
+      const res = await patchProfile(app, cookie, { incognitoByDefault: bad });
+      expect(res.status).toBe(400);
+    }
+
+    const user = await getUser('patch-incognito-invalid@example.com');
+    expect(user.settings?.zdr ?? null).toBeNull();
+  });
+
+  it('patching incognitoByDefault writes the same settings.zdr slot (issue #144)', async () => {
+    const { app, cookie } = await registerUser('patch-incognito-slot@example.com');
+
+    const before = await request(app).get('/api/auth/me').set('Cookie', cookie);
+    expect(before.body.user).not.toHaveProperty('incognitoByDefault');
+
+    const on = await patchProfile(app, cookie, { incognitoByDefault: true });
+    expect(on.status).toBe(200);
+    expect(on.body.user.incognitoByDefault).toBe(true);
+    expect(on.body.user.zdr).toBe(true);
+
+    const off = await patchProfile(app, cookie, { incognitoByDefault: false });
+    expect(off.status).toBe(200);
+    expect(off.body.user).not.toHaveProperty('incognitoByDefault');
+
+    const user = await getUser('patch-incognito-slot@example.com');
+    expect(user.settings?.zdr).toBe(false);
+  });
+
+  it('rejects conflicting zdr and incognitoByDefault values with 400', async () => {
+    const { app, cookie } = await registerUser('patch-incognito-conflict@example.com');
+
+    const res = await patchProfile(app, cookie, { zdr: true, incognitoByDefault: false });
+    expect(res.status).toBe(400);
+
+    const user = await getUser('patch-incognito-conflict@example.com');
+    expect(user.settings?.zdr ?? null).toBeNull();
+  });
+
+  describe('first-enable auto-purge (issue #116 Q5)', () => {
     const seedChats = async (email: string, sessions: number, withMessages = true) => {
       const user = await getUser(email);
       const docIds = [];

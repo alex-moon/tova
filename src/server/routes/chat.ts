@@ -29,6 +29,7 @@ import {
 } from '../services/entityExtractionService';
 import { zdrHistorySchema } from '../validation';
 import { redactForLog } from '../services/logRedaction';
+import { decideTurn } from '../services/zdrTurn';
 
 const router = express.Router();
 
@@ -304,9 +305,13 @@ const buildMessageMetrics = async (
   };
 };
 
-const createSessionWithUser = async (userId: string, content: string) => {
+const createSessionWithUser = async (
+  userId: string,
+  content: string,
+  { incognito = false }: { incognito?: boolean } = {},
+) => {
   const title = await generateChatTitle(content);
-  return Session.create({ userId, title });
+  return Session.create({ userId, title, incognito });
 };
 
 /*
@@ -439,24 +444,64 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
       if (!res.writableEnded) abortController.abort();
     });
 
-    if (userDoc.settings?.zdr) {
+    /*
+     * One decision owns the turn's retention shape (#144, services/zdrTurn.ts):
+     * reject / suppress-persistence + replay / persist normally. The flag is
+     * the effective per-chat incognito state: for a new chat it comes from the
+     * request's `zdr` intent (the chat toggle next to attach) or the account's
+     * 'incognito by default'; for a sessionId turn it comes from the stored
+     * session flag. The bridged account setting still rejects continuation
+     * before the read (frozen #116 ordering — see the reject below).
+     */
+    const accountIncognito = Boolean(userDoc.settings?.zdr);
+    const bodyIntent: boolean | undefined =
+      typeof req.body.zdr === 'boolean' ? req.body.zdr : undefined;
+    let session;
+    let turnDecision;
+    if (sessionId) {
+      if (accountIncognito) {
+        // Incognito accounts cannot continue a saved chat (#116/#144): the
+        // reject fires before any session read.
+        turnDecision = decideTurn({ incognito: true, sessionId });
+      } else {
+        if (!isValidObjectId(sessionId)) {
+          await cleanupEphemeralAsset(attachedAsset);
+          return res.status(400).json({ message: 'Invalid session id' });
+        }
+        session = await Session.findOne({ _id: sessionId, userId, deletedAt: null });
+        if (!session) {
+          return res.status(404).json({ message: 'Session not found' });
+        }
+        turnDecision = decideTurn({ incognito: Boolean(session.incognito), sessionId });
+      }
+    } else {
+      turnDecision = decideTurn({
+        incognito: bodyIntent ?? accountIncognito,
+        sessionId: undefined,
+      });
+    }
+    if (turnDecision.reject) {
+      await cleanupEphemeralAsset(attachedAsset);
+      return res.status(409).json({
+        message:
+          'Zero-data-retention is on — new turns are never stored, so they cannot continue a saved chat. Start a new chat instead.',
+      });
+    }
+    const cleanupIfEphemeral = async () => {
+      if (!turnDecision.requireEphemeralCleanup) return;
+      await cleanupEphemeralAsset(attachedAsset);
+    };
+
+    if (turnDecision.persistWithHistoryReplay) {
       // Zero-data retention (#116): nothing about the turn is written — no
       // Session row, no Message rows, no classification, no title. The
       // conversation continuity is the client's replayed `history` payload
-      // (validation-gated). A ZDR turn must not continue a persisted chat:
-      // writing there would contradict the retention promise.
-      if (sessionId) {
-        await cleanupEphemeralAsset(attachedAsset);
-        return res.status(409).json({
-          message:
-            'Zero-data-retention is on — new turns are never stored, so they cannot continue a saved chat. Start a new chat instead.',
-        });
-      }
+      // (validation-gated).
       const zdrHistory = parseZdrHistory(req.body.history);
       if (!zdrHistory.ok) {
         // The turn is rejected before it consumes anything, so the throwaway
         // attachment does not outlive the request either (#116).
-        await cleanupEphemeralAsset(attachedAsset);
+        await cleanupIfEphemeral();
         return res.status(400).json({ message: 'Invalid chat history' });
       }
       const messages = buildZdrMessages(zdrHistory.value, content);
@@ -483,7 +528,7 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
         abortSignal: abortController.signal,
       });
       const zdrAssistantContent = chatCompletion.choices[0]?.message?.content ?? '';
-      await cleanupEphemeralAsset(attachedAsset);
+      await cleanupIfEphemeral();
       return res.json({
         routing: routingResult,
         message: {
@@ -494,14 +539,16 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
       });
     }
 
-    let session;
-    if (sessionId) {
-      session = await Session.findOne({ _id: sessionId, userId, deletedAt: null });
-      if (!session) {
-        return res.status(404).json({ message: 'Session not found' });
-      }
-    } else {
-      session = await createSessionWithUser(userId as string, content);
+    // On the sessionId path the session is already loaded above (the decision
+    // needs the stored flag first). New persisted chats — the only way to get
+    // here — are never incognito: an incognito turn returns in the replay
+    // branch above without touching Session, so the flag is pinned to false
+    // explicitly (a persisted incognito session would contradict the
+    // write-nothing promise this ticket keeps).
+    if (!session) {
+      session = await createSessionWithUser(userId as string, content, {
+        incognito: false,
+      });
     }
     // Save user message
     const userMessage = await saveUserMessageWithMetrics(
@@ -644,33 +691,65 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
     if (!streamUserDoc) {
       return res.status(404).json({ message: 'User not found' });
     }
-    const zdr = Boolean(streamUserDoc.settings?.zdr);
-
+    /*
+     * One decision owns the turn's retention shape (#144, services/zdrTurn.ts),
+     * mirroring the non-streaming route: the per-chat flag comes from the
+     * request's `zdr` intent (new chat) or the account's 'incognito by
+     * default'; a sessionId turn decides off the stored session flag. The
+     * bridged account setting still rejects continuation before the read.
+     */
+    const accountIncognito = Boolean(streamUserDoc.settings?.zdr);
+    const bodyIntent: boolean | undefined =
+      typeof req.body.zdr === 'boolean' ? req.body.zdr : undefined;
     let session;
+    let turnDecision;
+    if (sessionId) {
+      if (accountIncognito) {
+        // Incognito accounts cannot continue a saved chat (#116/#144): the
+        // reject fires before any session read.
+        turnDecision = decideTurn({ incognito: true, sessionId });
+      } else {
+        if (!isValidObjectId(sessionId)) {
+          await cleanupEphemeralAsset(attachedAsset);
+          return res.status(400).json({ message: 'Invalid session id' });
+        }
+        session = await Session.findOne({ _id: sessionId, userId, deletedAt: null });
+        if (!session) {
+          return res.status(404).json({ message: 'Session not found' });
+        }
+        turnDecision = decideTurn({ incognito: Boolean(session.incognito), sessionId });
+      }
+    } else {
+      turnDecision = decideTurn({
+        incognito: bodyIntent ?? accountIncognito,
+        sessionId: undefined,
+      });
+    }
+    if (turnDecision.reject) {
+      await cleanupEphemeralAsset(attachedAsset);
+      return res.status(409).json({
+        message:
+          'Zero-data-retention is on — new turns are never stored, so they cannot continue a saved chat. Start a new chat instead.',
+      });
+    }
+    const cleanupIfEphemeral = async () => {
+      if (!turnDecision.requireEphemeralCleanup) return;
+      await cleanupEphemeralAsset(attachedAsset);
+    };
+    const zdr = turnDecision.persistWithHistoryReplay;
+
     let zdrHistory: { role: 'user' | 'assistant'; content: string }[] = [];
     if (zdr) {
       // Zero-data retention (#116): see the non-streaming route's rationale —
       // no session is created, and saved chats cannot be continued.
-      if (sessionId) {
-        await cleanupEphemeralAsset(attachedAsset);
-        return res.status(409).json({
-          message:
-            'Zero-data-retention is on — new turns are never stored, so they cannot continue a saved chat. Start a new chat instead.',
-        });
-      }
       const parsedHistory = parseZdrHistory(req.body.history);
       if (!parsedHistory.ok) {
-        await cleanupEphemeralAsset(attachedAsset);
+        await cleanupIfEphemeral();
         return res.status(400).json({ message: 'Invalid chat history' });
       }
       zdrHistory = parsedHistory.value;
-    } else if (sessionId) {
-      session = await Session.findOne({ _id: sessionId, userId, deletedAt: null });
-      if (!session) {
-        return res.status(404).json({ message: 'Session not found' });
-      }
-    } else {
-      session = await createSessionWithUser(userId as string, content);
+    } else if (!sessionId) {
+      session = await createSessionWithUser(userId as string, content, { incognito: false });
     }
 
     let routingBand: string;

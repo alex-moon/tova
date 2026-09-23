@@ -54,7 +54,8 @@ router.patch('/', authenticate, async (req: AuthRequest, res) => {
       parsed.data.theme !== undefined ||
       parsed.data.startupChat !== undefined ||
       parsed.data.confirmDeletes !== undefined ||
-      parsed.data.zdr !== undefined
+      parsed.data.zdr !== undefined ||
+      parsed.data.incognitoByDefault !== undefined
     ) {
       if (!user.settings) {
         // Mongoose applies the schema default (null) for any field omitted
@@ -104,7 +105,23 @@ router.patch('/', authenticate, async (req: AuthRequest, res) => {
           file: confirmDeletesPatch.file ?? existing?.file ?? true,
         };
       }
-      const zdrPatch = parsed.data.zdr;
+      // (#144) `incognitoByDefault` shares the settings.zdr slot; `zdr` is
+      // its legacy alias. Both present with different values is a conflict,
+      // not a silently-picked winner. The first-enable purge below still
+      // fires only on a legacy `zdr` first-enable (unchanged #116/#143
+      // behaviour — the alias intentionally does not re-trigger purges; see
+      // the plan note: toggling on a false slot still purges until #143
+      // resolves the purge's fate).
+      if (
+        parsed.data.zdr !== undefined &&
+        parsed.data.incognitoByDefault !== undefined &&
+        parsed.data.zdr !== parsed.data.incognitoByDefault
+      ) {
+        return res
+          .status(400)
+          .json({ message: 'zdr and incognitoByDefault must match when both are set' });
+      }
+      const zdrPatch = parsed.data.zdr ?? parsed.data.incognitoByDefault;
       if (zdrPatch !== undefined) {
         // Boolean-validated in profilePatchSchema. Written only when the key
         // is present (absent = untouched), mirroring `theme`/`startupChat`.

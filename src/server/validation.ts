@@ -47,6 +47,12 @@ export const profilePatchSchema = z.strictObject({
   // delete anything (issue #143 removed the first-enable auto-purge); wiping
   // existing data is now the explicit /factory-reset route below.
   zdr: z.boolean({ message: 'zdr must be a boolean' }).optional(),
+  // 'Incognito by default' (issue #144): new chats start incognito when set.
+  // Reads and writes the same settings.zdr storage slot — single source of
+  // truth; `zdr` is its legacy alias kept for the frozen #116 test surface
+  // and the existing client contract. Rename both together whenever the
+  // internal rename happens.
+  incognitoByDefault: z.boolean({ message: 'incognitoByDefault must be a boolean' }).optional(),
   // Granular delete-confirmation prefs (issue #59). Strict sub-object: an
   // unknown delete target is a 400, not a silently dropped key.
   confirmDeletes: z
@@ -91,9 +97,17 @@ export const assetPresignSchema = z.object({
   // Upload origin (issue #116): the chat composer tags its uploads so a ZDR
   // user's chat attachments can be kept out of long-term storage, while
   // Assets-page uploads (no scope) live on until deleted. The server still
-  // decides from the account's own zdr setting — the tag alone never changes
-  // storage behavior for other users.
+  // decides from the effective per-chat incognito flag (#144) — the tag alone
+  // never changes storage behavior for other users.
   scope: z.enum(['chat'], { message: 'scope must be "chat"' }).optional(),
+  // Per-chat incognito inputs (#144). For an existing chat the composer sends
+  // `chatId` and the stored session flag decides; for a brand-new incognito
+  // chat (the upload precedes session creation) the client sends `zdr`
+  // matching the composer toggle, and absent both the profile's 'incognito by
+  // default' decides. Storage name stays `zdr` per the plan's minimal-churn
+  // variant; ownership of `chatId` is checked in the route (404 on foreign).
+  chatId: z.string({ message: 'chatId must be a string' }).optional(),
+  zdr: z.boolean({ message: 'zdr must be a boolean' }).optional(),
 });
 
 // ZDR chats (issue #116) are stateless per turn: with persistence off, the

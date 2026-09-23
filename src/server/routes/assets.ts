@@ -2,6 +2,7 @@ import express from 'express';
 import archiver from 'archiver';
 import { isValidObjectId } from 'mongoose';
 import { Asset, type AssetDocument } from '../models/Asset';
+import { Session } from '../models/Session';
 import { User } from '../models/User';
 import { authenticate, AuthRequest } from '../middleware/auth';
 import {
@@ -146,18 +147,40 @@ router.post('/presign', authenticate, async (req: AuthRequest, res) => {
         message: parsed.error.issues[0]?.message ?? 'Invalid upload request',
       });
     }
-    // Needed to gate ephemeral chat uploads (#116) on the account's own
-    // zero-data-retention setting.
+    // Needed to gate ephemeral chat uploads (#116) on the effective per-chat
+    // incognito flag (#144).
     const user = await User.findById(req.user?.id);
     if (!user) {
       return res.status(404).json({ message: 'User not found' });
     }
 
+    /*
+     * (#144) The effective per-chat flag mirrors the chat routes' decision:
+     * an existing chat's stored `Session.incognito` decides; a new chat's
+     * upload (which must precede session creation, so no session can exist)
+     * uses the composer's `zdr` intent or the profile's 'incognito by
+     * default'. Assets-page uploads (scope !== 'chat') are never ephemeral.
+     */
+    let incognitoChat = false;
+    if (parsed.data.chatId !== undefined) {
+      if (!isValidObjectId(parsed.data.chatId)) {
+        return res.status(400).json({ message: 'Invalid chat id' });
+      }
+      const chat = await Session.findOne({
+        _id: parsed.data.chatId,
+        userId: req.user?.id,
+        deletedAt: null,
+      });
+      if (!chat) {
+        return res.status(404).json({ message: 'Session not found' });
+      }
+      incognitoChat = Boolean(chat.incognito);
+    } else {
+      incognitoChat = parsed.data.zdr ?? Boolean(user?.settings?.zdr);
+    }
+
     const result = await presignItemForUser(req.user?.id as string, parsed.data, {
-      // ZDR (#116): chat-composer uploads from a ZDR user are kept out of
-      // durable storage — the row is dropped after the turn consumes it. The
-      // account setting, not the client tag alone, decides.
-      ephemeral: parsed.data.scope === 'chat' && Boolean(user?.settings?.zdr),
+      ephemeral: parsed.data.scope === 'chat' && incognitoChat,
     });
     if (result.status === 'rejected') {
       return res.status(result.code).json({ message: result.message });
