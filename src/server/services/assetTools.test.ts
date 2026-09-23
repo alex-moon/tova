@@ -346,6 +346,15 @@ describe('read_file unit walking (#159)', () => {
     expect(out.units[1].preview).toHaveLength(120);
   });
 
+  it('accepts unitsOnly as a boolean-string ("true") from the wire (#159 live run)', async () => {
+    const user = await createUser('units-string-boolean@example.com');
+    const asset = await createPdf(user.id, 'x');
+    const out = (await readExecute({ id: asset.id, unitsOnly: 'true' }, asCtx(user.id))) as {
+      units?: { index: number }[];
+    };
+    expect(out.units).toHaveLength(3);
+  });
+
   it('reads a single unit and a range, truncated per read', async () => {
     const user = await createUser('units-read@example.com');
     const asset = await createPdf(user.id, 'x');
@@ -357,6 +366,15 @@ describe('read_file unit walking (#159)', () => {
       content: string;
     };
     expect(range.content).toContain('intro text');
+  });
+
+  it('coerces numeric strings ("58") to a unit number (#159 live run)', async () => {
+    const user = await createUser('units-numeric-string@example.com');
+    const asset = await createPdf(user.id, 'x');
+    const out = (await readExecute({ id: asset.id, unit: '3' }, asCtx(user.id))) as {
+      content: string;
+    };
+    expect(out.content).toBe('xxxPREFACE');
   });
 
   it('rejects unit arguments outside the real unit range', async () => {

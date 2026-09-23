@@ -71,7 +71,12 @@ const longManualUnits = (): AssetUnit[] => {
       label: `Page ${index}`,
       text:
         index === SUPPORT_PHONE_PAGE
-          ? `Appendix: support contact details.\nSupport phone number: ${SUPPORT_PHONE} ` +
+          ? // The phone sits beyond the 120-char `unitsOnly` preview window, so
+            // the preview can identify this page as the support-contact
+            // appendix without handing over either eval answer directly.
+            'Appendix: support contact details.\nThis appendix collects the published ' +
+            'support channels for the appliance, last revised at this edition\u2019s ' +
+            `release. Support phone number: ${SUPPORT_PHONE} ` +
             '(available weekdays 9am-6pm UK time).\nEmail: support@example.com'
           : manualPageText(index),
     });

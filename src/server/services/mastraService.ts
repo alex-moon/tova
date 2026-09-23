@@ -174,8 +174,10 @@ const modelSettingsFrom = (options: CompletionOptions) => ({
  * Abort/disconnect plumbing: forward a caller-supplied signal to Mastra's
  * call options (AI-SDK style) instead of sending undefined keys.
  * `maxSteps` caps the agent's own tool loop: with built-in tools attached
- * the agent decides how many rounds to run (search → answer, with a
- * follow-up round allowed); without tools a completion is single-step,
+ * the agent decides how many rounds to run (search → answer, with follow-up
+ * rounds allowed — e.g. #159's long-document workflows walk units and emit
+ * one file per section, so a low cap silently starves the task of its final
+ * answer step); without tools a completion is single-step,
  * as before #16. Since #52 the tools-mode, not the Brave key, drives this:
  * the key-free `current_datetime` keeps tools attached for key-less
  * deployments too.
@@ -204,7 +206,7 @@ const callOptionsFrom = (options: CompletionOptions, mode: ToolsMode = 'full') =
   if (options.userId !== undefined) requestContext.set('userId', options.userId);
   return {
     ...(options.abortSignal ? { abortSignal: options.abortSignal } : {}),
-    maxSteps: mode === 'full' ? 4 : 1,
+    maxSteps: mode === 'full' ? 12 : 1,
     modelSettings: modelSettingsFrom(options),
     ...traceOptionsFrom(options.trace),
     requestContext,
@@ -406,7 +408,11 @@ export const readFileTool = createTool({
     'of re-reading the whole file.',
   inputSchema: z.object({
     id: z.string().min(1),
-    unitsOnly: z.boolean().optional(),
+    // #159 live run: models emit boolean tool args as the string "true" (same
+    // wire-encoding drift as numeric `unit`), and a strict boolean schema
+    // makes Mastra reject the whole call. The string branch exists to accept
+    // those encodings; execute coerces to an actual boolean.
+    unitsOnly: z.union([z.boolean(), z.enum(['true', 'false', 'True', 'False'])]).optional(),
     unit: z
       .union([z.number(), z.string()])
       .optional()
@@ -436,7 +442,10 @@ export const readFileTool = createTool({
     note: z.string().optional(),
     error: z.string().optional(),
   }),
-  execute: async ({ id, unitsOnly, unit }, ctx) => {
+  execute: async ({ id, unitsOnly: rawUnitsOnly, unit }, ctx) => {
+    // #159: boolean wire-encoding coercion (see inputSchema note).
+    const unitsOnly =
+      rawUnitsOnly === undefined ? undefined : /^\s*(true|1)$/i.test(String(rawUnitsOnly));
     // #82: retry-within-completion short-circuit for a previously failed call.
     if (toolIsFailed(ctx, 'read_file'))
       return { error: degradedToolError('read_file', toolDegradeReason(ctx, 'read_file')) };
@@ -488,8 +497,12 @@ export const readFileTool = createTool({
         }
         let from: number;
         let to: number;
-        if (typeof unit === 'number') {
-          from = to = Math.trunc(unit);
+        // Models routinely emit numeric tool args as strings ("58") (#159
+        // eval run: the agent burned a step on each retry until it sent the
+        // number as JSON). Coerce digit-only strings to numbers first.
+        const numeric = typeof unit === 'string' ? /^\s*\d+\s*$/.test(unit) : true;
+        if (typeof unit === 'number' || (typeof unit === 'string' && numeric)) {
+          from = to = Math.trunc(Number(unit));
         } else {
           const range = /^\s*(\d+)\s*-\s*(\d+)\s*$/.exec(unit);
           if (!range)

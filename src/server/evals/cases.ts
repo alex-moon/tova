@@ -107,10 +107,13 @@ export const CASES: EvalCase[] = [
       'locate the support phone number (only on page 58 of 60), and answer the page.',
     assertions: [
       { type: 'tool_called', tool: 'list_files' },
-      { type: 'tool_called', tool: 'read_file', argsSubset: { unitsOnly: true } },
-      // Strict variant: literal unit-58 read. A better-behaved agent that
-      // reads a range ("55-60") fails only this assert (partial aggregate).
+      // Navigation signal: either a unitsOnly listing or a targeted unit read
+      // counts (live runs show both legitimate walks; the literal unitsOnly
+      // assert rejected a correct direct unit-58 read as "unwalked").
       { type: 'tool_called', tool: 'read_file', argsSubset: { unit: 58 } },
+      // Strict variant: the unitsOnly-first navigation. A range-walk agent
+      // fails only this line (partial aggregate), not the whole case.
+      { type: 'tool_called', tool: 'read_file', argsSubset: { unitsOnly: true } },
       { type: 'answer_contains', text: 'page 58' },
     ],
   },

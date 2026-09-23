@@ -21,7 +21,7 @@ import path from 'node:path';
 import mongoose from 'mongoose';
 import type { Client } from 'langsmith';
 import { buildMongoUri } from '../src/server/mongoUri';
-import { gradeRun } from '../src/server/evals/graders';
+import { gradeRun, normalizeArgs } from '../src/server/evals/graders';
 import { CASES, resolveExpectedContent, type EvalCase } from '../src/server/evals/cases';
 import { clearEvalSource, seedEvalSource, evalUserId } from '../src/server/evals/mongoSource';
 import type { Assertion, EvalRun } from '../src/server/evals/types';
@@ -73,7 +73,7 @@ const runCase = async (
     if (chunk.toolCall)
       toolCalls.push({
         name: chunk.toolCall.name,
-        ...(chunk.toolCall.args ? { args: chunk.toolCall.args } : {}),
+        ...(chunk.toolCall.args ? { args: normalizeArgs(chunk.toolCall.args) } : {}),
       });
   }
   const generateCall = toolCalls.find((call) => call.name === 'generate_file');

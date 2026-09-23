@@ -82,11 +82,43 @@ describe('assertRun', () => {
     expect(results.map((r) => r.passed)).toEqual([true, false]);
   });
 
+  it('answer_contains survives no-break spaces and casing (#159 live run)', () => {
+    const run_ = run([{ name: 'read_file' }], {
+      // Narrow no-break spaces (U+202F) inside the phone number, "Page" capitalised.
+      answer: 'The number is **+44\u202f20\u202f7946\u202f0812**, listed on **Page\u202f58**.',
+    });
+    const results = assertRun(run_, [
+      { type: 'answer_contains', text: '+44 20 7946 0812' },
+      { type: 'answer_contains', text: 'page 58' },
+    ]);
+    expect(results.map((r) => r.passed)).toEqual([true, true]);
+  });
+
   it('answer_contains fails when no answer was captured', () => {
     const results = assertRun(run([{ name: 'read_file' }]), [
       { type: 'answer_contains', text: '58' },
     ]);
     expect(results.map((r) => r.passed)).toEqual([false]);
+  });
+
+  it('argsSubset matches numeric args regardless of wire encoding (#159)', () => {
+    const run_ = run([
+      { name: 'read_file', args: { id: 'a', unit: '58' } },
+      { name: 'generate_file', args: { filename: '42-test.md', content: 'yes' } },
+    ]);
+    const results = assertRun(run_, [
+      { type: 'tool_called', tool: 'read_file', argsSubset: { unit: 58 } },
+      // Non-numeric strings stay strings; a number never merges with text.
+      { type: 'tool_called', tool: 'generate_file', argsSubset: { filename: '42-test.md' } },
+      {
+        type: 'tool_called',
+        tool: 'generate_file',
+        argsSubset: { filename: '042-test.md' },
+      },
+      // A boolean/string mismatch stays a mismatch.
+      { type: 'tool_called', tool: 'read_file', argsSubset: { id: 'b' } },
+    ]);
+    expect(results.map((r) => r.passed)).toEqual([true, true, false, false]);
   });
 
   it('file_content_contains matches the exact filename and substring content (#159)', () => {
@@ -165,10 +197,10 @@ describe('edge cases', () => {
     expect(results.map((r) => r.passed)).toEqual([true]);
   });
 
-  it('argsSubset compares values strictly, not loosely', () => {
+  it('argsSubset still mismatches genuinely different values', () => {
     const run_ = run([{ name: 'read_file', args: { maxChars: 1000 } }]);
     const results = assertRun(run_, [
-      { type: 'tool_called', tool: 'read_file', argsSubset: { maxChars: '1000' } },
+      { type: 'tool_called', tool: 'read_file', argsSubset: { maxChars: '2000' } },
     ]);
     expect(results.map((r) => r.passed)).toEqual([false]);
   });

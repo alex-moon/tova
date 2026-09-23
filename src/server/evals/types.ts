@@ -41,7 +41,7 @@ export type Assertion =
   | { type: 'tool_sequence'; tools: string[] }
   | { type: 'content_equals'; expected: string }
   | { type: 'prompt_contains'; text: string }
-  /** Substring (not exact) match on the assistant's final answer (#159). */
+  /** Substring (case/whitespace-normalised) match on the assistant's final answer (#159). */
   | { type: 'answer_contains'; text: string }
   /**
    * A generated file's content contains `text` (#159): `filename` must match
