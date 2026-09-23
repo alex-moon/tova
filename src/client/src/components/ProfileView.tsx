@@ -83,10 +83,11 @@ const ProfileView = () => {
     file: user?.confirmDeletes?.file ?? true,
   };
   const [confirmDeletes, setConfirmDeletes] = useState(initialConfirmDeletes);
-  // Zero-data retention (issue #116): off unless the account explicitly
-  // enabled it; enabling is forward-looking — saved chats stay until deleted.
-  const initialZdr = Boolean(user?.zdr);
-  const [zdr, setZdr] = useState(initialZdr);
+  // 'Incognito by default' (issue #144): the profile alias of the account's
+  // incognito flag (stored as settings.zdr); new chats start incognito when
+  // set. Enabling is forward-looking — saved chats stay until deleted.
+  const initialIncognito = Boolean(user?.incognitoByDefault ?? user?.zdr);
+  const [incognito, setIncognito] = useState(initialIncognito);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -112,7 +113,7 @@ const ProfileView = () => {
         confirmDeletes.file !== initialConfirmDeletes.file
           ? { confirmDeletes }
           : {}),
-        ...(zdr !== initialZdr ? { zdr } : {}),
+        ...(incognito !== initialIncognito ? { incognitoByDefault: incognito } : {}),
       });
       // The saved choice rides the mirror immediately so pre-auth pages and
       // reloads paint it without waiting on the profile round-trip.
@@ -210,17 +211,17 @@ const ProfileView = () => {
             <label className="mt-1 flex items-center gap-2">
               <input
                 type="checkbox"
-                data-testid="profile-zdr"
-                checked={zdr}
-                onChange={(e) => setZdr(e.target.checked)}
+                data-testid="profile-incognito"
+                checked={incognito}
+                onChange={(e) => setIncognito(e.target.checked)}
               />
-              Zero data retention
+              Incognito by default
             </label>
             <p className="mt-1 text-muted-foreground">
-              When on, nothing sent or attached in chat is stored — chats and attached files vanish
-              when the conversation ends. Files uploaded in Assets are kept so you can reuse them;
-              they are deleted only when you delete them. Turning this on removes your existing
-              chats and chat messages from storage.
+              New chats are incognito. In an incognito chat, nothing sent or attached is stored — it
+              vanishes when the conversation ends. Files uploaded in Assets are kept so you can
+              reuse them; they are deleted only when you delete them.
+              {incognito ? ' Turning this on removes your existing chats from storage.' : ''}
             </p>
           </fieldset>
         </div>

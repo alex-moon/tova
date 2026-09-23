@@ -57,6 +57,7 @@ const AuthService = {
     theme?: string;
     startupChat?: 'recent' | 'new';
     zdr?: boolean;
+    incognitoByDefault?: boolean;
     confirmDeletes?: { chat?: boolean; file?: boolean };
   }): Promise<AuthUser> {
     try {

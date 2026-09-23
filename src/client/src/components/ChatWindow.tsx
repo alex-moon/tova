@@ -8,6 +8,8 @@ import {
   Check,
   ChevronDown,
   ExternalLink,
+  Eye,
+  EyeOff,
   FileImage,
   Loader2,
   Menu,
@@ -30,6 +32,14 @@ interface ChatWindowProps {
   onSendMessage: (content: string, assetId?: string, assetFilename?: string) => void;
   isLoading: boolean;
   onOpenSidebar: () => void;
+  // Active persisted chat id (null on a new chat); the incognito toggle is
+  // only available before a chat's first submission.
+  sessionId?: string | null;
+  // Per-chat incognito (#144): App owns the toggle state; the composer
+  // controls it before a new chat's first submission. Standalone
+  // renders (tests) fall back to the account default.
+  incognito?: boolean;
+  onToggleIncognito?: (value: boolean) => void;
   onFeedback?: (messageId: string, value: 'up' | 'down' | null) => void;
   incomingAsset?: {
     id: string;
@@ -280,12 +290,17 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
   onSendMessage,
   isLoading,
   onOpenSidebar,
+  sessionId,
+  incognito: incognitoProp,
+  onToggleIncognito,
   onFeedback,
   incomingAsset,
   onPickedConsumed,
 }) => {
   const auth = useContext(AuthContext);
-  const zdr = Boolean(auth?.user?.zdr);
+  // Per-chat incognito (#144): a controlled value from App when present,
+  // else the account default; the toggle can only move a *new* chat.
+  const incognito = incognitoProp ?? Boolean(auth?.user?.incognitoByDefault ?? auth?.user?.zdr);
   const [input, setInput] = useState('');
   const [placeholder] = useState(pickPlaceholder);
   const textareaRef = React.useRef<HTMLTextAreaElement>(null);
@@ -394,10 +409,16 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
     if (!file || uploading) return;
     setUploading(true);
     try {
-      // Issue #116: composer uploads are always tagged 'chat' — the server
-      // turns that tag into throwaway (ephemeral) uploads only for accounts
-      // with zero-data retention on.
-      const asset = await AssetService.upload(file, undefined, 'chat');
+      // Issue #116/#144: composer uploads are always tagged 'chat' — the
+      // server turns that tag into throwaway (ephemeral) uploads when the
+      // effective per-chat incognito flag says so. The composer tells the
+      // server which chat the upload belongs to (stored flag decides for an
+      // existing chat) or what the toggle currently says (a new chat's
+      // upload must precede session creation).
+      const asset =
+        sessionId !== undefined && sessionId !== null
+          ? await AssetService.upload(file, undefined, 'chat', { chatId: sessionId })
+          : await AssetService.upload(file, undefined, 'chat', { zdr: Boolean(incognito) });
       setAttachment({
         id: asset.id,
         filename: asset.filename,
@@ -636,6 +657,27 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
               data-testid="chat-input"
             />
             <div className="absolute bottom-2 right-2 flex items-center gap-1">
+              {/* Per-chat incognito (#144): visible before the first
+                  submission of a new chat only — the flag is fixed at
+                  creation and the server 409s any later switch attempt. */}
+              {!sessionId && messages.length === 0 && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  aria-label="Incognito chat"
+                  aria-pressed={incognito}
+                  title="Incognito: nothing sent or attached in this chat is stored"
+                  onClick={() => onToggleIncognito?.(!incognito)}
+                  disabled={isLoading}
+                  data-testid="chat-incognito-toggle"
+                  className={`h-8 w-8 ${
+                    incognito ? 'text-primary' : 'text-muted-foreground hover:text-foreground'
+                  }`}
+                >
+                  {incognito ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+                </Button>
+              )}
               <input
                 ref={fileInputRef}
                 type="file"
@@ -677,7 +719,9 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
         </form>
         <p className="mt-2 text-center text-xs text-muted-foreground" data-testid="privacy-note">
           Your chats and files are never used to train models — by anyone, ever.
-          {zdr ? ' Zero-data retention is on: nothing sent or attached in chat is stored.' : ''}
+          {!sessionId && incognito
+            ? ' Incognito is on for this chat: nothing sent or attached is stored.'
+            : ''}
         </p>
       </footer>
     </section>

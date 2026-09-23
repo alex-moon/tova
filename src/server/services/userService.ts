@@ -18,7 +18,12 @@ export const toAuthUser = (user: UserDocument): AuthUser => {
     payload.customInstructions = user.settings.customInstructions;
   if (user.settings?.theme) payload.theme = user.settings.theme;
   if (user.settings?.startupChat) payload.startupChat = user.settings.startupChat;
-  if (user.settings?.zdr) payload.zdr = user.settings.zdr;
+  if (user.settings?.zdr) {
+    payload.zdr = user.settings.zdr;
+    // 'Incognito by default' (#144) reads the same storage slot; the two
+    // wire names are aliases of one flag, exposed in lockstep.
+    payload.incognitoByDefault = user.settings.zdr;
+  }
   if (user.settings?.confirmDeletes) payload.confirmDeletes = user.settings.confirmDeletes;
   // Country-level geolocation (#50) rides only once resolved; no timestamp
   // is exposed — route consumers never need it and the "remove my location"

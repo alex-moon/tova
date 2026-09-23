@@ -143,6 +143,9 @@ export interface AuthUser {
   // Zero-data-retention opt-in (issue #116): omitted until the user enabled
   // it, so the client only branches on the flag once it is explicitly true.
   zdr?: boolean;
+  // 'Incognito by default' (#144) alias: the same flag as `zdr`, exposed in
+  // lockstep once truthy. New chats start incognito when either is set.
+  incognitoByDefault?: boolean;
   confirmDeletes?: { chat: boolean; file: boolean };
   location?: AuthUserLocation;
 }

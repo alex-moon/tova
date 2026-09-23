@@ -296,4 +296,142 @@ describe('Per-chat incognito flag (issue #144)', () => {
     expect(await Asset.countDocuments({ _id: asset._id })).toBe(0);
     expect(mockDeleteObject).toHaveBeenCalled();
   });
+
+  describe('ephemeral upload tagging follows the per-chat flag', () => {
+    const presign = (cookie: string[], body: Record<string, unknown>) =>
+      request(app).post('/api/assets/presign').set('Cookie', cookie).send(body);
+
+    const assetDoc = async (id: string) => Asset.findById(id).lean();
+
+    const makeSession = async (email: string, incognito: boolean): Promise<string> => {
+      const doc = await User.findOne({ email });
+      if (!doc) throw new Error('user not found');
+      const session = await Session.create({
+        userId: doc._id,
+        title: 'chat',
+        incognito,
+        messages: [],
+      });
+      return String(session._id);
+    };
+
+    it('marks chat-scope uploads ephemeral for a toggled-on new chat (intent only)', async () => {
+      const email = 'incognito-asset-intent@example.com';
+      const cookies = await registerUser(email);
+
+      const created = await presign(cookies, {
+        filename: 'chat.csv',
+        contentType: 'text/csv',
+        size: 10,
+        scope: 'chat',
+        zdr: true,
+      });
+      expect(created.status).toBe(201);
+      expect((await assetDoc(created.body.asset.id))?.ephemeral).toBe(true);
+    });
+
+    it('never marks chat-scope uploads ephemeral when the composer is off (opt-in false)', async () => {
+      const email = 'incognito-asset-optout@example.com';
+      const cookies = await registerUser(email);
+
+      const created = await presign(cookies, {
+        filename: 'chat.csv',
+        contentType: 'text/csv',
+        size: 10,
+        scope: 'chat',
+        zdr: false,
+      });
+      expect(created.status).toBe(201);
+      expect((await assetDoc(created.body.asset.id))?.ephemeral).toBe(false);
+    });
+
+    it('marks chat-scope uploads ephemeral for an incognito-by-default user (no intent)', async () => {
+      const email = 'incognito-asset-default@example.com';
+      const cookies = await registerUser(email);
+      await setIncognitoByDefault(email);
+
+      const created = await presign(cookies, {
+        filename: 'chat.csv',
+        contentType: 'text/csv',
+        size: 10,
+        scope: 'chat',
+      });
+      expect(created.status).toBe(201);
+      expect((await assetDoc(created.body.asset.id))?.ephemeral).toBe(true);
+    });
+
+    it('decides off the stored session flag when chatId is present (session wins over intent)', async () => {
+      const email = 'incognito-asset-chatid@example.com';
+      const cookies = await registerUser(email);
+      const incognitoChat = await makeSession(email, true);
+      const plainChat = await makeSession(email, false);
+
+      const ephemeralCreated = await presign(cookies, {
+        filename: 'a.csv',
+        contentType: 'text/csv',
+        size: 10,
+        scope: 'chat',
+        chatId: incognitoChat,
+      });
+      expect(ephemeralCreated.status).toBe(201);
+      expect((await assetDoc(ephemeralCreated.body.asset.id))?.ephemeral).toBe(true);
+
+      const durableCreated = await presign(cookies, {
+        filename: 'b.csv',
+        contentType: 'text/csv',
+        size: 10,
+        scope: 'chat',
+        chatId: plainChat,
+        zdr: true,
+      });
+      expect(durableCreated.status).toBe(201);
+      expect((await assetDoc(durableCreated.body.asset.id))?.ephemeral).toBe(false);
+    });
+
+    it('never sets ephemeral for an Assets-page upload even with a toggled-on chat', async () => {
+      const email = 'incognito-asset-library@example.com';
+      const cookies = await registerUser(email);
+
+      const created = await presign(cookies, {
+        filename: 'library.csv',
+        contentType: 'text/csv',
+        size: 10,
+        zdr: true,
+      });
+      expect(created.status).toBe(201);
+      expect((await assetDoc(created.body.asset.id))?.ephemeral).toBe(false);
+    });
+
+    it('rejects a chatId that belongs to another user', async () => {
+      const ownerEmail = 'incognito-asset-owner@example.com';
+      await registerUser(ownerEmail);
+      const incognitoChat = await makeSession(ownerEmail, true);
+
+      const otherEmail = 'incognito-asset-foreign@example.com';
+      const otherCookies = await registerUser(otherEmail);
+
+      const created = await presign(otherCookies, {
+        filename: 'chat.csv',
+        contentType: 'text/csv',
+        size: 10,
+        scope: 'chat',
+        chatId: incognitoChat,
+      });
+      expect(created.status).toBe(404);
+    });
+
+    it('rejects a malformed chatId with 400', async () => {
+      const email = 'incognito-asset-badid@example.com';
+      const cookies = await registerUser(email);
+
+      const created = await presign(cookies, {
+        filename: 'chat.csv',
+        contentType: 'text/csv',
+        size: 10,
+        scope: 'chat',
+        chatId: 'not-an-objectid',
+      });
+      expect(created.status).toBe(400);
+    });
+  });
 });
