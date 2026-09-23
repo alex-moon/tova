@@ -293,3 +293,25 @@ export const listByTier = async (
  */
 export const completionsPoolFor = async (tier: 'small' | 'large'): Promise<ModelRef[]> =>
   listByTier(tier, { tools: true, provider: 'deepinfra' });
+
+/*
+ * Enumerates the eval sweep universe (#158) WITHOUT touching Mongo: the
+ * eligible seed+env rows only. DB-admin overrides on a live DB are a real
+ * config source but make a sweep non-reproducible, so the seed list is the
+ * declared universe; callers further restrict to providers they actually
+ * have connectors wired for.
+ */
+export const sweepModels = (providers?: ProviderName[]): Array<ModelRef & { tier: ModelTier }> => {
+  const allow = providers && new Set(providers);
+  const seen = new Set<string>();
+  const models: Array<ModelRef & { tier: ModelTier }> = [];
+  for (const { eligible, tier, ...rest } of SEED_ENTRIES()) {
+    if (!eligible) continue;
+    if (allow && !allow.has(rest.provider)) continue;
+    const key = `${rest.provider}:${rest.model}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    models.push({ ...rest, tier });
+  }
+  return models;
+};
