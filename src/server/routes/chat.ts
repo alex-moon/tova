@@ -29,6 +29,7 @@ import {
 } from '../services/entityExtractionService';
 import { zdrHistorySchema } from '../validation';
 import { redactForLog } from '../services/logRedaction';
+import { decideTurn } from '../services/zdrTurn';
 
 const router = express.Router();
 
@@ -439,24 +440,38 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
       if (!res.writableEnded) abortController.abort();
     });
 
-    if (userDoc.settings?.zdr) {
+    /*
+     * One decision owns the turn's retention shape (#144, services/zdrTurn.ts):
+     * reject / suppress-persistence + replay / persist normally. `incognito`
+     * is bridged from the user's ZDR setting until the per-chat flag lands.
+     * Cleanup attaches to every exit exactly when the decision says so.
+     */
+    const turnDecision = decideTurn({
+      incognito: Boolean(userDoc.settings?.zdr),
+      sessionId,
+    });
+    if (turnDecision.reject) {
+      await cleanupEphemeralAsset(attachedAsset);
+      return res.status(409).json({
+        message:
+          'Zero-data-retention is on — new turns are never stored, so they cannot continue a saved chat. Start a new chat instead.',
+      });
+    }
+    const cleanupIfEphemeral = async () => {
+      if (!turnDecision.requireEphemeralCleanup) return;
+      await cleanupEphemeralAsset(attachedAsset);
+    };
+
+    if (turnDecision.persistWithHistoryReplay) {
       // Zero-data retention (#116): nothing about the turn is written — no
       // Session row, no Message rows, no classification, no title. The
       // conversation continuity is the client's replayed `history` payload
-      // (validation-gated). A ZDR turn must not continue a persisted chat:
-      // writing there would contradict the retention promise.
-      if (sessionId) {
-        await cleanupEphemeralAsset(attachedAsset);
-        return res.status(409).json({
-          message:
-            'Zero-data-retention is on — new turns are never stored, so they cannot continue a saved chat. Start a new chat instead.',
-        });
-      }
+      // (validation-gated).
       const zdrHistory = parseZdrHistory(req.body.history);
       if (!zdrHistory.ok) {
         // The turn is rejected before it consumes anything, so the throwaway
         // attachment does not outlive the request either (#116).
-        await cleanupEphemeralAsset(attachedAsset);
+        await cleanupIfEphemeral();
         return res.status(400).json({ message: 'Invalid chat history' });
       }
       const messages = buildZdrMessages(zdrHistory.value, content);
@@ -483,7 +498,7 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
         abortSignal: abortController.signal,
       });
       const zdrAssistantContent = chatCompletion.choices[0]?.message?.content ?? '';
-      await cleanupEphemeralAsset(attachedAsset);
+      await cleanupIfEphemeral();
       return res.json({
         routing: routingResult,
         message: {
@@ -644,23 +659,35 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
     if (!streamUserDoc) {
       return res.status(404).json({ message: 'User not found' });
     }
-    const zdr = Boolean(streamUserDoc.settings?.zdr);
+    // One decision owns the turn's retention shape (#144, services/zdrTurn.ts),
+    // mirroring the non-streaming route; `incognito` is the settings bridge
+    // until the per-chat flag lands. Cleanup attaches to every exit exactly
+    // when the decision says so.
+    const turnDecision = decideTurn({
+      incognito: Boolean(streamUserDoc.settings?.zdr),
+      sessionId,
+    });
+    if (turnDecision.reject) {
+      await cleanupEphemeralAsset(attachedAsset);
+      return res.status(409).json({
+        message:
+          'Zero-data-retention is on — new turns are never stored, so they cannot continue a saved chat. Start a new chat instead.',
+      });
+    }
+    const cleanupIfEphemeral = async () => {
+      if (!turnDecision.requireEphemeralCleanup) return;
+      await cleanupEphemeralAsset(attachedAsset);
+    };
+    const zdr = turnDecision.persistWithHistoryReplay;
 
     let session;
     let zdrHistory: { role: 'user' | 'assistant'; content: string }[] = [];
     if (zdr) {
       // Zero-data retention (#116): see the non-streaming route's rationale —
       // no session is created, and saved chats cannot be continued.
-      if (sessionId) {
-        await cleanupEphemeralAsset(attachedAsset);
-        return res.status(409).json({
-          message:
-            'Zero-data-retention is on — new turns are never stored, so they cannot continue a saved chat. Start a new chat instead.',
-        });
-      }
       const parsedHistory = parseZdrHistory(req.body.history);
       if (!parsedHistory.ok) {
-        await cleanupEphemeralAsset(attachedAsset);
+        await cleanupIfEphemeral();
         return res.status(400).json({ message: 'Invalid chat history' });
       }
       zdrHistory = parsedHistory.value;
