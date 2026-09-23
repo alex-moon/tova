@@ -5,6 +5,7 @@ import { Asset } from '../models/Asset';
 import { AssetJob } from '../models/AssetJob';
 import { Entity } from '../models/Entity';
 import { EntityEdge } from '../models/EntityEdge';
+import { McpServer } from '../models/McpServer';
 import { purgeAllUserData } from './userDataPurge';
 
 // Data-level coverage for purgeAllUserData (issue #143 T1): every
@@ -76,7 +77,15 @@ const seedAssetsAndGraph = async (uid: mongoose.Types.ObjectId) => {
     kind: 'related-to',
     summary: 'self-reference fixture',
   });
-  return asset;
+  const mcpServer = await McpServer.create({
+    scope: 'user',
+    userId: uid,
+    name: 'remote-tools',
+    url: `https://${uid}.example.com/sse`,
+    headers: { iv: 'iv', tag: 'tag', ciphertext: 'cipher' },
+    headersConfigured: true,
+  });
+  return { asset, mcpServer };
 };
 
 describe('purgeAllUserData (issue #143: factory reset)', () => {
@@ -98,6 +107,12 @@ describe('purgeAllUserData (issue #143: factory reset)', () => {
   it('sweeps every enumerated collection to zero for the purging user; user B is untouched', async () => {
     const owner = userId();
     const other = userId();
+    // A platform server is ownerless and must never be swept by any user's reset.
+    await McpServer.create({
+      scope: 'platform',
+      name: 'platform-tools',
+      url: 'https://p.example.com',
+    });
     await seedUserWorkspace(owner);
     await seedUserWorkspace(other);
     await seedAssetsAndGraph(owner);
@@ -113,9 +128,13 @@ describe('purgeAllUserData (issue #143: factory reset)', () => {
     expect(await Message.countDocuments()).toBe(4); // only user B's remain
     expect(await Asset.countDocuments({ userId: owner })).toBe(0);
     // AssetJob has no userId: swept by the owner's asset ids only.
-    expect(await AssetJob.countDocuments({ assetId: otherAsset._id })).toBe(1);
+    expect(await AssetJob.countDocuments({ assetId: otherAsset.asset._id })).toBe(1);
     expect(await Entity.countDocuments({ userId: owner })).toBe(0);
     expect(await EntityEdge.countDocuments({ userId: owner })).toBe(0);
+    // User-scoped MCP server configs (urls + encrypted auth headers) die too.
+    expect(await McpServer.countDocuments({ scope: 'user', userId: owner })).toBe(0);
+    // The ownerless platform server is untouched.
+    expect(await McpServer.countDocuments({ scope: 'platform' })).toBe(1);
 
     // Other user: nothing changed.
     const otherSessions = await Session.find({ userId: other }).lean();

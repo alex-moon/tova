@@ -14,7 +14,10 @@ decisions unblocked this ticket — per-chat incognito replaces per-user ZDR
    graph (`Entity`/`EntityEdge`), and fires the best-effort LangSmith trace
    purge (`services/tracePurge.ts`, tova-dev project, best-effort + failure
    tolerant). Returns `failedObjects` for bucket keys that could not be
-   deleted. Coverage: `userDataPurge.test.ts`, `tracePurge.test.ts`.
+   deleted. The critic pass on 2026-09-23 folded user-scoped `McpServer`
+   configs (urls + encrypted auth header envelopes) into the sweep; platform
+   servers are untouched. Coverage: `userDataPurge.test.ts`,
+   `tracePurge.test.ts`.
 
 2. **Product surface** (this ticket): `POST /api/profile/factory-reset`
    protected by a typed confirmation string (`RESET`, `FACTORY_RESET_CONFIRM`
