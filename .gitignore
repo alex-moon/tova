@@ -27,5 +27,5 @@ yarn-error.log*
 
 
 /.iteration
-/data
+/data/*
 
