@@ -30,4 +30,20 @@ describe('decideTurn (#144)', () => {
   it('incognito turn into a persisted chat is rejected', () => {
     expect(decideTurn({ incognito: true, sessionId: 'abc' })).toEqual({ reject: true });
   });
+
+  // Both routes pass req.body.sessionId straight through, so the helper's
+  // truthiness rule must be pinned: only a truthy sessionId means "continuing
+  // a chat". An empty string is the un-filled new-chat field, not a
+  // continuation, and must not reject an incognito turn (#144).
+  it('incognito turn with an empty-string sessionId is treated as a new chat', () => {
+    expect(decideTurn({ incognito: true, sessionId: '' })).toEqual({
+      reject: false,
+      persistWithHistoryReplay: true,
+      requireEphemeralCleanup: true,
+    });
+  });
+
+  it('any truthy sessionId string result (e.g. whitespace) rejects', () => {
+    expect(decideTurn({ incognito: true, sessionId: ' ' })).toEqual({ reject: true });
+  });
 });
