@@ -1,8 +1,10 @@
 /*
  * Per-turn incognito decision (#144): one pure function owns the rule that
  * both chat routes used to duplicate inline. `incognito` is the effective
- * per-chat flag — today bridged from `user.settings.zdr` (pre-#144), later
- * from the session/first-submission flag itself.
+ * per-chat flag: for a new chat it is the request's `zdr` intent (the chat
+ * toggle, wire name unchanged) or the account's 'incognito by default'
+ * (`settings.zdr` at rest); for a continuation it comes from the stored
+ * `Session.incognito`.
  *
  * Semantics flagged by the route, not HTTP-shaped decisions:
  * - reject: the turn cannot be served at all (incognito turn joining a

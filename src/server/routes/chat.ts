@@ -305,9 +305,13 @@ const buildMessageMetrics = async (
   };
 };
 
-const createSessionWithUser = async (userId: string, content: string) => {
+const createSessionWithUser = async (
+  userId: string,
+  content: string,
+  { incognito = false }: { incognito?: boolean } = {},
+) => {
   const title = await generateChatTitle(content);
-  return Session.create({ userId, title });
+  return Session.create({ userId, title, incognito });
 };
 
 /*
@@ -442,14 +446,40 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
 
     /*
      * One decision owns the turn's retention shape (#144, services/zdrTurn.ts):
-     * reject / suppress-persistence + replay / persist normally. `incognito`
-     * is bridged from the user's ZDR setting until the per-chat flag lands.
-     * Cleanup attaches to every exit exactly when the decision says so.
+     * reject / suppress-persistence + replay / persist normally. The flag is
+     * the effective per-chat incognito state: for a new chat it comes from the
+     * request's `zdr` intent (the chat toggle next to attach) or the account's
+     * 'incognito by default'; for a sessionId turn it comes from the stored
+     * session flag. The bridged account setting still rejects continuation
+     * before the read (frozen #116 ordering — see the reject below).
      */
-    const turnDecision = decideTurn({
-      incognito: Boolean(userDoc.settings?.zdr),
-      sessionId,
-    });
+    const accountIncognito = Boolean(userDoc.settings?.zdr);
+    const bodyIntent: boolean | undefined =
+      typeof req.body.zdr === 'boolean' ? req.body.zdr : undefined;
+    let session;
+    let turnDecision;
+    if (sessionId) {
+      if (accountIncognito) {
+        // Incognito accounts cannot continue a saved chat (#116/#144): the
+        // reject fires before any session read.
+        turnDecision = decideTurn({ incognito: true, sessionId });
+      } else {
+        if (!isValidObjectId(sessionId)) {
+          await cleanupEphemeralAsset(attachedAsset);
+          return res.status(400).json({ message: 'Invalid session id' });
+        }
+        session = await Session.findOne({ _id: sessionId, userId, deletedAt: null });
+        if (!session) {
+          return res.status(404).json({ message: 'Session not found' });
+        }
+        turnDecision = decideTurn({ incognito: Boolean(session.incognito), sessionId });
+      }
+    } else {
+      turnDecision = decideTurn({
+        incognito: bodyIntent ?? accountIncognito,
+        sessionId: undefined,
+      });
+    }
     if (turnDecision.reject) {
       await cleanupEphemeralAsset(attachedAsset);
       return res.status(409).json({
@@ -509,14 +539,13 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
       });
     }
 
-    let session;
-    if (sessionId) {
-      session = await Session.findOne({ _id: sessionId, userId, deletedAt: null });
-      if (!session) {
-        return res.status(404).json({ message: 'Session not found' });
-      }
-    } else {
-      session = await createSessionWithUser(userId as string, content);
+    // On the sessionId path the session is already loaded above (the decision
+    // needs the stored flag first); new chats are created either plain or —
+    // never — incognito-persisted (nothing is written for incognito turns).
+    if (!session) {
+      session = await createSessionWithUser(userId as string, content, {
+        incognito: turnDecision.persistWithHistoryReplay,
+      });
     }
     // Save user message
     const userMessage = await saveUserMessageWithMetrics(
@@ -659,14 +688,40 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
     if (!streamUserDoc) {
       return res.status(404).json({ message: 'User not found' });
     }
-    // One decision owns the turn's retention shape (#144, services/zdrTurn.ts),
-    // mirroring the non-streaming route; `incognito` is the settings bridge
-    // until the per-chat flag lands. Cleanup attaches to every exit exactly
-    // when the decision says so.
-    const turnDecision = decideTurn({
-      incognito: Boolean(streamUserDoc.settings?.zdr),
-      sessionId,
-    });
+    /*
+     * One decision owns the turn's retention shape (#144, services/zdrTurn.ts),
+     * mirroring the non-streaming route: the per-chat flag comes from the
+     * request's `zdr` intent (new chat) or the account's 'incognito by
+     * default'; a sessionId turn decides off the stored session flag. The
+     * bridged account setting still rejects continuation before the read.
+     */
+    const accountIncognito = Boolean(streamUserDoc.settings?.zdr);
+    const bodyIntent: boolean | undefined =
+      typeof req.body.zdr === 'boolean' ? req.body.zdr : undefined;
+    let session;
+    let turnDecision;
+    if (sessionId) {
+      if (accountIncognito) {
+        // Incognito accounts cannot continue a saved chat (#116/#144): the
+        // reject fires before any session read.
+        turnDecision = decideTurn({ incognito: true, sessionId });
+      } else {
+        if (!isValidObjectId(sessionId)) {
+          await cleanupEphemeralAsset(attachedAsset);
+          return res.status(400).json({ message: 'Invalid session id' });
+        }
+        session = await Session.findOne({ _id: sessionId, userId, deletedAt: null });
+        if (!session) {
+          return res.status(404).json({ message: 'Session not found' });
+        }
+        turnDecision = decideTurn({ incognito: Boolean(session.incognito), sessionId });
+      }
+    } else {
+      turnDecision = decideTurn({
+        incognito: bodyIntent ?? accountIncognito,
+        sessionId: undefined,
+      });
+    }
     if (turnDecision.reject) {
       await cleanupEphemeralAsset(attachedAsset);
       return res.status(409).json({
@@ -680,7 +735,6 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
     };
     const zdr = turnDecision.persistWithHistoryReplay;
 
-    let session;
     let zdrHistory: { role: 'user' | 'assistant'; content: string }[] = [];
     if (zdr) {
       // Zero-data retention (#116): see the non-streaming route's rationale —
@@ -691,13 +745,8 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
         return res.status(400).json({ message: 'Invalid chat history' });
       }
       zdrHistory = parsedHistory.value;
-    } else if (sessionId) {
-      session = await Session.findOne({ _id: sessionId, userId, deletedAt: null });
-      if (!session) {
-        return res.status(404).json({ message: 'Session not found' });
-      }
-    } else {
-      session = await createSessionWithUser(userId as string, content);
+    } else if (!sessionId) {
+      session = await createSessionWithUser(userId as string, content, { incognito: false });
     }
 
     let routingBand: string;
