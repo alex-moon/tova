@@ -25,12 +25,24 @@ const evaluateAssertion = (run: EvalRun, assertion: Assertion): boolean => {
         return true;
       });
     }
-    case 'content_equals':
+    case 'content_equals': {
       return (
         typeof run.generatedContent === 'string' && run.generatedContent === assertion.expected
       );
+    }
     case 'prompt_contains':
       return run.prompt.includes(assertion.text);
+    case 'answer_contains':
+      return typeof run.answer === 'string' && run.answer.includes(assertion.text);
+    case 'file_content_contains':
+      return (
+        run.generatedFiles?.some(
+          (file) =>
+            file.filename === assertion.filename &&
+            typeof file.content === 'string' &&
+            file.content.includes(assertion.text),
+        ) ?? false
+      );
   }
 };
 

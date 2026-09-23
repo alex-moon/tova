@@ -72,6 +72,47 @@ describe('assertRun', () => {
     ]);
     expect(results.map((r) => r.passed)).toEqual([true, false]);
   });
+
+  it('answer_contains is a substring match on the final answer (#159)', () => {
+    const run_ = run([{ name: 'read_file' }], { answer: 'The number appears on page 58 of 60.' });
+    const results = assertRun(run_, [
+      { type: 'answer_contains', text: 'page 58' },
+      { type: 'answer_contains', text: 'page 59' },
+    ]);
+    expect(results.map((r) => r.passed)).toEqual([true, false]);
+  });
+
+  it('answer_contains fails when no answer was captured', () => {
+    const results = assertRun(run([{ name: 'read_file' }]), [
+      { type: 'answer_contains', text: '58' },
+    ]);
+    expect(results.map((r) => r.passed)).toEqual([false]);
+  });
+
+  it('file_content_contains matches the exact filename and substring content (#159)', () => {
+    const run_ = run(
+      [
+        {
+          name: 'generate_file',
+          args: { filename: '01-overview.md', content: '## Overview\nbody' },
+        },
+        { name: 'generate_file', args: { filename: '06-glossary.md', content: '## Glossary\n' } },
+      ],
+      {
+        generatedFiles: [
+          { filename: '01-overview.md', content: '## Overview\nbody' },
+          { filename: '06-glossary.md', content: '## Glossary\n' },
+        ],
+      },
+    );
+    const results = assertRun(run_, [
+      { type: 'file_content_contains', filename: '01-overview.md', text: '## Overview' },
+      { type: 'file_content_contains', filename: '06-glossary.md', text: '## Glossary' },
+      { type: 'file_content_contains', filename: '01-overview.md', text: '## Overview ' },
+      { type: 'file_content_contains', filename: '02-missing.md', text: ' anything' },
+    ]);
+    expect(results.map((r) => r.passed)).toEqual([true, true, false, false]);
+  });
 });
 
 describe('aggregateScore', () => {

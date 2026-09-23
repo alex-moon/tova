@@ -22,6 +22,13 @@ export interface EvalRun {
   prompt: string;
   /** Content extracted from generated files (README case), if any. */
   generatedContent?: string;
+  /**
+   * The assistant's final answer text (#159), concatenated text deltas;
+   * lets retrieval cases grade the answer itself, not just tool use.
+   */
+  answer?: string;
+  /** Every generated file emitted by the run (#159), in call order. */
+  generatedFiles?: Array<{ filename: string; content: string }>;
 }
 
 export type Assertion =
@@ -33,7 +40,14 @@ export type Assertion =
   | { type: 'tool_not_called'; tool: string }
   | { type: 'tool_sequence'; tools: string[] }
   | { type: 'content_equals'; expected: string }
-  | { type: 'prompt_contains'; text: string };
+  | { type: 'prompt_contains'; text: string }
+  /** Substring (not exact) match on the assistant's final answer (#159). */
+  | { type: 'answer_contains'; text: string }
+  /**
+   * A generated file's content contains `text` (#159): `filename` must match
+   * a `generate_file` call exactly, and its content must contain `text`.
+   */
+  | { type: 'file_content_contains'; filename: string; text: string };
 
 export interface AssertionResult {
   assertion: Assertion;

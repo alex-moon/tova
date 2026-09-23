@@ -1,4 +1,10 @@
-import { seedEvalSource, clearEvalSource, evalUserId } from './mongoSource';
+import {
+  seedEvalSource,
+  clearEvalSource,
+  evalUserId,
+  SUPPORT_PHONE,
+  SUPPORT_PHONE_PAGE,
+} from './mongoSource';
 import { Asset } from '../models/Asset';
 
 describe('#112 temp mongo source', () => {
@@ -9,8 +15,14 @@ describe('#112 temp mongo source', () => {
     await seedEvalSource();
     const files = await Asset.find({ userId });
 
-    // One Bupa policy for case 2, one decoy for listing realism.
-    expect(files.map((f) => f.filename).sort()).toEqual(['bupa-policy.md', 'utilities-notes.md']);
+    // Two #112 fixtures + the two #159 long-document fixtures.
+    const names = files.map((f) => f.filename).sort();
+    expect(names).toEqual([
+      'bupa-policy.md',
+      'long-manual.md',
+      'project-handbook.md',
+      'utilities-notes.md',
+    ]);
     expect(files.every((f) => f.status === 'ready' && f.textExtracted)).toBe(true);
   });
 
@@ -20,7 +32,39 @@ describe('#112 temp mongo source', () => {
     expect(policy?.textExtracted).toContain('Fertility treatment');
 
     // Cross-user probes must not see the fixtures.
-    expect(await Asset.countDocuments()).toBe(2);
+    expect(await Asset.countDocuments()).toBe(4);
+  });
+
+  it('seeds the #159 long manual with 60 page units, phone only on page 58', async () => {
+    await seedEvalSource();
+    const manual = await Asset.findOne({ userId, filename: 'long-manual.md' }).select('+units');
+    const units = manual?.get('units') ?? [];
+    expect(units).toHaveLength(60);
+    expect(units[0].label).toBe('Page 1');
+    const phonePages = (units as { index: number; text: string }[]).filter((u) =>
+      u.text.includes(SUPPORT_PHONE),
+    );
+    expect(phonePages.map((u) => u.index)).toEqual([SUPPORT_PHONE_PAGE]);
+    // Filler must be non-empty: a unit read must yield readable text.
+    expect(units.every((u: { text: string }) => u.text.length > 0)).toBe(true);
+  });
+
+  it('seeds the #159 handbook with one unit per heading-2 section', async () => {
+    await seedEvalSource();
+    const handbook = await Asset.findOne({ userId, filename: 'project-handbook.md' }).select(
+      '+units',
+    );
+    const units = handbook?.get('units') ?? [];
+    expect(units).toHaveLength(6);
+    expect(units.map((u: { label: string }) => u.label)).toEqual([
+      'Overview',
+      'Onboarding',
+      'Expense policy',
+      'Remote work',
+      'Escalation',
+      'Glossary',
+    ]);
+    expect((handbook?.textExtracted ?? '').includes('## Overview')).toBe(true);
   });
 
   it('clearEvalSource removes the eval user and every seeded asset', async () => {
