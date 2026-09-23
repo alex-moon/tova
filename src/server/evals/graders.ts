@@ -1,5 +1,38 @@
 import type { Assertion, EvalRun, AssertionResult, Score } from './types';
 
+/**
+ * #158 hallucination guard patterns: phrases where the model claims it
+ * performed a search (or cites "my search results") without an actual
+ * `web_search` tool call in the run. Deliberately narrow — it must match
+ * *first-person claims of having searched*, not any mention of the word
+ * "search" (e.g. quoting the user's prompt back is not a violation).
+ */
+export const SEARCH_CLAIMS = [
+  /\b(?:i|we)\s+(?:did|performed|ran|conducted|carried\s+out|executed)\b[^.!?;]{0,40}\bsearch(?:es|ed)?\b/i,
+  /\b(?:after|from|via|using)\s+(?:a\s+|my\s+|the\s+)*(?:web|brave[a-z ]*)\s*search(?:es|ing)?\b/i,
+  /\bmy\s+(?:web\s+)?search(?:es)?\b/i,
+  /\baccording\s+to\s+(?:my|the)\s+(?:web\s+)?search(?:es)?\b/i,
+  /\bsearch(?:es|ed|ing)?\s+(?:the\s+web|online|for\s+(?:recent|latest|current))\b/i,
+] as const;
+
+/**
+ * #158 no-sources refusal patterns (deterministic slice of rule 2): the
+ * agent must *explicitly* signal that no sources are available rather than
+ * filling the gap from model weights. This regex set is intentionally
+ * brittle — a courteous or indirect refusal ("I'm afraid I can't answer
+ * that from your files") is not caught — see the open LLM-judge question
+ * on #158.
+ */
+export const NO_SOURCES_PATTERNS = [
+  /\bno\s+(?:relevant\s+|matching\s+|from\s+your\s+files[a-z ,]*)?sources?\s+(?:are|is|were|available|found|exist)\b/i,
+  /\b(?:i|there)\s+(?:don'?t|doesn'?t)\s+have\s+(?:any\s+)?(?:sources|information|documents|materials)\b/i,
+  /\bno\s+(?:sources|information|relevant (?:documents|files))\s+available\b/i,
+  /\b(?:couldn'?t|cannot|can't|unable\s+to)\s+find\s+(?:any\s+)?(?:relevant\s+)?(?:sources|information|documents|materials|anything)\b/i,
+] as const;
+
+const matchesFinalText = (run: EvalRun, pattern: RegExp): boolean =>
+  typeof run.finalText === 'string' && pattern.test(run.finalText);
+
 const argsMatch = (call: { args?: Record<string, unknown> }, subset?: Record<string, unknown>) => {
   if (!subset) return true;
   return Object.entries(subset).every(([key, value]) => call.args?.[key] === value);
@@ -31,6 +64,13 @@ const evaluateAssertion = (run: EvalRun, assertion: Assertion): boolean => {
       );
     case 'prompt_contains':
       return run.prompt.includes(assertion.text);
+    case 'text_matches':
+      // A missing finalText can only fail: an absent answer never matches.
+      return matchesFinalText(run, new RegExp(assertion.pattern, assertion.flags ?? 'i'));
+    case 'text_not_claiming_search': {
+      const webSearched = run.toolCalls.some((call) => call.name === 'web_search');
+      return webSearched || !SEARCH_CLAIMS.some((pattern) => matchesFinalText(run, pattern));
+    }
   }
 };
 

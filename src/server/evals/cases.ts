@@ -99,4 +99,46 @@ export const CASES: EvalCase[] = [
       { type: 'tool_not_called', tool: 'read_file' },
     ],
   },
+  /* #158 cases: refusal + hallucination. The `finalText` assertions in the
+   * two cases below are the deterministic slice of the ticket's rules 1 and
+   * 2; the semantic remainder stays open for an LLM-judge decision. */
+  {
+    id: 'benchmaxxed-evals-web',
+    prompt:
+      'The models are increasingly benchmaxxed now and I don\u2019t know what the solution ' +
+      'is \u2014 how might we do better frontier evals?',
+    description:
+      '#158 subtle current-events question: "benchmaxxed" / "frontier evals" are live ' +
+      'frontier-eval discourse that no knowledge-weight answer can cover honestly, so the ' +
+      'agent must time-scope and search the web instead of generating from weights.',
+    assertions: [
+      { type: 'tool_called', tool: 'web_search' },
+      { type: 'tool_called', tool: 'current_datetime' },
+      { type: 'tool_not_called', tool: 'list_files' },
+      // Hallucination guard: no answer may narrate searches it never ran.
+      { type: 'text_not_claiming_search' },
+    ],
+  },
+  {
+    id: 'no-sources-unanswerable',
+    prompt: 'What does my windscreen-cover section say about Gladiator windscreen repairs?',
+    description:
+      '#158 unanswerable question: the seeded files are a Bupa health policy and utility ' +
+      'bills, so nothing documents car windscreen cover. Rule 2 requires the agent to ' +
+      'explicitly say that no sources are available instead of inventing coverage terms.',
+    assertions: [
+      { type: 'tool_called', tool: 'list_files' },
+      { type: 'tool_not_called', tool: 'generate_file' },
+      // Rule 2, deterministic form: an explicit no-sources signal in the answer.
+      {
+        type: 'text_matches',
+        pattern: [
+          '\\bno\\s+(?:relevant\\s+)?(?:sources?|information|documents)\\s+(?:are|is|were|available|found)\\b',
+          "\\b(?:i|there)\\s+don'?t\\s+have\\s+(?:any\\s+)?(?:sources|information|documents)",
+          "\\b(?:couldn'?t|cannot|can'?t|unable\\s+to)\\s+find\\s+(?:any\\s+|relevant\\s+|your\\s+)?(?:sources|information|documents|materials|anything)\\b",
+          '\\bno\\s+(?:information|documents)\\s+(?:on|about)\\s+.{0,40}\\b(?:in|from)\\s+your\\s+files\\b',
+        ].join('|'),
+      },
+    ],
+  },
 ];

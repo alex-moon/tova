@@ -24,9 +24,9 @@ import { buildMongoUri } from '../src/server/mongoUri';
 import { gradeRun } from '../src/server/evals/graders';
 import { CASES, resolveExpectedContent, type EvalCase } from '../src/server/evals/cases';
 import { clearEvalSource, seedEvalSource, evalUserId } from '../src/server/evals/mongoSource';
-import type { Assertion, EvalRun } from '../src/server/evals/types';
+import { runCase } from '../src/server/evals/runCase';
+import type { Assertion } from '../src/server/evals/types';
 import { groqConnector, deepinfraConnector } from '../src/server/services/mastraService';
-import type { CompletionOptions } from '../src/server/services/llmTypes';
 
 const repoRoot = path.resolve(path.dirname(import.meta.filename), '..');
 
@@ -48,42 +48,6 @@ const resolveAssertions = (testCase: EvalCase): Assertion[] =>
   );
 
 const connectorsByProvider = { groq: groqConnector, deepinfra: deepinfraConnector } as const;
-
-/**
- * One graded run: stream the agent's answer for the case prompt and record
- * tool calls in order from the neutral stream (#16). The `generate_file`
- * content rides in the call's scalar args, which is what `gradedContent`
- * extracts for the `content_equals` case; the assembled prompt is simply the
- * runner's own message list.
- */
-const runCase = async (
-  options: CompletionOptions,
-  testCase: EvalCase,
-): Promise<{ run: EvalRun; evidence: string }> => {
-  const stream =
-    await connectorsByProvider[options.provider ?? 'groq']?.createStreamingCompletion(options);
-  if (!stream) throw new Error(`no connector for provider ${options.provider ?? 'groq'}`);
-  const toolCalls: EvalRun['toolCalls'] = [];
-  for await (const chunk of stream) {
-    if (chunk.toolCall)
-      toolCalls.push({
-        name: chunk.toolCall.name,
-        ...(chunk.toolCall.args ? { args: chunk.toolCall.args } : {}),
-      });
-  }
-  const generateCall = toolCalls.find((call) => call.name === 'generate_file');
-  const generatedContent =
-    typeof generateCall?.args?.content === 'string' ? generateCall.args.content : undefined;
-  const run: EvalRun = {
-    toolCalls,
-    prompt: testCase.prompt,
-    ...(generatedContent !== undefined ? { generatedContent } : {}),
-  };
-  const evidence = toolCalls
-    .map((call) => `${call.name}${call.args ? ` ${JSON.stringify(call.args).slice(0, 120)}` : ''}`)
-    .join(' | ');
-  return { run, evidence };
-};
 
 /* Best-effort LangSmith export: the `tova-evals` dataset is created when
  * absent and re-used otherwise (score-over-time stays on one dataset), each
@@ -167,6 +131,9 @@ const main = async (): Promise<void> => {
       process.stdout.write(`${testCase.id} …`);
       try {
         const { run, evidence } = await runCase(
+          connectorsByProvider[provider].createStreamingCompletion.bind(
+            connectorsByProvider[provider],
+          ),
           {
             provider,
             model,

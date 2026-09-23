@@ -22,6 +22,12 @@ export interface EvalRun {
   prompt: string;
   /** Content extracted from generated files (README case), if any. */
   generatedContent?: string;
+  /**
+   * The assistant's final answer text, accumulated from `chunk.delta` while
+   * streaming (#158). Regex assertions over this are the deterministic slice
+   * of the refusal/hallucination checks.
+   */
+  finalText?: string;
 }
 
 export type Assertion =
@@ -33,7 +39,18 @@ export type Assertion =
   | { type: 'tool_not_called'; tool: string }
   | { type: 'tool_sequence'; tools: string[] }
   | { type: 'content_equals'; expected: string }
-  | { type: 'prompt_contains'; text: string };
+  | { type: 'prompt_contains'; text: string }
+  /**
+   * #158: the final answer must match the (case-insensitive-by-default)
+   * regex — e.g. the explicit "no sources available" refusal wording.
+   */
+  | { type: 'text_matches'; pattern: string; flags?: string }
+  /**
+   * #158 hallucination guard: the final answer must NOT claim a search
+   * happened unless a `web_search` call is actually present in the run.
+   * The search-claim regex set lives in `graders.ts` (`SEARCH_CLAIMS`).
+   */
+  | { type: 'text_not_claiming_search' };
 
 export interface AssertionResult {
   assertion: Assertion;

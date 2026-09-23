@@ -17,6 +17,44 @@ describe('#112 golden set', () => {
     expect(ids).toContain('pm-announcements-web');
     expect(ids).toContain('what-time-is-it');
     expect(ids).toContain('save-notes-file');
+    expect(ids).toContain('benchmaxxed-evals-web');
+    expect(ids).toContain('no-sources-unanswerable');
+  });
+
+  describe('#158 refusal / hallucination cases', () => {
+    const byId = Object.fromEntries(CASES.map((c) => [c.id, c]));
+
+    it('benchmaxxed: web_search + current_datetime required, no fake-search narration allowed', () => {
+      const testCase = byId['benchmaxxed-evals-web'];
+      expect(testCase).toBeDefined();
+      expect(testCase.assertions).toEqual([
+        { type: 'tool_called', tool: 'web_search' },
+        { type: 'tool_called', tool: 'current_datetime' },
+        { type: 'tool_not_called', tool: 'list_files' },
+        { type: 'text_not_claiming_search' },
+      ]);
+    });
+
+    it('unanswerable: list_files required and the refusal wording is asserted in text', () => {
+      const testCase = byId['no-sources-unanswerable'];
+      expect(testCase).toBeDefined();
+      const types = testCase.assertions.map((a) => a.type);
+      expect(types).toContain('tool_called');
+      expect(types).toContain('text_matches');
+      const textMatch = testCase.assertions.find((a) => a.type === 'text_matches')!;
+      // The refusal regex must accept the golden refusal wording.
+      expect(
+        new RegExp(textMatch.pattern, 'i').test(
+          'There are no sources available about windscreen cover in your files.',
+        ),
+      ).toBe(true);
+      // …and reject a confident invented answer.
+      expect(
+        new RegExp(textMatch.pattern, 'i').test(
+          'Your policy covers windscreen repairs up to £500 per claim.',
+        ),
+      ).toBe(false);
+    });
   });
 
   it('type-checks every assertion shape via TS narrowing (no unknown types at runtime)', () => {

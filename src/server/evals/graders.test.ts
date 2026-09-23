@@ -1,10 +1,141 @@
-import { assertRun, aggregateScore, gradeRun } from './graders';
+import { assertRun, aggregateScore, gradeRun, SEARCH_CLAIMS, NO_SOURCES_PATTERNS } from './graders';
 import type { Assertion, EvalRun } from './types';
 
 const run = (toolCalls: EvalRun['toolCalls'], extra: Partial<EvalRun> = {}): EvalRun => ({
   toolCalls,
   prompt: '',
   ...extra,
+});
+
+describe('#158 text assertions (deterministic refusal / hallucination slice)', () => {
+  const noSourcesTexts = [
+    'There are no relevant sources available in your files.',
+    "I don't have any sources on windscreen cover.",
+    "I couldn't find any relevant documents about that topic.",
+    'No sources were found for that question.',
+    "I'm unable to find any information about Gladiator windscreen repairs.",
+  ];
+
+  const searchClaimTexts = [
+    'I did a web search on models being benchmaxxed.',
+    'I performed a search of the web and found several results.',
+    'After searching the web, the picture is clearer.',
+    'According to my search, frontier evals need LLM judges.',
+    'Ran a search for recent benchmarks to ground this.',
+  ];
+
+  it.each(noSourcesTexts)('NO_SOURCES_PATTERNS match an explicit refusal: %s', (text) => {
+    expect(NO_SOURCES_PATTERNS.some((p) => p.test(text))).toBe(true);
+  });
+
+  it('NO_SOURCES_PATTERNS do not match fact-stating answers', () => {
+    for (const text of [
+      'Your Bupa policy covers 60% of fertility treatment costs up to £4,000.',
+      'Broadband renewals come up in November.',
+    ]) {
+      expect(NO_SOURCES_PATTERNS.some((p) => p.test(text))).toBe(false);
+    }
+  });
+
+  it.each(searchClaimTexts)('SEARCH_CLAIMS match a first-person search claim: %s', (text) => {
+    expect(SEARCH_CLAIMS.some((p) => p.test(text))).toBe(true);
+  });
+
+  it('SEARCH_CLAIMS do not match quoting the user or describing the tool list', () => {
+    for (const text of [
+      'Should I run a web search for you on this topic?',
+      'Frontier evals often use "search" in the benchmark name.',
+      'Your policy refers to fertility treatment, not web searching.',
+    ]) {
+      expect(SEARCH_CLAIMS.some((p) => p.test(text))).toBe(false);
+    }
+  });
+
+  it('text_matches passes on the final text and fails on absent finalText', () => {
+    const run_ = run([], { finalText: 'No sources available, sorry.' });
+    const results = assertRun(run_, [{ type: 'text_matches', pattern: 'no sources available' }]);
+    expect(results.map((r) => r.passed)).toEqual([true]);
+    expect(
+      assertRun(run([], { finalText: 'The windscreens are covered 80%.' }), [
+        { type: 'text_matches', pattern: 'no sources' },
+      ]).map((r) => r.passed),
+    ).toEqual([false]);
+    expect(
+      assertRun(run([]), [{ type: 'text_matches', pattern: 'no sources' }]).map((r) => r.passed),
+    ).toEqual([false]);
+  });
+
+  it('text_matches honours custom flags (empty flags = case-sensitive)', () => {
+    const run_ = run([], { finalText: 'Case Matters Here' });
+    expect(
+      assertRun(run_, [{ type: 'text_matches', pattern: 'case matters here', flags: '' }]).map(
+        (r) => r.passed,
+      ),
+    ).toEqual([false]);
+    expect(
+      assertRun(run_, [{ type: 'text_matches', pattern: 'case matters here' }]).map(
+        (r) => r.passed,
+      ),
+    ).toEqual([true]);
+  });
+
+  it('text_not_claiming_search fails when no search ran but the answer claims one', () => {
+    const run_ = run([{ name: 'current_datetime' }], {
+      finalText: searchClaimTexts[0],
+    });
+    const results = assertRun(run_, [{ type: 'text_not_claiming_search' }]);
+    expect(results.map((r) => r.passed)).toEqual([false]);
+  });
+
+  it('text_not_claiming_search passes when no search ran and no claim is made', () => {
+    const run_ = run([{ name: 'list_files' }], {
+      finalText: 'Your Bupa policy covers 60% of fertility treatment.',
+    });
+    expect(assertRun(run_, [{ type: 'text_not_claiming_search' }]).map((r) => r.passed)).toEqual([
+      true,
+    ]);
+  });
+
+  it('text_not_claiming_search passes when web_search really ran, claim or not', () => {
+    const run_ = run([{ name: 'web_search' }], { finalText: searchClaimTexts[3] });
+    expect(assertRun(run_, [{ type: 'text_not_claiming_search' }]).map((r) => r.passed)).toEqual([
+      true,
+    ]);
+  });
+
+  it('text_not_claiming_search also passes on an empty run', () => {
+    expect(assertRun(run([]), [{ type: 'text_not_claiming_search' }]).map((r) => r.passed)).toEqual(
+      [true],
+    );
+  });
+
+  it('the hallucination run scores fail via gradeRun on the golden fake-search answer', () => {
+    const run_ = run([{ name: 'generate_file' }], {
+      finalText: 'I did a web search about models being benchmaxxed.',
+    });
+    const { score, assertions } = gradeRun(run_, [
+      { type: 'tool_called', tool: 'web_search' },
+      { type: 'text_not_claiming_search' },
+    ]);
+    expect(score).toBe('fail');
+    expect(assertions.map((r) => r.passed)).toEqual([false, false]);
+  });
+
+  it('the unanswerable-refusal run grades pass on the golden refusal answer', () => {
+    const run_ = run([{ name: 'list_files' }], {
+      finalText: 'There are no sources available about windscreen cover in your files.',
+    });
+    const { score, assertions } = gradeRun(run_, [
+      { type: 'tool_called', tool: 'list_files' },
+      {
+        type: 'text_matches',
+        pattern:
+          '\\bno\\s+(?:relevant\\s+)?(?:sources?|information|documents)\\s+(?:are|is|were|available|found)\\b',
+      },
+    ]);
+    expect(score).toBe('pass');
+    expect(assertions.map((r) => r.passed)).toEqual([true, true]);
+  });
 });
 
 describe('assertRun', () => {
