@@ -1,4 +1,11 @@
-import { assertRun, aggregateScore, gradeRun, SEARCH_CLAIMS, NO_SOURCES_PATTERNS } from './graders';
+import {
+  assertRun,
+  aggregateScore,
+  gradeRun,
+  SEARCH_CLAIMS,
+  NO_SOURCES_PATTERNS,
+  noSourcesPattern,
+} from './graders';
 import type { Assertion, EvalRun } from './types';
 
 const run = (toolCalls: EvalRun['toolCalls'], extra: Partial<EvalRun> = {}): EvalRun => ({
@@ -14,6 +21,13 @@ describe('#158 text assertions (deterministic refusal / hallucination slice)', (
     "I couldn't find any relevant documents about that topic.",
     'No sources were found for that question.',
     "I'm unable to find any information about Gladiator windscreen repairs.",
+    // Hardened variants (critic pass): phrasings the original 4-pattern set missed.
+    'There are no documents about that.',
+    'I have no information about Gladiator windscreen repairs.',
+    'No windscreen information available in your files.',
+    'I do not have any sources on that topic.',
+    "I'm afraid there isn't any information on this",
+    'Nothing in your files is about that.',
   ];
 
   const searchClaimTexts = [
@@ -32,9 +46,35 @@ describe('#158 text assertions (deterministic refusal / hallucination slice)', (
     for (const text of [
       'Your Bupa policy covers 60% of fertility treatment costs up to £4,000.',
       'Broadband renewals come up in November.',
+      'The section says nothing about that, but here is the general claim wording.',
+      'None of your documents mention this specifically, so here is a confident invented answer.',
     ]) {
       expect(NO_SOURCES_PATTERNS.some((p) => p.test(text))).toBe(false);
     }
+  });
+
+  it('NO_SOURCES_PATTERNS are the single source of truth for the case assertion', () => {
+    expect(new RegExp(noSourcesPattern, 'i')).toBeInstanceOf(RegExp);
+    // the golden refusal wording from the case test resolves through the joined pattern
+    expect(
+      new RegExp(noSourcesPattern, 'i').test(
+        'There are no sources available about windscreen cover in your files.',
+      ),
+    ).toBe(true);
+  });
+
+  it('text_matches does not crash a graded run on a malformed pattern or flags', () => {
+    const run_ = run([], { finalText: 'anything' });
+    expect(
+      assertRun(run_, [{ type: 'text_matches', pattern: 'no sources(' }]).map((r) => r.passed),
+    ).toEqual([false]);
+    expect(
+      assertRun(run_, [{ type: 'text_matches', pattern: 'anything', flags: 'z' }]).map(
+        (r) => r.passed,
+      ),
+    ).toEqual([false]);
+    // and grading with such an assertion yields fail rather than throwing
+    expect(gradeRun(run_, [{ type: 'text_matches', pattern: '(' }]).score).toBe('fail');
   });
 
   it.each(searchClaimTexts)('SEARCH_CLAIMS match a first-person search claim: %s', (text) => {

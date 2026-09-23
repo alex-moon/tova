@@ -8,6 +8,7 @@
  * already available to the runner.
  */
 import type { Assertion } from './types';
+import { noSourcesPattern } from './graders';
 
 export interface EvalCase {
   id: string;
@@ -130,15 +131,9 @@ export const CASES: EvalCase[] = [
       { type: 'tool_called', tool: 'list_files' },
       { type: 'tool_not_called', tool: 'generate_file' },
       // Rule 2, deterministic form: an explicit no-sources signal in the answer.
-      {
-        type: 'text_matches',
-        pattern: [
-          '\\bno\\s+(?:relevant\\s+)?(?:sources?|information|documents)\\s+(?:are|is|were|available|found)\\b',
-          "\\b(?:i|there)\\s+don'?t\\s+have\\s+(?:any\\s+)?(?:sources|information|documents)",
-          "\\b(?:couldn'?t|cannot|can'?t|unable\\s+to)\\s+find\\s+(?:any\\s+|relevant\\s+|your\\s+)?(?:sources|information|documents|materials|anything)\\b",
-          '\\bno\\s+(?:information|documents)\\s+(?:on|about)\\s+.{0,40}\\b(?:in|from)\\s+your\\s+files\\b',
-        ].join('|'),
-      },
+      // The pattern is compiled from NO_SOURCES_PATTERNS so the case cannot
+      // drift from the central refusal regex set.
+      { type: 'text_matches', pattern: noSourcesPattern },
     ],
   },
 ];

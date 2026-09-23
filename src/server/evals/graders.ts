@@ -25,10 +25,23 @@ export const SEARCH_CLAIMS = [
  */
 export const NO_SOURCES_PATTERNS = [
   /\bno\s+(?:relevant\s+|matching\s+|from\s+your\s+files[a-z ,]*)?sources?\s+(?:are|is|were|available|found|exist)\b/i,
-  /\b(?:i|there)\s+(?:don'?t|doesn'?t)\s+have\s+(?:any\s+)?(?:sources|information|documents|materials)\b/i,
-  /\bno\s+(?:sources|information|relevant (?:documents|files))\s+available\b/i,
-  /\b(?:couldn'?t|cannot|can't|unable\s+to)\s+find\s+(?:any\s+)?(?:relevant\s+)?(?:sources|information|documents|materials|anything)\b/i,
+  /\b(?:i|there)\s+(?:do\s+not|don'?t|doesn'?t)\s+have\s+(?:any\s+|a\s+)?(?:relevant\s+|matching\s+)?(?:sources?|information|documents|materials)\b/i,
+  /\bno\s+(?:[a-z'-]+\s+){0,3}(?:relevant\s+|matching\s+)?(?:sources?|information|documents|materials)\s+available\b/i,
+  /\b(?:couldn'?t|cannot|can'?t|unable\s+to)\s+find\s+(?:any\s+|a\s+)?(?:relevant\s+|matching\s+)?(?:sources?|information|documents|materials|anything)\b/i,
+  /\bno\s+(?:[a-z'-]+\s+){0,3}(?:relevant\s+|matching\s+)?(?:sources?|information|documents)\s+(?:are|is|were|was|found|exist)\b/i,
+  /\bno\s+(?:[a-z'-]+\s+){0,3}(?:relevant\s+|matching\s+)?(?:sources?|information|documents|materials)\s+(?:on|about|covering)\b/i,
+  /\b(?:nothing|none|not\s+anything)\s+(?:in\s+your\s+files|of\s+yours)\b/i,
+  /\b(?:there\s+)?isn'?t\s+(?:any\s+|a\s+)?(?:relevant\s+|matching\s+)?(?:sources?|information|documents|materials|data)\b/i,
+  /\bno\s+(?:information|documents|sources)\s+(?:on|about)\s+.{0,40}\b(?:in|from)\s+your\s+files\b/i,
 ] as const;
+
+/**
+ * The #158 no-sources case assertion compiles its `text_matches` pattern from
+ * these patterns joined, so the case and the guard stay a single source of
+ * truth (each source is wrapped in a non-capturing group to keep alternation
+ * precedence intact).
+ */
+export const noSourcesPattern = NO_SOURCES_PATTERNS.map((p) => `(?:${p.source})`).join('|');
 
 const matchesFinalText = (run: EvalRun, pattern: RegExp): boolean =>
   typeof run.finalText === 'string' && pattern.test(run.finalText);
@@ -66,7 +79,13 @@ const evaluateAssertion = (run: EvalRun, assertion: Assertion): boolean => {
       return run.prompt.includes(assertion.text);
     case 'text_matches':
       // A missing finalText can only fail: an absent answer never matches.
-      return matchesFinalText(run, new RegExp(assertion.pattern, assertion.flags ?? 'i'));
+      // A case-declared pattern can be malformed; a throw there must fail the
+      // assertion, never crash the whole graded run.
+      try {
+        return matchesFinalText(run, new RegExp(assertion.pattern, assertion.flags ?? 'i'));
+      } catch {
+        return false;
+      }
     case 'text_not_claiming_search': {
       const webSearched = run.toolCalls.some((call) => call.name === 'web_search');
       return webSearched || !SEARCH_CLAIMS.some((pattern) => matchesFinalText(run, pattern));
