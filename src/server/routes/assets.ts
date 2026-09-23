@@ -12,78 +12,22 @@ import {
   assetPresignSchema,
   MAX_BULK_TOTAL_SIZE,
 } from '../validation';
-import { extractText, isExtractable, truncateForPrompt } from '../services/textExtraction';
 import { spacesWorkspaceStorage } from '../services/workspaceStorage';
-import { enqueueAssetJob } from '../services/assetJobService';
-import { isConvertible } from '../services/markdownConversion';
-import { ALLOWED_CONTENT_TYPES, MAX_ASSET_SIZE, sanitizeFilename } from '../services/assetLimits';
+// Presign/confirm domain cores live in services/assetPresign.ts and
+// services/assetConfirm.ts; asset views in services/assetViews.ts; zip-entry
+// helpers in services/assetZip.ts.
+import { presignItemForUser } from '../services/assetPresign';
+import { confirmAsset } from '../services/assetConfirm';
+import { safeAsset } from '../services/assetViews';
+import { dedupeEntryNames } from '../services/assetZip';
 
 const router = express.Router();
-
-// Presign + confirm headroom: pending assets older than this cannot be
-// confirmed, so stale rows never revive (plan honest-boundaries for #34).
-const CONFIRM_MAX_AGE_MS = 60 * 60 * 1000;
-
-// Extraction stays light: only objects up to this size are pulled back.
-const MAX_EXTRACT_BYTES = 1_000_000;
 
 const LIST_PAGE_SIZE = 20;
 
 // Bulk zip limits (#69): file count comes from the query schema cap; the
 // stored-size cap is the real limiter given the 15 MB per-file presign cap.
 const BULK_MAX_TOTAL_SIZE = 500 * 1024 * 1024;
-
-// Bulk-download entry names come from stored Asset.filename (sanitized at
-// presign), with a defensive second pass here. Collisions get `name (2).ext`.
-const sanitizeZipEntryName = (filename: string): string => {
-  const cleaned = filename
-    .split('')
-    .filter((char) => char.charCodeAt(0) >= 0x20 && char !== '\u007f')
-    .join('')
-    .replace(/[/\\]/g, '_')
-    .trim();
-  return cleaned || 'unnamed.bin';
-};
-
-const dedupeEntryNames = (filenames: string[]): string[] => {
-  const counts = new Map<string, number>();
-  return filenames.map((filename) => {
-    const name = sanitizeZipEntryName(filename);
-    const seen = counts.get(name) ?? 0;
-    counts.set(name, seen + 1);
-    if (seen === 0) return name;
-    const dot = name.lastIndexOf('.');
-    const base = dot > 0 ? name.slice(0, dot) : name;
-    const ext = dot > 0 ? name.slice(dot) : '';
-    return `${base} (${seen + 1})${ext}`;
-  });
-};
-
-// Filenames become the last path segment of the object key: shared
-// sanitizer imported from services/assetLimits (issue #66); the defensive
-// zip-entry variant above is separate on purpose.
-
-const safeAsset = (asset: AssetDocument): unknown => ({
-  id: String(asset._id),
-  filename: asset.filename,
-  contentType: asset.contentType,
-  size: asset.size,
-  status: asset.status,
-  // lets the UI tell the user when no text could be extracted (issue #34
-  // owner ask) — the extracted text itself stays server-side, never a
-  // client-rendered payload.
-  // Issue #83: markdown conversion output counts as text — align with the
-  // chat read path (textExtracted ?? markdownExtracted) so library picks of
-  // converted PDFs don't report a false "no text extracted".
-  hasText: Boolean(asset.textExtracted ?? asset.markdownExtracted),
-  // Issue #67: conversion lifecycle for the library UI badge; no markdown
-  // text ever reaches the client.
-  markdownStatus: asset.markdownStatus,
-  // Issue #83: surface the worker's last failure reason for the failed-card
-  // tooltip (metadata only — no markdown text content).
-  markdownFailureReason: asset.markdownFailureReason ?? null,
-  createdAt: asset.createdAt,
-});
 
 const ownedAsset = async (req: AuthRequest): Promise<AssetDocument | null> => {
   const asset = await Asset.findOne({
@@ -93,47 +37,6 @@ const ownedAsset = async (req: AuthRequest): Promise<AssetDocument | null> => {
   return asset;
 };
 
-// Core of POST /presign (and, per #68, of the bulk presign per-item loop):
-// policy checks (type allowlist, size cap), then mint a pending Asset row and
-// presign its direct-to-Spaces PUT URL. Returns a typed rejection instead of
-// throwing so bulk can map one bad file to a per-item row without blocking
-// its siblings; the single route maps the same shape to a status code.
-type PresignItem = { filename: string; contentType: string; size: number };
-type PresignResult =
-  | { status: 'ok'; uploadUrl: string; asset: ReturnType<typeof safeAsset> }
-  | { status: 'rejected'; code: number; message: string };
-
-const presignItemForUser = async (
-  userId: string,
-  { filename, contentType, size }: PresignItem,
-  opts: { ephemeral?: boolean } = {},
-): Promise<PresignResult> => {
-  if (!ALLOWED_CONTENT_TYPES.has(contentType)) {
-    return { status: 'rejected', code: 400, message: 'File type is not allowed' };
-  }
-  if (size > MAX_ASSET_SIZE) {
-    return { status: 'rejected', code: 413, message: 'File is too large (max 15 MB)' };
-  }
-
-  const asset = await Asset.create({
-    userId,
-    filename: sanitizeFilename(filename),
-    key: 'pending',
-    contentType,
-    size,
-    status: 'pending',
-    // ZDR chat attachments (#116): an ephemeral row is deleted together with
-    // its Spaces object once the turn that consumes it completes.
-    ...(opts.ephemeral ? { ephemeral: true } : {}),
-  });
-
-  const key = `${userId}/${asset._id}/${sanitizeFilename(filename)}`;
-  asset.key = key;
-  await asset.save();
-
-  const uploadUrl = await spacesWorkspaceStorage.presignPutByKey(key, 60, contentType);
-  return { status: 'ok', uploadUrl, asset: safeAsset(asset) };
-};
 // POST /api/assets/presign — mints the upload URL; no bytes reach Express.
 router.post('/presign', authenticate, async (req: AuthRequest, res) => {
   try {
@@ -233,87 +136,6 @@ router.post('/bulk-presign', authenticate, async (req: AuthRequest, res) => {
     return res.status(500).json({ message: 'Error preparing upload' });
   }
 });
-
-// Core of POST /:id/confirm (and, per #68, of the bulk confirm per-item
-// loop): assumes the asset row is already known to belong to the caller —
-// ownership is the caller's lookup (a foreign id must read as "not found",
-// never as an error row). Returns a typed rejection instead of throwing so
-// bulk can map per-item outcomes; the single route maps the same shape to a
-// status code.
-type ConfirmResult =
-  | { status: 'ok'; asset: ReturnType<typeof safeAsset> }
-  | { status: 'rejected'; code: number; message: string };
-
-const confirmAsset = async (asset: AssetDocument): Promise<ConfirmResult> => {
-  if (asset.status !== 'pending') {
-    return { status: 'rejected', code: 409, message: 'Asset was already confirmed' };
-  }
-  if (Date.now() - new Date(asset.createdAt).getTime() > CONFIRM_MAX_AGE_MS) {
-    asset.status = 'failed';
-    asset.failureReason = 'expired';
-    await asset.save();
-    return { status: 'rejected', code: 409, message: 'Upload window has expired' };
-  }
-
-  let head;
-  try {
-    head = await spacesWorkspaceStorage.headByKey(asset.key);
-  } catch (err) {
-    console.error('Asset confirm HEAD error:', err);
-    asset.status = 'failed';
-    asset.failureReason = 'upload-not-found';
-    await asset.save();
-    return { status: 'rejected', code: 409, message: 'Upload was not found in storage' };
-  }
-
-  if (head.size <= 0 || head.size > MAX_ASSET_SIZE) {
-    asset.status = 'failed';
-    asset.failureReason = 'size';
-    await asset.save();
-    return { status: 'rejected', code: 413, message: 'Stored file size is invalid' };
-  }
-
-  asset.size = head.size;
-  if (head.contentType) asset.contentType = head.contentType;
-
-  let text: string | null = null;
-  if (isExtractable(asset.filename) && head.size <= MAX_EXTRACT_BYTES) {
-    const buf = await spacesWorkspaceStorage.getByKey(asset.key);
-    if (buf) text = truncateForPrompt(extractText(asset.filename, buf) ?? '');
-    if (text !== null) asset.textExtracted = text === '' ? null : text;
-  }
-
-  asset.status = 'ready';
-  // Ephemeral assets (#116) never queue conversion: the job would keep the
-  // extracted markdown alive in storage after the turn deletes the row and
-  // bytes. Fast-path extraction already covers the turn's prompt needs.
-  // Issue #67: fast-path extraction won, nothing to convert. Otherwise
-  // queue a background conversion job — the response latency of /confirm
-  // stays low, conversion retries under the job cap, and a failed
-  // conversion never fails the asset (the binary is fine).
-  if (text === null && isConvertible(asset.filename) && !asset.ephemeral) {
-    asset.markdownStatus = 'pending';
-    asset.markdownFailureReason = null;
-    await asset.save();
-    // Enqueue is best-effort: the asset is confirmed and the binary is
-    // fine, so a failed enqueue must not 500 the confirm. Reverting to
-    // 'none' avoids a forever-'pending' badge on an asset no poller will
-    // ever claim a job for; the failure is logged for diagnosis.
-    try {
-      await enqueueAssetJob(asset._id);
-    } catch (enqueueErr) {
-      asset.markdownStatus = 'none';
-      console.error('Asset conversion enqueue error:', enqueueErr);
-      await Asset.updateOne(
-        { _id: asset._id, markdownStatus: 'pending' },
-        { $set: { markdownStatus: 'none' } },
-      );
-    }
-    return { status: 'ok', asset: safeAsset(asset) };
-  }
-  await asset.save();
-  return { status: 'ok', asset: safeAsset(asset) };
-};
 
 // POST /api/assets/:id/confirm — browser has PUT the object directly to
 // Spaces; verify it really exists at the expected size, extract light text,
