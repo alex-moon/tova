@@ -10,7 +10,8 @@ import { extractUnits } from './documentUnits';
 // extension toolchain, and persist the markdown. Jobs whose asset is gone or
 // no longer 'pending' settle as done without touching storage.
 
-// Match the asset upload cap (MAX_ASSET_SIZE in routes/assets.ts); declared
+// Match the asset upload cap (MAX_ASSET_SIZE in services/assetLimits.ts);
+// declared
 // here instead of imported to keep the route module free of worker deps.
 export const MAX_CONVERSION_INPUT_BYTES = 15 * 1024 * 1024;
 

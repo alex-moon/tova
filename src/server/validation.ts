@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { MAX_BULK_TOTAL_SIZE } from './services/assetLimits';
 
 export const registerSchema = z.object({
   email: z.email({ message: 'Email must be a valid email address' }).min(1, {
@@ -159,16 +160,14 @@ export const assetBulkDeleteQuerySchema = z.object({
 // MAX_BULK_FILES files, each item shaped exactly like a single-file presign.
 // Hard rule from the ticket: files arrive via N normal singleton uploads and
 // the direct-to-Spaces PUT flow — zip is never an accepted upload format at
-// any layer (ALLOWED_CONTENT_TYPES in routes/assets.ts excludes it), and
-// uploaded archives are never read or unzipped anywhere.
+// any layer (ALLOWED_CONTENT_TYPES in services/assetLimits.ts excludes it),
+// and uploaded archives are never read or unzipped anywhere.
 //
 // These schemas shape the batch; per-item content-type/size policy lives in
 // the routes (validation.ts knows shapes, routes know policy). The total
 // declared size cap is a batch-shape guard here: one HTTP request must not
 // carry an unbounded array of sizes.
 export const MAX_BULK_FILES = 20;
-// 20 files x 15 MB nominal per-file cap.
-export const MAX_BULK_TOTAL_SIZE = 300 * 1024 * 1024;
 
 export const assetBulkPresignSchema = z
   .array(assetPresignSchema, { message: 'Bulk upload payload must be an array of files' })

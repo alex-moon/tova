@@ -11,24 +11,20 @@ import {
   assetBulkDownloadQuerySchema,
   assetBulkPresignSchema,
   assetPresignSchema,
-  MAX_BULK_TOTAL_SIZE,
 } from '../validation';
 import { spacesWorkspaceStorage } from '../services/workspaceStorage';
 // Presign/confirm domain cores live in services/assetPresign.ts and
 // services/assetConfirm.ts; asset views in services/assetViews.ts; zip-entry
-// helpers in services/assetZip.ts.
+// helpers in services/assetZip.ts; shared caps in services/assetLimits.ts.
 import { presignItemForUser } from '../services/assetPresign';
 import { confirmAsset } from '../services/assetConfirm';
 import { safeAsset } from '../services/assetViews';
 import { dedupeEntryNames } from '../services/assetZip';
+import { BULK_MAX_TOTAL_SIZE, MAX_BULK_TOTAL_SIZE } from '../services/assetLimits';
 
 const router = express.Router();
 
 const LIST_PAGE_SIZE = 20;
-
-// Bulk zip limits (#69): file count comes from the query schema cap; the
-// stored-size cap is the real limiter given the 15 MB per-file presign cap.
-const BULK_MAX_TOTAL_SIZE = 500 * 1024 * 1024;
 
 const ownedAsset = async (req: AuthRequest): Promise<AssetDocument | null> => {
   const asset = await Asset.findOne({

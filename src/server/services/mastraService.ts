@@ -30,7 +30,6 @@ import {
 import { webSearch } from './webSearchService';
 import { fetchPage } from './webFetchService';
 import { createSystemAsset } from './systemAssetService';
-import { isStorageConfigured } from './storageService';
 import { spacesWorkspaceStorage } from './workspaceStorage';
 import { config } from '../config';
 

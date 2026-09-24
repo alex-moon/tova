@@ -1,9 +1,18 @@
 // Shared asset limits and normalization (issue #66): the presign/confirm
-// route and the new system-asset write path must enforce exactly the same
+// logic and the new system-asset write path must enforce exactly the same
 // cap, allowlist and filename rules, so they live here instead of inline in
-// routes/assets.ts.
+// the route/service files. Bulk-download caps (issue #69) live here too.
 
 export const MAX_ASSET_SIZE = 15 * 1024 * 1024;
+
+// Bulk-upload total cap (#68): 20 files x 15 MB nominal per-file cap; the
+// bulk-presign schema rejects requests whose declared sizes exceed it.
+export const MAX_BULK_TOTAL_SIZE = 300 * 1024 * 1024;
+
+// Bulk-download stored-size cap (#69): the file count comes from the query
+// schema cap; the stored-size cap is the real limiter given the 15 MB
+// per-file presign cap.
+export const BULK_MAX_TOTAL_SIZE = 500 * 1024 * 1024;
 
 // Allowlist enforced at presign time; the browser PUTs with this same
 // Content-Type because the presigned URL stores it (Spaces rejects a PUT
