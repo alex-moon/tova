@@ -2,6 +2,7 @@ import type { AssetJobDocument } from '../models/AssetJob';
 import { Asset } from '../models/Asset';
 import { spacesWorkspaceStorage } from './workspaceStorage';
 import { convertToMarkdown, isConvertible } from './markdownConversion';
+import { extractUnits } from './documentUnits';
 
 // Real processor for the conversion queue (issue #67): fetch the object with
 // a raised buffer cap (the fast-path 1 MB extract cap is a confirm-time
@@ -15,7 +16,7 @@ export const MAX_CONVERSION_INPUT_BYTES = 15 * 1024 * 1024;
 
 export const processAssetConversionJob = async (job: AssetJobDocument): Promise<void> => {
   const asset = await Asset.findById(job.assetId).select(
-    'filename key status markdownExtracted markdownStatus markdownFailureReason size',
+    'filename key status markdownExtracted markdownStatus markdownFailureReason size units',
   );
   // Asset deleted, already converted, or the lifecycle moved on (e.g. manual
   // retry): the job has nothing to do.
@@ -33,6 +34,8 @@ export const processAssetConversionJob = async (job: AssetJobDocument): Promise<
 
   const markdown = await convertToMarkdown(asset.filename, buffer);
   asset.markdownExtracted = markdown;
+  // Issue #159: slice the (already-capped) conversion into per-unit text.
+  asset.set('units', extractUnits(asset.filename, markdown));
   asset.markdownStatus = 'ready';
   asset.markdownFailureReason = null;
   await asset.save();

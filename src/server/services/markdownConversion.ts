@@ -28,7 +28,7 @@ const turndownInstance = new (turndown as any)({ headingStyle: 'atx', bulletList
 // owned by this module.
 export const htmlToMarkdown = (html: string): string => turndownInstance.turndown(html);
 
-const extensionOf = (filename: string): string => {
+export const extensionOf = (filename: string): string => {
   const dot = filename.lastIndexOf('.');
   return dot === -1 ? '' : filename.slice(dot + 1).toLowerCase();
 };
