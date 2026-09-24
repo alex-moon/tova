@@ -7,13 +7,15 @@ import { COOKIE_NAME, STORAGE_KEY } from '../theme';
 import { toast } from 'sonner';
 import type { User } from '../context/AuthContext';
 
-vi.mock('sonner', () => ({ toast: { success: vi.fn() } }));
+vi.mock('sonner', () => ({ toast: { success: vi.fn(), warning: vi.fn() } }));
 
 const updateProfile = vi.fn();
+const factoryReset = vi.fn();
 
 vi.mock('../services/auth', () => ({
   default: {
     updateProfile: (...args: unknown[]) => updateProfile(...args),
+    factoryReset: (...args: unknown[]) => factoryReset(...args),
   },
   AuthError: class AuthError extends Error {
     name = 'AuthError';
@@ -294,5 +296,67 @@ describe('ProfileView startup choice (issue #96)', () => {
         startupChat: 'recent',
       }),
     );
+  });
+});
+
+describe('ProfileView factory reset (issue #143)', () => {
+  beforeEach(() => {
+    updateProfile.mockReset();
+    factoryReset.mockReset();
+  });
+
+  afterEach(cleanup);
+
+  it('keeps the destructive button disabled until the exact confirm string is typed', () => {
+    renderWithUser(user);
+
+    expect(screen.getByTestId('profile-factory-reset')).toBeDisabled();
+    fireEvent.change(screen.getByTestId('profile-reset-confirm'), { target: { value: 'reset' } });
+    expect(screen.getByTestId('profile-factory-reset')).toBeDisabled();
+    fireEvent.change(screen.getByTestId('profile-reset-confirm'), { target: { value: 'RESET' } });
+    expect(screen.getByTestId('profile-factory-reset')).not.toBeDisabled();
+    expect(factoryReset).not.toHaveBeenCalled();
+  });
+
+  it('POSTs the typed confirm string and confirms with a toast on success', async () => {
+    factoryReset.mockResolvedValue({ reset: true, failedObjects: [] });
+    renderWithUser(user);
+
+    fireEvent.change(screen.getByTestId('profile-reset-confirm'), { target: { value: 'RESET' } });
+    fireEvent.click(screen.getByTestId('profile-factory-reset'));
+
+    await waitFor(() => expect(factoryReset).toHaveBeenCalledWith('RESET'));
+    await waitFor(() =>
+      expect(vi.mocked(toast.success)).toHaveBeenCalledWith('Factory reset complete'),
+    );
+    expect(screen.getByTestId('profile-factory-reset')).toBeDisabled();
+  });
+
+  it('warns (not success) when stored file deletions failed', async () => {
+    factoryReset.mockResolvedValue({ reset: true, failedObjects: ['k1', 'k2'] });
+    renderWithUser(user);
+
+    fireEvent.change(screen.getByTestId('profile-reset-confirm'), { target: { value: 'RESET' } });
+    fireEvent.click(screen.getByTestId('profile-factory-reset'));
+
+    await waitFor(() =>
+      expect(vi.mocked(toast.warning)).toHaveBeenCalledWith(
+        'Factory reset: 2 stored file(s) could not be deleted',
+      ),
+    );
+    expect(vi.mocked(toast.success)).not.toHaveBeenCalled();
+  });
+
+  it('shows the API error and keeps the view open when the server refuses', async () => {
+    factoryReset.mockRejectedValue(new AuthError('Type RESET to confirm the factory reset'));
+    renderWithUser(user);
+
+    fireEvent.change(screen.getByTestId('profile-reset-confirm'), { target: { value: 'RESET' } });
+    fireEvent.click(screen.getByTestId('profile-factory-reset'));
+
+    expect(await screen.findByTestId('profile-error')).toHaveTextContent(
+      'Type RESET to confirm the factory reset',
+    );
+    expect(screen.getByTestId('profile-view')).toBeInTheDocument();
   });
 });

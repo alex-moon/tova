@@ -99,4 +99,57 @@ export const CASES: EvalCase[] = [
       { type: 'tool_not_called', tool: 'read_file' },
     ],
   },
+  {
+    id: 'manual-page-of-phone',
+    prompt: 'Which page of long-manual.md is the support phone number on?',
+    description:
+      '#159 long-document navigation: the agent must walk units (unitsOnly first), ' +
+      'locate the support phone number (only on page 58 of 60), and answer the page.',
+    assertions: [
+      { type: 'tool_called', tool: 'list_files' },
+      // Navigation signal: either a unitsOnly listing or a targeted unit read
+      // counts (live runs show both legitimate walks; the literal unitsOnly
+      // assert rejected a correct direct unit-58 read as "unwalked").
+      { type: 'tool_called', tool: 'read_file', argsSubset: { unit: 58 } },
+      // Strict variant: the unitsOnly-first navigation. A range-walk agent
+      // fails only this line (partial aggregate), not the whole case.
+      { type: 'tool_called', tool: 'read_file', argsSubset: { unitsOnly: true } },
+      { type: 'answer_contains', text: 'page 58' },
+    ],
+  },
+  {
+    id: 'manual-phone-number',
+    prompt: 'What is the support phone number in long-manual.md?',
+    description:
+      '#159 long-document retrieval: the answer material (the support phone number, ' +
+      "page 58 of 60) is graded on the assistant's answer text, not on a generated file.",
+    assertions: [
+      { type: 'tool_called', tool: 'read_file' },
+      { type: 'answer_contains', text: '+44 20 7946 0812' },
+      { type: 'tool_not_called', tool: 'web_search' },
+    ],
+  },
+  {
+    id: 'handbook-split-sections',
+    prompt:
+      'Split project-handbook.md into one markdown file per heading-2 section, ' +
+      'named <nn>-<slug>.md in section order (zero-padded two-digit number, e.g. ' +
+      '01-overview.md), each file starting with the section heading kept exactly ' +
+      'as a heading-2 line (## Title) followed by its body.',
+    description:
+      '#159 long-document structuring: the agent reads the handbook by units and ' +
+      'generates one markdown file per heading-2 section under the stated filename ' +
+      'convention; content assertions are substring-level since bodies may be rewritten.',
+    assertions: [
+      { type: 'tool_sequence', tools: ['read_file', 'generate_file'] },
+      { type: 'tool_called', tool: 'generate_file', argsSubset: { filename: '01-overview.md' } },
+      { type: 'file_content_contains', filename: '01-overview.md', text: '## Overview' },
+      {
+        type: 'tool_called',
+        tool: 'generate_file',
+        argsSubset: { filename: '06-glossary.md' },
+      },
+      { type: 'file_content_contains', filename: '06-glossary.md', text: '## Glossary' },
+    ],
+  },
 ];

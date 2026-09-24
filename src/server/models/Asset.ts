@@ -50,6 +50,26 @@ const assetSchema = new mongoose.Schema(
       type: String,
       default: null,
     },
+    // Issue #159: per-unit extracted text (one unit per PDF page, per
+    // top-level section for md/html, whole doc otherwise) so the agent can
+    // walk long documents unit by unit. Additive to `markdownExtracted`
+    // (units slice the already-capped conversion output); invisible to the
+    // user. `select: false` keeps the default query light like the other
+    // heavy text fields; readers that need units must select them.
+    units: {
+      select: false,
+      // `_id: false`: units are derived slices re-generated on every job run,
+      // so per-unit ObjectIds are pure noise/storage.
+      type: [
+        {
+          _id: false,
+          index: { type: Number, required: true },
+          label: { type: String, required: true },
+          text: { type: String, required: true },
+        },
+      ],
+      default: [],
+    },
     status: {
       type: String,
       enum: ['pending', 'ready', 'failed'],

@@ -30,6 +30,7 @@ import {
 import { webSearch } from './webSearchService';
 import { fetchPage } from './webFetchService';
 import { createSystemAsset } from './systemAssetService';
+import { isStorageConfigured } from './storageService';
 import { spacesWorkspaceStorage } from './workspaceStorage';
 import { config } from '../config';
 
@@ -174,8 +175,10 @@ const modelSettingsFrom = (options: CompletionOptions) => ({
  * Abort/disconnect plumbing: forward a caller-supplied signal to Mastra's
  * call options (AI-SDK style) instead of sending undefined keys.
  * `maxSteps` caps the agent's own tool loop: with built-in tools attached
- * the agent decides how many rounds to run (search → answer, with a
- * follow-up round allowed); without tools a completion is single-step,
+ * the agent decides how many rounds to run (search → answer, with follow-up
+ * rounds allowed — e.g. #159's long-document workflows walk units and emit
+ * one file per section, so a low cap silently starves the task of its final
+ * answer step); without tools a completion is single-step,
  * as before #16. Since #52 the tools-mode, not the Brave key, drives this:
  * the key-free `current_datetime` keeps tools attached for key-less
  * deployments too.
@@ -204,7 +207,7 @@ const callOptionsFrom = (options: CompletionOptions, mode: ToolsMode = 'full') =
   if (options.userId !== undefined) requestContext.set('userId', options.userId);
   return {
     ...(options.abortSignal ? { abortSignal: options.abortSignal } : {}),
-    maxSteps: mode === 'full' ? 4 : 1,
+    maxSteps: mode === 'full' ? 12 : 1,
     modelSettings: modelSettingsFrom(options),
     ...traceOptionsFrom(options.trace),
     requestContext,
@@ -400,8 +403,22 @@ export const readFileTool = createTool({
   description:
     'Read a file from the calling user’s asset library by its id (from `list_files`), ' +
     'returning its metadata (filename, type, size, upload date) and extracted text ' +
-    'content when any exists.',
-  inputSchema: z.object({ id: z.string().min(1) }),
+    'content when any exists. For long documents call with `unitsOnly: true` first ' +
+    'to list the document’s units (pages/sections) with a short preview each, then ' +
+    'read specific units selectively with `unit: n` or `unit: "start-end"` instead ' +
+    'of re-reading the whole file.',
+  inputSchema: z.object({
+    id: z.string().min(1),
+    // #159 live run: models emit boolean tool args as the string "true" (same
+    // wire-encoding drift as numeric `unit`), and a strict boolean schema
+    // makes Mastra reject the whole call. The string branch exists to accept
+    // those encodings; execute coerces to an actual boolean.
+    unitsOnly: z.union([z.boolean(), z.enum(['true', 'false', 'True', 'False'])]).optional(),
+    unit: z
+      .union([z.number(), z.string()])
+      .optional()
+      .describe('Unit number (1-based) or inclusive range "start-end" to read selectively'),
+  }),
   outputSchema: z.object({
     file: z
       .object({
@@ -414,10 +431,22 @@ export const readFileTool = createTool({
       .optional(),
     content: z.string().nullable().optional(),
     hasText: z.boolean().optional(),
+    units: z
+      .array(
+        z.object({
+          index: z.number(),
+          label: z.string(),
+          preview: z.string(),
+        }),
+      )
+      .optional(),
     note: z.string().optional(),
     error: z.string().optional(),
   }),
-  execute: async ({ id }, ctx) => {
+  execute: async ({ id, unitsOnly: rawUnitsOnly, unit }, ctx) => {
+    // #159: boolean wire-encoding coercion (see inputSchema note).
+    const unitsOnly =
+      rawUnitsOnly === undefined ? undefined : /^\s*(true|1)$/i.test(String(rawUnitsOnly));
     // #82: retry-within-completion short-circuit for a previously failed call.
     if (toolIsFailed(ctx, 'read_file'))
       return { error: degradedToolError('read_file', toolDegradeReason(ctx, 'read_file')) };
@@ -428,10 +457,78 @@ export const readFileTool = createTool({
     }
     try {
       const asset = await Asset.findOne({ _id: id, userId, status: 'ready' }).select(
-        'filename contentType size createdAt textExtracted markdownExtracted',
+        'filename contentType size createdAt textExtracted markdownExtracted units',
       );
       if (!asset) return { error: 'not_found' };
       const file = assetFileFrom(asset);
+      // #159: per-unit text (one unit per PDF page / top-level section),
+      // selected explicitly because the field is `select: false`.
+      const units = (asset.get('units') ?? []) as { index: number; label: string; text: string }[];
+      const readUnitRange = (
+        from: number,
+        to: number,
+      ): { index: number; label: string; text: string }[] =>
+        units.filter((u) => u.index >= from && u.index <= to);
+      if (unitsOnly) {
+        if (units.length === 0) {
+          return {
+            file,
+            note:
+              'This document has no per-unit text available; read it without ' +
+              '`unitsOnly` to get its full extracted text.',
+          };
+        }
+        return {
+          file,
+          units: units.map((u) => ({
+            index: u.index,
+            label: u.label,
+            preview: u.text.slice(0, 120),
+          })),
+        };
+      }
+      if (unit !== undefined) {
+        if (units.length === 0) {
+          return {
+            file,
+            note:
+              'This document has no per-unit text available; read it without the ' +
+              '`unit` parameter to get its full extracted text.',
+          };
+        }
+        let from: number;
+        let to: number;
+        // Models routinely emit numeric tool args as strings ("58") (#159
+        // eval run: the agent burned a step on each retry until it sent the
+        // number as JSON). Coerce digit-only strings to numbers first.
+        const numeric = typeof unit === 'string' ? /^\s*\d+\s*$/.test(unit) : true;
+        if (typeof unit === 'number' || (typeof unit === 'string' && numeric)) {
+          from = to = Math.trunc(Number(unit));
+        } else {
+          const range = /^\s*(\d+)\s*-\s*(\d+)\s*$/.exec(unit);
+          if (!range)
+            return { file, error: 'invalid', note: 'unit must be a number or "start-end"' };
+          from = Number(range[1]);
+          to = Number(range[2]);
+        }
+        if (!Number.isFinite(from) || from < 1 || to < from) {
+          return { file, error: 'invalid', note: `unit must be within 1-${units.length}` };
+        }
+        const selected = readUnitRange(from, to);
+        if (selected.length === 0) {
+          return { file, error: 'invalid', note: `unit must be within 1-${units.length}` };
+        }
+        return {
+          file,
+          content: truncateForPrompt(selected.map((u) => u.text).join('\n\n')),
+          hasText: true,
+          units: selected.map((u) => ({
+            index: u.index,
+            label: u.label,
+            preview: u.text.slice(0, 120),
+          })),
+        };
+      }
       // Issue #67: markdown conversion is the fallback content source when
       // the fast extraction did not produce text (pdf/docx/html).
       const text = asset.textExtracted ?? asset.markdownExtracted;
@@ -555,7 +652,10 @@ const TOOL_INSTRUCTIONS =
   'own knowledge when no search is needed. When the user refers to their files, ' +
   'assets, or library, call the `list_files` tool to see what they have; call ' +
   '`read_file` with a file id from that list before quoting any file contents, ' +
-  'and never invent file contents you have not read. When the user asks you to ' +
+  'and never invent file contents you have not read. For a long multi-unit ' +
+  'document, call `read_file` with `unitsOnly: true` first to see the unit ' +
+  '(page/section) list, then read only the relevant units with `unit` — never ' +
+  're-read a long document end to end. When the user asks you to ' +
   'save, generate or create a new file, note or document, call `generate_file` ' +
   'with a filename (ending in .md) and the full markdown content; the file then ' +
   'appears in their library and in `list_files` output.';

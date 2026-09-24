@@ -127,9 +127,14 @@ describe('conversion job end-to-end (#67)', () => {
     const asset = await seedAsset('sample.pdf', fixture('sample.pdf'));
     await AssetJob.create({ assetId: asset._id, status: 'pending' });
     await runAssetJobTick(processAssetConversionJob);
-    const stored = await Asset.findById(asset._id);
+    const stored = await Asset.findById(asset._id).select('markdownStatus markdownExtracted units');
     expect(stored?.markdownStatus).toBe('ready');
     expect(stored?.markdownExtracted).toContain('Hello Tova');
+    // #159: units persist alongside the markdown, one per PDF page. The real
+    // pdf-parse separator is `\n-- n of n --\n` (verified against this
+    // fixture), so page 1 is the text before the separator, and the trailing
+    // blank lines after the final separator produce no phantom page.
+    expect(stored?.toObject().units).toEqual([{ index: 1, label: 'Page 1', text: 'Hello Tova' }]);
   });
 
   it('a failed converter path returns through runAssetJobTick without touching the asset', async () => {

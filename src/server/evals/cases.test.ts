@@ -19,6 +19,13 @@ describe('#112 golden set', () => {
     expect(ids).toContain('save-notes-file');
   });
 
+  it('covers both #159 document-unit eval cases', () => {
+    const ids = CASES.map((c) => c.id);
+    expect(ids).toContain('manual-page-of-phone');
+    expect(ids).toContain('manual-phone-number');
+    expect(ids).toContain('handbook-split-sections');
+  });
+
   it('type-checks every assertion shape via TS narrowing (no unknown types at runtime)', () => {
     const seen = new Set(CASES.flatMap((c) => c.assertions).map((a) => a.type));
     for (const t of ['tool_called', 'tool_matching', 'tool_not_called', 'tool_sequence']) {

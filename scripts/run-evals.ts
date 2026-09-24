@@ -21,7 +21,7 @@ import path from 'node:path';
 import mongoose from 'mongoose';
 import type { Client } from 'langsmith';
 import { buildMongoUri } from '../src/server/mongoUri';
-import { gradeRun } from '../src/server/evals/graders';
+import { gradeRun, normalizeArgs } from '../src/server/evals/graders';
 import { CASES, resolveExpectedContent, type EvalCase } from '../src/server/evals/cases';
 import { clearEvalSource, seedEvalSource, evalUserId } from '../src/server/evals/mongoSource';
 import type { Assertion, EvalRun } from '../src/server/evals/types';
@@ -49,6 +49,9 @@ const resolveAssertions = (testCase: EvalCase): Assertion[] =>
 
 const connectorsByProvider = { groq: groqConnector, deepinfra: deepinfraConnector } as const;
 
+/** Only assistant text deltas count as answer material (null = tool-only gap). */
+const hasText = (value: string): boolean => value.trim().length > 0;
+
 /**
  * One graded run: stream the agent's answer for the case prompt and record
  * tool calls in order from the neutral stream (#16). The `generate_file`
@@ -64,19 +67,29 @@ const runCase = async (
     await connectorsByProvider[options.provider ?? 'groq']?.createStreamingCompletion(options);
   if (!stream) throw new Error(`no connector for provider ${options.provider ?? 'groq'}`);
   const toolCalls: EvalRun['toolCalls'] = [];
+  const deltas: string[] = [];
   for await (const chunk of stream) {
+    if (chunk.delta) deltas.push(chunk.delta);
     if (chunk.toolCall)
       toolCalls.push({
         name: chunk.toolCall.name,
-        ...(chunk.toolCall.args ? { args: chunk.toolCall.args } : {}),
+        ...(chunk.toolCall.args ? { args: normalizeArgs(chunk.toolCall.args) } : {}),
       });
   }
   const generateCall = toolCalls.find((call) => call.name === 'generate_file');
   const generatedContent =
     typeof generateCall?.args?.content === 'string' ? generateCall.args.content : undefined;
+  // #159 cases grade the assistant's final answer and possibly several
+  // generated files, so both are captured alongside the tool calls.
+  const generatedFiles = toolCalls
+    .filter((call) => call.name === 'generate_file' && typeof call.args?.content === 'string')
+    .map((call) => ({ filename: call.args?.filename ?? '', content: call.args?.content ?? '' }));
+  const answer = deltas.join('');
   const run: EvalRun = {
     toolCalls,
     prompt: testCase.prompt,
+    ...(!hasText(answer) ? {} : { answer }),
+    ...(!generatedFiles.length ? {} : { generatedFiles }),
     ...(generatedContent !== undefined ? { generatedContent } : {}),
   };
   const evidence = toolCalls
