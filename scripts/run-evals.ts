@@ -58,6 +58,7 @@ const resolveAssertions = (testCase: EvalCase): Assertion[] =>
 
 const connectorsByProvider = { groq: groqConnector, deepinfra: deepinfraConnector } as const;
 
+/* Best-effort LangSmith export:
 /* Best-effort LangSmith export: the `tova-evals` dataset is created when
  * absent and re-used otherwise (score-over-time stays on one dataset), each
  * case becomes an example, each graded run becomes a run on that example

@@ -80,6 +80,10 @@ function App() {
     markdownStatus?: string;
   } | null>(null);
   const streamingRef = useRef(false);
+  // Per-chat incognito (#144): the composer toggle's state. `null` means "no
+  // manual choice yet — follow the profile's 'incognito by default'";
+  // true/false is a deliberate override for the chat being started.
+  const [incognitoChoice, setIncognitoChoice] = useState<boolean | null>(null);
   // Startup-chat preference (issue #96): 'recent' re-opens the newest session
   // once per mount; the ref guard keeps later refetches (after send, delete)
   // from ever overriding a user-selected or new session.
@@ -117,8 +121,9 @@ function App() {
     if (startupSessionRef.current || sessions.length === 0) return;
     startupSessionRef.current = true;
     // 'new' starts with a blank composer; 'recent' (the default when unset)
-    // opens the newest session once sessions have loaded. ZDR users (#116)
-    // never open a saved chat by default — their turns are stateless.
+    // opens the newest session once sessions have loaded. Incognito-default
+    // users (#144, stored as settings.zdr) never open a saved chat by
+    // default — their turns are stateless.
     if (user?.zdr) return;
     if ((user?.startupChat ?? 'recent') === 'recent') {
       // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -145,9 +150,15 @@ function App() {
     ]);
     const streamId = `stream-${Date.now()}`;
     setMessages((prev) => [...prev, { _id: streamId, role: 'assistant', content: '' }]);
-    // Zero-data retention (#116): the setting decides the request shape; the
-    // stream path above replays recent turns instead of a session id.
-    const zdr = Boolean(user?.zdr);
+    // Per-chat incognito (#144): a stored chat's flag is fixed at creation
+    // (the server decides off Session.incognito); a new chat uses the
+    // composer toggle's explicit choice, else the profile default.
+    const profileIncognito = Boolean(user?.incognitoByDefault ?? user?.zdr);
+    const incognito = incognitoChoice ?? profileIncognito;
+    // Existing chats continue by sessionId; new chats carry the toggle's
+    // decision plus, when incognito, a bounded replay of recent turns so the
+    // server-side conversation has context without anything being stored.
+    const sessionIdPayload = activeSessionId;
     try {
       const res = await fetch('/api/chat/stream', {
         method: 'POST',
@@ -156,25 +167,25 @@ function App() {
         body: JSON.stringify({
           content,
           ...(assetId ? { assetId } : {}),
-          // Zero-data retention (#116): with the setting on, no sessionId is
-          // sent and recent turns are replayed as a bounded history payload —
-          // the server keeps nothing, so continuity lives on the client.
-          ...(zdr
-            ? {
-                history: messages
-                  .filter(
-                    (m) =>
-                      (m.role === 'user' || m.role === 'assistant') &&
-                      !m.isError &&
-                      m.content &&
-                      m._id !== streamId,
-                  )
-                  .slice(-20)
-                  .map((m) => ({ role: m.role, content: m.content })),
-              }
-            : activeSessionId
-              ? { sessionId: activeSessionId }
-              : {}),
+          ...(sessionIdPayload
+            ? { sessionId: sessionIdPayload }
+            : {
+                zdr: incognito,
+                ...(incognito
+                  ? {
+                      history: messages
+                        .filter(
+                          (m) =>
+                            (m.role === 'user' || m.role === 'assistant') &&
+                            !m.isError &&
+                            m.content &&
+                            m._id !== streamId,
+                        )
+                        .slice(-20)
+                        .map((m) => ({ role: m.role, content: m.content })),
+                    }
+                  : {}),
+              }),
         }),
       });
 
@@ -419,6 +430,9 @@ function App() {
             isLoading={isChatLoading}
             onOpenSidebar={() => setSidebarOpen(true)}
             onFeedback={handleFeedback}
+            sessionId={activeSessionId}
+            incognito={incognitoChoice ?? Boolean(user?.incognitoByDefault ?? user?.zdr)}
+            onToggleIncognito={setIncognitoChoice}
             incomingAsset={pickedAsset}
             onPickedConsumed={() => setPickedAsset(null)}
           />

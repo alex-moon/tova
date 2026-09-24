@@ -346,6 +346,47 @@ describe('PATCH /api/profile (issue #35)', () => {
     expect(user.settings?.zdr ?? null).toBeNull();
   });
 
+  it('rejects non-boolean incognitoByDefault values with 400', async () => {
+    const { app, cookie } = await registerUser('patch-incognito-invalid@example.com');
+
+    for (const bad of ['yes', 1, null, 0]) {
+      const res = await patchProfile(app, cookie, { incognitoByDefault: bad });
+      expect(res.status).toBe(400);
+    }
+
+    const user = await getUser('patch-incognito-invalid@example.com');
+    expect(user.settings?.zdr ?? null).toBeNull();
+  });
+
+  it('patching incognitoByDefault writes the same settings.zdr slot (issue #144)', async () => {
+    const { app, cookie } = await registerUser('patch-incognito-slot@example.com');
+
+    const before = await request(app).get('/api/auth/me').set('Cookie', cookie);
+    expect(before.body.user).not.toHaveProperty('incognitoByDefault');
+
+    const on = await patchProfile(app, cookie, { incognitoByDefault: true });
+    expect(on.status).toBe(200);
+    expect(on.body.user.incognitoByDefault).toBe(true);
+    expect(on.body.user.zdr).toBe(true);
+
+    const off = await patchProfile(app, cookie, { incognitoByDefault: false });
+    expect(off.status).toBe(200);
+    expect(off.body.user).not.toHaveProperty('incognitoByDefault');
+
+    const user = await getUser('patch-incognito-slot@example.com');
+    expect(user.settings?.zdr).toBe(false);
+  });
+
+  it('rejects conflicting zdr and incognitoByDefault values with 400', async () => {
+    const { app, cookie } = await registerUser('patch-incognito-conflict@example.com');
+
+    const res = await patchProfile(app, cookie, { zdr: true, incognitoByDefault: false });
+    expect(res.status).toBe(400);
+
+    const user = await getUser('patch-incognito-conflict@example.com');
+    expect(user.settings?.zdr ?? null).toBeNull();
+  });
+
   describe('first-enable auto-purge (issue #116 Q5)', () => {
     const seedChats = async (email: string, sessions: number, withMessages = true) => {
       const user = await getUser(email);
@@ -363,59 +404,39 @@ describe('PATCH /api/profile (issue #35)', () => {
       return { user, docIds };
     };
 
-    it('purges sessions and messages when zdr flips false → true', async () => {
-      const { app, cookie } = await registerUser('patch-zdr-purge@example.com');
-      const { docIds } = await seedChats('patch-zdr-purge@example.com', 2);
+    it('enabling zdr leaves existing sessions and messages untouched', async () => {
+      const { app, cookie } = await registerUser('patch-zdr-nopurge@example.com');
+      const { docIds } = await seedChats('patch-zdr-nopurge@example.com', 2);
 
       const res = await patchProfile(app, cookie, { zdr: true });
       expect(res.status).toBe(200);
 
-      const purged = await Session.find({ _id: { $in: docIds } }).lean();
-      expect(purged).toHaveLength(2);
-      // Soft delete only: every session still exists but is now unlisted.
-      expect(purged.every((s) => s.deletedAt instanceof Date)).toBe(true);
-      // Messages are hard-deleted so the contents are truly gone (Q5).
-      expect(await Message.countDocuments({ sessionId: { $in: docIds } })).toBe(0);
+      const remaining = await Session.find({ _id: { $in: docIds } }).lean();
+      expect(remaining).toHaveLength(2);
+      // Not even soft-deleted: the flag no longer touches data at all.
+      expect(remaining.every((s) => s.deletedAt === null)).toBe(true);
+      expect(await Message.countDocuments({ sessionId: { $in: docIds } })).toBe(4);
     });
 
-    it('purges messages of already-soft-deleted sessions too, and is safe with zero sessions', async () => {
-      const { app, cookie } = await registerUser('patch-zdr-purge-empty@example.com');
-      const { docIds } = await seedChats('patch-zdr-purge-empty@example.com', 1);
-      await Session.findByIdAndUpdate(docIds[0], { deletedAt: new Date() });
+    it('toggling off and back on still changes nothing (the old re-purge concern is moot)', async () => {
+      const { app, cookie } = await registerUser('patch-zdr-nopurge-again@example.com');
+      const { docIds } = await seedChats('patch-zdr-nopurge-again@example.com', 1);
 
-      const res = await patchProfile(app, cookie, { zdr: true });
-      expect(res.status).toBe(200);
-      expect(await Message.countDocuments({ sessionId: { $in: docIds } })).toBe(0);
-
-      // A user with no chats at all: the PATCH must still succeed (no throw).
-      const { app: app2, cookie: cookie2 } = await registerUser('patch-zdr-purge-none@example.com');
-      const res2 = await patchProfile(app2, cookie2, { zdr: true });
-      expect(res2.status).toBe(200);
-    });
-
-    it('does not re-purge on toggle-off/on: the second enable changes nothing', async () => {
-      const { app, cookie } = await registerUser('patch-zdr-purge-again@example.com');
       await patchProfile(app, cookie, { zdr: true });
-      const before = await Session.find({}).lean();
-      expect(before.every((s) => s.deletedAt !== null)).toBe(true);
-
-      // Off is a normal toggle…
-      const off = await patchProfile(app, cookie, { zdr: false });
-      expect(off.status).toBe(200);
-
-      // …and on again fires no second purge (after the first, nothing is left).
-      // The prior purge's effect stands; previously deleted data stays gone.
+      await patchProfile(app, cookie, { zdr: false });
       await patchProfile(app, cookie, { zdr: true });
-      expect(await Message.countDocuments()).toBe(0);
+
+      expect(await Session.countDocuments({ _id: { $in: docIds } })).toBe(1);
+      expect(await Message.countDocuments({ sessionId: { $in: docIds } })).toBe(2);
     });
 
-    it('a failed PATCH body (400) never triggers a purge', async () => {
-      const { app, cookie } = await registerUser('patch-zdr-purge-invalid@example.com');
-      await seedChats('patch-zdr-purge-invalid@example.com', 1);
+    it('a failed PATCH body (400) still never touches data', async () => {
+      const { app, cookie } = await registerUser('patch-zdr-nopurge-invalid@example.com');
+      const { docIds } = await seedChats('patch-zdr-nopurge-invalid@example.com', 1);
 
       await patchProfile(app, cookie, { zdr: 'yes', theme: 'dark' });
 
-      expect(await Session.countDocuments({ deletedAt: null })).toBe(1);
+      expect(await Session.countDocuments({ _id: { $in: docIds } })).toBe(1);
       expect(await Message.countDocuments()).toBe(2);
     });
   });

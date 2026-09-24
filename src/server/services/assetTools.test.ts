@@ -314,6 +314,104 @@ describe('read_file tool (#58)', () => {
   });
 });
 
+describe('read_file unit walking (#159)', () => {
+  const setUnits = (assetId: string, units: { index: number; label: string; text: string }[]) =>
+    Asset.updateOne({ _id: assetId }, { $set: { units } });
+
+  const createPdf = async (userId: string, markdown: string) => {
+    const asset = await createAsset(userId, 'report.pdf', {
+      textExtracted: null,
+      markdownExtracted: markdown,
+    });
+    await setUnits(asset.id, [
+      { index: 1, label: 'Page 1', text: 'intro text, phone 0400' },
+      { index: 2, label: 'Page 2', text: ' '.repeat(200) },
+      { index: 3, label: 'Page 3', text: 'PREFACE'.padStart(10, 'x') },
+    ]);
+    return asset;
+  };
+
+  it('lists units with short previews via unitsOnly', async () => {
+    const user = await createUser('units-list@example.com');
+    const asset = await createPdf(user.id, 'x');
+    const out = (await readExecute({ id: asset.id, unitsOnly: true }, asCtx(user.id))) as {
+      units: { index: number; label: string; preview: string }[];
+    };
+    expect(out.units).toHaveLength(3);
+    expect(out.units[0]).toMatchObject({
+      index: 1,
+      label: 'Page 1',
+      preview: 'intro text, phone 0400',
+    });
+    expect(out.units[1].preview).toHaveLength(120);
+  });
+
+  it('accepts unitsOnly as a boolean-string ("true") from the wire (#159 live run)', async () => {
+    const user = await createUser('units-string-boolean@example.com');
+    const asset = await createPdf(user.id, 'x');
+    const out = (await readExecute({ id: asset.id, unitsOnly: 'true' }, asCtx(user.id))) as {
+      units?: { index: number }[];
+    };
+    expect(out.units).toHaveLength(3);
+  });
+
+  it('reads a single unit and a range, truncated per read', async () => {
+    const user = await createUser('units-read@example.com');
+    const asset = await createPdf(user.id, 'x');
+    const one = (await readExecute({ id: asset.id, unit: 3 }, asCtx(user.id))) as {
+      content: string;
+    };
+    expect(one.content).toBe('xxxPREFACE');
+    const range = (await readExecute({ id: asset.id, unit: '1-2' }, asCtx(user.id))) as {
+      content: string;
+    };
+    expect(range.content).toContain('intro text');
+  });
+
+  it('coerces numeric strings ("58") to a unit number (#159 live run)', async () => {
+    const user = await createUser('units-numeric-string@example.com');
+    const asset = await createPdf(user.id, 'x');
+    const out = (await readExecute({ id: asset.id, unit: '3' }, asCtx(user.id))) as {
+      content: string;
+    };
+    expect(out.content).toBe('xxxPREFACE');
+  });
+
+  it('rejects unit arguments outside the real unit range', async () => {
+    const user = await createUser('units-oor@example.com');
+    const asset = await createPdf(user.id, 'x');
+    for (const unit of [0, 4, '2-1', '02x', '0-2']) {
+      const out = (await readExecute({ id: asset.id, unit }, asCtx(user.id))) as {
+        error?: string;
+      };
+      expect(out.error).toBe('invalid');
+      expect(toolIsFailed(asCtx('other'), 'read_file')).toBe(false);
+    }
+  });
+
+  it('keeps legacy behavior for documents without units (item 3)', async () => {
+    const user = await createUser('units-legacy@example.com');
+    // No units set — an asset ingested before #159.
+    const asset = await createAsset(user.id, 'report.pdf', {
+      textExtracted: null,
+      markdownExtracted: 'whole markdown',
+    });
+    const out = (await readExecute({ id: asset.id }, asCtx(user.id))) as { content: string };
+    expect(out.content).toBe('whole markdown');
+    const unitsOnly = (await readExecute({ id: asset.id, unitsOnly: true }, asCtx(user.id))) as {
+      units?: unknown[];
+      note?: string;
+    };
+    expect(unitsOnly.units).toBeUndefined();
+    expect(unitsOnly.note).toContain('no per-unit text');
+    const withUnit = (await readExecute({ id: asset.id, unit: 1 }, asCtx(user.id))) as {
+      units?: unknown[];
+      note?: string;
+    };
+    expect(withUnit.note).toContain('no per-unit text');
+  });
+});
+
 describe('asset tools degradation (#82)', () => {
   afterEach(() => {
     jest.restoreAllMocks();

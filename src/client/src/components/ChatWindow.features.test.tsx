@@ -503,3 +503,45 @@ describe('Composer library-pick (issue #51)', () => {
     view.unmount();
   });
 });
+
+describe('Composer incognito toggle (issue #144)', () => {
+  afterEach(cleanup);
+
+  it('renders next to attach before first submission and toggles', () => {
+    const onToggle = vi.fn();
+    renderChat([], false, { incognito: false, onToggleIncognito: onToggle });
+    const toggle = screen.getByTestId('chat-incognito-toggle');
+    expect(toggle).toHaveAttribute('aria-pressed', 'false');
+    fireEvent.click(toggle);
+    expect(onToggle).toHaveBeenCalledWith(true);
+  });
+
+  it('disappears once a message exists or a session is active', () => {
+    const onToggle = vi.fn();
+    const view = renderChat([], false, { incognito: false, onToggleIncognito: onToggle });
+    view.rerender(
+      <ChatWindow
+        messages={[base()]}
+        onSendMessage={vi.fn()}
+        isLoading={false}
+        onOpenSidebar={vi.fn()}
+        sessionId={null}
+        incognito={false}
+        onToggleIncognito={onToggle}
+      />,
+    );
+    expect(screen.queryByTestId('chat-incognito-toggle')).not.toBeInTheDocument();
+    view.rerender(
+      <ChatWindow
+        messages={[]}
+        onSendMessage={vi.fn()}
+        isLoading={false}
+        onOpenSidebar={vi.fn()}
+        sessionId="abc"
+        incognito={false}
+        onToggleIncognito={onToggle}
+      />,
+    );
+    expect(screen.queryByTestId('chat-incognito-toggle')).not.toBeInTheDocument();
+  });
+});

@@ -3,6 +3,7 @@ import {
   DeleteObjectCommand,
   GetObjectCommand,
   HeadObjectCommand,
+  ListObjectsV2Command,
   PutObjectCommand,
   S3Client,
 } from '@aws-sdk/client-s3';
@@ -100,9 +101,8 @@ export const getObjectBuffer = async (
   return bytes ? Buffer.from(bytes) : null;
 };
 
-// Returns true when the object existed and was deleted; NoSuchKey and
-// NoSuchBucket-side "already gone" cases converge to true so deletes are
-// idempotent from callers' perspective.
+// Returns true on success (NoSuchKey / NotFound converge to true); deletes
+// are idempotent from callers' perspective.
 export const deleteObject = async (key: string): Promise<boolean> => {
   try {
     await getClient().send(new DeleteObjectCommand({ Bucket: bucket(), Key: key }));
@@ -112,4 +112,25 @@ export const deleteObject = async (key: string): Promise<boolean> => {
     if (name === 'NoSuchKey' || name === 'NotFound') return true;
     throw err;
   }
+};
+
+// All keys under one prefix (issue #143: prefix sweeps for the factory
+// reset). Paginates with ListObjectsV2 continuation tokens; up to 1000 keys
+// per page. Listing is only possible with real credentials, so callers gate
+// on isStorageConfigured() first.
+export const listObjectKeys = async (prefix: string): Promise<string[]> => {
+  const keys: string[] = [];
+  let continuation: string | undefined;
+  do {
+    const result = await getClient().send(
+      new ListObjectsV2Command({
+        Bucket: bucket(),
+        Prefix: prefix,
+        ContinuationToken: continuation,
+      }),
+    );
+    for (const object of result.Contents ?? []) if (object.Key) keys.push(object.Key);
+    continuation = result.IsTruncated ? result.NextContinuationToken : undefined;
+  } while (continuation);
+  return keys;
 };

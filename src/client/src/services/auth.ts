@@ -57,11 +57,26 @@ const AuthService = {
     theme?: string;
     startupChat?: 'recent' | 'new';
     zdr?: boolean;
+    incognitoByDefault?: boolean;
     confirmDeletes?: { chat?: boolean; file?: boolean };
   }): Promise<AuthUser> {
     try {
       const res = await axios.patch<{ user: AuthUser }>('/api/profile', patch);
       return res.data.user;
+    } catch (err) {
+      throw toAuthError(err);
+    }
+  },
+
+  // Factory reset (issue #143): the typed confirmation string must match the
+  // server-side literal exactly or the wipe is refused with 400.
+  async factoryReset(confirm: string): Promise<{ reset: boolean; failedObjects: string[] }> {
+    try {
+      const res = await axios.post<{
+        reset: boolean;
+        failedObjects: string[];
+      }>('/api/profile/factory-reset', { confirm });
+      return res.data;
     } catch (err) {
       throw toAuthError(err);
     }

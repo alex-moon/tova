@@ -147,3 +147,36 @@ test('ZDR off: the outgoing stream body carries the sessionId and no history', a
   expect(body.sessionId).toBe('e2e-session-1');
   expect(body).not.toHaveProperty('history');
 });
+
+test('factory reset: wrong confirm string never fires the request, right one wipes', async ({
+  page,
+}) => {
+  const user = { id: 'e2e-user-1', email };
+  await mockUserAndApp(page, user);
+  const resetRequests: string[] = [];
+  await page.route('**/api/profile/factory-reset', async (route) => {
+    resetRequests.push(route.request().postData() ?? '');
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ reset: true, failedObjects: [] }),
+    });
+  });
+  await page.goto('/profile');
+  await expect(page.getByTestId('profile-view')).toBeVisible();
+  await expect(page.getByTestId('profile-danger-zone')).toContainText('Factory reset');
+
+  const button = page.getByTestId('profile-factory-reset');
+  // Disabled until the typed confirmation matches exactly: even a wrong
+  // lower/upper-cased string must not enable it.
+  await page.getByTestId('profile-reset-confirm').fill('reset');
+  await expect(button).toBeDisabled();
+  expect(resetRequests).toHaveLength(0);
+
+  await page.getByTestId('profile-reset-confirm').fill('RESET');
+  await expect(button).toBeEnabled();
+  await button.click();
+
+  expect(resetRequests).toHaveLength(1);
+  expect(JSON.parse(resetRequests[0])).toEqual({ confirm: 'RESET' });
+});

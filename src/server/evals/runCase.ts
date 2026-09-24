@@ -8,6 +8,7 @@
 import type { EvalCase } from './cases';
 import type { EvalRun } from './types';
 import type { CompletionOptions, NeutralStreamChunk } from '../services/llmTypes';
+import { normalizeArgs } from './graders';
 
 type CreateStreaming = (
   options: CompletionOptions,
@@ -29,23 +30,33 @@ export const runCase = async (
   const stream = await createStreamingCompletion(options);
   if (!stream) throw new Error(`no connector for provider ${options.provider ?? 'groq'}`);
   const toolCalls: EvalRun['toolCalls'] = [];
-  let finalText: string | undefined;
+  let deltas: string[] = [];
   for await (const chunk of stream) {
-    if (chunk.delta) finalText = (finalText ?? '') + chunk.delta;
+    if (chunk.delta) deltas = [...deltas, chunk.delta];
     if (chunk.toolCall)
       toolCalls.push({
         name: chunk.toolCall.name,
-        ...(chunk.toolCall.args ? { args: chunk.toolCall.args } : {}),
+        ...(chunk.toolCall.args ? { args: normalizeArgs(chunk.toolCall.args) } : {}),
       });
   }
   const generateCall = toolCalls.find((call) => call.name === 'generate_file');
   const generatedContent =
     typeof generateCall?.args?.content === 'string' ? generateCall.args.content : undefined;
+  // #159 cases grade the assistant's final answer and possibly several
+  // generated files, so both are captured alongside the tool calls.
+  const generatedFiles = toolCalls
+    .filter((call) => call.name === 'generate_file' && typeof call.args?.content === 'string')
+    .map((call) => ({
+      filename: String(call.args?.filename ?? ''),
+      content: String(call.args?.content ?? ''),
+    }));
+  const finalText = deltas.join('');
   const run: EvalRun = {
     toolCalls,
     prompt: testCase.prompt,
+    ...(!finalText.trim() ? {} : { finalText, answer: finalText }),
+    ...(!generatedFiles.length ? {} : { generatedFiles }),
     ...(generatedContent !== undefined ? { generatedContent } : {}),
-    ...(finalText !== undefined ? { finalText } : {}),
   };
   const evidence = toolCalls
     .map((call) => `${call.name}${call.args ? ` ${JSON.stringify(call.args).slice(0, 120)}` : ''}`)

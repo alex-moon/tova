@@ -104,7 +104,7 @@ describe('Assets presign', () => {
   });
 
   // Pinned per #68's hard rule: zip is never an accepted upload format at
-  // any layer, and ALLOWED_CONTENT_TYPES in routes/assets.ts deliberately
+  // any layer, and ALLOWED_CONTENT_TYPES in services/assetLimits.ts deliberately
   // excludes it (see the comment there). If this test ever fails, an upload
   // path has started accepting archives.
   it('rejects zip uploads outright and creates nothing', async () => {

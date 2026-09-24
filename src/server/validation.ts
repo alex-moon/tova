@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { MAX_BULK_TOTAL_SIZE } from './services/assetLimits';
 
 export const registerSchema = z.object({
   email: z.email({ message: 'Email must be a valid email address' }).min(1, {
@@ -43,10 +44,16 @@ export const profilePatchSchema = z.strictObject({
     })
     .optional(),
   // Zero-data-retention preference (issue #116): opts the account out of all
-  // chat persistence. Boolean-only and forward-looking — enabling it never
-  // deletes data saved before it was turned on (that decision is tracked
-  // separately in the plan's open questions).
+  // chat persistence. Boolean-only and forward-looking — enabling it does not
+  // delete anything (issue #143 removed the first-enable auto-purge); wiping
+  // existing data is now the explicit /factory-reset route below.
   zdr: z.boolean({ message: 'zdr must be a boolean' }).optional(),
+  // 'Incognito by default' (issue #144): new chats start incognito when set.
+  // Reads and writes the same settings.zdr storage slot — single source of
+  // truth; `zdr` is its legacy alias kept for the frozen #116 test surface
+  // and the existing client contract. Rename both together whenever the
+  // internal rename happens.
+  incognitoByDefault: z.boolean({ message: 'incognitoByDefault must be a boolean' }).optional(),
   // Granular delete-confirmation prefs (issue #59). Strict sub-object: an
   // unknown delete target is a 400, not a silently dropped key.
   confirmDeletes: z
@@ -55,6 +62,17 @@ export const profilePatchSchema = z.strictObject({
       file: z.boolean().optional(),
     })
     .optional(),
+});
+
+// Factory reset (issue #143): the exact confirmation string a user must type
+// to unlock the route. A fixed product literal, not user data — copy lives on
+// the client, verification is exact-match here.
+export const FACTORY_RESET_CONFIRM = 'RESET';
+
+export const factoryResetSchema = z.strictObject({
+  confirm: z.literal(FACTORY_RESET_CONFIRM, {
+    message: `Type ${FACTORY_RESET_CONFIRM} to confirm the factory reset`,
+  }),
 });
 
 export const feedbackValueSchema = z.object({
@@ -80,9 +98,17 @@ export const assetPresignSchema = z.object({
   // Upload origin (issue #116): the chat composer tags its uploads so a ZDR
   // user's chat attachments can be kept out of long-term storage, while
   // Assets-page uploads (no scope) live on until deleted. The server still
-  // decides from the account's own zdr setting — the tag alone never changes
-  // storage behavior for other users.
+  // decides from the effective per-chat incognito flag (#144) — the tag alone
+  // never changes storage behavior for other users.
   scope: z.enum(['chat'], { message: 'scope must be "chat"' }).optional(),
+  // Per-chat incognito inputs (#144). For an existing chat the composer sends
+  // `chatId` and the stored session flag decides; for a brand-new incognito
+  // chat (the upload precedes session creation) the client sends `zdr`
+  // matching the composer toggle, and absent both the profile's 'incognito by
+  // default' decides. Storage name stays `zdr` per the plan's minimal-churn
+  // variant; ownership of `chatId` is checked in the route (404 on foreign).
+  chatId: z.string({ message: 'chatId must be a string' }).optional(),
+  zdr: z.boolean({ message: 'zdr must be a boolean' }).optional(),
 });
 
 // ZDR chats (issue #116) are stateless per turn: with persistence off, the
@@ -134,16 +160,14 @@ export const assetBulkDeleteQuerySchema = z.object({
 // MAX_BULK_FILES files, each item shaped exactly like a single-file presign.
 // Hard rule from the ticket: files arrive via N normal singleton uploads and
 // the direct-to-Spaces PUT flow — zip is never an accepted upload format at
-// any layer (ALLOWED_CONTENT_TYPES in routes/assets.ts excludes it), and
-// uploaded archives are never read or unzipped anywhere.
+// any layer (ALLOWED_CONTENT_TYPES in services/assetLimits.ts excludes it),
+// and uploaded archives are never read or unzipped anywhere.
 //
 // These schemas shape the batch; per-item content-type/size policy lives in
 // the routes (validation.ts knows shapes, routes know policy). The total
 // declared size cap is a batch-shape guard here: one HTTP request must not
 // carry an unbounded array of sizes.
 export const MAX_BULK_FILES = 20;
-// 20 files x 15 MB nominal per-file cap.
-export const MAX_BULK_TOTAL_SIZE = 300 * 1024 * 1024;
 
 export const assetBulkPresignSchema = z
   .array(assetPresignSchema, { message: 'Bulk upload payload must be an array of files' })

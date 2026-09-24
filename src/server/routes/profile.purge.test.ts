@@ -1,218 +1,191 @@
 import mongoose from 'mongoose';
-import { Session } from '../models/Session';
-import { Message } from '../models/Message';
-import { Asset } from '../models/Asset';
-import { purgeUserChats } from './profile';
-
-// Coverage for `purgeUserChats` (plan 136, T5). profile.test.ts (issue #116)
-// only asserts the zdr flag flip; this file adds the data-level assertions:
-// the bulk-op shape (no per-doc loops), the user scoping, the first-enable
-// route behaviour, and the "assets survive a purge" shipped decision.
-
-const userId = () => new mongoose.Types.ObjectId();
-
-const seedUserChat = async (uid: mongoose.Types.ObjectId, count = 2) => {
-  for (let i = 0; i < count; i++) {
-    const session = await Session.create({ userId: uid, title: `Chat ${i}` });
-    await Message.create([
-      { sessionId: session._id, role: 'user', content: `question ${i}` },
-      { sessionId: session._id, role: 'assistant', content: `answer ${i}` },
-    ]);
-  }
-};
-
-describe('purgeUserChats (plan 136 T5)', () => {
-  const spies = {
-    find: jest.spyOn(Session, 'find'),
-    updateMany: jest.spyOn(Session, 'updateMany'),
-    sessionDeleteMany: jest.spyOn(Session, 'deleteMany'),
-    messageDeleteMany: jest.spyOn(Message, 'deleteMany'),
-  };
-
-  beforeEach(() => {
-    for (const spy of Object.values(spies)) spy.mockClear();
-  });
-
-  it('soft-deletes owned sessions via one updateMany, never via deleteMany', async () => {
-    const uid = userId();
-    await seedUserChat(uid);
-
-    await purgeUserChats(uid);
-
-    expect(spies.find).toHaveBeenCalledWith({ userId: uid });
-    expect(spies.updateMany).toHaveBeenCalledWith(
-      { userId: uid, deletedAt: null },
-      expect.objectContaining({ $set: { deletedAt: expect.any(Date) } }),
-    );
-    // Sessions are soft-deleted (recoverable unlisting), never removed.
-    expect(spies.sessionDeleteMany).not.toHaveBeenCalled();
-  });
-
-  it('hard-deletes messages across all owned sessions with one $in bulk op', async () => {
-    const uid = userId();
-    await seedUserChat(uid);
-
-    await purgeUserChats(uid);
-
-    expect(spies.messageDeleteMany).toHaveBeenCalledWith({
-      sessionId: { $in: expect.arrayContaining([expect.any(mongoose.Types.ObjectId)]) },
-    });
-    expect(spies.messageDeleteMany).toHaveBeenCalledTimes(1);
-  });
-
-  it('acts per bulk model calls only: no per-doc loops (find returns lean _ids)', async () => {
-    const uid = userId();
-    const sessions = await seedReturningSessions(uid, 3);
-
-    await purgeUserChats(uid);
-
-    expect(spies.find).toHaveBeenCalledTimes(1);
-    expect(spies.updateMany).toHaveBeenCalledTimes(1);
-    expect(spies.messageDeleteMany).toHaveBeenCalledTimes(1);
-    // The $in filter targets exactly the user's session ids.
-    expect(spies.messageDeleteMany).toHaveBeenCalledWith({
-      sessionId: {
-        $in: sessions.map((s) => s._id),
-      },
-    });
-  });
-
-  it('scopes to the given user: a different user’s chats are untouched', async () => {
-    const owner = userId();
-    const other = userId();
-    await seedUserChat(owner);
-    await seedUserChat(other);
-
-    await purgeUserChats(owner);
-
-    // Owner: session unlisted, messages gone.
-    expect(await Session.find({ userId: owner, deletedAt: null }).lean()).toHaveLength(0);
-    expect(await Message.countDocuments()).toBe(4);
-
-    // Other user: nothing changed.
-    const otherSessions = await Session.find({ userId: other, deletedAt: null }).lean();
-    expect(otherSessions).toHaveLength(2);
-    expect(await Message.countDocuments({ sessionId: otherSessions[0]._id })).toBe(2);
-  });
-
-  it('includes already-soft-deleted sessions in the message sweep', async () => {
-    const uid = userId();
-    const active = await Session.create({ userId: uid, title: 'active' });
-    const orphaned = await Session.create({
-      userId: uid,
-      title: 'orphaned',
-      deletedAt: new Date(),
-    });
-    await Message.create([
-      { sessionId: active._id, role: 'user', content: 'a' },
-      { sessionId: orphaned._id, role: 'user', content: 'b' },
-    ]);
-
-    await purgeUserChats(uid);
-
-    expect(await Message.countDocuments({ sessionId: { $in: [active._id, orphaned._id] } })).toBe(
-      0,
-    );
-  });
-
-  it('is a no-op for a user with no sessions', async () => {
-    const uid = userId();
-    await expect(purgeUserChats(uid)).resolves.toBeUndefined();
-    expect(await Message.countDocuments()).toBe(0);
-  });
-
-  it('leaves the user’s assets alone (shipped decision: assets are the reusable library)', async () => {
-    const uid = userId();
-    await Asset.create({
-      userId: uid,
-      filename: 'notes.md',
-      key: `${uid}/asset-1/notes.md`,
-      contentType: 'text/markdown',
-      size: 10,
-      status: 'ready',
-    });
-
-    await purgeUserChats(uid);
-
-    const assets = await Asset.find({ userId: uid }).lean();
-    expect(assets).toHaveLength(1);
-    expect(assets[0].filename).toBe('notes.md');
-  });
-});
-
-// Route-level coverage for T5 item 2: the first-enable purge as the route
-// actually triggers it (profile.test.ts asserts the flag flip, never the data).
 import request from 'supertest';
 import { createApp } from '../index';
 import { User } from '../models/User';
+import { Session } from '../models/Session';
+import { Message } from '../models/Message';
+import { Asset } from '../models/Asset';
+import { AssetJob } from '../models/AssetJob';
+import { Entity } from '../models/Entity';
+import { EntityEdge } from '../models/EntityEdge';
+import { McpServer } from '../models/McpServer';
+import { FACTORY_RESET_CONFIRM } from '../validation';
 
-describe('PATCH /api/profile zdr enable purge (plan 136 T5 item 2)', () => {
-  const registerUser = async (email: string) => {
-    const app = createApp();
-    const response = await request(app)
-      .post('/api/auth/register')
-      .send({ email, password: 'password123' });
-    return {
-      app,
-      userId: await User.findOne({ email }).then((u) => u?._id as mongoose.Types.ObjectId),
-      cookie: response.headers['set-cookie'],
-    };
+// Route-level coverage for the factory reset (issue #143), superseding the
+// old purgeUserChats coverage (plan 136, T5): typed confirmation is required,
+// nothing PII-bearing survives the POST (sessions hard-deleted, messages,
+// assets, job rows and the entity graph all swept), the user's settings and
+// account survive, other users are untouched — and the removed ZDR
+// first-enable auto-purge truly no longer fires.
+
+const registerUser = async (email: string) => {
+  const app = createApp();
+  const response = await request(app)
+    .post('/api/auth/register')
+    .send({ email, password: 'password123' });
+  return {
+    app,
+    userId: await User.findOne({ email }).then((u) => u?._id as mongoose.Types.ObjectId),
+    cookie: response.headers['set-cookie'],
   };
+};
 
-  it('first zdr enable soft-deletes sessions and hard-deletes messages', async () => {
-    const { app, userId, cookie } = await registerUser('purge-route@example.com');
-    await seedUserChat(userId, 2);
-
-    const res = await request(app).patch('/api/profile').set('Cookie', cookie).send({ zdr: true });
-    expect(res.status).toBe(200);
-
-    expect(await Session.find({ userId, deletedAt: null }).lean()).toHaveLength(0);
-    expect(
-      await Message.countDocuments({
-        sessionId: {
-          $in: await Session.find({ userId })
-            .select('_id')
-            .lean()
-            .then((docs) => docs.map((d) => d._id)),
-        },
-      }),
-    ).toBe(0);
-    expect(await Message.countDocuments()).toBe(0);
-  });
-
-  it('false→false never purges', async () => {
-    const { app, userId, cookie } = await registerUser('purge-route-false@example.com');
-    await seedUserChat(userId, 1);
-
-    const res = await request(app).patch('/api/profile').set('Cookie', cookie).send({ zdr: false });
-    expect(res.status).toBe(200);
-
-    expect(await Session.find({ userId, deletedAt: null }).lean()).toHaveLength(1);
-    expect(await Message.countDocuments()).toBe(2);
-  });
-
-  it('true→true is not a second purge opportunity', async () => {
-    const { app, userId, cookie } = await registerUser('purge-route-true@example.com');
-    await request(app).patch('/api/profile').set('Cookie', cookie).send({ zdr: true });
-    await seedUserChat(userId, 1);
-
-    const res = await request(app).patch('/api/profile').set('Cookie', cookie).send({ zdr: true });
-    expect(res.status).toBe(200);
-
-    expect(await Session.find({ userId, deletedAt: null }).lean()).toHaveLength(1);
-    expect(await Message.countDocuments()).toBe(2);
-  });
-});
-
-const seedReturningSessions = async (uid: mongoose.Types.ObjectId, count: number) => {
-  const sessions: Array<{ _id: unknown }> = [];
+const seedUserWorkspace = async (uid: mongoose.Types.ObjectId, count = 2) => {
   for (let i = 0; i < count; i++) {
     const session = await Session.create({ userId: uid, title: `Chat ${i}` });
-    sessions.push(session);
     await Message.create([
       { sessionId: session._id, role: 'user', content: `question ${i}` },
       { sessionId: session._id, role: 'assistant', content: `answer ${i}` },
     ]);
   }
-  return sessions;
+  const asset = await Asset.create({
+    userId: uid,
+    filename: 'notes.md',
+    key: `${uid}/asset-1/notes.md`,
+    contentType: 'text/markdown',
+    size: 10,
+    status: 'ready',
+  });
+  await AssetJob.create({ assetId: asset._id });
+  const entity = await Entity.create({
+    userId: uid,
+    name: 'Ada Lovelace',
+    normalizedName: 'ada lovelace',
+    kind: 'person',
+  });
+  await EntityEdge.create({
+    userId: uid,
+    fromEntityId: entity._id,
+    toEntityId: entity._id,
+    kind: 'related-to',
+    summary: 'self-reference fixture',
+  });
+  await McpServer.create({
+    scope: 'user',
+    userId: uid,
+    name: 'remote-tools',
+    url: `https://${uid}.example.com/sse`,
+    headers: { iv: 'iv', tag: 'tag', ciphertext: 'cipher' },
+    headersConfigured: true,
+  });
+  return { assetId: asset._id };
 };
+
+const expectNothingPIIBearingRemains = async (
+  uid: mongoose.Types.ObjectId,
+  sessionIds: mongoose.Types.ObjectId[] = [],
+  assetId?: mongoose.Types.ObjectId,
+) => {
+  expect(await Session.countDocuments({ userId: uid })).toBe(0);
+  expect(await Message.countDocuments({ sessionId: { $in: sessionIds } })).toBe(0);
+  expect(await Asset.countDocuments({ userId: uid })).toBe(0);
+  // AssetJob has no userId — it must have been swept via the user's asset ids.
+  if (assetId) expect(await AssetJob.countDocuments({ assetId })).toBe(0);
+  expect(await Entity.countDocuments({ userId: uid })).toBe(0);
+  expect(await EntityEdge.countDocuments({ userId: uid })).toBe(0);
+  // User-scoped MCP server configs carry urls + encrypted auth headers —
+  // secret material at rest — so they must be swept too.
+  expect(await McpServer.countDocuments({ scope: 'user', userId: uid })).toBe(0);
+};
+
+describe('POST /api/profile/factory-reset (issue #143)', () => {
+  it('rejects a wrong confirmation string with 400 and touches no data', async () => {
+    const { app, userId, cookie } = await registerUser('reset-wrong@example.com');
+    await seedUserWorkspace(userId);
+
+    const res = await request(app)
+      .post('/api/profile/factory-reset')
+      .set('Cookie', cookie)
+      .send({ confirm: 'reset' });
+    expect(res.status).toBe(400);
+    expect(res.body.message).toBe('Type RESET to confirm the factory reset');
+
+    expect(await Session.countDocuments({ userId })).toBe(2);
+    expect(await Message.countDocuments()).toBe(4);
+    expect(await Asset.countDocuments({ userId })).toBe(1);
+  });
+
+  it('rejects a missing/unknown body and unauthenticated calls before any wipe', async () => {
+    const { app, cookie } = await registerUser('reset-guard@example.com');
+
+    const noBody = await request(app)
+      .post('/api/profile/factory-reset')
+      .set('Cookie', cookie)
+      .send({});
+    expect(noBody.status).toBe(400);
+
+    const noAuth = await request(app)
+      .post('/api/profile/factory-reset')
+      .send({ confirm: FACTORY_RESET_CONFIRM });
+    expect(noAuth.status).toBe(401);
+  });
+
+  it('executes on the exact confirm string: nothing PII-bearing survives; user B untouched', async () => {
+    const { app, userId, cookie } = await registerUser('reset-ok@example.com');
+    const seeded = await seedUserWorkspace(userId);
+    const other = (await registerUser('reset-other@example.com')).userId;
+    await seedUserWorkspace(other);
+
+    const preReadIds = await Session.find({ userId }).select('_id').lean();
+    const res = await request(app)
+      .post('/api/profile/factory-reset')
+      .set('Cookie', cookie)
+      .send({ confirm: FACTORY_RESET_CONFIRM });
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ reset: true, failedObjects: [] });
+
+    await expectNothingPIIBearingRemains(
+      userId,
+      preReadIds.map((s) => s._id),
+      seeded.assetId,
+    );
+    // The account itself and its preferences survive — the user can stay
+    // signed in and keep using Tova from a clean state.
+    const me = await request(app).get('/api/auth/me').set('Cookie', cookie);
+    expect(me.status).toBe(200);
+    expect(me.body.user.email).toBe('reset-ok@example.com');
+
+    // Other user: nothing changed.
+    expect(await Session.countDocuments({ userId: other })).toBe(2);
+    expect(await Asset.countDocuments({ userId: other })).toBe(1);
+    // Their AssetJob (no userId on it) must not have been collateral damage.
+    expect(await AssetJob.countDocuments()).toBe(1);
+  });
+
+  it('hard-deletes soft-deleted (unlisted) sessions too', async () => {
+    const { app, userId, cookie } = await registerUser('reset-orphan@example.com');
+    const orphanId = (await Session.create({ userId, title: 'unlisted', deletedAt: new Date() }))
+      ._id;
+
+    const res = await request(app)
+      .post('/api/profile/factory-reset')
+      .set('Cookie', cookie)
+      .send({ confirm: FACTORY_RESET_CONFIRM });
+    expect(res.status).toBe(200);
+
+    await expectNothingPIIBearingRemains(userId, [orphanId]);
+  });
+
+  it('is idempotent-safe for a user with no data at all', async () => {
+    const { app, cookie } = await registerUser('reset-empty@example.com');
+    const res = await request(app)
+      .post('/api/profile/factory-reset')
+      .set('Cookie', cookie)
+      .send({ confirm: FACTORY_RESET_CONFIRM });
+    expect(res.status).toBe(200);
+    expect(res.body.reset).toBe(true);
+  });
+
+  it('the zdr toggle no longer purges as a side effect (issue #143)', async () => {
+    const { app, userId, cookie } = await registerUser('reset-zdr@example.com');
+    await seedUserWorkspace(userId);
+
+    const res = await request(app).patch('/api/profile').set('Cookie', cookie).send({ zdr: true });
+    expect(res.status).toBe(200);
+    expect(res.body.user.zdr).toBe(true);
+
+    expect(await Session.countDocuments({ userId })).toBe(2);
+    expect(await Message.countDocuments()).toBe(4);
+    expect(await Asset.countDocuments({ userId })).toBe(1);
+  });
+});

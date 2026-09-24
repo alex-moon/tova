@@ -23,11 +23,18 @@ export interface EvalRun {
   /** Content extracted from generated files (README case), if any. */
   generatedContent?: string;
   /**
-   * The assistant's final answer text, accumulated from `chunk.delta` while
-   * streaming (#158). Regex assertions over this are the deterministic slice
-   * of the refusal/hallucination checks.
-   */
+  * The assistant's final answer text, accumulated from `chunk.delta` while
+  * streaming (#158). Regex assertions over this are the deterministic slice
+  * of the refusal/hallucination checks.
+  */
   finalText?: string;
+  /**
+   * The assistant's final answer text (#159), concatenated text deltas;
+   * lets retrieval cases grade the answer itself, not just tool use.
+   */
+  answer?: string;
+  /** Every generated file emitted by the run (#159), in call order. */
+  generatedFiles?: Array<{ filename: string; content: string }>;
 }
 
 export type Assertion =
@@ -58,7 +65,14 @@ export type Assertion =
    * http(s) URL — a bare link or a markdown link both count. Whether the
    * source actually supports the statement stays out of regex reach.
    */
-  | { type: 'text_inline_sources' };
+  | { type: 'text_inline_sources' }
+  /** Substring (case/whitespace-normalised) match on the assistant's final answer (#159). */
+  | { type: 'answer_contains'; text: string }
+  /**
+   * A generated file's content contains `text` (#159): `filename` must match
+   * a `generate_file` call exactly, and its content must contain `text`.
+   */
+  | { type: 'file_content_contains'; filename: string; text: string };
 
 export interface AssertionResult {
   assertion: Assertion;
