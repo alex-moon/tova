@@ -23,6 +23,12 @@ export interface EvalRun {
   /** Content extracted from generated files (README case), if any. */
   generatedContent?: string;
   /**
+  * The assistant's final answer text, accumulated from `chunk.delta` while
+  * streaming (#158). Regex assertions over this are the deterministic slice
+  * of the refusal/hallucination checks.
+  */
+  finalText?: string;
+  /**
    * The assistant's final answer text (#159), concatenated text deltas;
    * lets retrieval cases grade the answer itself, not just tool use.
    */
@@ -41,6 +47,25 @@ export type Assertion =
   | { type: 'tool_sequence'; tools: string[] }
   | { type: 'content_equals'; expected: string }
   | { type: 'prompt_contains'; text: string }
+  /**
+   * #158: the final answer must match the (case-insensitive-by-default)
+   * regex — e.g. the explicit "no sources available" refusal wording.
+   */
+  | { type: 'text_matches'; pattern: string; flags?: string }
+  /**
+   * #158 hallucination guard: the final answer must NOT claim a search
+   * happened unless a `web_search` call is actually present in the run.
+   * The search-claim regex set lives in `graders.ts` (`SEARCH_CLAIMS`).
+   */
+  | { type: 'text_not_claiming_search' }
+  /**
+   * #158 OQ2 (pinned in the issue): a sourced answer must carry sources that
+   * are referenced inline as literal links in the final text. Deterministic
+   * form: finalText (or generatedContent fallback) must contain at least one
+   * http(s) URL — a bare link or a markdown link both count. Whether the
+   * source actually supports the statement stays out of regex reach.
+   */
+  | { type: 'text_inline_sources' }
   /** Substring (case/whitespace-normalised) match on the assistant's final answer (#159). */
   | { type: 'answer_contains'; text: string }
   /**
