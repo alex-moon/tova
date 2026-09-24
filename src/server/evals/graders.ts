@@ -43,6 +43,14 @@ export const NO_SOURCES_PATTERNS = [
  */
 export const noSourcesPattern = NO_SOURCES_PATTERNS.map((p) => `(?:${p.source})`).join('|');
 
+/**
+ * #158 rule 1, positive deterministic slice (OQ2 pinned in the issue): a
+ * sourced answer must reference its sources inline as literal links. A bare
+ * URL or a markdown `[title](https://…)` link both count; the URL in
+ * brackets of a markdown link satisfies either reading.
+ */
+export const INLINE_SOURCE_PATTERN = /(?:\[[^\]]*\]\()?https?:\/\/[^\s)>"']+/i;
+
 const matchesFinalText = (run: EvalRun, pattern: RegExp): boolean =>
   typeof run.finalText === 'string' && pattern.test(run.finalText);
 
@@ -89,6 +97,16 @@ const evaluateAssertion = (run: EvalRun, assertion: Assertion): boolean => {
     case 'text_not_claiming_search': {
       const webSearched = run.toolCalls.some((call) => call.name === 'web_search');
       return webSearched || !SEARCH_CLAIMS.some((pattern) => matchesFinalText(run, pattern));
+    }
+    case 'text_inline_sources': {
+      // URLs appear in the search result blocks fed to the model, not in
+      // streamed deltas; only the final answer text counts. A generated-file
+      // run may legitimately put the citation in the document instead.
+      return (
+        (typeof run.finalText === 'string' && INLINE_SOURCE_PATTERN.test(run.finalText)) ||
+        (typeof run.generatedContent === 'string' &&
+          INLINE_SOURCE_PATTERN.test(run.generatedContent))
+      );
     }
   }
 };

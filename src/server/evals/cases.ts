@@ -73,6 +73,9 @@ export const CASES: EvalCase[] = [
       { type: 'tool_called', tool: 'web_search' },
       { type: 'tool_called', tool: 'current_datetime' },
       { type: 'tool_not_called', tool: 'list_files' },
+      // #158 rule 1 (OQ2, pinned): a sourced answer must reference its
+      // sources inline as literal links, not just narrate conclusions.
+      { type: 'text_inline_sources' },
     ],
   },
   {
@@ -118,6 +121,8 @@ export const CASES: EvalCase[] = [
       { type: 'tool_not_called', tool: 'list_files' },
       // Hallucination guard: no answer may narrate searches it never ran.
       { type: 'text_not_claiming_search' },
+      // #158 rule 1 (OQ2, pinned): sourced answers cite inline as links.
+      { type: 'text_inline_sources' },
     ],
   },
   {

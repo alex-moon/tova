@@ -9,6 +9,16 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
 
+    # Ephemeral fixture Mongo for the post-deploy eval smoke (#158 OQ1): the
+    # eval runner seeds a temp source at startup, so a throwaway
+    # localhost-only instance keeps every run self-contained. It is torn down
+    # when the job ends.
+    services:
+      mongo:
+        image: mongo:7
+        ports:
+          - 27017:27017
+
     # Runs only on successful pushes to main (not PR events).
     if: >
       github.event.workflow_run.conclusion == 'success' &&
@@ -38,3 +48,18 @@ jobs:
       - name: Deploy to ajmoon.com
         run: |
           npm run deploy
+
+      # Post-deploy eval smoke (#158): the golden cases against one fixed
+      # model, graded offline against an ephemeral Mongo. Warn-only for now —
+      # it must not fail deploys while the deterministic graders bed in. The
+      # nightly all-models sweep is a separate scheduled job, not a
+      # per-deploy cost (see .iteration/docs/plan-158-more-evals.md).
+      - name: Post-deploy evals
+        continue-on-error: true
+        env:
+          DEEPINFRA_API_KEY: ${{ secrets.DEEPINFRA_API_KEY }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          BRAVE_SEARCH_API_KEY: ${{ secrets.BRAVE_SEARCH_API_KEY }}
+          MONGODB_URL: mongodb://localhost:27017/tova
+          LANGSMITH_API_KEY: ${{ secrets.LANGSMITH_API_KEY }}
+        run: npx tsx scripts/run-evals.ts

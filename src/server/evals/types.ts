@@ -50,7 +50,15 @@ export type Assertion =
    * happened unless a `web_search` call is actually present in the run.
    * The search-claim regex set lives in `graders.ts` (`SEARCH_CLAIMS`).
    */
-  | { type: 'text_not_claiming_search' };
+  | { type: 'text_not_claiming_search' }
+  /**
+   * #158 OQ2 (pinned in the issue): a sourced answer must carry sources that
+   * are referenced inline as literal links in the final text. Deterministic
+   * form: finalText (or generatedContent fallback) must contain at least one
+   * http(s) URL — a bare link or a markdown link both count. Whether the
+   * source actually supports the statement stays out of regex reach.
+   */
+  | { type: 'text_inline_sources' };
 
 export interface AssertionResult {
   assertion: Assertion;

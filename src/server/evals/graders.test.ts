@@ -5,6 +5,7 @@ import {
   SEARCH_CLAIMS,
   NO_SOURCES_PATTERNS,
   noSourcesPattern,
+  INLINE_SOURCE_PATTERN,
 } from './graders';
 import type { Assertion, EvalRun } from './types';
 
@@ -175,6 +176,80 @@ describe('#158 text assertions (deterministic refusal / hallucination slice)', (
     ]);
     expect(score).toBe('pass');
     expect(assertions.map((r) => r.passed)).toEqual([true, true]);
+  });
+});
+
+describe('#158 text_inline_sources (positive-citation slice, OQ2 pinned)', () => {
+  it('the exported pattern matches bare and markdown links, nothing else required', () => {
+    expect(INLINE_SOURCE_PATTERN.test('see https://example.com/a')).toBe(true);
+    expect(INLINE_SOURCE_PATTERN.test('see [a](https://example.com/a)')).toBe(true);
+    expect(INLINE_SOURCE_PATTERN.test('no links here')).toBe(false);
+  });
+
+  it('passes on a bare inline URL in the final text', () => {
+    const run_ = run([{ name: 'web_search' }], {
+      finalText:
+        'Recent coverage points to tightening acceptance criteria, see https://example.com/frontier-evals for the survey.',
+    });
+    expect(assertRun(run_, [{ type: 'text_inline_sources' }]).map((r) => r.passed)).toEqual([true]);
+  });
+
+  it('passes on a markdown inline link in the final text', () => {
+    const run_ = run([{ name: 'web_search' }], {
+      finalText:
+        'Per [Nature: better frontier evals](https://www.nature.com/articles/evals), progress requires held-out human panels.',
+    });
+    expect(assertRun(run_, [{ type: 'text_inline_sources' }]).map((r) => r.passed)).toEqual([true]);
+  });
+
+  it('fails on an uncited answer even when web_search ran', () => {
+    const run_ = run([{ name: 'web_search' }], {
+      finalText: 'The consensus is that frontier evals need LLM judges — models are benchmaxxed.',
+    });
+    expect(assertRun(run_, [{ type: 'text_inline_sources' }]).map((r) => r.passed)).toEqual([
+      false,
+    ]);
+  });
+
+  it('fails on an absent finalText', () => {
+    expect(
+      assertRun(run([{ name: 'web_search' }]), [{ type: 'text_inline_sources' }]).map(
+        (r) => r.passed,
+      ),
+    ).toEqual([false]);
+  });
+
+  it('accepts a citation that lands in the generated document instead of the message', () => {
+    const run_ = run([{ name: 'web_search' }, { name: 'generate_file' }], {
+      finalText: 'Saved the brief to your files.',
+      generatedContent: '# Frontier evals\nSource: https://example.com/evals-report\n',
+    });
+    expect(assertRun(run_, [{ type: 'text_inline_sources' }]).map((r) => r.passed)).toEqual([true]);
+  });
+
+  it('does not accept a citation that only exists in tool results, never in text', () => {
+    const run_ = run(
+      [{ name: 'web_search', result: { results: [{ url: 'https://example.com/x' }] } }],
+      { finalText: 'Yes, there is striking movement on this topic lately.' },
+    );
+    expect(assertRun(run_, [{ type: 'text_inline_sources' }]).map((r) => r.passed)).toEqual([
+      false,
+    ]);
+  });
+
+  it('grades fail when the golden hallucination answer also lacks citations', () => {
+    const { score } = gradeRun(
+      run([{ name: 'generate_file' }], {
+        finalText:
+          'I did a web search about models being benchmaxxed — benchmarks are saturating; use better evals.',
+      }),
+      [
+        { type: 'tool_called', tool: 'web_search' },
+        { type: 'text_not_claiming_search' },
+        { type: 'text_inline_sources' },
+      ],
+    );
+    expect(score).toBe('fail');
   });
 });
 

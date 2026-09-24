@@ -32,6 +32,7 @@ describe('#112 golden set', () => {
         { type: 'tool_called', tool: 'current_datetime' },
         { type: 'tool_not_called', tool: 'list_files' },
         { type: 'text_not_claiming_search' },
+        { type: 'text_inline_sources' },
       ]);
     });
 
