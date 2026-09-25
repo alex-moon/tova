@@ -180,7 +180,6 @@ h6 {
   padding: 0;
   background: none;
   white-space: pre-wrap;
-  overflow-wrap: break-word;
 }
 
 .markdown-body p,
