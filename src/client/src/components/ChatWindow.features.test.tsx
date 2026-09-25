@@ -167,6 +167,24 @@ describe('Tool chip result counts (issue #114)', () => {
   });
 });
 
+describe('Fenced code blocks (issue #167)', () => {
+  afterEach(cleanup);
+
+  it('renders a fenced code block as pre > code inside markdown-body', () => {
+    renderChat([
+      {
+        _id: 'm1',
+        role: 'assistant',
+        content: 'before\n\n```js\nconst a = 1;\nconst b = 2;\n```\n\nafter',
+      },
+    ]);
+    const pre = document.querySelector('.markdown-body pre');
+    expect(pre).toBeInTheDocument();
+    expect(pre?.querySelector('code')).toBeInTheDocument();
+    expect(pre?.textContent).toContain('const a = 1;');
+  });
+});
+
 describe('Message content links (issue #33)', () => {
   afterEach(cleanup);
 
