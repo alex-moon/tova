@@ -23,10 +23,10 @@ export interface EvalRun {
   /** Content extracted from generated files (README case), if any. */
   generatedContent?: string;
   /**
-  * The assistant's final answer text, accumulated from `chunk.delta` while
-  * streaming (#158). Regex assertions over this are the deterministic slice
-  * of the refusal/hallucination checks.
-  */
+   * The assistant's final answer text, accumulated from `chunk.delta` while
+   * streaming (#158). Regex assertions over this are the deterministic slice
+   * of the refusal/hallucination checks.
+   */
   finalText?: string;
   /**
    * The assistant's final answer text (#159), concatenated text deltas;

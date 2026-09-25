@@ -36,6 +36,14 @@ const providerRoutingSchema = new mongoose.Schema({
   contextLength: {
     type: Number,
   },
+  /*
+   * Cool-off timestamp (#168): set when a connector failure temporarily
+   * disables the model. Absent/null = not cooling off (legacy rows never
+   * carried the field). Expiry is applied lazily on read — no timers.
+   */
+  disabledUntil: {
+    type: Date,
+  },
 });
 
 providerRoutingSchema.index({ tier: 1, provider: 1, model: 1 }, { unique: true });

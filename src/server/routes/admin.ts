@@ -83,6 +83,7 @@ type ProviderRow = {
   tools?: boolean;
   vision?: boolean;
   contextLength?: number;
+  disabledUntil?: Date;
   _id: mongoose.Types.ObjectId;
 };
 
@@ -196,6 +197,10 @@ router.get('/models', ...adminGuard, async (_req, res) => {
         tools: route.tools !== false,
         vision: route.vision === true,
         contextLength: route.contextLength,
+        // #168: system-owned cool-off, surfaced for the admin badge (absent
+        // on legacy rows → null). Cleared only by the health service/expiry,
+        // not admin CRUD.
+        disabledUntil: route.disabledUntil ?? null,
         stats: [...(statMap.get(route.model) ?? [])],
       })),
     );

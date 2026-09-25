@@ -109,6 +109,30 @@ describe('Model Config Service', () => {
     });
   });
 
+  describe('cool-off seed shape (#168)', () => {
+    it('seeds fresh rows with disabledUntil null', async () => {
+      await listByTier('small');
+      const row = (await ProviderRouting.findOne({ model: 'Qwen/Qwen3-14B' }).lean<{
+        disabledUntil?: Date | null;
+      }>())!;
+      expect(row.disabledUntil).toBeNull();
+    });
+
+    it('legacy rows without the field never cool off (missing = not disabled)', async () => {
+      await listByTier('guard');
+      // Simulate a pre-#168 doc: strip the field below the schema layer.
+      const raw = await ProviderRouting.collection.findOneAndUpdate(
+        { tier: 'guard' },
+        { $unset: { disabledUntil: '' } },
+      );
+      expect(raw).not.toBeNull();
+      const row = (await ProviderRouting.findOne({ tier: 'guard' }).lean<{
+        disabledUntil?: Date | null;
+      }>())!;
+      expect(row.disabledUntil ?? null).toBeNull();
+    });
+  });
+
   describe('env fallback', () => {
     it('falls back to a DeepInfra model when the collection is unusable (#94)', async () => {
       process.env.ROUTER_SMALL_MODEL = 'env-fallback-model';

@@ -182,8 +182,20 @@ const SEED_ENTRIES = (): SeedEntry[] => [
  * for such rows on first insert and covertly rule them out of tool pools.
  */
 const seedDocFrom = ({ eligible, tools, vision, contextLength }: SeedEntry) => {
-  const doc: { eligible: boolean; tools?: boolean; vision?: boolean; contextLength?: number } = {
+  const doc: {
+    eligible: boolean;
+    tools?: boolean;
+    vision?: boolean;
+    contextLength?: number;
+    disabledUntil: null;
+  } = {
     eligible,
+    /*
+     * #168: fresh seeds start not cooling off. `null` on purpose (not
+     * `undefined` — see the `$setOnInsert` note below) so the field is
+     * present-on-insert and read as "not cooling off" everywhere.
+     */
+    disabledUntil: null,
   };
   if (tools !== undefined) doc.tools = tools;
   if (vision !== undefined) doc.vision = vision;
