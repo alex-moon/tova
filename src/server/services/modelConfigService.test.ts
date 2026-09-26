@@ -1,5 +1,5 @@
 import { ProviderRouting } from '../models/ProviderRouting';
-import { completionsPoolFor, listByTier, ModelRef } from './modelConfigService';
+import { completionsPoolFor, disableModel, listByTier, ModelRef } from './modelConfigService';
 import { muteConsoleError } from '../test/muteConsole';
 
 const TIER_ENV_VARS = {
@@ -146,6 +146,40 @@ describe('Model Config Service', () => {
         disabledUntil?: Date | null;
       }>())!;
       expect(row.disabledUntil ?? null).toBeNull();
+    });
+  });
+
+  describe('cool-off pool exclusion (#168)', () => {
+    it('disableModel immediately drops the model from its tier pools', async () => {
+      await listByTier('small');
+      await listByTier('large');
+      await disableModel('deepinfra', 'deepseek-ai/DeepSeek-V3.2');
+      expect((await listByTier('large')).map(({ model }) => model)).not.toContain(
+        'deepseek-ai/DeepSeek-V3.2',
+      );
+      expect((await completionsPoolFor('large')).map(({ model }) => model)).not.toContain(
+        'deepseek-ai/DeepSeek-V3.2',
+      );
+    });
+
+    it('a cooling-off row is not re-seeded back to eligibility', async () => {
+      await listByTier('large');
+      await disableModel('deepinfra', 'deepseek-ai/DeepSeek-V3.2');
+      await listByTier('large'); // triggers (no-op) seeding again
+      expect((await listByTier('large')).map(({ model }) => model)).not.toContain(
+        'deepseek-ai/DeepSeek-V3.2',
+      );
+    });
+
+    it('an expired cool-off returns the model to the pools (lazy expiry, no timers)', async () => {
+      await listByTier('large');
+      await ProviderRouting.updateMany(
+        { provider: 'deepinfra', model: 'deepseek-ai/DeepSeek-V3.2' },
+        { disabledUntil: new Date(Date.now() - 1) },
+      );
+      expect((await listByTier('large')).map(({ model }) => model)).toContain(
+        'deepseek-ai/DeepSeek-V3.2',
+      );
     });
   });
 

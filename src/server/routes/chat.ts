@@ -30,6 +30,13 @@ import {
 import { zdrHistorySchema } from '../validation';
 import { redactForLog } from '../services/logRedaction';
 import { decideTurn } from '../services/zdrTurn';
+import { disableModel } from '../services/modelConfigService';
+import {
+  AllModelsDisabledError,
+  isClientAbort,
+  isPromptSizeError,
+  withModelFailover,
+} from '../services/modelFailover';
 
 const router = express.Router();
 
@@ -185,6 +192,9 @@ const toolCallEvent = (call: NonNullable<NeutralStreamChunk['toolCall']>) => ({
 export const streamingErrorMessage = (err: unknown): string => {
   const message = err instanceof Error ? err.message : '';
   const statusCode = (err as { statusCode?: unknown } | null | undefined)?.statusCode;
+  // #168: when every model cooled off after failures, the message itself is
+  // the end-user text — pass it through verbatim.
+  if (err instanceof AllModelsDisabledError) return message;
   if (statusCode === 413 || /Request too large/.test(message)) {
     return (
       'Request too large for this deployment’s current rate limit — connected MCP servers ' +
@@ -517,16 +527,18 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
       });
       appendAssetBlock(messages, attachedAsset);
 
-      const routingResult = await routeQuery(content, undefined, undefined, {
-        band: buildRoutingBand(computeDeterministicMetrics(content)),
-      });
-      const chatCompletion = await inferenceService.createCompletion({
-        messages,
-        model: routingResult.model,
-        provider: routingResult.provider,
-        userId,
-        abortSignal: abortController.signal,
-      });
+      const zdrRoutingBand = buildRoutingBand(computeDeterministicMetrics(content));
+      const { routing: routingResult, completion: chatCompletion } = await withModelFailover(
+        () => routeQuery(content, undefined, undefined, { band: zdrRoutingBand }),
+        (r) =>
+          inferenceService.createCompletion({
+            messages,
+            model: r.model,
+            provider: r.provider,
+            userId,
+            abortSignal: abortController.signal,
+          }),
+      );
       const zdrAssistantContent = chatCompletion.choices[0]?.message?.content ?? '';
       await cleanupIfEphemeral();
       return res.json({
@@ -561,14 +573,12 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
     // it must be computed before the router sees the turn (decision 4).
     const routingBand = buildRoutingBand(userMessage.metrics);
 
-    // Determine model. Image turns (#115) route vision-first only when the
+    // Image turns (#115) route vision-first only when the
     // presign path is actually available; otherwise the turn degrades to the
-    // legacy text envelope and normal routing applies.
+    // legacy text envelope and normal routing applies. Routing happens inside
+    // the failover wrapper below so a failed endpoint can be disabled and
+    // re-routed against the fresh pools (#168).
     const hasImage = turnsWithImage(attachedAsset);
-    const routingResult = await routeQuery(content, undefined, undefined, {
-      band: routingBand,
-      hasImage,
-    });
 
     // Get chat history for context
     const history = await Message.find({ sessionId: session._id })
@@ -589,16 +599,20 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
       if (!imageAttached) appendAssetBlock(messages, attachedAsset);
     }
 
-    const chatCompletion = await inferenceService.createCompletion({
-      messages,
-      model: routingResult.model,
-      provider: routingResult.provider,
-      // #104: always send an output-token budget so the provider cannot
-      // default it to the model's whole context window.
-      max_tokens: outputTokensFor(routingResult.contextLength, promptCharsFrom(messages)),
-      userId,
-      abortSignal: abortController.signal,
-    });
+    const { routing: routingResult, completion: chatCompletion } = await withModelFailover(
+      () => routeQuery(content, undefined, undefined, { band: routingBand, hasImage }),
+      (r) =>
+        inferenceService.createCompletion({
+          messages,
+          model: r.model,
+          provider: r.provider,
+          // #104: always send an output-token budget so the provider cannot
+          // default it to the model's whole context window.
+          max_tokens: outputTokensFor(r.contextLength, promptCharsFrom(messages)),
+          userId,
+          abortSignal: abortController.signal,
+        }),
+    );
 
     // Empty provider responses persist as '' (fail-visibility, #4 J); the
     // UI presents the '(no content returned)' placeholder.
@@ -655,9 +669,13 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
     // erases its throwaway attachment — cleanup is a no-op for durable
     // assets, so the persisted path is untouched (#116).
     await cleanupEphemeralAsset(attachedAsset);
-    // Same 429/413 surfacing as the stream route (#117): the detail rides
-    // additively so existing JSON consumers keep their shape.
-    res.status(500).json({ message: 'Error processing chat', detail: streamingErrorMessage(err) });
+    // #168: every model cooled off after failures → the friendly message
+    // becomes the primary error text.
+    const allDisabled = err instanceof AllModelsDisabledError;
+    res.status(allDisabled ? 503 : 500).json({
+      message: allDisabled ? streamingErrorMessage(err) : 'Error processing chat',
+      detail: streamingErrorMessage(err),
+    });
   }
 });
 
@@ -818,13 +836,6 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
       res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
     };
 
-    sendEvent('meta', {
-      // ZDR (#116): no sessionId is minted — nothing the replay could point
-      // at exists.
-      ...(zdr ? {} : { sessionId: session!._id }),
-      routing: routingResult,
-    });
-
     let assistantContent = '';
     let sources: string[] = [];
     const titles = new Map<string, string>();
@@ -838,32 +849,71 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
     });
 
     try {
-      const stream = await inferenceService.createStreamingCompletion({
-        messages,
-        model: routingResult.model,
-        provider: routingResult.provider,
-        // #104: always send an output-token budget so the provider cannot
-        // default it to the model's whole context window.
-        max_tokens: outputTokensFor(routingResult.contextLength, promptCharsFrom(messages)),
-        userId,
-        abortSignal: abortController.signal,
-      });
+      // #168 failover loop: an endpoint failure (non-abort, non-prompt-size)
+      // with no streamed content yet disables the model, re-routes against
+      // the fresh pools and re-emits 'meta'. The attempts are naturally
+      // bounded — each failure removes the routed model from every pool, so
+      // the pool drains and routing eventually fails — but the explicit cap
+      // keeps pathological cases loud instead of putting an unbounded loop
+      // on the request path.
+      for (let attempt = 1; attempt <= 8; attempt++) {
+        try {
+          sendEvent('meta', {
+            // ZDR (#116): no sessionId is minted — nothing the replay could
+            // point at exists.
+            ...(zdr ? {} : { sessionId: session!._id }),
+            routing: routingResult,
+          });
 
-      for await (const chunk of stream) {
-        // Tool feedback (issue #33): structured events replace the single
-        // prose status hint — the call event names the tool + query, the
-        // result event carries a compact outcome summary.
-        if (chunk.toolCall) {
-          sendEvent('tool', toolCallEvent(chunk.toolCall));
-        }
-        if (chunk.toolResult) {
-          sendEvent('tool', toolResultEvent(chunk.toolResult));
-          collectSourcesInto(sources, chunk.toolResult.result, titles);
-        }
-        const delta = chunk.delta;
-        if (delta) {
-          assistantContent += delta;
-          sendEvent('delta', { content: delta });
+          const stream = await inferenceService.createStreamingCompletion({
+            messages,
+            model: routingResult.model,
+            provider: routingResult.provider,
+            // #104: always send an output-token budget so the provider cannot
+            // default it to the model's whole context window.
+            max_tokens: outputTokensFor(routingResult.contextLength, promptCharsFrom(messages)),
+            userId,
+            abortSignal: abortController.signal,
+          });
+
+          for await (const chunk of stream) {
+            // Tool feedback (issue #33): structured events replace the single
+            // prose status hint — the call event names the tool + query, the
+            // result event carries a compact outcome summary.
+            if (chunk.toolCall) {
+              sendEvent('tool', toolCallEvent(chunk.toolCall));
+            }
+            if (chunk.toolResult) {
+              sendEvent('tool', toolResultEvent(chunk.toolResult));
+              collectSourcesInto(sources, chunk.toolResult.result, titles);
+            }
+            const delta = chunk.delta;
+            if (delta) {
+              assistantContent += delta;
+              sendEvent('delta', { content: delta });
+            }
+          }
+          break;
+        } catch (err) {
+          if (
+            // no deltas yet — mid-stream failures are reported, not retried
+            assistantContent === '' &&
+            !isClientAbort(err) &&
+            !isPromptSizeError(err) &&
+            attempt < 8
+          ) {
+            await disableModel(routingResult.provider, routingResult.model);
+            try {
+              routingResult = await routeQuery(content, undefined, undefined, {
+                band: routingBand,
+                hasImage,
+              });
+            } catch {
+              throw new AllModelsDisabledError();
+            }
+            continue;
+          }
+          throw err;
         }
       }
     } catch (err) {

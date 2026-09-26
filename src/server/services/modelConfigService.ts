@@ -234,16 +234,29 @@ const fromEnv = (tier: ModelTier): ModelRef => ({
  * stable because seeds write in that order). Rows are returned with their
  * capability fields so callers can apply `requiredCapabilities` matching.
  */
-const readRows = async (tier: ModelTier) =>
-  (await ProviderRouting.find({ tier, eligible: true })
+const readRows = async (tier: ModelTier): Promise<Array<ProviderPoolRow>> => {
+  const now = new Date();
+  const rows = (await ProviderRouting.find({ tier, eligible: true })
     .sort({ provider: 1, model: 1 })
-    .lean()) as Array<{
-    provider: ProviderName;
-    model: string;
-    tools?: boolean;
-    vision?: boolean;
-    contextLength?: number;
-  }>;
+    .lean()) as Array<ProviderPoolRow>;
+  /*
+   * #168 cool-off, applied lazily: a row whose `disabledUntil` is still in
+   * the future is dropped from every pool; an expired (or missing/null)
+   * timestamp reads as "not disabled", so no timers are needed.
+   */
+  return rows.filter(
+    (row) => !(row.disabledUntil instanceof Date) || row.disabledUntil.getTime() <= now.getTime(),
+  );
+};
+
+interface ProviderPoolRow {
+  provider: ProviderName;
+  model: string;
+  tools?: boolean;
+  vision?: boolean;
+  contextLength?: number;
+  disabledUntil?: Date | null;
+}
 
 /*
  * A row satisfies required capabilities under the schema semantics:
@@ -258,6 +271,30 @@ const rowMeetsFilter = (
   (filter.provider === undefined || row.provider === filter.provider) &&
   (filter.tools === undefined || filter.tools === false || row.tools !== false) &&
   (filter.vision === undefined || filter.vision === false || row.vision === true);
+
+/*
+ * #168: immediately cool off a failed endpoint. Sets `disabledUntil` on every
+ * routing row for the provider+model (a model can serve several tiers); the
+ * pool reads above then exclude it until the timestamp expires. Duration is
+ * env-tunable, default 6 hours. Errors are swallowed and logged: the cool-off
+ * rides alongside a real failure and must not mask or duplicate it.
+ */
+const coolOffHours = (): number => {
+  const raw = process.env.MODEL_COOL_OFF_HOURS;
+  const parsed = raw === undefined || raw === '' ? NaN : Number(raw);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 6;
+};
+
+export const disableModel = async (provider: ProviderName, model: string): Promise<void> => {
+  try {
+    await ProviderRouting.updateMany(
+      { provider, model },
+      { disabledUntil: new Date(Date.now() + coolOffHours() * 60 * 60 * 1000) },
+    );
+  } catch (err) {
+    console.error('ProviderRouting cool-off write error:', err);
+  }
+};
 
 /*
  * Seed on first read; idempotent upserts keep concurrent/multi-call seeding
