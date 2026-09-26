@@ -251,7 +251,11 @@ export const routeQuery = async (
   // Tier 1: Deterministic Rules
 
   // Rule 1: Short queries (greetings, simple confirmations)
-  if (query.length < 20 && /^(hello|hi|hey|yes|no|ok|thanks|thank you)/i.test(query)) {
+  // #169: require a word boundary after the greeting token — a bare prefix
+  // match was sending non-trivial short prompts ('hit me', 'nope, and...',
+  // 'okapi facts') to the small tier, which under the inverted boundary is
+  // reserved for trivially conversational intent only.
+  if (query.length < 20 && /^(hello|hi|hey|yes|no|ok|okay|thanks|thank you)\b/i.test(query)) {
     const modelRef = pickModelRef(smallPoolRaw, 'small', epsilon, random);
     return { model: modelRef.model, reason: 'deterministic-short', ...spreadRef(modelRef) };
   }

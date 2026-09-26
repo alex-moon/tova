@@ -289,6 +289,26 @@ describe('Router Service', () => {
       expect(result.model).toBe('test-large-model');
       expect(result.reason).toBe('classifier-complex');
     });
+
+    it('#169: does NOT prefix-match greeting words inside real words', async () => {
+      // The deterministic-short regex must not treat a greeting word as just
+      // a prefix ('high', 'notice', 'nope', 'okay' minus the word itself) —
+      // under the inverted boundary, small is reserved for trivial intent.
+      const notTrivial = ['high tier please', 'notice sent', 'nope is fine', 'hippo facts'];
+      for (const query of notTrivial) {
+        expect(query.length).toBeLessThan(20);
+        classifyAs('simple');
+        const result = await routeQueryWithCfg(query);
+        expect(result.reason).not.toContain('deterministic-short');
+      }
+    });
+
+    it('#169: keeps greeting words WITH word boundaries deterministic-short', async () => {
+      for (const query of ['OK', 'Yes, do it', 'thank you', 'hey!', 'hi!']) {
+        const result = await routeQueryWithCfg(query);
+        expect(result.reason).toBe('deterministic-short');
+      }
+    });
   });
 
   describe('ε-random tier pools (#4 task 7)', () => {
