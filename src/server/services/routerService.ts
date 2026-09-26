@@ -52,6 +52,16 @@ export interface RouterDeps {
    * worse than failing the turn.
    */
   hasImage?: boolean;
+  /*
+   * #169 phase 2: prior chat turns (oldest first, text-only) so the guard
+   * can judge the current request in context — "no, use psql" inherits the
+   * significance of the surrounding work. PRIOR TURNS ONLY: never the
+   * current message, which rides separately as the query. The router
+   * bounds the tail (ROUTER_GUARD_CONTEXT_MESSAGES); absent/empty history
+   * is legal (first turn, incognito) — the guard then judges the bare
+   * message, exactly the information it had before this field existed.
+   */
+  history?: { role: 'user' | 'assistant'; content: string }[];
   getFitWeight?: (band: string, model: string) => Promise<FitWeight>;
 }
 
@@ -161,41 +171,129 @@ const defaultConfig = async (): Promise<RouterConfig> => {
 };
 
 /*
- * Tier 2 classifier prompt (#129). Evidence first: LangSmith traces from
- * `tova-dev` (2026-09-20, all retained classify runs) show the guard model —
- * a reasoning model (`openai/gpt-oss-20b`) — spending its entire token
- * budget on reasoning and returning an EMPTY text answer (`text: ''`) at the
- * old `max_tokens: 10`. Every such empty reply classifies as "simple" and
- * routes conversational turns to the small tier. Two changes follow:
- *   1. the prompt now spells out what counts as complex (narrative /
- *      conversational prose, multiple distinct questions, references to
- *      prior context or personal experience) so the guard does not need to
- *      spend tokens deciding criteria;
- *   2. the token budget is env-tunable (`ROUTER_GUARD_MAX_TOKENS`) and
- *      defaults to 256 — reasoning content is emitted ahead of the answer
- *      word, so the reply contract (a single lowercase word) is unchanged
- *      but the answer is no longer truncated away.
+ * Tier 2 guard classifier (#169 phase 2). Boundary history, evidence-first:
+ * - #129: LangSmith traces (tova-dev, 2026-09-20) showed the reasoning guard
+ *   model (openai/gpt-oss-20b) burning its whole token budget on reasoning
+ *   and returning an EMPTY reply at the old max_tokens: 10. The budget is
+ *   env-tunable (`ROUTER_GUARD_MAX_TOKENS`, default 512 since #169 phase 2 —
+ *   a transcript in the prompt truncated the vote JSON at 256) and every
+ *   failure mode (empty, unparseable, thrown) routes LARGE — never small.
+ * - #169 phase 1: inverted the boundary — large is the default route, small
+ *   the explicit exception for trivially conversational intent.
+ * - #169 phase 2 (user direction, 2026-09-26): the deterministic key-phrase
+ *   rules ("hi"/"hello" regexes, the code-keyword fast-path) are deleted
+ *   ENTIRELY — parsing natural language is the guard LLM's job, and it now
+ *   receives the chat context so "Hello! Please explain quantum tunneling
+ *   to me." or "no, use psql" route on substance, not on greeting words.
+ *   The guard replies with ONE JSON object of category votes; any "yes"
+ *   routes large, all "no" routes small ("if all no, then small, otherwise
+ *   large"). The reason vocabulary `classifier-complex` / `classifier-simple`
+ *   now names the VOTE OUTCOME (any-yes / all-no), not literal reply words —
+ *   kept stable for chat-route mocks, LangSmith and `(band, model)` feedback
+ *   keys. A future DeepInfra /decisions endpoint can replace the call behind
+ *   this same contract.
  */
 
-export const classifyPrompt = (query: string): string =>
-  `Classify the user query below into "simple" or "complex".
+export const classifyPrompt = (
+  query: string,
+  history: { role: 'user' | 'assistant'; content: string }[] = [],
+): string => {
+  const transcript = history.length
+    ? `\nConversation so far, oldest first:\n${history
+        .map((m) => `${m.role}: ${m.content}`)
+        .join('\n')}\n`
+    : '';
+  return `Classify the user's current request below by replying with ONLY one JSON object, nothing else, with exactly these four keys, each "yes" or "no":
 
-A query is "complex" when ANY of these apply:
-- it is conversational or narrative prose: the user shares context, tells a story, or writes several sentences in a personal tone
-- it asks more than one distinct question, even casually embedded in the prose
-- it refers to prior conversation, personal experience, named places, people, or events
-- it wants a recommendation, comparison, or multi-part answer
+{"reasoning":"yes|no","code":"yes|no","emotional":"yes|no","creative":"yes|no"}
+${transcript}
+Current request: ${query}
 
-A query is "simple" only when it is a short, single factual question, a one-line command, or a greeting/thanks.
+Judge what answering the current request well needs, in light of the conversation so far when one is given: when the conversation shows ongoing work, a short current request that continues or steers that work (a choice, a correction, a next step) inherits that work's significance.
+- reasoning: explanation, analysis, multi-step reasoning, a comparison, a recommendation, or a plan — a substantive how/why question, real work, or a short follow-up that continues such work from the conversation. A single simple fact, look-up, or calculation ("what is the capital of Australia?", "2 + 2") with no such work behind it is "no".
+- code: writing, debugging, reviewing, or discussing code — including a tool, command, or implementation choice that continues technical work in the conversation.
+- emotional: emotional support, comfort, or weighty personal talk. Casual small talk ("how has your day been?") is "no".
+- creative: creative writing — stories, poems, lyrics, role-play, and the like.
 
-Reply with only one word: complex or simple.
+Greetings, thanks, and yes/no confirmations with no work behind them score "no" on all four keys.`;
+};
 
-Query: ${query}`;
+const VOTE_CATEGORIES = ['reasoning', 'code', 'emotional', 'creative'] as const;
+
+/*
+ * Extract the guard's vote object: the LAST balanced, JSON-parseable {...}
+ * in the reply that carries at least one category key. Reasoning models
+ * emit chain-of-thought ahead of the answer (#129), so an earlier object
+ * may be a worked example — the last vote-shaped object wins (same
+ * last-match rationale as the old complex|simple word parse). Objects
+ * with none of the category keys (prose examples, decoys) are skipped;
+ * none at all → null (routeQuery's unparseable path).
+ */
+export const parseGuardVotes = (raw: string): Record<string, unknown> | null => {
+  const objects: Record<string, unknown>[] = [];
+  let start = raw.indexOf('{');
+  while (start !== -1) {
+    let depth = 0;
+    for (let i = start; i < raw.length; i += 1) {
+      const ch = raw[i];
+      if (ch === '{') depth += 1;
+      else if (ch === '}') {
+        depth -= 1;
+        if (depth === 0) {
+          try {
+            const obj: unknown = JSON.parse(raw.slice(start, i + 1));
+            if (obj && typeof obj === 'object' && !Array.isArray(obj)) {
+              objects.push(obj as Record<string, unknown>);
+            }
+          } catch {
+            // Not valid JSON from this '{' — keep scanning.
+          }
+          break;
+        }
+      }
+    }
+    start = raw.indexOf('{', start + 1);
+  }
+  for (let i = objects.length - 1; i >= 0; i -= 1) {
+    if (VOTE_CATEGORIES.some((c) => c in objects[i])) return objects[i];
+  }
+  return null;
+};
+
+/*
+ * Map the vote object to the tier decision. A category counts as "no" only
+ * on an explicit (case-insensitive) "no"; a missing category or any other
+ * value counts as "yes" — doubt routes large, per #169's large-by-default
+ * boundary. Null when no vote-shaped object is parseable.
+ */
+export const guardVerdictFromReply = (content: string): 'complex' | 'simple' | null => {
+  const votes = parseGuardVotes(content);
+  if (!votes) return null;
+  return VOTE_CATEGORIES.some(
+    (c) =>
+      String(votes[c] ?? '')
+        .trim()
+        .toLowerCase() !== 'no',
+  )
+    ? 'complex'
+    : 'simple';
+};
 
 const guardMaxTokens = (): number => {
   const raw = process.env.ROUTER_GUARD_MAX_TOKENS;
   const parsed = raw === undefined || raw === '' ? NaN : Number(raw);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : 256;
+  // 512 since #169 phase 2: the v2 spot-check + budget probe
+  // (.iteration/docs/169-guard-budget-probe*.txt) show the reasoning guard
+  // burning the old 256-token budget on chain-of-thought whenever a
+  // conversation transcript rides in the prompt, returning empty/truncated
+  // votes — the #129 failure shape at JSON scale.
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 512;
+};
+
+const guardContextMessages = (): number => {
+  const raw = process.env.ROUTER_GUARD_CONTEXT_MESSAGES;
+  const parsed = raw === undefined || raw === '' ? NaN : Number(raw);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 10;
 };
 
 export const routeQuery = async (
@@ -233,26 +331,13 @@ export const routeQuery = async (
     };
   }
 
-  // Tier 1: Deterministic Rules
-
-  // Rule 1: Short queries (greetings, simple confirmations)
-  if (query.length < 20 && /^(hello|hi|hey|yes|no|ok|thanks|thank you)/i.test(query)) {
-    const modelRef = pickModelRef(smallPoolRaw, 'small', epsilon, random);
-    return { model: modelRef.model, reason: 'deterministic-short', ...spreadRef(modelRef) };
-  }
-
-  // Rule 2: Code blocks or explicit coding requests
-  if (
-    query.toLowerCase().includes('code') ||
-    query.toLowerCase().includes('function') ||
-    query.toLowerCase().includes('script') ||
-    /```/.test(query)
-  ) {
-    const modelRef = pickModelRef(largePool, 'large', epsilon, random);
-    return { model: modelRef.model, reason: 'deterministic-code', ...spreadRef(modelRef) };
-  }
-
-  // Tier 2: Guard model classification
+  // Tier 2: Guard model classification — the ONLY text routing path. The
+  // deterministic key-phrase rules that used to short-circuit here are gone
+  // (#169 phase 2): every text turn, greetings included, pays one guard
+  // round-trip so natural language is judged by the LLM in conversation
+  // context, never by a regex. The context tail is bounded by
+  // ROUTER_GUARD_CONTEXT_MESSAGES (default 10, aligned with the chat
+  // routes' history window).
   try {
     // #77: a tool-free agent — the guard model may reject tool-carrying
     // requests entirely, and this call needs plain text only (issue #41).
@@ -261,25 +346,24 @@ export const routeQuery = async (
       messages: [
         {
           role: 'user',
-          content: classifyPrompt(query),
+          content: classifyPrompt(query, (deps.history ?? []).slice(-guardContextMessages())),
         },
       ],
       temperature: 0,
       max_tokens: guardMaxTokens(),
     });
 
-    // Take the LAST word-boundary match: some guard models emit their
-    // reasoning ahead of the verdict in `content` (or reply with trailing
-    // punctuation), so an exact-equality check would misclassify that as
-    // simple. A reply with NO verdict at all is exactly the LangSmith-
-    // observed failure mode (reasoning consumed the budget, `text: ''`) —
-    // treat it like a classifier error and fall back to the large tier
-    // instead of silently defaulting to small.
+    // The vote object is the LAST balanced {...} carrying a category key:
+    // reasoning models emit chain-of-thought ahead of the answer (#129), so
+    // earlier objects may be worked examples. A reply with NO vote object
+    // at all is exactly the LangSmith-observed failure mode (reasoning
+    // consumed the budget, empty text) — treat it like a classifier error
+    // and fall back to the large tier instead of silently defaulting to
+    // small.
     const content = response.choices[0]?.message?.content ?? '';
-    const matches = [...content.toLowerCase().matchAll(/\b(complex|simple)\b/g)];
-    const classification = matches.length ? matches[matches.length - 1][1] : null;
+    const verdict = guardVerdictFromReply(content);
 
-    if (classification === 'complex') {
+    if (verdict === 'complex') {
       const { pool, forced, reasonSuffix } = await orderPoolByFit(largePool, band, readWeight);
       const modelRef = forced ?? pickModelRef(pool, 'large', epsilon, random);
       return {
@@ -288,7 +372,7 @@ export const routeQuery = async (
         ...spreadRef(modelRef),
       };
     }
-    if (classification === 'simple') {
+    if (verdict === 'simple') {
       const { pool, forced, reasonSuffix } = await orderPoolByFit(smallPoolRaw, band, readWeight);
       const modelRef = forced ?? pickModelRef(pool, 'small', epsilon, random);
       return {
@@ -297,7 +381,7 @@ export const routeQuery = async (
         ...spreadRef(modelRef),
       };
     }
-    // Unparseable reply (empty, or no verdict word anywhere): route large as
+    // Unparseable reply (empty, or no vote object anywhere): route large as
     // the safe default — defaulting verdict-less replies to small is what
     // pushed the Ad Gefrin conversation to the small tier (issue #129).
     console.error('Classifier unparseable reply:', redactForLog(content || '(empty)'));

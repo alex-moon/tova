@@ -29,7 +29,7 @@ jest.mock('../services/titleService', () => ({
 const MOCK_ROUTING = {
   model: 'mock-small-model',
   provider: 'deepinfra',
-  reason: 'deterministic-short',
+  reason: 'classifier-simple',
 };
 
 const isClassifierCall = (args?: { messages?: { role: string; content: string }[] }) =>
@@ -129,6 +129,51 @@ describe('Chat streaming route', () => {
     });
     const session = await Session.findById(sessionId);
     expect(session).not.toBeNull();
+  });
+
+  it('passes prior turns, oldest first, to the guard classifier — never the current turn (#169 phase 2)', async () => {
+    const cookies = await registerUser('stream-guard-history@example.com');
+    const app = createApp();
+
+    const first = await request(app)
+      .post('/api/chat/stream')
+      .set('Cookie', cookies)
+      .send({ content: 'first question' });
+    expect(first.status).toBe(200);
+    // First turn of a session: the guard context is the empty tail.
+    expect(mockRouteQuery).toHaveBeenLastCalledWith('first question', undefined, undefined, {
+      band: expect.any(String),
+      hasImage: false,
+      history: [],
+    });
+
+    const meta = first.text
+      .split('\n\n')
+      .map((part) => part.split('\n').find((l) => l.startsWith('data: ')))
+      .find((l) => l?.includes('"sessionId"'));
+    const { sessionId } = JSON.parse((meta as string).slice(6));
+
+    const second = await request(app)
+      .post('/api/chat/stream')
+      .set('Cookie', cookies)
+      .send({ sessionId, content: 'second question' });
+    expect(second.status).toBe(200);
+    expect(mockRouteQuery).toHaveBeenLastCalledWith(
+      'second question',
+      undefined,
+      undefined,
+      expect.objectContaining({
+        hasImage: false,
+        history: [
+          { role: 'user', content: 'first question' },
+          { role: 'assistant', content: 'chunk' },
+        ],
+      }),
+    );
+    const lastDeps = mockRouteQuery.mock.calls[mockRouteQuery.mock.calls.length - 1]?.[3] as {
+      history?: { content: string }[];
+    };
+    expect(lastDeps.history?.some((m) => m.content === 'second question')).toBe(false);
   });
 
   it('passes a client-disconnect abort signal into the provider stream call', async () => {

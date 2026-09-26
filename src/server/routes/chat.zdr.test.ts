@@ -49,7 +49,7 @@ jest.mock('../services/titleService', () => ({
   generateChatTitle: jest.fn().mockResolvedValue('Hello'),
 }));
 
-const MOCK_ROUTING = { model: 'mock-small-model', reason: 'deterministic-short' };
+const MOCK_ROUTING = { model: 'mock-small-model', reason: 'classifier-simple' };
 
 const fullStreamFrom = (chunks: string[]) =>
   (async function* () {
@@ -172,6 +172,51 @@ describe('Zero-data retention chats (issue #116)', () => {
     expect(assistantContents).toEqual(['older reply', 'newer reply']);
     expect(messages).toEqual(
       expect.arrayContaining([expect.objectContaining({ role: 'user', content: 'older turn' })]),
+    );
+
+    // #169 phase 2: the replayed history is also the guard classifier's
+    // context — prior-turns-only by construction, exactly the contract.
+    expect(mockRouteQuery).toHaveBeenCalledWith(
+      'and now?',
+      undefined,
+      undefined,
+      expect.objectContaining({
+        history: [
+          { role: 'user', content: 'older turn' },
+          { role: 'assistant', content: 'older reply' },
+          { role: 'user', content: 'newer turn' },
+          { role: 'assistant', content: 'newer reply' },
+        ],
+      }),
+    );
+  });
+
+  it('passes the replayed history to the guard classifier on the plain ZDR route (#169 phase 2)', async () => {
+    mockPlainGenerate.mockResolvedValue({
+      choices: [{ message: { content: 'Plain ephemeral answer' } }],
+    });
+    const email = 'zdr-guard-history-plain@example.com';
+    const cookies = await registerUser(email);
+    await enableZdr(email);
+
+    const response = await plainMessage(cookies, {
+      content: 'and now?',
+      history: [
+        { role: 'user', content: 'older turn' },
+        { role: 'assistant', content: 'older reply' },
+      ],
+    });
+    expect(response.status).toBe(200);
+    expect(mockRouteQuery).toHaveBeenCalledWith(
+      'and now?',
+      undefined,
+      undefined,
+      expect.objectContaining({
+        history: [
+          { role: 'user', content: 'older turn' },
+          { role: 'assistant', content: 'older reply' },
+        ],
+      }),
     );
   });
 
