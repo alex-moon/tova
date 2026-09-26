@@ -5,6 +5,7 @@ import { authenticate, requireRole, AuthRequest } from '../middleware/auth';
 import { AdminUser } from '../../shared/contracts';
 import { ProviderRouting } from '../models/ProviderRouting';
 import { ModelMetricStat } from '../models/ModelMetricStat';
+import { ModelErrorStat } from '../models/ModelErrorStat';
 import { getLogs, LogLevel } from '../services/logService';
 import {
   MAX_COMPARE_MODELS,
@@ -177,9 +178,11 @@ const duplicateModelError = (err: unknown): boolean =>
 
 router.get('/models', ...adminGuard, async (_req, res) => {
   try {
-    const [routes, stats] = await Promise.all([
+    const [routes, stats, errorStats] = await Promise.all([
       ProviderRouting.find({}).lean(),
       ModelMetricStat.find({}).lean(),
+      // #168 diagnostics: most recent error shapes first.
+      ModelErrorStat.find({}).sort({ lastSeenAt: -1 }).lean(),
     ]);
     const statMap = new Map<string, { band: string; up: number; down: number }[]>();
     for (const stat of stats as { band: string; modelName: string; up: number; down: number }[]) {
@@ -187,8 +190,8 @@ router.get('/models', ...adminGuard, async (_req, res) => {
       list.push({ band: stat.band, up: stat.up ?? 0, down: stat.down ?? 0 });
       statMap.set(stat.modelName, list);
     }
-    res.json(
-      ((routes ?? []) as unknown as ProviderRow[]).map((route) => ({
+    res.json({
+      models: ((routes ?? []) as unknown as ProviderRow[]).map((route) => ({
         id: String(route._id),
         provider: route.provider,
         model: route.model,
@@ -198,12 +201,34 @@ router.get('/models', ...adminGuard, async (_req, res) => {
         vision: route.vision === true,
         contextLength: route.contextLength,
         // #168: system-owned cool-off, surfaced for the admin badge (absent
-        // on legacy rows → null). Cleared only by the health service/expiry,
-        // not admin CRUD.
-        disabledUntil: route.disabledUntil ?? null,
+        // on legacy rows → null). Cleared only by expiry, not admin CRUD.
+        disabledUntil: route.disabledUntil ? new Date(route.disabledUntil).toISOString() : null,
         stats: [...(statMap.get(route.model) ?? [])],
       })),
-    );
+      // #168 diagnostics, keyed provider+model (a model can serve several
+      // tiers, so embedding per row would duplicate).
+      errors: (
+        (errorStats ?? []) as unknown as {
+          provider: string;
+          model: string;
+          key: string;
+          statusCode?: number;
+          sample?: string;
+          count?: number;
+          lastSeenAt: Date;
+        }[]
+      ).map((stat) => ({
+        provider: stat.provider,
+        model: stat.model,
+        key: stat.key,
+        count: stat.count ?? 0,
+        lastSeenAt: new Date(stat.lastSeenAt).toISOString(),
+        ...(stat.statusCode !== undefined && stat.statusCode !== null
+          ? { statusCode: stat.statusCode }
+          : {}),
+        sample: stat.sample ?? '',
+      })),
+    });
   } catch (_err) {
     res.status(500).json({ message: 'Error listing models' });
   }

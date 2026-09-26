@@ -22,6 +22,20 @@ jest.mock('../services/routerService', () => ({
   routeQuery: (...args: unknown[]) => mockRouteQuery(...args),
 }));
 
+const mockDisableModel = jest.fn();
+const mockRecordEndpointError = jest.fn();
+
+jest.mock('../services/modelConfigService', () => ({
+  // Keep the real module; stub only disableModel so the cool-off path never
+  // touches the DB (#168).
+  ...jest.requireActual('../services/modelConfigService'),
+  disableModel: (...args: unknown[]) => mockDisableModel(...args),
+}));
+
+jest.mock('../services/modelErrorStatsService', () => ({
+  recordEndpointError: (...args: unknown[]) => mockRecordEndpointError(...args),
+}));
+
 jest.mock('../services/titleService', () => ({
   generateChatTitle: jest.fn().mockResolvedValue('Hello'),
 }));
@@ -718,5 +732,124 @@ describe('Chat streaming prompt metrics', () => {
     expect(userMessage?.metrics?.llmSkipReason).toBe('trivial');
     // Deterministic metrics are still attached to the trivial skip
     expect(userMessage?.metrics?.sessionMessageIndex).toBe(0);
+  });
+});
+
+/*
+ * #168 streaming failover + diagnostics: an endpoint failure with no deltas
+ * yet disables the model and re-routes (re-emitting 'meta'); every non-abort
+ * failure is recorded per model. Mastra rethrows provider stream errors as
+ * plain Errors carrying the payload text (no status code), which is exactly
+ * the message-shaped classification these tests use.
+ */
+describe('Chat streaming route — #168 endpoint failures', () => {
+  const errorStreamFrom = (message: string) =>
+    mockAgentStream.mockImplementation(async () => ({
+      fullStream: (async function* () {
+        yield { type: 'error', payload: { error: { message } } };
+      })(),
+    }));
+
+  const sseEvents = (response: { text: string }) =>
+    response.text
+      .split('\n\n')
+      .filter((part) => part.trim().length > 0)
+      .map((part) => {
+        const eventLine = part.split('\n').find((l) => l.startsWith('event: '));
+        const dataLine = part.split('\n').find((l) => l.startsWith('data: '));
+        return {
+          event: eventLine?.slice(7),
+          data: dataLine ? JSON.parse(dataLine.slice(6)) : undefined,
+        };
+      });
+
+  beforeEach(() => {
+    mockAgentStream.mockReset();
+    mockGenerate.mockReset().mockResolvedValue({ text: 'plain' });
+    mockRouteQuery.mockReset().mockResolvedValue(MOCK_ROUTING);
+    mockDisableModel.mockReset().mockResolvedValue(true);
+    mockRecordEndpointError.mockReset().mockResolvedValue(undefined);
+  });
+
+  it('disables a failing stream endpoint, records it, and re-emits meta after re-routing', async () => {
+    mockRouteQuery
+      .mockResolvedValueOnce({ model: 'first-model', provider: 'deepinfra', reason: 'test' })
+      .mockResolvedValueOnce({ model: 'second-model', provider: 'deepinfra', reason: 'test' });
+    mockAgentStream
+      .mockImplementationOnce(async () => ({
+        fullStream: (async function* () {
+          yield { type: 'error', payload: { error: { message: 'upstream exploded' } } };
+        })(),
+      }))
+      .mockImplementationOnce(async () => ({ fullStream: fullStreamFrom(['recovered.']) }));
+
+    const cookies = await registerUser('stream-failover@example.com');
+    const app = createApp();
+    const response = await request(app)
+      .post('/api/chat/stream')
+      .set('Cookie', cookies)
+      .send({ content: 'hello there' });
+
+    expect(response.status).toBe(200);
+    const events = sseEvents(response);
+    const metas = events.filter((e) => e.event === 'meta');
+    expect(metas).toHaveLength(2);
+    expect(metas[1].data).toMatchObject({ routing: { model: 'second-model' } });
+    expect(
+      events
+        .filter((e) => e.event === 'delta')
+        .map((e) => e.data.content)
+        .join(''),
+    ).toBe('recovered.');
+    expect(mockDisableModel).toHaveBeenCalledTimes(1);
+    expect(mockDisableModel).toHaveBeenCalledWith('deepinfra', 'first-model');
+    expect(mockRecordEndpointError).toHaveBeenCalledTimes(1);
+    expect(mockRecordEndpointError).toHaveBeenCalledWith(
+      'deepinfra',
+      'first-model',
+      expect.objectContaining({ message: 'upstream exploded' }),
+    );
+  });
+
+  it('records a rate-limit stream failure as a diagnostic without disabling the model', async () => {
+    errorStreamFrom('rate limit exceeded');
+
+    const cookies = await registerUser('stream-429@example.com');
+    const app = createApp();
+    const response = await request(app)
+      .post('/api/chat/stream')
+      .set('Cookie', cookies)
+      .send({ content: 'hello there' });
+
+    expect(response.status).toBe(200);
+    const errorEvent = response.text.split('\n\n').find((part) => part.includes('event: error'));
+    expect(errorEvent).toContain('Rate limited by the model provider');
+    expect(mockRecordEndpointError).toHaveBeenCalledTimes(1);
+    expect(mockRecordEndpointError).toHaveBeenCalledWith(
+      'deepinfra',
+      'mock-small-model',
+      expect.objectContaining({ message: 'rate limit exceeded' }),
+    );
+    expect(mockDisableModel).not.toHaveBeenCalled();
+  });
+
+  it('stops the loop and surfaces the original error when the cool-off write fails', async () => {
+    mockDisableModel.mockResolvedValueOnce(false);
+    errorStreamFrom('upstream exploded');
+
+    const cookies = await registerUser('stream-write-fail@example.com');
+    const app = createApp();
+    const response = await request(app)
+      .post('/api/chat/stream')
+      .set('Cookie', cookies)
+      .send({ content: 'hello there' });
+
+    expect(response.status).toBe(200);
+    const errorEvent = response.text.split('\n\n').find((part) => part.includes('event: error'));
+    expect(errorEvent).toContain('Error streaming from model');
+    expect(mockDisableModel).toHaveBeenCalledTimes(1);
+    expect(mockDisableModel).toHaveBeenCalledWith('deepinfra', 'mock-small-model');
+    expect(mockRouteQuery).toHaveBeenCalledTimes(1); // no re-route happened
+    expect(mockRecordEndpointError).toHaveBeenCalledTimes(1);
   });
 });

@@ -2,6 +2,22 @@
 
 ## Status (current)
 
+#168 Model cool-off on failure (in flight, branch `feat/168-model-errors`): a failing
+completion endpoint is disabled immediately for a cool-off period
+(`providerroutings.disabledUntil`, `MODEL_COOL_OFF_HOURS`, default 6h, lazy expiry), and
+the turn re-routes against the fresh pool until it succeeds or the pool drains — an
+all-cooling-off pool then errors loudly with an end-user-visible message
+(`AllModelsDisabledError`, no env fallback). 429 is deliberately NOT a cool-off (back-off
+is a separate mechanism, to be filed separately) and neither are client aborts nor
+prompt-size (413) failures. Per-model error diagnostics (Alex, 2026-09-26): every
+non-abort endpoint failure — including 429/413/mid-stream shapes — is tallied in the
+`modelerrorstats` collection grouped by status code or redacted message text
+(`modelErrorStatsService.recordEndpointError`), because deploys wipe the logs that would
+otherwise show real connector error shapes; they render in the admin Models tab (own
+table, plus a "Cooling off · ~Nh left" badge per inventory row). A failed cool-off write
+stops the failover loop and surfaces the original endpoint error instead of retrying a
+known-broken endpoint.
+
 #148 E2E expansion (branch `feat/148-e2e-expansion`): local Playwright was failing because
 `e2e/playwright.config.ts` never loaded `.env` (a one-line `import 'dotenv/config'` was the
 sole root cause — suite went 16/16 green immediately). Added stable `data-testid` hooks to

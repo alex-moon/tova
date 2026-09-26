@@ -10,6 +10,7 @@ const ROUTE_A: RoutingResult = { model: 'm-a', provider: 'deepinfra', reason: 't
 const ROUTE_B: RoutingResult = { model: 'm-b', provider: 'deepinfra', reason: 'test' };
 
 const mockDisableModel = jest.fn();
+const mockRecordEndpointError = jest.fn();
 
 jest.mock('./modelConfigService', () => ({
   // Keep the real module (AllModelsDisabledError is re-exported through it);
@@ -18,9 +19,14 @@ jest.mock('./modelConfigService', () => ({
   disableModel: (...args: unknown[]) => mockDisableModel(...args),
 }));
 
+jest.mock('./modelErrorStatsService', () => ({
+  recordEndpointError: (...args: unknown[]) => mockRecordEndpointError(...args),
+}));
+
 describe('withModelFailover (#168)', () => {
   beforeEach(() => {
-    mockDisableModel.mockReset().mockResolvedValue(undefined);
+    mockDisableModel.mockReset().mockResolvedValue(true);
+    mockRecordEndpointError.mockReset().mockResolvedValue(undefined);
   });
 
   it('returns routing + completion untouched when the first invoke succeeds', async () => {
@@ -47,7 +53,7 @@ describe('withModelFailover (#168)', () => {
   });
 
   it('obtains the user-visible message when a disabled pool leaves routing empty', async () => {
-    mockDisableModel.mockResolvedValueOnce(undefined);
+    mockDisableModel.mockResolvedValueOnce(true);
     let routed = { ...ROUTE_A };
     const routing = async () => {
       // second lookup fails: m-a was disabled, m-b is gone from both test
@@ -169,5 +175,89 @@ describe('withModelFailover (#168)', () => {
       ),
     ).rejects.toBe(poolDrained);
     expect(mockDisableModel).not.toHaveBeenCalled();
+  });
+
+  // #168 diagnostics (Alex, 2026-09-26): error shapes must accumulate per
+  // model — including the shapes the cool-off deliberately ignores.
+  it('records a 429 as a diagnostic but does not disable the endpoint', async () => {
+    const err = Object.assign(new Error('quota exceeded'), { statusCode: 429 });
+    await expect(
+      withModelFailover(
+        async () => ROUTE_A,
+        async () => {
+          throw err;
+        },
+      ),
+    ).rejects.toThrow('quota exceeded');
+    expect(mockRecordEndpointError).toHaveBeenCalledTimes(1);
+    expect(mockRecordEndpointError).toHaveBeenCalledWith('deepinfra', 'm-a', err);
+    expect(mockDisableModel).not.toHaveBeenCalled();
+  });
+
+  it('records a prompt-size (413) failure without disabling it', async () => {
+    const err = Object.assign(new Error('Request too large'), { statusCode: 413 });
+    await expect(
+      withModelFailover(
+        async () => ROUTE_A,
+        async () => {
+          throw err;
+        },
+      ),
+    ).rejects.toThrow('Request too large');
+    expect(mockRecordEndpointError).toHaveBeenCalledWith('deepinfra', 'm-a', err);
+    expect(mockDisableModel).not.toHaveBeenCalled();
+  });
+
+  it('records a disabling failure before re-routing', async () => {
+    const routes = [ROUTE_A, ROUTE_B];
+    const err = new Error('upstream 500');
+    await withModelFailover(
+      async () => routes.shift()!,
+      async (routing) => {
+        if (routing.model === 'm-a') throw err;
+        return 'ok-b';
+      },
+    );
+    expect(mockRecordEndpointError).toHaveBeenCalledWith('deepinfra', 'm-a', err);
+  });
+
+  it('does not record a client abort (the endpoint never failed)', async () => {
+    const abort = new Error('Request aborted');
+    abort.name = 'AbortError';
+    await expect(
+      withModelFailover(
+        async () => ROUTE_A,
+        async () => {
+          throw abort;
+        },
+      ),
+    ).rejects.toThrow('Request aborted');
+    expect(mockRecordEndpointError).not.toHaveBeenCalled();
+    expect(mockDisableModel).not.toHaveBeenCalled();
+  });
+
+  // #168: a failed cool-off write must stop the loop — the pool is
+  // unchanged, so a re-route would re-pick the same broken endpoint.
+  it('surfaces the original endpoint error without re-routing when the cool-off write fails', async () => {
+    mockDisableModel.mockResolvedValueOnce(false);
+    let routeCalls = 0;
+    let invokes = 0;
+    const err = new Error('upstream 500');
+    await expect(
+      withModelFailover(
+        async () => {
+          routeCalls += 1;
+          return ROUTE_A;
+        },
+        async () => {
+          invokes += 1;
+          throw err;
+        },
+      ),
+    ).rejects.toBe(err);
+    expect(mockDisableModel).toHaveBeenCalledWith('deepinfra', 'm-a');
+    expect(routeCalls).toBe(1);
+    expect(invokes).toBe(1);
+    expect(mockRecordEndpointError).toHaveBeenCalledWith('deepinfra', 'm-a', err);
   });
 });

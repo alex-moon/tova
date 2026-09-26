@@ -188,6 +188,18 @@ describe('Model Config Service', () => {
       );
     });
 
+    it('disableModel reports a failed cool-off write (failover loops stop on it)', async () => {
+      const spy = jest.spyOn(ProviderRouting, 'updateMany').mockRejectedValue(new Error('db down'));
+      const consoleErrorSpy = muteConsoleError();
+      try {
+        await expect(disableModel('deepinfra', 'some-model')).resolves.toBe(false);
+      } finally {
+        spy.mockRestore();
+        consoleErrorSpy.mockRestore();
+      }
+      await expect(disableModel('deepinfra', 'other-model')).resolves.toBe(true);
+    });
+
     it('a pool whose every eligible row is cooling off errors loudly, no env fallback', async () => {
       await listByTier('small');
       await listByTier('large');

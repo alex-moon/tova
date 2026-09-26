@@ -50,12 +50,19 @@ const admin = (): AdminUser => ({
   updatedAt: '2026-09-11T00:00:00.000Z',
 });
 
+// #168: GET /api/admin/models returns { models, errors } — every mock uses
+// this helper so the payload shape stays consistent with the contract.
+const modelsPayload = (models: Record<string, unknown>[] = [], errors: unknown[] = []) => ({
+  models,
+  errors,
+});
+
 describe('AdminView', () => {
   afterEach(cleanup);
 
   beforeEach(() => {
     listUsers.mockReset().mockResolvedValue([admin()]);
-    listModels.mockReset().mockResolvedValue([]);
+    listModels.mockReset().mockResolvedValue(modelsPayload());
     updatePermissions.mockReset();
     updateRole.mockReset();
   });
@@ -115,6 +122,7 @@ describe('AdminView models table (issue #33/#104)', () => {
     tools: true,
     vision: false,
     contextLength: 131072,
+    disabledUntil: null,
     stats: [{ band: 'short|prose', up: 3, down: 1 }],
   });
 
@@ -128,7 +136,7 @@ describe('AdminView models table (issue #33/#104)', () => {
   });
 
   const setup = () => {
-    listModels.mockReset().mockResolvedValueOnce([sampleRow()]);
+    listModels.mockReset().mockResolvedValueOnce(modelsPayload([sampleRow()]));
     return render(<AdminView />);
   };
 
@@ -144,7 +152,7 @@ describe('AdminView models table (issue #33/#104)', () => {
   });
 
   it('shows an empty state when no models are configured', async () => {
-    listModels.mockReset().mockResolvedValue([]);
+    listModels.mockReset().mockResolvedValue(modelsPayload());
     render(<AdminView />);
     fireEvent.click(await screen.findByTestId('admin-tab-models'));
     expect(await screen.findByText('No models configured.')).toBeInTheDocument();
@@ -152,30 +160,32 @@ describe('AdminView models table (issue #33/#104)', () => {
 
   // #115: capabilities are surfaced as read-only badges per row.
   it('renders vision/tools capability badges with the context length', async () => {
-    listModels.mockResolvedValue([
-      {
-        id: 'r1',
-        provider: 'groq',
-        model: 'test-large',
-        tier: 'large',
-        eligible: true,
-        tools: true,
-        vision: false,
-        contextLength: 131072,
-        stats: [],
-      },
-      {
-        id: 'r2',
-        provider: 'deepinfra',
-        model: 'Qwen/Qwen3-VL-8B-Instruct',
-        tier: 'small',
-        eligible: true,
-        tools: true,
-        vision: true,
-        contextLength: 262144,
-        stats: [],
-      },
-    ]);
+    listModels.mockResolvedValue(
+      modelsPayload([
+        {
+          id: 'r1',
+          provider: 'groq',
+          model: 'test-large',
+          tier: 'large',
+          eligible: true,
+          tools: true,
+          vision: false,
+          contextLength: 131072,
+          stats: [],
+        },
+        {
+          id: 'r2',
+          provider: 'deepinfra',
+          model: 'Qwen/Qwen3-VL-8B-Instruct',
+          tier: 'small',
+          eligible: true,
+          tools: true,
+          vision: true,
+          contextLength: 262144,
+          stats: [],
+        },
+      ]),
+    );
     render(<AdminView />);
     expect(await screen.findByTestId('admin-view')).toBeInTheDocument();
     fireEvent.click(screen.getByTestId('admin-tab-models'));
@@ -248,12 +258,135 @@ describe('AdminView models table (issue #33/#104)', () => {
   });
 });
 
+/*
+ * #168: cool-off badge on the inventory rows and the per-model error
+ * diagnostics table (errors grouped by status code/message).
+ */
+describe('AdminView cool-off badge and error diagnostics (#168)', () => {
+  afterEach(cleanup);
+
+  const coolingRow = (disabledUntil: string | null, overrides = {}) => ({
+    id: 'r1',
+    provider: 'deepinfra',
+    model: 'test-cooling',
+    tier: 'large',
+    eligible: true,
+    tools: true,
+    vision: false,
+    contextLength: 131072,
+    disabledUntil,
+    stats: [],
+    ...overrides,
+  });
+
+  beforeEach(() => {
+    listUsers.mockReset().mockResolvedValue([admin()]);
+    updatePermissions.mockReset();
+    updateRole.mockReset();
+    updateModel.mockReset().mockResolvedValue({ id: 'r1' });
+    createModel.mockReset().mockResolvedValue({ id: 'r2' });
+    deleteModel.mockReset().mockResolvedValue(undefined);
+  });
+
+  it('shows a cooling-off badge with approximate hours left for a future disabledUntil', async () => {
+    listModels.mockResolvedValue(
+      modelsPayload([coolingRow(new Date(Date.now() + 3 * 60 * 60 * 1000).toISOString())]),
+    );
+    render(<AdminView />);
+    fireEvent.click(await screen.findByTestId('admin-tab-models'));
+    const badge = await screen.findByTestId('admin-model-cooloff-r1');
+    expect(badge).toHaveTextContent(/Cooling off · ~\d+h left/);
+  });
+
+  it('renders no badge when the model is not cooling off (null or expired)', async () => {
+    listModels.mockResolvedValue(
+      modelsPayload([
+        coolingRow(null),
+        coolingRow(new Date(Date.now() - 60_000).toISOString(), {
+          id: 'r2',
+          model: 'test-expired',
+        }),
+      ]),
+    );
+    render(<AdminView />);
+    fireEvent.click(await screen.findByTestId('admin-tab-models'));
+    await screen.findByTestId('admin-model-r1');
+    expect(screen.queryByTestId('admin-model-cooloff-r1')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('admin-model-cooloff-r2')).not.toBeInTheDocument();
+  });
+
+  it('renders the per-model error diagnostics table with keys, counts and samples', async () => {
+    listModels.mockResolvedValue(
+      modelsPayload(
+        [coolingRow(null)],
+        [
+          {
+            provider: 'deepinfra',
+            model: 'Qwen/Qwen3-14B',
+            key: '429',
+            count: 7,
+            lastSeenAt: '2026-09-26T08:00:00.000Z',
+            statusCode: 429,
+            sample: 'Error: rate limit exceeded',
+          },
+          {
+            provider: 'deepinfra',
+            model: 'other-model',
+            key: 'connection reset',
+            count: 1,
+            lastSeenAt: '2026-09-26T07:00:00.000Z',
+            sample: 'Error: connection reset',
+          },
+        ],
+      ),
+    );
+    render(<AdminView />);
+    fireEvent.click(await screen.findByTestId('admin-tab-models'));
+    const table = await screen.findByTestId('admin-model-errors');
+    expect(table).toHaveTextContent('deepinfra/Qwen/Qwen3-14B');
+    expect(table).toHaveTextContent('rate limit exceeded');
+    expect(table).toHaveTextContent('connection reset');
+    expect(table).toHaveTextContent('7');
+  });
+
+  it('hides the errors table when no diagnostics are recorded', async () => {
+    listModels.mockResolvedValue(modelsPayload([coolingRow(null)], []));
+    render(<AdminView />);
+    fireEvent.click(await screen.findByTestId('admin-tab-models'));
+    await screen.findByTestId('admin-models');
+    expect(screen.queryByTestId('admin-model-errors')).not.toBeInTheDocument();
+  });
+
+  it('highlights error rows whose endpoint is currently cooling off', async () => {
+    listModels.mockResolvedValue(
+      modelsPayload(
+        [coolingRow(new Date(Date.now() + 60 * 60 * 1000).toISOString())],
+        [
+          {
+            provider: 'deepinfra',
+            model: 'test-cooling',
+            key: '502',
+            count: 2,
+            lastSeenAt: '2026-09-26T08:00:00.000Z',
+            statusCode: 502,
+            sample: 'Error: bad gateway',
+          },
+        ],
+      ),
+    );
+    render(<AdminView />);
+    fireEvent.click(await screen.findByTestId('admin-tab-models'));
+    const row = await screen.findByTestId('admin-model-error-deepinfra-test-cooling-502');
+    expect(row.querySelector('td')!.className).toContain('text-warning');
+  });
+});
+
 describe('AdminView layout (issue #91)', () => {
   afterEach(cleanup);
 
   beforeEach(() => {
     listUsers.mockReset().mockResolvedValue([admin()]);
-    listModels.mockReset().mockResolvedValue([]);
+    listModels.mockReset().mockResolvedValue(modelsPayload());
     updatePermissions.mockReset();
     updateRole.mockReset();
   });
@@ -307,7 +440,7 @@ describe('AdminView logs section (issue #76)', () => {
 
   beforeEach(() => {
     listUsers.mockReset().mockResolvedValue([admin()]);
-    listModels.mockReset().mockResolvedValue([]);
+    listModels.mockReset().mockResolvedValue(modelsPayload());
     updatePermissions.mockReset().mockResolvedValue(admin());
     updateRole.mockReset().mockResolvedValue(admin());
     listLogs.mockReset().mockResolvedValue({ logs: [], nextCursor: 0 });
@@ -393,6 +526,7 @@ describe('AdminView model comparison (issue #129)', () => {
     tools: true,
     vision: false,
     contextLength: 131072,
+    disabledUntil: null,
     stats: [],
     ...overrides,
   });
@@ -408,7 +542,7 @@ describe('AdminView model comparison (issue #129)', () => {
   });
 
   const setup = (rows = [sampleRow()]) => {
-    listModels.mockResolvedValue(rows);
+    listModels.mockResolvedValue(modelsPayload(rows));
     render(<AdminView />);
     return screen.findByTestId('admin-view');
   };
@@ -490,7 +624,7 @@ describe('AdminView graph section (issue #138)', () => {
 
   beforeEach(() => {
     listUsers.mockReset().mockResolvedValue([admin()]);
-    listModels.mockReset().mockResolvedValue([]);
+    listModels.mockReset().mockResolvedValue(modelsPayload());
     updatePermissions.mockReset();
     updateRole.mockReset();
     listLogs.mockReset();

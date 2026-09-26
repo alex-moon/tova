@@ -1,5 +1,6 @@
 import type { RoutingResult } from './routerService';
 import { AllModelsDisabledError, disableModel } from './modelConfigService';
+import { recordEndpointError } from './modelErrorStatsService';
 
 export { ALL_MODELS_DISABLED_MESSAGE, AllModelsDisabledError } from './modelConfigService';
 
@@ -89,10 +90,20 @@ export const withModelFailover = async <T>(
       return { routing, completion };
     } catch (err) {
       if (isClientAbort(err)) throw err;
+      // #168 diagnostics: every non-abort endpoint error is recorded —
+      // including the 429/413 shapes below that deliberately do not disable —
+      // so real connector error shapes accumulate per model (deploy wipes
+      // the logs that would otherwise answer this).
+      await recordEndpointError(routing.provider, routing.model, err);
       if (isPromptSizeError(err)) throw err;
       if (isRateLimitError(err)) throw err;
       lastError = err;
-      await disableModel(routing.provider, routing.model);
+      const disabled = await disableModel(routing.provider, routing.model);
+      if (!disabled) {
+        // Cool-off write failed: the pool is unchanged, so a re-route would
+        // re-pick the same broken endpoint — surface the original error.
+        throw err;
+      }
       disabledAny = true;
     }
   }

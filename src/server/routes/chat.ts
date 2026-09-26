@@ -31,6 +31,7 @@ import { zdrHistorySchema } from '../validation';
 import { redactForLog } from '../services/logRedaction';
 import { decideTurn } from '../services/zdrTurn';
 import { disableModel } from '../services/modelConfigService';
+import { recordEndpointError } from '../services/modelErrorStatsService';
 import {
   AllModelsDisabledError,
   isClientAbort,
@@ -897,6 +898,12 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
           }
           break;
         } catch (err) {
+          // #168 diagnostics: every non-abort endpoint error is recorded
+          // (mid-stream and 429/413 shapes included) — the cool-off decision
+          // below is unchanged.
+          if (!isClientAbort(err)) {
+            await recordEndpointError(routingResult.provider, routingResult.model, err);
+          }
           if (
             // no deltas yet — mid-stream failures are reported, not retried
             assistantContent === '' &&
@@ -907,7 +914,13 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
             !isRateLimitError(err) &&
             attempt < MAX_ATTEMPTS
           ) {
-            await disableModel(routingResult.provider, routingResult.model);
+            const disabled = await disableModel(routingResult.provider, routingResult.model);
+            if (!disabled) {
+              // Cool-off write failed: the pool is unchanged, so re-routing
+              // would re-pick the same broken endpoint — fail the turn with
+              // the original error.
+              throw err;
+            }
             try {
               routingResult = await routeQuery(content, undefined, undefined, {
                 band: routingBand,

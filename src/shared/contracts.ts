@@ -26,6 +26,8 @@ export interface AdminUser {
 // by model name. #115 badge fields: `tools` is schema-defaulted to true;
 // `vision` is only ever true when the row explicitly claims it;
 // `contextLength` is the advertised limit (omitted when none is known).
+// #168: `disabledUntil` is the system-owned cool-off expiry (ISO wire
+// string), null when the model is not cooling off.
 export interface AdminModel {
   id: string;
   provider: string;
@@ -35,7 +37,29 @@ export interface AdminModel {
   tools: boolean;
   vision: boolean;
   contextLength?: number;
+  disabledUntil: string | null;
   stats: { band: string; up: number; down: number }[];
+}
+
+// #168 per-model endpoint-error diagnostics (Alex, 2026-09-26): errors
+// grouped by status code when present and by redacted message text
+// otherwise (`key`), so real connector error shapes accumulate in Mongo
+// and survive deploys. `sample` is a redacted, capped excerpt.
+export interface AdminModelErrorStat {
+  provider: string;
+  model: string;
+  key: string;
+  count: number;
+  lastSeenAt: string;
+  statusCode?: number;
+  sample: string;
+}
+
+// GET /api/admin/models payload. `errors` is keyed provider+model (one model
+// can serve several tiers, so a per-row join would duplicate rows).
+export interface AdminModelsPayload {
+  models: AdminModel[];
+  errors: AdminModelErrorStat[];
 }
 
 // One in-memory log buffer row, GET /api/admin/logs (issue #76). `id` is a

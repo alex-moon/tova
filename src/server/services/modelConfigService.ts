@@ -295,8 +295,11 @@ const rowMeetsFilter = (
  * #168: immediately cool off a failed endpoint. Sets `disabledUntil` on every
  * routing row for the provider+model (a model can serve several tiers); the
  * pool reads above then exclude it until the timestamp expires. Duration is
- * env-tunable, default 6 hours. Errors are swallowed and logged: the cool-off
- * rides alongside a real failure and must not mask or duplicate it.
+ * env-tunable, default 6 hours. Returns whether the write landed: the
+ * failover loops stop on `false` (re-trying the same broken endpoint against
+ * an unchanged pool only adds latency) and surface the original endpoint
+ * error instead. Errors are logged, not thrown — the cool-off rides alongside
+ * a real failure and must not mask or duplicate it.
  */
 const coolOffHours = (): number => {
   const raw = process.env.MODEL_COOL_OFF_HOURS;
@@ -304,14 +307,16 @@ const coolOffHours = (): number => {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : 6;
 };
 
-export const disableModel = async (provider: ProviderName, model: string): Promise<void> => {
+export const disableModel = async (provider: ProviderName, model: string): Promise<boolean> => {
   try {
     await ProviderRouting.updateMany(
       { provider, model },
       { disabledUntil: new Date(Date.now() + coolOffHours() * 60 * 60 * 1000) },
     );
+    return true;
   } catch (err) {
     console.error('ProviderRouting cool-off write error:', err);
+    return false;
   }
 };
 
