@@ -5,6 +5,11 @@ import {
   detachConsoleCapture,
   pushLog,
 } from './logService';
+import { ErrorLog } from '../models/ErrorLog';
+
+jest.mock('../models/ErrorLog', () => ({
+  ErrorLog: { create: jest.fn().mockReturnValue(Promise.resolve({})) },
+}));
 
 describe('logService', () => {
   beforeEach(() => {
@@ -88,6 +93,22 @@ describe('logService', () => {
       detachConsoleCapture();
       detachConsoleCapture();
     }).not.toThrow();
+    clearLogs();
+  });
+
+  it('persists error entries to MongoDB outside test env', () => {
+    const prev = process.env.NODE_ENV;
+    process.env.NODE_ENV = 'development';
+    try {
+      pushLog('error', 'boom persisted');
+      pushLog('info', 'not persisted');
+    } finally {
+      process.env.NODE_ENV = prev;
+    }
+    expect(ErrorLog.create).toHaveBeenCalledTimes(1);
+    const arg = (ErrorLog.create as jest.Mock).mock.calls[0][0];
+    expect(arg.msg).toBe('boom persisted');
+    expect(arg.ts).toBeDefined();
     clearLogs();
   });
 });

@@ -4,6 +4,7 @@
 // while preserving original stdout behaviour.
 
 import { format } from 'util';
+import { ErrorLog } from '../models/ErrorLog';
 
 export type LogLevel = 'info' | 'warn' | 'error';
 
@@ -16,6 +17,14 @@ export interface LogEntry {
 
 const CAP = 1000;
 const MAX_MSG_LENGTH = 2000;
+
+// Issue #175: mirror error entries into MongoDB as they are emitted so
+// diagnostics survive a restart. Fire-and-forget: failures are swallowed
+// (never re-logged through console, which would recurse into the capture).
+const persistErrorEntry = (entry: Pick<LogEntry, 'id' | 'ts' | 'msg'>) => {
+  if (process.env.NODE_ENV === 'test') return;
+  ErrorLog.create({ bufferId: entry.id, ts: entry.ts, msg: entry.msg }).catch(() => {});
+};
 
 const buffer: LogEntry[] = [];
 // ids start at 1 so a default cursor of 0 in getLogs means "everything"
@@ -37,6 +46,7 @@ export const pushLog = (level: LogLevel, msg: string) => {
   };
   buffer.push(entry);
   if (buffer.length > CAP) buffer.splice(0, buffer.length - CAP);
+  if (level === 'error') persistErrorEntry(entry);
   return entry;
 };
 

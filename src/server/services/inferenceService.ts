@@ -1,5 +1,6 @@
 import { CompletionOptions, LlmConnector, LlmProvider } from './llmTypes';
 import { deepinfraConnector, groqConnector } from './mastraService';
+import { recordModelError } from './modelErrorTally';
 
 /*
  * Delegating LLM service: every completion call across the app goes through
@@ -32,17 +33,27 @@ const connectorFor = (provider: LlmProvider | undefined): LlmConnector => {
   return connector;
 };
 
+// Issue #175: record every completion failure against its provider route
+// before rethrowing — inferenceService is the single choke point for all
+// LLM calls, so nothing else needs instrumenting.
+const withTally = async <T>(
+  options: CompletionOptions,
+  run: (connector: LlmConnector) => Promise<T>,
+): Promise<T> => {
+  const provider: LlmProvider = options.provider ?? 'groq';
+  try {
+    return await run(connectorFor(provider));
+  } catch (err) {
+    recordModelError(provider, options.model, err);
+    throw err;
+  }
+};
+
 export const inferenceService = {
-  createCompletion: async (options: CompletionOptions) => {
-    const connector = connectorFor(options.provider);
-    return connector.createCompletion(options);
-  },
-  createStreamingCompletion: async (options: CompletionOptions) => {
-    const connector = connectorFor(options.provider);
-    return connector.createStreamingCompletion(options);
-  },
-  createToolFreeCompletion: async (options: CompletionOptions) => {
-    const connector = connectorFor(options.provider);
-    return connector.createToolFreeCompletion(options);
-  },
+  createCompletion: async (options: CompletionOptions) =>
+    withTally(options, (connector) => connector.createCompletion(options)),
+  createStreamingCompletion: async (options: CompletionOptions) =>
+    withTally(options, (connector) => connector.createStreamingCompletion(options)),
+  createToolFreeCompletion: async (options: CompletionOptions) =>
+    withTally(options, (connector) => connector.createToolFreeCompletion(options)),
 };
