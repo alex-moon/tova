@@ -78,12 +78,114 @@ describe('Model Config Service', () => {
             vision: true,
             contextLength: 262144,
           },
+          // #170 batch: 14 more DeepInfra large-tier rows (ZDR-only: no
+          // Google/Anthropic partner models), catalog + live-probed
+          // 2026-09-26 (tools for all, image parts for the vision rows).
+          {
+            provider: 'deepinfra',
+            model: 'deepseek-ai/DeepSeek-V4-Pro-0813',
+            tools: true,
+            vision: false,
+            contextLength: 1048576,
+          },
+          {
+            provider: 'deepinfra',
+            model: 'deepseek-ai/DeepSeek-V4.1-Flash',
+            tools: true,
+            vision: true,
+            contextLength: 1048576,
+          },
+          {
+            provider: 'deepinfra',
+            model: 'moonshotai/Kimi-K3',
+            tools: true,
+            vision: true,
+            contextLength: 1048576,
+          },
+          {
+            provider: 'deepinfra',
+            model: 'moonshotai/Kimi-K2.6',
+            tools: true,
+            vision: true,
+            contextLength: 262144,
+          },
+          {
+            provider: 'deepinfra',
+            model: 'Qwen/Qwen3.8-2.4T-A95B',
+            tools: true,
+            vision: false,
+            contextLength: 262144,
+          },
+          {
+            provider: 'deepinfra',
+            model: 'Qwen/Qwen3.5-397B-A17B',
+            tools: true,
+            vision: true,
+            contextLength: 262144,
+          },
+          {
+            provider: 'deepinfra',
+            model: 'Qwen/Qwen3-VL-235B-A22B-Instruct',
+            tools: true,
+            vision: true,
+            contextLength: 262144,
+          },
+          {
+            provider: 'deepinfra',
+            model: 'Qwen/Qwen3-Coder-480B-A35B-Instruct-Turbo',
+            tools: true,
+            vision: false,
+            contextLength: 262144,
+          },
+          {
+            provider: 'deepinfra',
+            model: 'zai-org/GLM-5.3',
+            tools: true,
+            vision: false,
+            contextLength: 1048576,
+          },
+          {
+            provider: 'deepinfra',
+            model: 'zai-org/GLM-5.3-Flash',
+            tools: true,
+            vision: true,
+            contextLength: 1048576,
+          },
+          {
+            provider: 'deepinfra',
+            model: 'nvidia/NVIDIA-Nemotron-3-Ultra-550B-A55B',
+            tools: true,
+            vision: false,
+            contextLength: 262144,
+          },
+          {
+            provider: 'deepinfra',
+            model: 'XiaomiMiMo/MiMo-V2.6-Pro',
+            tools: true,
+            vision: true,
+            contextLength: 1048576,
+          },
+          {
+            provider: 'deepinfra',
+            model: 'MiniMaxAI/MiniMax-M3',
+            tools: true,
+            vision: true,
+            contextLength: 524288,
+          },
+          {
+            provider: 'deepinfra',
+            model: 'nvidia/NVIDIA-Nemotron-3-Super-120B-A12B',
+            tools: true,
+            vision: false,
+            contextLength: 262144,
+          },
         ]),
       );
       expect(await listByTier('guard')).toEqual([
         { provider: 'groq', model: 'openai/gpt-oss-20b', tools: true, vision: false },
       ]);
-      expect(await ProviderRouting.countDocuments()).toBe(10);
+      // 3 small (incl. ineligible gemma) + 20 large (6 + 14 #170 rows) + 1 guard.
+      expect(await ProviderRouting.countDocuments()).toBe(24);
     });
 
     it('gemma-3-4b-it never appears in any pool (user veto, #115)', async () => {
@@ -105,7 +207,7 @@ describe('Model Config Service', () => {
       await listByTier('small');
       await listByTier('large');
       await listByTier('small');
-      expect(await ProviderRouting.countDocuments()).toBe(10);
+      expect(await ProviderRouting.countDocuments()).toBe(24);
     });
   });
 
@@ -314,8 +416,20 @@ describe('Model Config Service', () => {
     it('filters on vision for the #115 image pool (large tier)', async () => {
       await listByTier('large');
       const visionModels = (await listByTier('large', { vision: true })).map(({ model }) => model);
-      // Sorted `provider, model`; all image turns route through this pool.
-      expect(visionModels).toEqual(['Qwen/Qwen3-VL-30B-A3B-Instruct', 'Qwen/Qwen3-VL-8B-Instruct']);
+      // Sorted `provider, model` (binary collation: uppercase first, `-` < `.`);
+      // 2 #115 rows + 8 #170 vision rows; all image turns route through here.
+      expect(visionModels).toEqual([
+        'MiniMaxAI/MiniMax-M3',
+        'Qwen/Qwen3-VL-235B-A22B-Instruct',
+        'Qwen/Qwen3-VL-30B-A3B-Instruct',
+        'Qwen/Qwen3-VL-8B-Instruct',
+        'Qwen/Qwen3.5-397B-A17B',
+        'XiaomiMiMo/MiMo-V2.6-Pro',
+        'deepseek-ai/DeepSeek-V4.1-Flash',
+        'moonshotai/Kimi-K2.6',
+        'moonshotai/Kimi-K3',
+        'zai-org/GLM-5.3-Flash',
+      ]);
     });
 
     it('a missing capability field rules nothing out under schema defaults', async () => {
@@ -415,7 +529,7 @@ describe('Model Config Service', () => {
   describe('concurrent first reads', () => {
     it('survives concurrent seeding without duplicates or errors', async () => {
       await Promise.all([listByTier('small'), listByTier('small'), listByTier('small')]);
-      expect(await ProviderRouting.countDocuments()).toBe(10);
+      expect(await ProviderRouting.countDocuments()).toBe(24);
     });
   });
 });

@@ -2,6 +2,24 @@
 
 ## Status (current)
 
+#170 More models (in flight, branch `feat/170-more-models`): 14 more DeepInfra
+models seeded into the large completion tier so the admin elimination process
+has candidates to evaluate on live traffic. ZDR-only selection — no
+Google/Anthropic partner models (the only retention exceptions on DeepInfra);
+13 rows are >170b total params, plus the 70-170b bucket's one representative
+(Nemotron-3-Super-120B, known to 429 "Model busy" intermittently — capacity,
+covered by #168 cool-off; keep/drop is OQ-2 on the ticket). Capabilities from
+the live catalog + probes (2026-09-26): all 14 accept OpenAI-style `tools`; 8
+are vision rows (accept `image_url` parts in the same request) growing the
+image-turn pool 2 → 10. Delivered as `SEED_ENTRIES` rows + seed tests (pool
+10 → 24 docs) + `$setOnInsert` migration `20260926000200-seed-more-models-
+routing.ts` + migration test — admin deletions after migration stick, and
+`eligible: true` means the batch takes real routed traffic immediately under
+uniform ε-exploration. #158 sweep universe grows 9 → 23 eligible rows (full
+sweeps proportionally costlier). Discovery logged for a follow-up: Maverick
+and Qwen3-VL-8B are delisted from the DeepInfra catalog but still serve via
+legacy aliases. `npm run ci` green.
+
 #148 E2E expansion (branch `feat/148-e2e-expansion`): local Playwright was failing because
 `e2e/playwright.config.ts` never loaded `.env` (a one-line `import 'dotenv/config'` was the
 sole root cause — suite went 16/16 green immediately). Added stable `data-testid` hooks to

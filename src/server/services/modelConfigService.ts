@@ -168,6 +168,142 @@ const SEED_ENTRIES = (): SeedEntry[] => [
     tools: true,
     contextLength: 1048576,
   },
+  /*
+   * #170: DeepInfra expansion, all `tier: 'large'` (the "<70b ignored" rule
+   * bars new small rows; the batch's one 70-170b model joins the large tier
+   * where gpt-oss-120b already sits). ZDR is non-negotiable: per
+   * docs.deepinfra.com/account/data-privacy only Google and Anthropic models
+   * share data with partners — everything here is DeepInfra-served open
+   * weights, zero retention. `contextLength`/`vision` come from the live
+   * catalog (`/v1/openai/models`, 2026-09-26 dump); capabilities were
+   * live-probed the same day — every row accepted an OpenAI-style `tools`
+   * request, and every `vision: true` row an `image_url` part in the same
+   * request (#115 probe convention). Nemotron-3-Super-120B probes "Model
+   * busy" (429) intermittently — capacity, not capability; runtime cool-off
+   * (#168) covers it. Discovery while dumping: Maverick and Qwen3-VL-8B
+   * above are DELISTED from the catalog (legacy aliases still serve) —
+   * retiring them is a follow-up ticket, not #170.
+   */
+  {
+    provider: 'deepinfra',
+    model: 'deepseek-ai/DeepSeek-V4-Pro-0813',
+    tier: 'large',
+    eligible: true,
+    tools: true,
+    contextLength: 1048576,
+  },
+  {
+    provider: 'deepinfra',
+    model: 'deepseek-ai/DeepSeek-V4.1-Flash',
+    tier: 'large',
+    eligible: true,
+    tools: true,
+    vision: true,
+    contextLength: 1048576,
+  },
+  {
+    provider: 'deepinfra',
+    model: 'moonshotai/Kimi-K3',
+    tier: 'large',
+    eligible: true,
+    tools: true,
+    vision: true,
+    contextLength: 1048576,
+  },
+  {
+    provider: 'deepinfra',
+    model: 'moonshotai/Kimi-K2.6',
+    tier: 'large',
+    eligible: true,
+    tools: true,
+    vision: true,
+    contextLength: 262144,
+  },
+  {
+    provider: 'deepinfra',
+    model: 'Qwen/Qwen3.8-2.4T-A95B',
+    tier: 'large',
+    eligible: true,
+    tools: true,
+    contextLength: 262144,
+  },
+  {
+    provider: 'deepinfra',
+    model: 'Qwen/Qwen3.5-397B-A17B',
+    tier: 'large',
+    eligible: true,
+    tools: true,
+    vision: true,
+    contextLength: 262144,
+  },
+  {
+    provider: 'deepinfra',
+    model: 'Qwen/Qwen3-VL-235B-A22B-Instruct',
+    tier: 'large',
+    eligible: true,
+    tools: true,
+    vision: true,
+    contextLength: 262144,
+  },
+  {
+    provider: 'deepinfra',
+    model: 'Qwen/Qwen3-Coder-480B-A35B-Instruct-Turbo',
+    tier: 'large',
+    eligible: true,
+    tools: true,
+    contextLength: 262144,
+  },
+  {
+    provider: 'deepinfra',
+    model: 'zai-org/GLM-5.3',
+    tier: 'large',
+    eligible: true,
+    tools: true,
+    contextLength: 1048576,
+  },
+  {
+    provider: 'deepinfra',
+    model: 'zai-org/GLM-5.3-Flash',
+    tier: 'large',
+    eligible: true,
+    tools: true,
+    vision: true,
+    contextLength: 1048576,
+  },
+  {
+    provider: 'deepinfra',
+    model: 'nvidia/NVIDIA-Nemotron-3-Ultra-550B-A55B',
+    tier: 'large',
+    eligible: true,
+    tools: true,
+    contextLength: 262144,
+  },
+  {
+    provider: 'deepinfra',
+    model: 'XiaomiMiMo/MiMo-V2.6-Pro',
+    tier: 'large',
+    eligible: true,
+    tools: true,
+    vision: true,
+    contextLength: 1048576,
+  },
+  {
+    provider: 'deepinfra',
+    model: 'MiniMaxAI/MiniMax-M3',
+    tier: 'large',
+    eligible: true,
+    tools: true,
+    vision: true,
+    contextLength: 524288,
+  },
+  {
+    provider: 'deepinfra',
+    model: 'nvidia/NVIDIA-Nemotron-3-Super-120B-A12B',
+    tier: 'large',
+    eligible: true,
+    tools: true,
+    contextLength: 262144,
+  },
   {
     provider: 'groq',
     model: envModel(GUARD_ENV),
