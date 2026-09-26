@@ -40,10 +40,10 @@ while [[ $# -gt 0 ]]; do
 done
 
 REPO_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
-DUMP_DIR=${REPO_ROOT}/tmp/db-dumps
+DUMP_DIR=${REPO_ROOT}/data/db-dumps
 mkdir -p "${DUMP_DIR}"
 STAMP=$(date +%Y%m%d-%H%M%S)
-WORK_DIR=$(mktemp -d "${REPO_ROOT}/tmp/db-dumps/dump-${STAMP}.XXXXXX")
+WORK_DIR=$(mktemp -d "${REPO_ROOT}/data/db-dumps/dump-${STAMP}.XXXXXX")
 trap 'rm -rf "${WORK_DIR}"' EXIT
 
 # Resume the compose-local stack if it is not up (non-fatal: Atlas sources

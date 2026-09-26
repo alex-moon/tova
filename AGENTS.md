@@ -64,6 +64,15 @@ There is no `mongosh` binary in this environment (yet). To query or mutate the l
 - `npx tsx scripts/mongo.ts <js-expression>` — evaluates a snippet with `db` bound to the `tova` database, prints the result. Examples: `npx tsx scripts/mongo.ts "await db.listCollections().toArray()"`, `npx tsx scripts/mongo.ts "await db.collection('sessions').countDocuments()"`.
 - Prefer small, explicit snippets; this is a debugging tool, not an ORM.
 
+### Database snapshots as diagnostic aid
+
+Take a live dump of production at any time to aid diagnostics (it is non-destructive and safe to run freely):
+
+- `npm run db:dump` — dumps the production/Atlas cluster (`MONGODB_DUMP_URL` in `.env`) into a tarball under `data/db-dumps/` (git-ignored). `npm run db:sync` additionally drops and restores it into the local stack (`MONGODB_URL`) so you can interrogate real data locally; the destructive steps refuse to run against a non-localhost target without `-- --i-know-this-is-dangerous`.
+- Prefer the sync-then-interrogate-locally route: run `npm run db:sync`, then use `scripts/mongo.ts` snippets against the local db.
+
+Reading the dump artifacts directly has a catch: they live under `data/`, which is `.gitignore`d, and the native search/read tools skip ignored files — they will report "not found" even though the file exists. Use CLI tools instead for these paths (e.g. `bash`-tool `tar -tzf data/db-dumps/<file>.tar.gz` to list contents, `rg` explicitly pointed at the path). Preferably, don't read the artifacts at all: load one into the local stack with `npm run db:restore -- --tarball data/db-dumps/<file>.tar.gz` and interrogate it with `scripts/mongo.ts` (the dump/restore payloads are also binary BSON, so text tools get little out of them anyway).
+
 ### Code quality gate
 
 `npm run ci` is the single gate for any code change. It runs everything in sequence (server lint, format check, typecheck, server tests, client lint, client format check, client tests, client build), fails at the first error, and is mirrored by the CI workflow that gates merges to `main`. Run it as the final step before finishing any change; it must pass with exit code 0. Per-step commands below are only for iterating on a single failure without re-running the whole gate:
