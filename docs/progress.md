@@ -8,12 +8,14 @@ completion endpoint is disabled immediately for a cool-off period
 the turn re-routes against the fresh pool until it succeeds or the pool drains — an
 all-cooling-off pool then errors loudly with an end-user-visible message
 (`AllModelsDisabledError`, no env fallback). 429 is deliberately NOT a cool-off (back-off
-is a separate mechanism, to be filed separately) and neither are client aborts nor
+is a separate mechanism, filed as #178) and neither are client aborts nor
 prompt-size (413) failures. Per-model error diagnostics (Alex, 2026-09-26): every
 non-abort endpoint failure — including 429/413/mid-stream shapes — is tallied in the
 `modelerrorstats` collection grouped by status code or redacted message text
 (`modelErrorStatsService.recordEndpointError`), because deploys wipe the logs that would
-otherwise show real connector error shapes; they render in the admin Models tab (own
+otherwise show real connector error shapes (the in-memory log buffer loses everything on
+restart — persistent retention filed as #179, Loki+Promtail); they render in the admin
+Models tab (own
 table, plus a "Cooling off · ~Nh left" badge per inventory row). A failed cool-off write
 stops the failover loop and surfaces the original endpoint error instead of retrying a
 known-broken endpoint.
