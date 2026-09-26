@@ -29,7 +29,7 @@ jest.mock('../services/titleService', () => ({
 const MOCK_ROUTING = {
   model: 'mock-small-model',
   provider: 'deepinfra',
-  reason: 'deterministic-short',
+  reason: 'classifier-simple',
 };
 
 const isClassifierCall = (args?: { messages?: { role: string; content: string }[] }) =>

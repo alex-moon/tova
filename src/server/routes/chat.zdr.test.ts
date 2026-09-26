@@ -49,7 +49,7 @@ jest.mock('../services/titleService', () => ({
   generateChatTitle: jest.fn().mockResolvedValue('Hello'),
 }));
 
-const MOCK_ROUTING = { model: 'mock-small-model', reason: 'deterministic-short' };
+const MOCK_ROUTING = { model: 'mock-small-model', reason: 'classifier-simple' };
 
 const fullStreamFrom = (chunks: string[]) =>
   (async function* () {

@@ -1,4 +1,10 @@
-import { classifyPrompt, pickModelRef, routeQuery } from './routerService';
+import {
+  classifyPrompt,
+  guardVerdictFromReply,
+  parseGuardVotes,
+  pickModelRef,
+  routeQuery,
+} from './routerService';
 import { ModelRef } from './modelConfigService';
 import { FitWeight } from './modelMetricsStatsService';
 import { muteConsoleError } from '../test/muteConsole';
@@ -44,9 +50,13 @@ beforeEach(() => {
 
 afterEach(() => {
   jest.restoreAllMocks();
+  delete process.env.ROUTER_GUARD_CONTEXT_MESSAGES;
 });
 
-const classifyAs = (content: string, error = false) => {
+// Raw guard-reply setter: the mocked generate returns exactly this reply
+// text (createToolFreeCompletion maps generate().text onto
+// choices[0].message.content, so this is the content routeQuery parses).
+const guardReplies = (content: string, error = false) => {
   mockGenerate.mockReset();
   if (error) {
     mockGenerate.mockRejectedValueOnce(new Error('classifier down'));
@@ -55,53 +65,155 @@ const classifyAs = (content: string, error = false) => {
   }
 };
 
+// Semantic shortcut: a well-formed category vote object for the verdict —
+// any "yes" (complex) vs all "no" (simple), the #169 phase-2 contract.
+const classifyAs = (verdict: 'complex' | 'simple') =>
+  guardReplies(
+    verdict === 'complex'
+      ? '{"reasoning":"yes","code":"no","emotional":"no","creative":"no"}'
+      : '{"reasoning":"no","code":"no","emotional":"no","creative":"no"}',
+  );
+
+const lastGuardPrompt = (): string => {
+  const [messages] = mockGenerate.mock.calls[0] as unknown as [{ role: string; content: string }[]];
+  return messages[0].content;
+};
+
 describe('Router Service', () => {
-  describe('Deterministic Routing', () => {
-    it('should route short greetings to the smaller model', async () => {
-      const result = await routeQueryWithCfg('Hello');
+  describe('Guard-only routing (#169 phase 2: no deterministic rules)', () => {
+    // Every text turn reaches the guard now — the old key-phrase rules
+    // ('hi'/'hello' regexes, code keywords) are deleted; a mocked vote
+    // decides each case, so these pin the PLUMBING, not the guard's
+    // judgment (live judgment is evidenced by the #169 spot-check runs).
+    it('routes greetings only when the guard votes all-no', async () => {
+      classifyAs('simple');
+      const result = await routeQueryWithCfg('thanks');
       expect(result.model).toBe('test-small-model');
-      expect(result.reason).toBe('deterministic-short');
+      expect(result.reason).toBe('classifier-simple');
     });
 
-    it('should recognize other greeting/confirmation variants', async () => {
-      for (const query of ['Hey', 'thanks', 'OK', 'Yes, do it', 'thank you']) {
+    it('routes a greeting the guard votes substantive to the LARGE tier', async () => {
+      classifyAs('complex');
+      const result = await routeQueryWithCfg('Hello');
+      expect(result.model).toBe('test-large-model');
+      expect(result.reason).toBe('classifier-complex');
+    });
+
+    it('sends explicit code requests through the guard, vote decides', async () => {
+      for (const query of [
+        'hi, write code',
+        'ok script',
+        'Write a Python function to sort a list',
+      ]) {
+        classifyAs('complex');
         const result = await routeQueryWithCfg(query);
-        expect(result.reason).toBe('deterministic-short');
+        expect(result.reason).toBe('classifier-complex');
+        expect(result.model).toBe('test-large-model');
       }
     });
 
-    it('should route requests for code to the larger model', async () => {
-      const result = await routeQueryWithCfg('Write a Python function to sort a list');
+    it('sends short confirmations and prefix-lookalikes through the guard', async () => {
+      // The deleted deterministic-short regex used to decide these before
+      // the guard ever saw them ('OK', 'Okay', 'high tier please', 'hit me').
+      for (const query of [
+        'OK',
+        'Okay',
+        'okay!',
+        'hi!',
+        'no, use postgres',
+        'high tier please',
+        'hit me',
+      ]) {
+        classifyAs('simple');
+        const result = await routeQueryWithCfg(query);
+        expect(result.reason).toBe('classifier-simple');
+        expect(mockGenerate).toHaveBeenCalledTimes(1);
+        mockGenerate.mockClear();
+      }
+    });
+
+    it('routes the canonical greeting-plus-substance prompt by its vote', async () => {
+      // The user's #169 example: a greeting prefix must never drag a
+      // substantive request into the exception tier.
+      classifyAs('complex');
+      const result = await routeQueryWithCfg('Hello! Please explain quantum tunneling to me.');
       expect(result.model).toBe('test-large-model');
-      expect(result.reason).toBe('deterministic-code');
+      expect(result.reason).toBe('classifier-complex');
+    });
+  });
+
+  describe('Vote parsing (the #169 phase-2 reply contract)', () => {
+    it('extracts the last vote object from reasoning-clad replies', () => {
+      // Reasoning models emit chain-of-thought ahead of the answer (#129):
+      // an earlier worked-example object must not win over the final vote.
+      const reply =
+        'Considering the request, e.g. {"reasoning":"yes","code":"no","emotional":"no","creative":"no"} would be wrong here, so: {"reasoning":"no","code":"no","emotional":"no","creative":"no"}';
+      expect(guardVerdictFromReply(reply)).toBe('simple');
     });
 
-    it('should match code keywords case-insensitively', async () => {
-      const result = await routeQueryWithCfg('Help me write a SCRIPT');
-      expect(result.reason).toBe('deterministic-code');
+    it('skips decoy objects with no category keys', () => {
+      expect(parseGuardVotes('{"foo":"bar"}')).toBeNull();
+      expect(parseGuardVotes('prose {"note":"hi"} tail {"reasoning":"no"} end')).toEqual({
+        reasoning: 'no',
+      });
     });
 
-    it('should route fenced code blocks to the larger model', async () => {
-      const result = await routeQueryWithCfg('What does this do?\n```js\nconsole.log(1);\n```');
-      expect(result.reason).toBe('deterministic-code');
+    it('tolerates markdown fences and trailing punctuation around the object', () => {
+      expect(
+        guardVerdictFromReply(
+          '```json\n{"reasoning":"no","code":"no","emotional":"no","creative":"no"}\n```',
+        ),
+      ).toBe('simple');
+      expect(
+        guardVerdictFromReply('{"reasoning":"yes","code":"no","emotional":"no","creative":"no"}.'),
+      ).toBe('complex');
     });
 
-    it('should not treat a long greeting as a deterministic rule', async () => {
-      classifyAs('simple');
-      const result = await routeQueryWithCfg('Hello there, how are you doing today?');
-      // Longer than 20 chars: falls through to the classifier.
-      expect(result.reason).toBe('classifier-simple');
+    it('finds a vote nested inside a wrapper object', () => {
+      expect(
+        guardVerdictFromReply(
+          '{"votes":{"reasoning":"no","code":"no","emotional":"no","creative":"no"}}',
+        ),
+      ).toBe('simple');
     });
 
-    it('should send a short non-greeting query to the classifier', async () => {
-      classifyAs('simple');
-      const result = await routeQueryWithCfg('2 + 2');
-      expect(result.reason).toBe('classifier-simple');
+    it('treats a missing category as a yes vote (doubt routes large)', () => {
+      expect(guardVerdictFromReply('{"reasoning":"no","code":"no","emotional":"no"}')).toBe(
+        'complex',
+      );
+    });
+
+    it('treats any non-"no" value as a yes vote', () => {
+      expect(
+        guardVerdictFromReply('{"reasoning":"maybe","code":"no","emotional":"no","creative":"no"}'),
+      ).toBe('complex');
+      // Booleans are not the contract's yes/no strings — doubt routes large.
+      expect(
+        guardVerdictFromReply(
+          '{"reasoning":false,"code":false,"emotional":false,"creative":false}',
+        ),
+      ).toBe('complex');
+    });
+
+    it('normalizes value case and surrounding whitespace', () => {
+      expect(
+        guardVerdictFromReply('{"reasoning":"NO","code":" No ","emotional":"no","creative":"no"}'),
+      ).toBe('simple');
+      expect(
+        guardVerdictFromReply('{"reasoning":"YES","code":"no","emotional":"no","creative":"no"}'),
+      ).toBe('complex');
+    });
+
+    it('returns null for empty or vote-less replies', () => {
+      expect(guardVerdictFromReply('')).toBeNull();
+      expect(guardVerdictFromReply('unsure')).toBeNull();
+      // Truncated JSON (no closing brace) — the max_tokens failure shape.
+      expect(guardVerdictFromReply('{"reasoning":"no","code":"no","emot')).toBeNull();
     });
   });
 
   describe('Classifier Routing', () => {
-    it('should route queries classified as complex to the larger model', async () => {
+    it('should route any-yes votes to the larger model', async () => {
       classifyAs('complex');
       const result = await routeQueryWithCfg(
         'Explain the tradeoffs of event sourcing in distributed systems',
@@ -114,7 +226,7 @@ describe('Router Service', () => {
       });
     });
 
-    it('should route queries classified as simple to the smaller model', async () => {
+    it('should route all-no votes to the smaller model', async () => {
       classifyAs('simple');
       const result = await routeQueryWithCfg('Give me a one-line haiku about rain');
       expect(result).toEqual({
@@ -124,14 +236,16 @@ describe('Router Service', () => {
       });
     });
 
-    it('should normalize classifier output when deciding', async () => {
-      classifyAs('  COMPLEX\n  ');
+    it('should route a vote carried by reasoning prose to the larger model', async () => {
+      guardReplies(
+        'thinking... example {"reasoning":"no","code":"no","emotional":"no","creative":"no"} then final: {"reasoning":"yes","code":"no","emotional":"no","creative":"no"}',
+      );
       const result = await routeQueryWithCfg('Advise a go-to-market plan for a new SaaS product');
       expect(result.reason).toBe('classifier-complex');
     });
 
     it('should fall back to the larger model when the classifier errors', async () => {
-      classifyAs('', true);
+      guardReplies('', true);
       const result = await routeQueryWithCfg('Should I buy this car or that car?');
       expect(result).toEqual({
         model: 'test-large-model',
@@ -144,24 +258,10 @@ describe('Router Service', () => {
       );
     });
 
-    it('should normalize classifier output embedded in reasoning text', async () => {
-      // Some guard models include their reasoning in `content` ahead of the
-      // verdict; the LAST word-boundary match decides.
-      classifyAs('This query is multi-part, so not simple: my verdict is complex.');
-      const result = await routeQueryWithCfg('Advise a go-to-market plan for a new SaaS product');
-      expect(result.reason).toBe('classifier-complex');
-    });
-
-    it('should accept a punctuated verdict', async () => {
-      classifyAs('complex.');
-      const result = await routeQueryWithCfg('Tell me about classic cars');
-      expect(result.reason).toBe('classifier-complex');
-    });
-
-    it('should fall back to the larger model on an unrecognized classification', async () => {
+    it('should fall back to the larger model on an unparseable reply', async () => {
       // A verdict-less reply is the exact LangSmith-observed failure that
       // routed the #129 conversation to the small tier: never default small.
-      classifyAs('unsure');
+      guardReplies('unsure');
       const result = await routeQueryWithCfg('Tell me about classic cars');
       expect(result).toEqual({
         model: 'test-large-model',
@@ -171,10 +271,10 @@ describe('Router Service', () => {
       expect(consoleErrorSpy).toHaveBeenCalledWith('Classifier unparseable reply:', 'unsure');
     });
 
-    it('should fall back to the larger model on an empty classification', async () => {
+    it('should fall back to the larger model on an empty reply', async () => {
       // #129: the guard model consumed its whole token budget on reasoning
-      // and returned `text: ''` on every retained trace.
-      classifyAs('');
+      // and returned empty text on every retained trace.
+      guardReplies('');
       const result = await routeQueryWithCfg('Hello there, how are you doing today?');
       expect(result).toEqual({
         model: 'test-large-model',
@@ -183,7 +283,7 @@ describe('Router Service', () => {
       });
     });
 
-    it('sends the query to the guard classifier', async () => {
+    it('sends the query and the vote contract to the guard classifier', async () => {
       classifyAs('simple');
       await routeQueryWithCfg('Give me investment advice');
       const [messages, options] = mockGenerate.mock.calls[0] as unknown as [
@@ -195,37 +295,42 @@ describe('Router Service', () => {
       expect(ctorCall.model).toBe('groq/test-guard-model');
       expect(options.modelSettings.temperature).toBe(0);
       expect(messages[0].role).toBe('user');
-      expect(messages[0].content).toMatch(/simple|complex/i);
+      expect(messages[0].content).toContain('"reasoning"');
+      expect(messages[0].content).toContain('"code"');
+      expect(messages[0].content).toContain('Current request: Give me investment advice');
     });
 
-    it('classifies conversational narrative prose with the new prompt (#129)', async () => {
+    it('frames the categories and the small exception in the prompt (#129/#169)', async () => {
       classifyAs('simple');
       await routeQueryWithCfg(
         `Hello! We are going to Ad Gefrin this morning - last time I went it was literally just a plaque, now they have a whole museum. While we're up that way are there any other super cool historical sites we should swing past? That's the Cheviots if I'm not mistaken?`,
       );
-      const [messages] = mockGenerate.mock.calls[0] as unknown as [
-        { role: string; content: string }[],
-      ];
-      expect(messages[0].role).toBe('user');
-      expect(messages[0].content).toContain('complex');
-      expect(messages[0].content).toContain('conversational or narrative prose');
-      expect(messages[0].content).toContain('more than one distinct question');
-      expect(messages[0].content).toContain('prior conversation, personal experience');
-      expect(messages[0].content).toContain('one word');
-      expect(messages[0].content).toContain('Ad Gefrin');
+      const prompt = lastGuardPrompt();
+      expect(prompt).toContain('ONLY one JSON object');
+      expect(prompt).toContain('explanation, analysis, multi-step reasoning');
+      expect(prompt).toContain('writing, debugging, reviewing, or discussing code');
+      expect(prompt).toContain('emotional support, comfort, or weighty personal talk');
+      expect(prompt).toContain('creative writing');
+      // The #169 asymmetry survives phase 2: greetings/thanks are named as
+      // the all-no exception, and short factual one-liners stay small.
+      expect(prompt).toContain('Greetings, thanks, and yes/no confirmations');
+      expect(prompt).toContain('what is the capital of Australia?');
+      expect(prompt).toContain('Ad Gefrin');
     });
 
-    it('gives reasoning guard models room for the answer word (#129)', async () => {
+    it('gives reasoning guard models room for the vote object (#129)', async () => {
       classifyAs('simple');
       await routeQueryWithCfg('Give me investment advice');
       const [, options] = mockGenerate.mock.calls[0] as unknown as [
         { role: string; content: string }[],
         { modelSettings: { temperature: number; maxOutputTokens: number } },
       ];
-      // LangSmith evidence: the reasoning guard model returned an EMPTY
-      // answer at the old 10-token budget. Default must be far above it.
+      // LangSmith evidence (#129): the reasoning guard model returned an
+      // EMPTY answer at the old 10-token budget. #169 phase 2 raised the
+      // default 256 → 512: with a conversation transcript in the prompt,
+      // 256 truncated the vote JSON (budget-probe artifact).
       expect(options.modelSettings.maxOutputTokens).not.toBe(10);
-      expect(options.modelSettings.maxOutputTokens).toBe(256);
+      expect(options.modelSettings.maxOutputTokens).toBe(512);
       expect(options.modelSettings.temperature).toBe(0);
     });
 
@@ -256,81 +361,79 @@ describe('Router Service', () => {
     });
   });
 
-  describe('Large-by-default inversion (#169)', () => {
-    it('frames small as the exception in the classifier prompt', () => {
-      // #169: the decision boundary is inverted — large is the default, the
-      // small tier gets only trivially conversational intent. The prompt's
-      // own wording must keep that asymmetry: `simple` is defined narrowly
-      // ("only when"), `complex` covers everything otherwise.
-      expect(classifyPrompt('anything')).toMatch(/"simple" only when/);
-      expect(classifyPrompt('anything')).toMatch(/only one word/);
-    });
+  describe('Conversation context (#169 phase 2)', () => {
+    const heavyWorkHistory = [
+      { role: 'user' as const, content: 'help me design a postgres schema for our bookings app' },
+      {
+        role: 'assistant' as const,
+        content: 'sure, here is a normalized schema with bookings and guests tables...',
+      },
+      { role: 'user' as const, content: 'the migrations keep failing on the foreign keys' },
+      { role: 'assistant' as const, content: 'lets look at the constraint order then...' },
+    ];
+    const trivialHistory = [
+      { role: 'user' as const, content: 'hello' },
+      { role: 'assistant' as const, content: 'hi! how can I help?' },
+    ];
 
-    it('still routes unambiguous greeting one-liners to the small tier', async () => {
-      const result = await routeQueryWithCfg('thanks');
-      expect(result.reason).toBe('deterministic-short');
-      expect(result.model).toBe('test-small-model');
-    });
-
-    it('routes unparseable guard replies to the LARGE tier, never small', async () => {
-      // The inversion's safe default: a classifier that fails or answers
-      // nonsense must not page the exception tier.
-      classifyAs('unsure');
-      const result = await routeQueryWithCfg('Tell me about classic cars');
-      expect(result.model).toBe('test-large-model');
-      expect(result.reason).toBe('classifier-unparseable');
-    });
-
-    it('routes a substantive multi-part request to the LARGE tier', async () => {
+    it('shows the transcript to the guard, oldest first, without the current turn', async () => {
       classifyAs('complex');
-      const result = await routeQueryWithCfg(
-        'We are planning a week in the Pyrenees with kids; compare rail vs flying and suggest an itinerary',
-      );
-      expect(result.model).toBe('test-large-model');
-      expect(result.reason).toBe('classifier-complex');
+      await routeQuery('no, use psql', TEST_CONFIG, undefined, { history: heavyWorkHistory });
+      const prompt = lastGuardPrompt();
+      expect(prompt).toContain('Conversation so far, oldest first:');
+      expect(prompt.indexOf('bookings app')).toBeLessThan(prompt.indexOf('constraint order'));
+      expect(prompt).toContain('user: help me design a postgres schema');
+      expect(prompt).toContain('Current request: no, use psql');
     });
 
-    it('#169: never shadows an explicit code request with the greeting rule', async () => {
-      // Rule-order hardening: short prompts that start with a greeting token
-      // but carry an explicit coding request ('hi, write code', <20 chars)
-      // used to hit deterministic-short and route SMALL — contradicting the
-      // inverted boundary, under which an explicit code request is never
-      // trivially conversational. The deterministic-code rule must win.
-      for (const query of ['hi, write code', 'ok script', 'no code please']) {
-        expect(query.length).toBeLessThan(20);
-        const result = await routeQueryWithCfg(query);
-        expect(result.reason).toBe('deterministic-code');
-        expect(result.model).toBe('test-large-model');
-      }
+    it('bounds the transcript to the last ROUTER_GUARD_CONTEXT_MESSAGES (default 10)', async () => {
+      const longHistory = Array.from({ length: 13 }, (_, i) => ({
+        role: 'user' as const,
+        content: `turn ${i}`,
+      }));
+      classifyAs('simple');
+      await routeQuery('next', TEST_CONFIG, undefined, { history: longHistory });
+      const prompt = lastGuardPrompt();
+      expect(prompt).toContain('turn 3');
+      expect(prompt).not.toContain('turn 0');
+      expect(prompt).not.toContain('turn 2');
     });
 
-    it('#169: does NOT prefix-match greeting words inside real words', async () => {
-      // The deterministic-short regex must not treat a greeting word as just
-      // a prefix ('high', 'notice', 'nope', 'okay' minus the word itself) —
-      // under the inverted boundary, small is reserved for trivial intent.
-      const notTrivial = [
-        'high tier please',
-        'notice sent',
-        'nope is fine',
-        'hippo facts',
-        'hit me',
-      ];
-      for (const query of notTrivial) {
-        expect(query.length).toBeLessThan(20);
-        classifyAs('simple');
-        const result = await routeQueryWithCfg(query);
-        expect(result.reason).not.toContain('deterministic-short');
-      }
+    it('honors ROUTER_GUARD_CONTEXT_MESSAGES when set', async () => {
+      process.env.ROUTER_GUARD_CONTEXT_MESSAGES = '3';
+      const history = Array.from({ length: 6 }, (_, i) => ({
+        role: 'user' as const,
+        content: `turn ${i}`,
+      }));
+      classifyAs('simple');
+      await routeQuery('next', TEST_CONFIG, undefined, { history });
+      const prompt = lastGuardPrompt();
+      expect(prompt).toContain('turn 3');
+      expect(prompt).toContain('turn 5');
+      expect(prompt).not.toContain('turn 2');
     });
 
-    it('#169: keeps greeting words WITH word boundaries deterministic-short', async () => {
-      // 'Okay' pins the 77c7163 alternation entry: without it the \b would
-      // reject 'okay' (the 'ok' branch fails the boundary mid-word) and the
-      // greeting would silently fall through to the guard.
-      for (const query of ['OK', 'Okay', 'okay!', 'Yes, do it', 'thank you', 'hey!', 'hi!']) {
-        const result = await routeQueryWithCfg(query);
-        expect(result.reason).toBe('deterministic-short');
-      }
+    it('omits the transcript block entirely when history is absent', () => {
+      expect(classifyPrompt('bare question')).not.toContain('Conversation so far');
+      expect(classifyPrompt('bare question', [])).not.toContain('Conversation so far');
+      expect(classifyPrompt('bare question', [])).toContain('Current request: bare question');
+    });
+
+    it('pins the context-sensitivity plumbing: same text, history decides', async () => {
+      // The mocked votes stand in for the guard's context-sensitive
+      // judgment (evidenced live by the spot-check); these pins prove the
+      // history actually reaches the decision path.
+      classifyAs('complex');
+      const atWork = await routeQuery('no, use psql', TEST_CONFIG, undefined, {
+        history: heavyWorkHistory,
+      });
+      expect(atWork.reason).toBe('classifier-complex');
+
+      classifyAs('simple');
+      const atChitChat = await routeQuery('no, use psql', TEST_CONFIG, undefined, {
+        history: trivialHistory,
+      });
+      expect(atChitChat.reason).toBe('classifier-simple');
     });
   });
 
@@ -380,7 +483,8 @@ describe('Router Service', () => {
       expect(pickModelRef(models, 'small', 0, () => 0.99)).toBe(groqSmall);
     });
 
-    it('routes a multi-model tier through the pool for a deterministic rule', async () => {
+    it('routes a multi-model tier through the pool for a guard vote', async () => {
+      classifyAs('complex');
       const result = await routeQuery(
         'Hello',
         pool([{ ...groqSmall }, { ...groqLarge }]),
@@ -388,13 +492,14 @@ describe('Router Service', () => {
       );
       expect(result).toEqual({
         model: 'test-large-model',
-        reason: 'deterministic-short',
+        reason: 'classifier-complex',
         provider: 'groq',
       });
     });
 
     it('records the picked provider from the pool, not a hard-coded groq', async () => {
       // Non-trivial pool with a DeepInfra entry selected by the injected PRNG.
+      classifyAs('complex');
       const result = await routeQuery(
         'Hello',
         pool([groqSmall, { provider: 'deepinfra', model: 'gemma-test' }]),
@@ -451,11 +556,11 @@ describe('Router Service', () => {
       ).rejects.toThrow('No vision-capable models configured for image attachments');
     });
 
-    it('keeps deterministic rules and classifier behaviour for text-only turns', async () => {
+    it('keeps guard behaviour for text-only turns', async () => {
       classifyAs('simple');
       const result = await routeQuery('Hello', vlConfig, () => 0.1);
       expect(result.model).toBe(groqSmall.model);
-      expect(result.reason).toBe('deterministic-short');
+      expect(result.reason).toBe('classifier-simple');
     });
   });
 
@@ -470,7 +575,8 @@ describe('Router Service', () => {
       guardModel: 'test-guard-model',
     });
 
-    it('carries contextLength from the pool ref on a deterministic rule', async () => {
+    it('carries contextLength from the pool ref on a guard small pick', async () => {
+      classifyAs('simple');
       const result = await routeQuery(
         'Hello',
         pool([{ provider: 'deepinfra', model: 'qwen', contextLength: 40960 }], [groqLarge]),
@@ -480,6 +586,7 @@ describe('Router Service', () => {
     });
 
     it('omits the key entirely when the ref has no contextLength (env fallback)', async () => {
+      classifyAs('simple');
       const result = await routeQuery('Hello', pool([groqSmall], [groqLarge]), () => 0.1);
       expect('contextLength' in result).toBe(false);
       expect('reason' in result).toBe(true);
@@ -517,7 +624,7 @@ describe('Router Service', () => {
       expect(forced.model).toBe('test-small-model-2');
       expect(forced.contextLength).toBe(8192);
 
-      classifyAs('complex', true);
+      guardReplies('', true);
       const errored = await routeQuery(
         'Design a schema migration plan',
         pool([groqSmall], [{ provider: 'groq', model: 'test-large-model', contextLength: 55000 }]),
@@ -591,12 +698,8 @@ describe('Router Service', () => {
       expect(result.reason).toContain(';feedback-weight:1.00:0/0');
     });
 
-    it('leaves deterministic rules and classifier-error untouched by feedback', async () => {
-      const greet = await routeQueryWithCfg('Hello');
-      expect(greet.reason).toBe('deterministic-short');
-      const code = await routeQueryWithCfg('write code');
-      expect(code.reason).toBe('deterministic-code');
-      classifyAs('', true);
+    it('leaves the classifier-error fallback untouched by feedback', async () => {
+      guardReplies('', true);
       const errored = await routeQuery(
         'Should I buy this or that car?',
         twoPool([groqSmall], [groqLarge, groqSmallAlt]),
@@ -637,6 +740,7 @@ describe('Router Service', () => {
 
     it('fails loudly when the completions pool resolves empty (#4 G, #94)', async () => {
       mockCompletionsPoolFor.mockResolvedValue([]);
+      classifyAs('simple');
       await expect(routeQuery('Hello')).rejects.toThrow('No eligible models configured for tier');
     });
   });
@@ -644,14 +748,20 @@ describe('Router Service', () => {
   describe('Routing metadata contract', () => {
     it('always returns a model and a human-readable reason', async () => {
       const cases: Promise<Routing>[] = [
-        routeQueryWithCfg('Hello'),
-        routeQueryWithCfg('write code'),
+        (async () => {
+          classifyAs('simple');
+          return routeQueryWithCfg('Hello');
+        })(),
+        (async () => {
+          classifyAs('complex');
+          return routeQueryWithCfg('write code');
+        })(),
         (async () => {
           classifyAs('complex');
           return routeQueryWithCfg('Design a caching strategy');
         })(),
         (async () => {
-          classifyAs('', true);
+          guardReplies('', true);
           return routeQueryWithCfg('Pick a color for me out of two options');
         })(),
       ];

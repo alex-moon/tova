@@ -24,7 +24,7 @@ jest.mock('../services/titleService', () => ({
   generateChatTitle: jest.fn().mockResolvedValue('Hello'),
 }));
 
-const MOCK_ROUTING = { model: 'mock-small-model', reason: 'deterministic-short' };
+const MOCK_ROUTING = { model: 'mock-small-model', reason: 'classifier-simple' };
 
 const registerUser = async (app: ReturnType<typeof createApp>, email: string) => {
   const response = await request(app)

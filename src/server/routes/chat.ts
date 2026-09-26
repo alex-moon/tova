@@ -348,6 +348,23 @@ const messagesFromPersistedHistory = (
     content: m.content as string,
   }));
 
+/*
+ * #169 phase 2: the guard classifier's conversation context — prior turns
+ * only, oldest first, never the just-saved current message (it rides
+ * separately as the query). The persisted find is newest-first and INCLUDES
+ * the current turn, so it is dropped by id and the tail reversed. DB
+ * `Message.content` is always a string, so the guard's text-only history
+ * needs no part-flattening here.
+ */
+const guardHistoryFromDocs = (
+  docs: { _id: unknown; role: string; content: string }[],
+  currentMessageId: unknown,
+): { role: 'user' | 'assistant'; content: string }[] =>
+  docs
+    .filter((m) => String(m._id) !== String(currentMessageId))
+    .reverse()
+    .map((m) => ({ role: m.role as 'user' | 'assistant', content: m.content as string }));
+
 // Throwaway chat attachments (#116): as soon as the turn that consumed them
 // completes, the row and its Spaces object go. Never throws — cleanup must
 // not turn a finished answer into an error.
@@ -529,7 +546,13 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
 
       const zdrRoutingBand = buildRoutingBand(computeDeterministicMetrics(content));
       const { routing: routingResult, completion: chatCompletion } = await withModelFailover(
-        () => routeQuery(content, undefined, undefined, { band: zdrRoutingBand }),
+        // #169 phase 2: the guard classifies with the replayed context —
+        // prior-turns-only by construction of buildZdrMessages.
+        () =>
+          routeQuery(content, undefined, undefined, {
+            band: zdrRoutingBand,
+            history: zdrHistory.value,
+          }),
         (r) =>
           inferenceService.createCompletion({
             messages,
@@ -580,10 +603,16 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
     // re-routed against the fresh pools (#168).
     const hasImage = turnsWithImage(attachedAsset);
 
-    // Get chat history for context
+    // Get chat history for context. #169 phase 2: the guard classifies the
+    // turn with this context too — the window includes the just-saved
+    // current turn, which is dropped for the guard (it rides as the query).
     const history = await Message.find({ sessionId: session._id })
       .sort({ timestamp: -1 })
       .limit(10);
+    const guardHistory = guardHistoryFromDocs(
+      history as unknown as { _id: unknown; role: string; content: string }[],
+      userMessage._id,
+    );
     const messages = messagesFromPersistedHistory(history as { role: string; content: string }[]);
     // Coarse geolocation (#50): awaited so this turn's prompt can include the
     // country; cheap when cached (fresh/cooldown returns immediately) and the
@@ -600,7 +629,12 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
     }
 
     const { routing: routingResult, completion: chatCompletion } = await withModelFailover(
-      () => routeQuery(content, undefined, undefined, { band: routingBand, hasImage }),
+      () =>
+        routeQuery(content, undefined, undefined, {
+          band: routingBand,
+          hasImage,
+          history: guardHistory,
+        }),
       (r) =>
         inferenceService.createCompletion({
           messages,
@@ -776,6 +810,10 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
       role: 'system' | 'user' | 'assistant';
       content: string | MessageContentPart[];
     }[];
+    // #169 phase 2: the guard classifier's conversation context — prior
+    // turns only, computed once per turn and reused by the failover
+    // re-route below so a retry never re-derives it.
+    let guardHistory: { role: 'user' | 'assistant'; content: string }[] = [];
 
     // Image turns (#115): gate on both the content type and a configured
     // presign path; the image part replaces the filename envelope this turn.
@@ -786,9 +824,13 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
       // Continuity comes from the client replay (#116); nothing is read back.
       routingBand = buildRoutingBand(computeDeterministicMetrics(content));
       messages = buildZdrMessages(zdrHistory, content);
+      // #169 phase 2: the replay is prior-turns-only by construction —
+      // exactly the guard's context contract.
+      guardHistory = zdrHistory;
       routingResult = await routeQuery(content, undefined, undefined, {
         band: routingBand,
         hasImage,
+        history: guardHistory,
       });
     } else {
       // Save user message
@@ -802,16 +844,24 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
       // so it must be computed before the router sees the turn (decision 4).
       routingBand = buildRoutingBand(userMessage.metrics);
 
+      // Get chat history BEFORE routing (#169 phase 2): the guard
+      // classifies the turn with this context — the window includes the
+      // just-saved current turn, which is dropped for the guard (it rides
+      // as the query).
+      const history = await Message.find({ sessionId: session!._id })
+        .sort({ timestamp: -1 })
+        .limit(10);
+      guardHistory = guardHistoryFromDocs(
+        history as unknown as { _id: unknown; role: string; content: string }[],
+        userMessage._id,
+      );
+
       // Determine model. Same image-turn gating as the non-streaming route (#115).
       routingResult = await routeQuery(content, undefined, undefined, {
         band: routingBand,
         hasImage,
+        history: guardHistory,
       });
-
-      // Get chat history for context
-      const history = await Message.find({ sessionId: session!._id })
-        .sort({ timestamp: -1 })
-        .limit(10);
       messages = messagesFromPersistedHistory(history as { role: string; content: string }[]);
     }
 
@@ -907,6 +957,7 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
               routingResult = await routeQuery(content, undefined, undefined, {
                 band: routingBand,
                 hasImage,
+                history: guardHistory,
               });
             } catch {
               throw new AllModelsDisabledError();
