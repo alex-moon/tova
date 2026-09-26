@@ -42,10 +42,21 @@ export const isPromptSizeError = (err: unknown): boolean => {
   return statusCode === 413 || /Request too large/.test(message);
 };
 
+/*
+ * Mirrors the 429 discrimination in `streamingErrorMessage` (routes/chat.ts):
+ * a status code when present, plus the Groq/Mastra message bodies that
+ * rethrow without one. A stricter (narrower) matcher here would disable an
+ * endpoint on a rate-limit-shaped error the route layer treats as a retry.
+ */
 export const isRateLimitError = (err: unknown): boolean => {
   const message = err instanceof Error ? err.message : '';
   const statusCode = (err as { statusCode?: unknown } | null | undefined)?.statusCode;
-  return statusCode === 429 || /rate limit|too many requests/i.test(message);
+  return (
+    statusCode === 429 ||
+    /rate[ _-]?limit/i.test(message) ||
+    /(tokens per minute|requests per minute)/i.test(message) ||
+    /\bTPM\b|\bRPM\b|\btoo many requests\b/i.test(message)
+  );
 };
 
 export interface FailoverOutcome<T> {
@@ -54,7 +65,7 @@ export interface FailoverOutcome<T> {
 }
 
 /** Safety cap: one disable per attempt exhausts any sane pool long before. */
-const MAX_ATTEMPTS = 8;
+export const MAX_ATTEMPTS = 8;
 
 export const withModelFailover = async <T>(
   route: () => Promise<RoutingResult>,

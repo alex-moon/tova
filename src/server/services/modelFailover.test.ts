@@ -2,6 +2,7 @@ import type { RoutingResult } from './routerService';
 import {
   AllModelsDisabledError,
   ALL_MODELS_DISABLED_MESSAGE,
+  isRateLimitError,
   withModelFailover,
 } from './modelFailover';
 
@@ -133,6 +134,28 @@ describe('withModelFailover (#168)', () => {
       ),
     ).rejects.toThrow(/rate limit/i);
     expect(mockDisableModel).not.toHaveBeenCalled();
+  });
+
+  // #168: the rate-limit matcher must stay as broad as the 429
+  // discrimination in `streamingErrorMessage` (routes/chat.ts) — a
+  // Groq-style TPM/RPM body rethrown without a status code must not disable.
+  it('a rate-limit message without a status code is matched in all message shapes', () => {
+    for (const message of [
+      'Rate limit exceeded',
+      'rate_limit_exceeded',
+      'Tokens per minute (TPM) limit reached',
+      'Requests per minute (RPM) quota exhausted',
+      'Too Many Requests',
+    ]) {
+      expect(isRateLimitError(new Error(message))).toBe(true);
+    }
+    expect(isRateLimitError(Object.assign(new Error('over quota'), { statusCode: 429 }))).toBe(
+      true,
+    );
+    expect(isRateLimitError(new Error('upstream 500'))).toBe(false);
+    expect(isRateLimitError(Object.assign(new Error('bad gateway'), { statusCode: 502 }))).toBe(
+      false,
+    );
   });
 
   it('an AllModelsDisabledError escaping route passes through untouched', async () => {

@@ -35,6 +35,8 @@ import {
   AllModelsDisabledError,
   isClientAbort,
   isPromptSizeError,
+  isRateLimitError,
+  MAX_ATTEMPTS,
   withModelFailover,
 } from '../services/modelFailover';
 
@@ -856,7 +858,7 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
       // the pool drains and routing eventually fails — but the explicit cap
       // keeps pathological cases loud instead of putting an unbounded loop
       // on the request path.
-      for (let attempt = 1; attempt <= 8; attempt++) {
+      for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
         try {
           sendEvent('meta', {
             // ZDR (#116): no sessionId is minted — nothing the replay could
@@ -900,7 +902,10 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
             assistantContent === '' &&
             !isClientAbort(err) &&
             !isPromptSizeError(err) &&
-            attempt < 8
+            // #168 (decision 2026-09-26): 429 is back-off territory, a
+            // separate mechanism — never a cool-off or a pool-draining retry.
+            !isRateLimitError(err) &&
+            attempt < MAX_ATTEMPTS
           ) {
             await disableModel(routingResult.provider, routingResult.model);
             try {
