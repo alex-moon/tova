@@ -10,6 +10,7 @@ services:
       - MONGODB_URL=${MONGODB_URL}
       - PORT=5000
       - NODE_ENV=production
+      - LOKI_URL=http://loki:3100
     env_file:
       - .env
 
@@ -21,3 +22,24 @@ services:
       - '15173:4173'
     depends_on:
       - backend
+
+  loki:
+    image: grafana/loki:3.7.3
+    command: ['-config.file=/etc/loki/config.yml']
+    ports:
+      - '127.0.0.1:3100:3100'
+    volumes:
+      - ./ops/loki/config.yml:/etc/loki/config.yml:ro
+      - loki_data:/loki
+
+  alloy:
+    image: grafana/alloy:v1.19.2
+    command: ['run', '/etc/alloy/config.alloy']
+    volumes:
+      - ./ops/alloy/config.alloy:/etc/alloy/config.alloy:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    depends_on:
+      - loki
+
+volumes:
+  loki_data:
