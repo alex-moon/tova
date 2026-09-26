@@ -7,7 +7,46 @@ Written: 2026-09-26, plan-write pass. Revised: 2026-09-26, plan-review pass
 probed candidates, fixed the selection, and re-verified every factual claim.
 Sources are named inline; facts re-verified in the review pass are marked **[R]**.
 
-## Status (revision 3, 2026-09-26 — implementation pass; working tree, uncommitted)
+## Status (revision 4, 2026-09-26 — critic pass; working tree, uncommitted)
+
+Independent adversarial review of the branch (diff vs `origin/main`).
+The orchestrator owns commit/push.
+
+Re-verified first-hand this pass:
+- Live catalog re-dump (`GET /v1/openai/models`, 2026-09-26): all 14 ids
+  present, 187 models / 102 chat-tagged; every `contextLength`, input/output
+  price and vision tag still matches the decision-1 table exactly, and the
+  Maverick/VL-8B delisting is re-confirmed (both absent from the dump).
+- Live probes re-run: `XiaomiMiMo/MiMo-V2.6-Pro` and `MiniMaxAI/MiniMax-M3`
+  clean 200s with tools + `image_url` part; `NVIDIA-Nemotron-3-Super-120B-A12B`
+  "Model busy" 429 on 2/2 attempts — OQ-2's recurrence holds (evidence
+  updated there).
+- Local DB inspection: all 14 rows present field-complete post-migration;
+  admin deletions (Maverick, gpt-oss-120b-large, VL-8B-large) were not
+  resurrected. Side observation, not #170's scope: the local dev DB carries
+  stale pre-migration rows production-shaped DBs would not have
+  (`Qwen/Qwen2.5-72B-Instruct` small tier with `contextLength: null`;
+  VL-8B at small tier) — they share local small-tier traffic until cleaned.
+
+Hardening added this pass (uncommitted, on top of the deliverable):
+- `migrationSeedMoreModels.test.ts` gained a seed↔migration drift test:
+  `up` on a fresh (empty) DB must insert exactly the 14 rows, every field
+  present-on-insert, and the row set must equal the non-pre-#170 large
+  `SEED_ENTRIES` rows (cross-checked via `sweepModels`) field for field.
+  Closes the two-copies-of-the-same-truth hole: nothing previously related
+  SEED_ENTRIES to the migration `ROWS`, so a one-sided future edit would
+  silently split fresh DBs from upgraded ones. Mutation-verified (a
+  one-field drift injected into the migration fails the test; reverted).
+  Also covers the previously untested fresh-deployment `up` path
+  (migrations run before the app ever seeds).
+- `npm run ci` exit 0 with the added test: 69 suites / 886 tests green.
+
+The four open questions are (re-)queued on the ticket this pass — the
+injected ticket state still shows no comments, so per the plan-169
+precedent the substance is re-queued regardless of what earlier passes
+may have queued. OQ-2 carries today's added recurrence evidence.
+
+### Status (revision 3, 2026-09-26 — implementation pass; archived below)
 
 Implemented tasks 1–3. The orchestrator owns commit/push.
 
@@ -391,8 +430,9 @@ what the plan-write pass queued).
   answered by the ticket body (70–170b is acceptable, only <70b is ignored),
   so the remaining doubt is capacity: `NVIDIA-Nemotron-3-Super-120B-A12B`
   returned "Model busy" 429 on 2 of 3 probe attempts in the review pass, and
-  on ALL 6 attempts (~20 min apart) in the implementation pass — the
-  oscillation is worse than first recorded. At runtime one
+  on ALL 6 attempts (~20 min apart) in the implementation pass — and on 2
+  of 2 attempts again in the critic pass — the oscillation is worse than
+  first recorded. At runtime one
   429 = a 6-hour cool-off (#168), so the row should be expected to oscillate
   out of the pool. Keep it as the bucket's one representative (newest and
   cheapest capable reasoner in that range; the only alternatives are 2024-era

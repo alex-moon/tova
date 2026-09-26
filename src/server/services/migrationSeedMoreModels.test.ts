@@ -1,6 +1,7 @@
 import { Db } from 'mongodb';
 import mongoose from 'mongoose';
 import { SeedMoreModelsRouting } from '../../../migrations/20260926000200-seed-more-models-routing';
+import { sweepModels } from './modelConfigService';
 
 /*
  * The migration must upgrade the deployed pool shape as of this branch
@@ -180,5 +181,63 @@ describe('migration SeedMoreModelsRouting', () => {
       model: 'moonshotai/Kimi-K3',
     });
     expect(edited).toMatchObject({ eligible: false });
+  });
+
+  /*
+   * SEED_ENTRIES and the migration's ROWS are two parallel definitions of the
+   * same 14 rows; nothing else relates them, so a future edit to one side
+   * alone would silently split fresh databases (seeded by the app) from
+   * upgraded ones (seeded by the migration). This test pins the contract:
+   * `up` on a FRESH database (migrations run before the app ever seeds)
+   * must produce exactly the #170 SEED_ENTRIES rows, field for field —
+   * if a later ticket adds or edits seed rows, this failing is the prompt
+   * to mirror the change in a migration (or extend this test).
+   */
+  it('up on a fresh database inserts exactly the #170 seed rows (no seed/migration drift)', async () => {
+    await new SeedMoreModelsRouting().up(db);
+    const inserted = await db
+      .collection('providerroutings')
+      .find({}, { projection: { _id: 0, __v: 0 } })
+      .toArray();
+    expect(inserted).toHaveLength(14);
+    for (const row of inserted) {
+      // Raw-driver insert: no mongoose defaults, so every field must have
+      // been carried explicitly by the migration.
+      expect(row).toMatchObject({
+        provider: 'deepinfra',
+        tier: 'large',
+        eligible: true,
+        tools: true,
+        disabledUntil: null,
+      });
+      expect(typeof row.contextLength).toBe('number');
+      expect(typeof row.vision).toBe('boolean');
+    }
+
+    const hadEnv = process.env.ROUTER_LARGE_MODEL;
+    delete process.env.ROUTER_LARGE_MODEL;
+    try {
+      // `sweepModels` reads SEED_ENTRIES, the same source the app seeds
+      // from, so it is the seed-side half of the contract.
+      const seedLarge = sweepModels().filter((ref) => ref.tier === 'large');
+      const pre170 = new Set(
+        DEPLOYED_ROWS.filter((row) => row.tier === 'large').map((row) => row.model),
+      );
+      const byModel = new Map(inserted.map((row) => [row.model as string, row]));
+      for (const ref of seedLarge) {
+        if (pre170.has(ref.model)) continue;
+        const row = byModel.get(ref.model);
+        expect(row).toBeDefined();
+        expect(row).toMatchObject({
+          tools: ref.tools,
+          vision: ref.vision ?? false,
+          contextLength: ref.contextLength,
+        });
+      }
+      const migrated = seedLarge.filter((ref) => !pre170.has(ref.model));
+      expect(migrated).toHaveLength(inserted.length);
+    } finally {
+      if (hadEnv !== undefined) process.env.ROUTER_LARGE_MODEL = hadEnv;
+    }
   });
 });
