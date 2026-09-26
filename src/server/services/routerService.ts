@@ -248,19 +248,12 @@ export const routeQuery = async (
     };
   }
 
-  // Tier 1: Deterministic Rules
+  // Tier 1: Deterministic Rules. The code rule runs first: a short prompt
+  // that starts with a greeting token but asks for code ('hi, write code')
+  // is never trivially conversational, so the greeting rule must not shadow
+  // it into the exception tier (#169).
 
-  // Rule 1: Short queries (greetings, simple confirmations)
-  // #169: require a word boundary after the greeting token — a bare prefix
-  // match was sending non-trivial short prompts ('hit me', 'nope, and...',
-  // 'okapi facts') to the small tier, which under the inverted boundary is
-  // reserved for trivially conversational intent only.
-  if (query.length < 20 && /^(hello|hi|hey|yes|no|ok|okay|thanks|thank you)\b/i.test(query)) {
-    const modelRef = pickModelRef(smallPoolRaw, 'small', epsilon, random);
-    return { model: modelRef.model, reason: 'deterministic-short', ...spreadRef(modelRef) };
-  }
-
-  // Rule 2: Code blocks or explicit coding requests
+  // Rule 1: Code blocks or explicit coding requests
   if (
     query.toLowerCase().includes('code') ||
     query.toLowerCase().includes('function') ||
@@ -269,6 +262,16 @@ export const routeQuery = async (
   ) {
     const modelRef = pickModelRef(largePool, 'large', epsilon, random);
     return { model: modelRef.model, reason: 'deterministic-code', ...spreadRef(modelRef) };
+  }
+
+  // Rule 2: Short queries (greetings, simple confirmations)
+  // #169: require a word boundary after the greeting token — a bare prefix
+  // match was sending non-trivial short prompts ('hit me', 'nope, and...',
+  // 'okapi facts') to the small tier, which under the inverted boundary is
+  // reserved for trivially conversational intent only.
+  if (query.length < 20 && /^(hello|hi|hey|yes|no|ok|okay|thanks|thank you)\b/i.test(query)) {
+    const modelRef = pickModelRef(smallPoolRaw, 'small', epsilon, random);
+    return { model: modelRef.model, reason: 'deterministic-short', ...spreadRef(modelRef) };
   }
 
   // Tier 2: Guard model classification

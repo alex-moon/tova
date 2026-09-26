@@ -290,11 +290,31 @@ describe('Router Service', () => {
       expect(result.reason).toBe('classifier-complex');
     });
 
+    it('#169: never shadows an explicit code request with the greeting rule', async () => {
+      // Rule-order hardening: short prompts that start with a greeting token
+      // but carry an explicit coding request ('hi, write code', <20 chars)
+      // used to hit deterministic-short and route SMALL — contradicting the
+      // inverted boundary, under which an explicit code request is never
+      // trivially conversational. The deterministic-code rule must win.
+      for (const query of ['hi, write code', 'ok script', 'no code please']) {
+        expect(query.length).toBeLessThan(20);
+        const result = await routeQueryWithCfg(query);
+        expect(result.reason).toBe('deterministic-code');
+        expect(result.model).toBe('test-large-model');
+      }
+    });
+
     it('#169: does NOT prefix-match greeting words inside real words', async () => {
       // The deterministic-short regex must not treat a greeting word as just
       // a prefix ('high', 'notice', 'nope', 'okay' minus the word itself) —
       // under the inverted boundary, small is reserved for trivial intent.
-      const notTrivial = ['high tier please', 'notice sent', 'nope is fine', 'hippo facts'];
+      const notTrivial = [
+        'high tier please',
+        'notice sent',
+        'nope is fine',
+        'hippo facts',
+        'hit me',
+      ];
       for (const query of notTrivial) {
         expect(query.length).toBeLessThan(20);
         classifyAs('simple');
@@ -304,7 +324,10 @@ describe('Router Service', () => {
     });
 
     it('#169: keeps greeting words WITH word boundaries deterministic-short', async () => {
-      for (const query of ['OK', 'Yes, do it', 'thank you', 'hey!', 'hi!']) {
+      // 'Okay' pins the 77c7163 alternation entry: without it the \b would
+      // reject 'okay' (the 'ok' branch fails the boundary mid-word) and the
+      // greeting would silently fall through to the guard.
+      for (const query of ['OK', 'Okay', 'okay!', 'Yes, do it', 'thank you', 'hey!', 'hi!']) {
         const result = await routeQueryWithCfg(query);
         expect(result.reason).toBe('deterministic-short');
       }
