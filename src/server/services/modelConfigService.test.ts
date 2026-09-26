@@ -1,5 +1,5 @@
 import { ProviderRouting } from '../models/ProviderRouting';
-import { completionsPoolFor, listByTier, ModelRef } from './modelConfigService';
+import { completionsPoolFor, disableModel, listByTier, ModelRef } from './modelConfigService';
 import { muteConsoleError } from '../test/muteConsole';
 
 const TIER_ENV_VARS = {
@@ -106,6 +106,80 @@ describe('Model Config Service', () => {
       await listByTier('large');
       await listByTier('small');
       expect(await ProviderRouting.countDocuments()).toBe(10);
+    });
+  });
+
+  describe('cool-off seed shape (#168)', () => {
+    it('seeds fresh rows with disabledUntil null', async () => {
+      await listByTier('small');
+      const row = (await ProviderRouting.findOne({ model: 'Qwen/Qwen3-14B' }).lean<{
+        disabledUntil?: Date | null;
+      }>())!;
+      expect(row.disabledUntil).toBeNull();
+    });
+
+    it('re-seeding an already-seeded row preserves an in-flight cool-off (#168)', async () => {
+      await listByTier('small'); // ensure the row exists first
+      const until = new Date(Date.now() + 6 * 60 * 60 * 1000);
+      await ProviderRouting.updateOne(
+        { provider: 'deepinfra', model: 'openai/gpt-oss-20b', tier: 'small' },
+        { disabledUntil: until },
+      );
+      await listByTier('small'); // re-seed is a no-op upsert, must not reset
+      const row = await ProviderRouting.findOne({
+        provider: 'deepinfra',
+        model: 'openai/gpt-oss-20b',
+        tier: 'small',
+      }).lean<{ disabledUntil: Date | null }>();
+      expect(row?.disabledUntil?.getTime()).toBe(until.getTime());
+    });
+
+    it('legacy rows without the field never cool off (missing = not disabled)', async () => {
+      await listByTier('guard');
+      // Simulate a pre-#168 doc: strip the field below the schema layer.
+      const raw = await ProviderRouting.collection.findOneAndUpdate(
+        { tier: 'guard' },
+        { $unset: { disabledUntil: '' } },
+      );
+      expect(raw).not.toBeNull();
+      const row = (await ProviderRouting.findOne({ tier: 'guard' }).lean<{
+        disabledUntil?: Date | null;
+      }>())!;
+      expect(row.disabledUntil ?? null).toBeNull();
+    });
+  });
+
+  describe('cool-off pool exclusion (#168)', () => {
+    it('disableModel immediately drops the model from its tier pools', async () => {
+      await listByTier('small');
+      await listByTier('large');
+      await disableModel('deepinfra', 'deepseek-ai/DeepSeek-V3.2');
+      expect((await listByTier('large')).map(({ model }) => model)).not.toContain(
+        'deepseek-ai/DeepSeek-V3.2',
+      );
+      expect((await completionsPoolFor('large')).map(({ model }) => model)).not.toContain(
+        'deepseek-ai/DeepSeek-V3.2',
+      );
+    });
+
+    it('a cooling-off row is not re-seeded back to eligibility', async () => {
+      await listByTier('large');
+      await disableModel('deepinfra', 'deepseek-ai/DeepSeek-V3.2');
+      await listByTier('large'); // triggers (no-op) seeding again
+      expect((await listByTier('large')).map(({ model }) => model)).not.toContain(
+        'deepseek-ai/DeepSeek-V3.2',
+      );
+    });
+
+    it('an expired cool-off returns the model to the pools (lazy expiry, no timers)', async () => {
+      await listByTier('large');
+      await ProviderRouting.updateMany(
+        { provider: 'deepinfra', model: 'deepseek-ai/DeepSeek-V3.2' },
+        { disabledUntil: new Date(Date.now() - 1) },
+      );
+      expect((await listByTier('large')).map(({ model }) => model)).toContain(
+        'deepseek-ai/DeepSeek-V3.2',
+      );
     });
   });
 

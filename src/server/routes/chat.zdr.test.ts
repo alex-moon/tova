@@ -388,7 +388,9 @@ describe('Zero-data retention chats (issue #116)', () => {
       const cookies = await registerUser(email);
       await enableZdr(email);
       const asset = await ephemeralAssetFor(email, 'leakerror.csv');
-      mockAgentStream.mockRejectedValueOnce(new Error('provider down'));
+      // #168 failover: every routing attempt fails (not just the first), so
+      // the loop exhausts the pool and the error event fires on the final attempt.
+      mockAgentStream.mockRejectedValue(new Error('provider down'));
 
       const response = await streamMessage(cookies, {
         content: 'hello',
