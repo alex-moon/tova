@@ -7,6 +7,7 @@ import AdminService, {
 } from '../services/admin';
 import type {
   AdminLogEntry,
+  AdminModelError,
   AdminModel,
   AdminUser,
   ModelComparisonRun,
@@ -20,9 +21,24 @@ const LOG_LEVELS = ['all', 'info', 'warn', 'error'] as const;
 
 const POLL_INTERVAL_MS = 3000;
 
+/*
+ * #168 cool-off badge: approximate remaining hours, computed client-side —
+ * expiry itself stays server-authoritative (lazy, on read). Returns null
+ * when the model is not cooling off, so callers render nothing.
+ */
+const coolOffHoursLeft = (disabledUntil: string | null): number | null => {
+  if (!disabledUntil) return null;
+  const ms = new Date(disabledUntil).getTime() - Date.now();
+  if (ms <= 0) return null;
+  return Math.max(1, Math.ceil(ms / 3_600_000));
+};
+
 const AdminView = () => {
   const [users, setUsers] = useState<AdminUser[] | null>(null);
   const [models, setModels] = useState<AdminModel[] | null>(null);
+  // #168 diagnostics: per-model error shapes, rendered as their own table
+  // under the models inventory.
+  const [modelErrors, setModelErrors] = useState<AdminModelError[]>([]);
   const [logLevel, setLogLevel] = useState<(typeof LOG_LEVELS)[number]>('all');
   const [logQuery, setLogQuery] = useState('');
   const [logs, setLogs] = useState<AdminLogEntry[]>([]);
@@ -62,7 +78,8 @@ const AdminView = () => {
   const loadModels = useCallback(async () => {
     try {
       const res = await AdminModelsService.listModels();
-      setModels(res);
+      setModels(res.models);
+      setModelErrors(res.errors);
       setError(null);
     } catch (err) {
       setError(err instanceof AdminError ? err.message : 'Something went wrong.');
@@ -513,73 +530,86 @@ const AdminView = () => {
                     </tr>
                   </thead>
                   <tbody>
-                    {models?.map((model) => (
-                      <tr key={model.id} className="border-b border-border last:border-b-0">
-                        <td className="px-4 py-3" data-testid={`admin-model-${model.id}`}>
-                          {model.model}
-                        </td>
-                        <td className="px-4 py-3 text-muted-foreground">{model.provider}</td>
-                        <td className="px-4 py-3">{model.tier}</td>
-                        <td className="px-4 py-3 text-muted-foreground">
-                          {model.contextLength?.toLocaleString() ?? '—'}
-                        </td>
-                        <td className="px-4 py-3">
-                          <input
-                            type="checkbox"
-                            data-testid={`model-eligible-${model.id}`}
-                            checked={model.eligible}
-                            onChange={() => toggleModelEligible(model)}
-                          />
-                        </td>
-                        <td className="px-4 py-3" data-testid={`admin-model-caps-${model.id}`}>
-                          <span
-                            className={`mr-1.5 inline-block rounded-full border px-2 py-0.5 text-xs ${
-                              model.vision
-                                ? 'border-primary text-primary'
-                                : 'border-border text-muted-foreground'
-                            }`}
-                            data-testid={`admin-model-vision-${model.id}`}
-                          >
-                            vision {model.vision ? '✓' : '✗'}
-                          </span>
-                          <span
-                            className={`mr-1.5 inline-block rounded-full border px-2 py-0.5 text-xs ${
-                              model.tools
-                                ? 'border-primary text-primary'
-                                : 'border-border text-muted-foreground'
-                            }`}
-                          >
-                            tools {model.tools ? '✓' : '✗'}
-                          </span>
-                          <span className="inline-block px-2 py-0.5 text-xs text-muted-foreground">
-                            {model.contextLength
-                              ? `${model.contextLength.toLocaleString()} tok`
-                              : ''}
-                          </span>
-                        </td>
-                        <td className="px-4 py-3 text-muted-foreground">
-                          {model.stats.length === 0
-                            ? '—'
-                            : model.stats.map((s) => `${s.band}: ${s.up}↑ ${s.down}↓`).join(' · ')}
-                        </td>
-                        <td className="px-4 py-3">
-                          <button
-                            data-testid={`model-edit-${model.id}`}
-                            onClick={() => startEdit(model)}
-                            className="mr-2 rounded-lg border border-border px-2 py-1 text-xs transition-colors hover:bg-accent"
-                          >
-                            Edit
-                          </button>
-                          <button
-                            data-testid={`model-delete-${model.id}`}
-                            onClick={() => deleteModel(model)}
-                            className="rounded-lg border border-destructive px-2 py-1 text-xs text-destructive transition-colors hover:bg-destructive/10"
-                          >
-                            Delete
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
+                    {models?.map((model) => {
+                      const coolOff = coolOffHoursLeft(model.disabledUntil);
+                      return (
+                        <tr key={model.id} className="border-b border-border last:border-b-0">
+                          <td className="px-4 py-3" data-testid={`admin-model-${model.id}`}>
+                            {model.model}
+                            {coolOff !== null && (
+                              <span
+                                data-testid={`admin-model-cooloff-${model.id}`}
+                                className="ml-2 inline-block rounded-full border border-warning px-2 py-0.5 text-xs text-warning"
+                              >
+                                Cooling off · ~{coolOff}h left
+                              </span>
+                            )}
+                          </td>
+                          <td className="px-4 py-3 text-muted-foreground">{model.provider}</td>
+                          <td className="px-4 py-3">{model.tier}</td>
+                          <td className="px-4 py-3 text-muted-foreground">
+                            {model.contextLength?.toLocaleString() ?? '—'}
+                          </td>
+                          <td className="px-4 py-3">
+                            <input
+                              type="checkbox"
+                              data-testid={`model-eligible-${model.id}`}
+                              checked={model.eligible}
+                              onChange={() => toggleModelEligible(model)}
+                            />
+                          </td>
+                          <td className="px-4 py-3" data-testid={`admin-model-caps-${model.id}`}>
+                            <span
+                              className={`mr-1.5 inline-block rounded-full border px-2 py-0.5 text-xs ${
+                                model.vision
+                                  ? 'border-primary text-primary'
+                                  : 'border-border text-muted-foreground'
+                              }`}
+                              data-testid={`admin-model-vision-${model.id}`}
+                            >
+                              vision {model.vision ? '✓' : '✗'}
+                            </span>
+                            <span
+                              className={`mr-1.5 inline-block rounded-full border px-2 py-0.5 text-xs ${
+                                model.tools
+                                  ? 'border-primary text-primary'
+                                  : 'border-border text-muted-foreground'
+                              }`}
+                            >
+                              tools {model.tools ? '✓' : '✗'}
+                            </span>
+                            <span className="inline-block px-2 py-0.5 text-xs text-muted-foreground">
+                              {model.contextLength
+                                ? `${model.contextLength.toLocaleString()} tok`
+                                : ''}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3 text-muted-foreground">
+                            {model.stats.length === 0
+                              ? '—'
+                              : model.stats
+                                  .map((s) => `${s.band}: ${s.up}↑ ${s.down}↓`)
+                                  .join(' · ')}
+                          </td>
+                          <td className="px-4 py-3">
+                            <button
+                              data-testid={`model-edit-${model.id}`}
+                              onClick={() => startEdit(model)}
+                              className="mr-2 rounded-lg border border-border px-2 py-1 text-xs transition-colors hover:bg-accent"
+                            >
+                              Edit
+                            </button>
+                            <button
+                              data-testid={`model-delete-${model.id}`}
+                              onClick={() => deleteModel(model)}
+                              className="rounded-lg border border-destructive px-2 py-1 text-xs text-destructive transition-colors hover:bg-destructive/10"
+                            >
+                              Delete
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
                     {models?.length === 0 && (
                       <tr>
                         <td className="px-4 py-3 text-muted-foreground" colSpan={8}>
@@ -590,6 +620,66 @@ const AdminView = () => {
                   </tbody>
                 </table>
               </div>
+              {modelErrors.length > 0 && (
+                <div className="mt-4">
+                  <h4 className="font-heading text-sm font-semibold">Recent endpoint errors</h4>
+                  <p className="text-xs text-muted-foreground">
+                    Completion failures tallied per provider route (status + category), newest first
+                    — kept in Mongo because deploys wipe the logs. Highlighted rows are currently
+                    cooling off.
+                  </p>
+                  <div
+                    data-testid="admin-model-errors"
+                    className="mt-2 overflow-x-auto rounded-xl border border-border bg-card"
+                  >
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="border-b border-border text-left text-muted-foreground">
+                          <th className="px-4 py-3 font-medium">Model</th>
+                          <th className="px-4 py-3 font-medium">Error</th>
+                          <th className="px-4 py-3 font-medium">Count</th>
+                          <th className="px-4 py-3 font-medium">Last seen</th>
+                          <th className="px-4 py-3 font-medium">Last message</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {modelErrors.map((e) => {
+                          const cooling = (models ?? []).some(
+                            (m) =>
+                              m.provider === e.provider &&
+                              m.model === e.model &&
+                              coolOffHoursLeft(m.disabledUntil) !== null,
+                          );
+                          return (
+                            <tr
+                              key={`${e.provider}/${e.model}/${e.status ?? 'none'}/${e.category}`}
+                              data-testid={`admin-model-error-${e.provider}-${e.model}-${e.status ?? 'none'}`}
+                              className="border-b border-border last:border-b-0"
+                            >
+                              <td
+                                className={`px-4 py-3 ${cooling ? 'text-warning' : 'text-muted-foreground'}`}
+                              >
+                                {e.provider}/{e.model}
+                              </td>
+                              <td className="px-4 py-3">
+                                {e.status !== null ? `${e.status} · ` : ''}
+                                {e.category}
+                              </td>
+                              <td className="px-4 py-3 text-muted-foreground">{e.count}</td>
+                              <td className="px-4 py-3 text-muted-foreground">
+                                {new Date(e.lastSeenAt).toLocaleString()}
+                              </td>
+                              <td className="max-w-md break-all px-4 py-3 text-muted-foreground">
+                                {e.lastMessage}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
             </section>
           )}
           {activeSection === 'compare' && (

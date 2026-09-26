@@ -1,6 +1,6 @@
 import { inferenceService } from './inferenceService';
 import { LlmProvider } from './llmTypes';
-import { completionsPoolFor, ModelRef } from './modelConfigService';
+import { AllModelsDisabledError, completionsPoolFor, ModelRef } from './modelConfigService';
 import { redactForLog } from './logRedaction';
 import { FitWeight, getFitWeight } from './modelMetricsStatsService';
 
@@ -18,6 +18,18 @@ export interface RouterConfig {
   small: ModelRef[];
   large: ModelRef[];
   guardModel: string;
+  /*
+   * #168: set when a tier's pool read reported "rows exist but all are
+   * cooling off" (AllModelsDisabledError from listByTier — the only
+   * rejection that can escape it, every other read failure falls back to
+   * the env model inside listByTier). The error is DEFERRED to the pick of
+   * that tier: one drained tier must not fail turns the healthy tier could
+   * serve (the pools are read together up front, the tier decision happens
+   * after). The flag travels with the config so injected-test configs
+   * (plain pools, no flags) keep the pre-#168 loud-empty-pool behaviour.
+   */
+  smallCoolingOff?: boolean;
+  largeCoolingOff?: boolean;
 }
 
 export interface RoutingResult {
@@ -159,14 +171,27 @@ export const pickModelRef = (
  * construction of `createToolFreeCompletion`.
  */
 const defaultConfig = async (): Promise<RouterConfig> => {
-  const [small, large] = await Promise.all([
+  /*
+   * #168: the two pool reads settle independently — one tier's rows all
+   * cooling off (AllModelsDisabledError) must not fail the turn before the
+   * tier decision has even happened. The drained tier keeps an empty pool
+   * plus its flag; the loud error is thrown at pick time (see routeQuery),
+   * so a healthy tier still serves its turns.
+   */
+  const [small, large] = await Promise.allSettled([
     completionsPoolFor('small'),
     completionsPoolFor('large'),
   ]);
+  const pools = (r: PromiseSettledResult<ModelRef[]>): ModelRef[] =>
+    r.status === 'fulfilled' ? r.value : [];
+  const coolingOff = (r: PromiseSettledResult<ModelRef[]>): boolean =>
+    r.status === 'rejected' && r.reason instanceof AllModelsDisabledError;
   return {
-    small,
-    large,
+    small: pools(small),
+    large: pools(large),
     guardModel: process.env.ROUTER_GUARD_MODEL || 'openai/gpt-oss-20b',
+    ...(coolingOff(small) ? { smallCoolingOff: true } : {}),
+    ...(coolingOff(large) ? { largeCoolingOff: true } : {}),
   };
 };
 
@@ -302,10 +327,31 @@ export const routeQuery = async (
   random: () => number = Math.random,
   deps: RouterDeps = {},
 ): Promise<RoutingResult> => {
-  const { small: smallPoolRaw, large: largePool, guardModel } = config ?? (await defaultConfig());
+  const {
+    small: smallPoolRaw,
+    large: largePool,
+    guardModel,
+    smallCoolingOff = false,
+    largeCoolingOff = false,
+  } = config ?? (await defaultConfig());
   const epsilon = epsilonFromEnv();
   const readWeight = deps.getFitWeight ?? defaultGetFitWeight;
   const band = deps.band ?? '';
+
+  /*
+   * #168: a tier whose pool drained via cool-off fails with the dedicated
+   * all-disabled error at pick time (deferred from the pool read — see
+   * defaultConfig). Other empty pools keep the generic loud error
+   * (`pickModelRef`).
+   */
+  const pickFromTier = (
+    pool: ModelRef[],
+    tier: 'small' | 'large',
+    coolingOff: boolean,
+  ): ModelRef => {
+    if (pool.length === 0 && coolingOff) throw new AllModelsDisabledError();
+    return pickModelRef(pool, tier, epsilon, random);
+  };
 
   // Image turns (#115): capability first — only `vision: true` rows in the
   // LARGE tier survive, the classifier (text-only) is skipped. The user
@@ -314,6 +360,10 @@ export const routeQuery = async (
   // image turns. Empty large vision pool is a loud failure — routing an
   // image to a non-vision model would be worse than failing the turn.
   if (deps.hasImage) {
+    // #168: a large tier that drained via cool-off fails with the dedicated
+    // all-disabled error — "No vision-capable models configured" would
+    // misreport a cool-off outage as a config problem.
+    if (largeCoolingOff) throw new AllModelsDisabledError();
     const visionLarge = largePool.filter((ref) => ref.vision === true);
     if (visionLarge.length === 0) {
       throw new Error('No vision-capable models configured for image attachments');
@@ -365,7 +415,7 @@ export const routeQuery = async (
 
     if (verdict === 'complex') {
       const { pool, forced, reasonSuffix } = await orderPoolByFit(largePool, band, readWeight);
-      const modelRef = forced ?? pickModelRef(pool, 'large', epsilon, random);
+      const modelRef = forced ?? pickFromTier(pool, 'large', largeCoolingOff);
       return {
         model: modelRef.model,
         reason: `classifier-complex${reasonSuffix}`,
@@ -374,7 +424,7 @@ export const routeQuery = async (
     }
     if (verdict === 'simple') {
       const { pool, forced, reasonSuffix } = await orderPoolByFit(smallPoolRaw, band, readWeight);
-      const modelRef = forced ?? pickModelRef(pool, 'small', epsilon, random);
+      const modelRef = forced ?? pickFromTier(pool, 'small', smallCoolingOff);
       return {
         model: modelRef.model,
         reason: `classifier-simple${reasonSuffix}`,
@@ -386,17 +436,18 @@ export const routeQuery = async (
     // pushed the Ad Gefrin conversation to the small tier (issue #129).
     console.error('Classifier unparseable reply:', redactForLog(content || '(empty)'));
     const { pool, forced, reasonSuffix } = await orderPoolByFit(largePool, band, readWeight);
-    const modelRef = forced ?? pickModelRef(pool, 'large', epsilon, random);
+    const modelRef = forced ?? pickFromTier(pool, 'large', largeCoolingOff);
     return {
       model: modelRef.model,
       reason: `classifier-unparseable${reasonSuffix}`,
       ...spreadRef(modelRef),
     };
   } catch (err) {
+    if (err instanceof AllModelsDisabledError) throw err;
     console.error('Classifier error:', redactForLog(err));
     // Fallback to large model on error for safety (raw pool order — the
     // classifier is down, so its feedback weighting waits for a retry).
-    const modelRef = pickModelRef(largePool, 'large', epsilon, random);
+    const modelRef = pickFromTier(largePool, 'large', largeCoolingOff);
     return { model: modelRef.model, reason: 'classifier-error', ...spreadRef(modelRef) };
   }
 };

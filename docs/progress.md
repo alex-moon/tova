@@ -2,7 +2,27 @@
 
 ## Status (current)
 
-#170 More models (in flight, branch `feat/170-more-models`): 14 more DeepInfra
+#168 Model errors disable the model (branch `feat/tv/168-170-model-pool`): a
+qualifying endpoint failure immediately cools the model off
+(`providerroutings.disabledUntil`, 6h default via `MODEL_COOL_OFF_HOURS`, lazy
+expiry on read). Both chat paths (streaming and non-streaming) disable →
+re-route → retry up to MAX_ATTEMPTS; a failed cool-off write stops the loop
+with the original error; 429/413/client-aborts never cool off — 429 is
+deliberately back-off territory (#178) and fails the turn loudly with the
+retry-hint message instead of draining the pool. A fully cooling-off pinned
+pool throws `AllModelsDisabledError` (three-case `listByTier`, NO env
+fallback) and both routes surface it as 503 with the friendly message; the
+router defers the tier's all-disabled error to pick time so the healthy tier
+keeps serving, and reports drained pools on image turns as all-disabled
+rather than a config gap. Diagnostics consolidated lean (OQ-7, decision
+2026-09-26): #175's `modelrouteerrors` tally at the inferenceService choke
+point is the single mechanism — the admin Models tab shows a cooling-off
+badge and an errors table reading that collection; no second stats service.
+Builds on #173 (cool-off scaffolding) and supersedes PR #177. Follow-ups
+filed: #178 (429 back-off), #179 (persistent log retention).
+
+#170 More models (in flight, branch `feat/tv/168-170-model-pool`, was
+`feat/170-more-models`/PR #180): 14 more DeepInfra
 models seeded into the large completion tier so the admin elimination process
 has candidates to evaluate on live traffic. ZDR-only selection — no
 Google/Anthropic partner models (the only retention exceptions on DeepInfra);

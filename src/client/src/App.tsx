@@ -192,7 +192,10 @@ function App() {
       if (!res.ok || !res.body) {
         if (res.body) {
           const msg = (await res.json().catch(() => null)) as { message?: string } | null;
-          if (res.status === 403 && msg?.message) {
+          // #168: 503 = every model is cooling off (the server's friendly
+          // message is the primary text); 403 = the geo block. Both surface
+          // verbatim, exactly like the SSE error event would.
+          if ((res.status === 403 || res.status === 503) && msg?.message) {
             setMessages((prev) =>
               prev.map((m) =>
                 m._id === streamId ? { ...m, content: msg.message as string, isError: true } : m,

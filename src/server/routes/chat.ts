@@ -35,6 +35,8 @@ import {
   AllModelsDisabledError,
   isClientAbort,
   isPromptSizeError,
+  isRateLimitError,
+  MAX_ATTEMPTS,
   withModelFailover,
 } from '../services/modelFailover';
 
@@ -906,7 +908,7 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
       // the pool drains and routing eventually fails — but the explicit cap
       // keeps pathological cases loud instead of putting an unbounded loop
       // on the request path.
-      for (let attempt = 1; attempt <= 8; attempt++) {
+      for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
         try {
           sendEvent('meta', {
             // ZDR (#116): no sessionId is minted — nothing the replay could
@@ -950,9 +952,18 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
             assistantContent === '' &&
             !isClientAbort(err) &&
             !isPromptSizeError(err) &&
-            attempt < 8
+            // #168 (decision 2026-09-26): 429 is back-off territory, a
+            // separate mechanism — never a cool-off or a pool-draining retry.
+            !isRateLimitError(err) &&
+            attempt < MAX_ATTEMPTS
           ) {
-            await disableModel(routingResult.provider, routingResult.model);
+            const disabled = await disableModel(routingResult.provider, routingResult.model);
+            if (!disabled) {
+              // Cool-off write failed: the pool is unchanged, so re-routing
+              // would re-pick the same broken endpoint — fail the turn with
+              // the original error.
+              throw err;
+            }
             try {
               routingResult = await routeQuery(content, undefined, undefined, {
                 band: routingBand,
@@ -1072,9 +1083,15 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
     // throwaway attachment (#116); no-op for durable assets.
     await cleanupEphemeralAsset(attachedAsset);
     if (!res.headersSent) {
-      res
-        .status(500)
-        .json({ message: 'Error processing chat', detail: streamingErrorMessage(err) });
+      // #168: every model cooled off before the stream opened (the
+      // pre-stream routeQuery throws) → the friendly message is the
+      // primary text, mirroring the non-streaming route. The client
+      // surfaces it on 503 like it does the 403 geo message.
+      const allDisabled = err instanceof AllModelsDisabledError;
+      res.status(allDisabled ? 503 : 500).json({
+        message: allDisabled ? streamingErrorMessage(err) : 'Error processing chat',
+        detail: streamingErrorMessage(err),
+      });
     } else {
       res.end();
     }

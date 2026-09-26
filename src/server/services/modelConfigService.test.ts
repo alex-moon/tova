@@ -1,5 +1,11 @@
 import { ProviderRouting } from '../models/ProviderRouting';
-import { completionsPoolFor, disableModel, listByTier, ModelRef } from './modelConfigService';
+import {
+  AllModelsDisabledError,
+  completionsPoolFor,
+  disableModel,
+  listByTier,
+  ModelRef,
+} from './modelConfigService';
 import { muteConsoleError } from '../test/muteConsole';
 
 const TIER_ENV_VARS = {
@@ -282,6 +288,55 @@ describe('Model Config Service', () => {
       expect((await listByTier('large')).map(({ model }) => model)).toContain(
         'deepseek-ai/DeepSeek-V3.2',
       );
+    });
+
+    it('disableModel reports a failed cool-off write (failover loops stop on it)', async () => {
+      const spy = jest.spyOn(ProviderRouting, 'updateMany').mockRejectedValue(new Error('db down'));
+      const consoleErrorSpy = muteConsoleError();
+      try {
+        await expect(disableModel('deepinfra', 'some-model')).resolves.toBe(false);
+      } finally {
+        spy.mockRestore();
+        consoleErrorSpy.mockRestore();
+      }
+      await expect(disableModel('deepinfra', 'other-model')).resolves.toBe(true);
+    });
+
+    it('a pool whose every eligible row is cooling off errors loudly, no env fallback', async () => {
+      await listByTier('small');
+      await listByTier('large');
+      await ProviderRouting.updateMany(
+        { tier: 'small', eligible: true },
+        { disabledUntil: new Date(Date.now() + 60 * 60 * 1000) },
+      );
+      await expect(listByTier('small')).rejects.toBeInstanceOf(AllModelsDisabledError);
+      await expect(completionsPoolFor('small')).rejects.toBeInstanceOf(AllModelsDisabledError);
+      // Unaffected tiers still resolve normally.
+      expect((await listByTier('large')).map(({ model }) => model)).toContain(
+        'deepseek-ai/DeepSeek-V3.2',
+      );
+    });
+
+    it('the all-cooling-off verdict is provider-scoped, not tier-scoped', async () => {
+      await listByTier('small');
+      await listByTier('guard');
+      // A healthy Groq row in the small tier must not mask the DeepInfra
+      // outage for the provider-pinned completion pool (`completionsPoolFor`
+      // pins deepinfra), but the unpinned read keeps serving the Groq row.
+      await ProviderRouting.create({
+        provider: 'groq',
+        model: 'stale-groq-small',
+        tier: 'small',
+        eligible: true,
+        disabledUntil: null,
+      });
+      await ProviderRouting.updateMany(
+        { tier: 'small', provider: 'deepinfra', eligible: true },
+        { disabledUntil: new Date(Date.now() + 60 * 60 * 1000) },
+      );
+      await expect(completionsPoolFor('small')).rejects.toBeInstanceOf(AllModelsDisabledError);
+      expect((await listByTier('small')).map(({ model }) => model)).toContain('stale-groq-small');
+      await ProviderRouting.deleteOne({ provider: 'groq', model: 'stale-groq-small' });
     });
   });
 

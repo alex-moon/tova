@@ -3,6 +3,7 @@ import { streamingErrorMessage } from './chat';
 import { createApp } from '../index';
 import { Message } from '../models/Message';
 import { User } from '../models/User';
+import { AllModelsDisabledError } from '../services/modelConfigService';
 
 const mockGenerate = jest.fn();
 
@@ -565,5 +566,36 @@ describe('pre-stream 429 surfacing (#117)', () => {
     expect(res.status).toBe(500);
     expect(res.body.message).toBe('Error processing chat');
     expect(res.body.detail).toMatch(/Rate limited/);
+  });
+});
+
+describe('#168 all-cooling-off surfacing', () => {
+  beforeEach(() => {
+    mockGenerate.mockReset().mockResolvedValue({
+      text: 'e2e-ok',
+    });
+    mockRouteQuery.mockReset().mockRejectedValue(new AllModelsDisabledError());
+  });
+
+  it('the non-stream route returns 503 with the friendly message as the primary text', async () => {
+    const app = createApp();
+    const cookie = await registerUser(app, 'all-disabled-nonstream@example.com');
+    const res = await request(app).post('/api/chat').set('Cookie', cookie).send({
+      content: 'Give me restaurant ideas near Bandra in Mumbai',
+    });
+    expect(res.status).toBe(503);
+    expect(res.body.message).toMatch(/temporarily unavailable/);
+    expect(res.body.detail).toMatch(/temporarily unavailable/);
+  });
+
+  it('the stream route returns 503 with the friendly message before any SSE event', async () => {
+    const app = createApp();
+    const cookie = await registerUser(app, 'all-disabled-stream@example.com');
+    const res = await request(app).post('/api/chat/stream').set('Cookie', cookie).send({
+      content: 'Give me restaurant ideas near Bandra in Mumbai',
+    });
+    expect(res.status).toBe(503);
+    expect(res.body.message).toMatch(/temporarily unavailable/);
+    expect(res.body.detail).toMatch(/temporarily unavailable/);
   });
 });

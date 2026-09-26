@@ -1,6 +1,7 @@
 import axios from 'axios';
 import type {
   AdminModel,
+  AdminModelsPayload,
   AdminUser,
   AdminLogsPayload,
   ModelComparisonRun,
@@ -61,14 +62,16 @@ export default AdminService;
 
 // Model inventory with CRUD (issue #104): list, create, update, delete
 // routing rows in the admin view. Mutations return the row id (POST/PUT) or
-// nothing (DELETE); callers refetch for the authoritative list.
+// nothing (DELETE); callers refetch for the authoritative list. #168: the
+// list also carries per-model error diagnostics (deploy wipes logs, so the
+// shapes accumulate in Mongo instead).
 type ModelInput = Partial<Omit<AdminModel, 'id' | 'stats' | 'contextLength'>> & {
   contextLength?: number | null;
 };
 
-const listModels = async (): Promise<AdminModel[]> => {
+const listModels = async (): Promise<AdminModelsPayload> => {
   try {
-    const res = await axios.get<AdminModel[]>('/api/admin/models');
+    const res = await axios.get<AdminModelsPayload>('/api/admin/models');
     return res.data;
   } catch (err) {
     throw toAdminError(err, 'Failed to load models.');

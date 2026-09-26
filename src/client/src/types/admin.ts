@@ -6,6 +6,8 @@ export type { AdminUser } from '@shared/contracts';
 // Public shape of a read-only admin models row, as returned by
 // GET /api/admin/models (issue #33). Re-exported from the shared contract.
 export type { AdminModel } from '@shared/contracts';
+// #168: per-model error diagnostics rows and the full models payload.
+export type { AdminModelError, AdminModelsPayload } from '@shared/contracts';
 // Public shape of a log buffer row and the logs response, as returned by
 // GET /api/admin/logs (issue #76). Re-exported from the shared contract.
 export type { AdminLogEntry, AdminLogsPayload } from '@shared/contracts';
