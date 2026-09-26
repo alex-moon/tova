@@ -204,6 +204,18 @@ describe('Router Service', () => {
       ).toBe('complex');
     });
 
+    it('treats a bare template echo as all-yes (doubt routes large)', () => {
+      // The prompt's own shape line parses as a vote object whose values
+      // are the literal "yes|no" — anything but an explicit "no" counts
+      // as yes, so a model that echoes the contract instead of filling
+      // it in routes large, never silently small.
+      expect(
+        guardVerdictFromReply(
+          '{"reasoning":"yes|no","code":"yes|no","emotional":"yes|no","creative":"yes|no"}',
+        ),
+      ).toBe('complex');
+    });
+
     it('returns null for empty or vote-less replies', () => {
       expect(guardVerdictFromReply('')).toBeNull();
       expect(guardVerdictFromReply('unsure')).toBeNull();

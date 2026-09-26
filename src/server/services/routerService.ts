@@ -175,7 +175,8 @@ const defaultConfig = async (): Promise<RouterConfig> => {
  * - #129: LangSmith traces (tova-dev, 2026-09-20) showed the reasoning guard
  *   model (openai/gpt-oss-20b) burning its whole token budget on reasoning
  *   and returning an EMPTY reply at the old max_tokens: 10. The budget is
- *   env-tunable (`ROUTER_GUARD_MAX_TOKENS`, default 256) and every
+ *   env-tunable (`ROUTER_GUARD_MAX_TOKENS`, default 512 since #169 phase 2 —
+ *   a transcript in the prompt truncated the vote JSON at 256) and every
  *   failure mode (empty, unparseable, thrown) routes LARGE — never small.
  * - #169 phase 1: inverted the boundary — large is the default route, small
  *   the explicit exception for trivially conversational intent.

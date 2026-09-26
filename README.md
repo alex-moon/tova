@@ -4,7 +4,7 @@ Tova is a chat application with authenticated users, persistent MongoDB-backed c
 
 ## Features
 
-- **Intelligent Routing**: Model pools (not fixed pairs) are resolved from MongoDB per tier (`small`, `large`, `guard`); a fast guard-model classifier and deterministic rules pick the tier, feedback weighting re-orders the pool.
+- **Intelligent Routing**: Model pools (not fixed pairs) are resolved from MongoDB per tier (`small`, `large`, `guard`); a context-aware guard-model classifier picks the tier — large by default, small only for trivially conversational turns — and feedback weighting re-orders the pool.
 - **Tool-calling Agent**: Chat runs through a Mastra agent loop with optional `web_search` (Brave Search API), the current time (`current_datetime`), user-scoped MCP server tools, and asset tools (`list_files`, `read_file`, `generate_file`). The SSE stream emits structured `tool` call/result events.
 - **Persistent Chat**: Session-based chat history in MongoDB, with per-message routing `metrics` and feedback-driven model fit statistics, followup suggestions, and auto-generated session titles.
 - **Asset Library**: File uploads to DigitalOcean Spaces with presigned uploads/downloads, text extraction for documents, and per-message attachments.
@@ -101,9 +101,8 @@ Required: set `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, and `GOOGLE_CALLBACK_U
 
 Routing picks a tier, then a model:
 
-1. **Deterministic rules** — short greetings and code-related requests map to fixed bands/tiers without a classifier call.
-2. **Classifier** — everything else is classified by a fast guard-tier model call (error → safe large-tier fallback).
-3. **Pool pick** — each tier resolves to an eligible pool of models from the MongoDB `providerroutings` collection (managed via admin routes; env vars `ROUTER_SMALL_MODEL`/`ROUTER_LARGE_MODEL` are the fallback when the DB has no rows). A single-model pool is deterministic; a multi-model pool uses ε-random exploration (`ROUTER_EPSILON`) so per-model feedback can accrue.
+1. **Guard classifier** — every text turn is classified by a guard-tier model call that sees the recent conversation and replies with JSON category votes (`reasoning`/`code`/`emotional`/`creative`); any "yes" routes large, all "no" routes small, and every failure mode (empty, unparseable, thrown) falls back to the large tier (#169). Image turns skip the classifier and route to the large vision pool (#115).
+2. **Pool pick** — each tier resolves to an eligible pool of models from the MongoDB `providerroutings` collection (managed via admin routes; env vars `ROUTER_SMALL_MODEL`/`ROUTER_LARGE_MODEL` are the fallback when the DB has no rows). A single-model pool is deterministic; a multi-model pool uses ε-random exploration (`ROUTER_EPSILON`) so per-model feedback can accrue.
 
 Per-band/model up/down feedback (`/api/feedback`) is aggregated into fit weights; when a pool's leader exceeds the `FEEDBACK_FLIP_RATIO` margin, it is forced into the pick, otherwise the pool is ε-shuffled. Empty pools fail loudly rather than falling back silently.
 

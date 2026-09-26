@@ -173,6 +173,51 @@ describe('Zero-data retention chats (issue #116)', () => {
     expect(messages).toEqual(
       expect.arrayContaining([expect.objectContaining({ role: 'user', content: 'older turn' })]),
     );
+
+    // #169 phase 2: the replayed history is also the guard classifier's
+    // context — prior-turns-only by construction, exactly the contract.
+    expect(mockRouteQuery).toHaveBeenCalledWith(
+      'and now?',
+      undefined,
+      undefined,
+      expect.objectContaining({
+        history: [
+          { role: 'user', content: 'older turn' },
+          { role: 'assistant', content: 'older reply' },
+          { role: 'user', content: 'newer turn' },
+          { role: 'assistant', content: 'newer reply' },
+        ],
+      }),
+    );
+  });
+
+  it('passes the replayed history to the guard classifier on the plain ZDR route (#169 phase 2)', async () => {
+    mockPlainGenerate.mockResolvedValue({
+      choices: [{ message: { content: 'Plain ephemeral answer' } }],
+    });
+    const email = 'zdr-guard-history-plain@example.com';
+    const cookies = await registerUser(email);
+    await enableZdr(email);
+
+    const response = await plainMessage(cookies, {
+      content: 'and now?',
+      history: [
+        { role: 'user', content: 'older turn' },
+        { role: 'assistant', content: 'older reply' },
+      ],
+    });
+    expect(response.status).toBe(200);
+    expect(mockRouteQuery).toHaveBeenCalledWith(
+      'and now?',
+      undefined,
+      undefined,
+      expect.objectContaining({
+        history: [
+          { role: 'user', content: 'older turn' },
+          { role: 'assistant', content: 'older reply' },
+        ],
+      }),
+    );
   });
 
   it('refuses to write into an already-persisted session', async () => {
