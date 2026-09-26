@@ -118,6 +118,22 @@ describe('Model Config Service', () => {
       expect(row.disabledUntil).toBeNull();
     });
 
+    it('re-seeding an already-seeded row preserves an in-flight cool-off (#168)', async () => {
+      await listByTier('small'); // ensure the row exists first
+      const until = new Date(Date.now() + 6 * 60 * 60 * 1000);
+      await ProviderRouting.updateOne(
+        { provider: 'deepinfra', model: 'openai/gpt-oss-20b', tier: 'small' },
+        { disabledUntil: until },
+      );
+      await listByTier('small'); // re-seed is a no-op upsert, must not reset
+      const row = await ProviderRouting.findOne({
+        provider: 'deepinfra',
+        model: 'openai/gpt-oss-20b',
+        tier: 'small',
+      }).lean<{ disabledUntil: Date | null }>();
+      expect(row?.disabledUntil?.getTime()).toBe(until.getTime());
+    });
+
     it('legacy rows without the field never cool off (missing = not disabled)', async () => {
       await listByTier('guard');
       // Simulate a pre-#168 doc: strip the field below the schema layer.
