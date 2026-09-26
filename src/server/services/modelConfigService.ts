@@ -23,6 +23,24 @@ export interface ModelFilter extends ModelCapabilities {
   provider?: ProviderName;
 }
 
+/*
+ * #168: thrown when a tier's pool for the requested filter has rows, but
+ * every one of them is cooling off. This is deliberately a throw rather than
+ * an envFallback-sized empty result: `completionsPoolFor` pins the provider,
+ * so "config exists" and "all cooling off" are only distinguishable here —
+ * and silently routing a full outage to the single env model would defeat
+ * both the cool-off and the end-user-visible empty-pool error.
+ */
+export const ALL_MODELS_DISABLED_MESSAGE =
+  'All models are temporarily unavailable after failures — they cool off for a few hours and are retried automatically. Please try again later.';
+
+export class AllModelsDisabledError extends Error {
+  constructor() {
+    super(ALL_MODELS_DISABLED_MESSAGE);
+    this.name = 'AllModelsDisabledError';
+  }
+}
+
 export interface ModelRef extends ModelCapabilities {
   provider: ProviderName;
   model: string;
@@ -230,23 +248,24 @@ const fromEnv = (tier: ModelTier): ModelRef => ({
 });
 
 /*
+ * #168 cool-off, applied lazily: a row whose `disabledUntil` is still in
+ * the future is cooling off; an expired (or missing/null) timestamp reads
+ * as "not disabled", so no timers are needed. Filtering happens in
+ * `listByTier` (which needs to distinguish "no rows" from "all cooling
+ * off"), not in `readRows`.
+ */
+const isCoolingOff = (row: ProviderPoolRow, now: Date): boolean =>
+  row.disabledUntil instanceof Date && row.disabledUntil.getTime() > now.getTime();
+
+/*
  * Reads a tier's eligible rows ordered `provider, model` (post-seed shape is
  * stable because seeds write in that order). Rows are returned with their
  * capability fields so callers can apply `requiredCapabilities` matching.
  */
 const readRows = async (tier: ModelTier): Promise<Array<ProviderPoolRow>> => {
-  const now = new Date();
-  const rows = (await ProviderRouting.find({ tier, eligible: true })
+  return (await ProviderRouting.find({ tier, eligible: true })
     .sort({ provider: 1, model: 1 })
     .lean()) as Array<ProviderPoolRow>;
-  /*
-   * #168 cool-off, applied lazily: a row whose `disabledUntil` is still in
-   * the future is dropped from every pool; an expired (or missing/null)
-   * timestamp reads as "not disabled", so no timers are needed.
-   */
-  return rows.filter(
-    (row) => !(row.disabledUntil instanceof Date) || row.disabledUntil.getTime() <= now.getTime(),
-  );
 };
 
 interface ProviderPoolRow {
@@ -298,11 +317,18 @@ export const disableModel = async (provider: ProviderName, model: string): Promi
 
 /*
  * Seed on first read; idempotent upserts keep concurrent/multi-call seeding
- * safe. Falls back to the tier's env-configured model if the DB is unusable
- * or the tier has no eligible rows (e.g. with the seeding disabled in tests).
+ * safe. Three outcomes for a failing pool read (#168):
+ * - DB unusable → env fallback (existing behaviour, preserved);
+ * - no eligible rows for the tier even after seeding → env fallback;
+ * - eligible rows exist for the requested provider but every one is cooling
+ *   off → `AllModelsDisabledError`, NO env fallback: the env model is a
+ *   single point that would quietly absorb 100% of the traffic and defeat
+ *   both the cool-off and the loud empty-pool error.
  *
- * `requiredCapabilities` filters the resolved rows (capability matching for
- * completions, #94). An empty filter outcome is NOT a fallback: the caller
+ * The cool-off check runs on the provider-filtered rows (before capability
+ * matching) so the pinned `deepinfra` pools of `completionsPoolFor` still
+ * report "all cooling off" when only Groq rows elsewhere in the tier stay
+ * healthy. A capability rule-out on live rows is NOT a fallback: the caller
  * gets `[]` and fails loudly — silently completing with a degenerate env
  * model would defeat the rule-out logic.
  */
@@ -317,9 +343,17 @@ export const listByTier = async (
       rows = await readRows(tier);
       if (rows.length === 0) return [fromEnv(tier)];
     }
+    const now = new Date();
+    const providerPin = requiredFilter?.provider;
+    const providerRows =
+      providerPin === undefined ? rows : rows.filter((row) => row.provider === providerPin);
+    if (providerRows.length > 0 && !providerRows.some((row) => !isCoolingOff(row, now))) {
+      throw new AllModelsDisabledError();
+    }
+    const active = rows.filter((row) => !isCoolingOff(row, now));
     const filtered = requiredFilter
-      ? rows.filter((row) => rowMeetsFilter(row, requiredFilter))
-      : rows;
+      ? active.filter((row) => rowMeetsFilter(row, requiredFilter))
+      : active;
     return filtered.map(({ provider, model, tools, vision, contextLength }) => ({
       provider,
       model,
@@ -328,6 +362,8 @@ export const listByTier = async (
       ...(contextLength !== undefined ? { contextLength } : {}),
     }));
   } catch (err) {
+    // Deliberate pool-exhaustion signal, not a read failure — let it escape.
+    if (err instanceof AllModelsDisabledError) throw err;
     console.error('ProviderRouting config read/seed error:', err);
     return [fromEnv(tier)];
   }

@@ -11,6 +11,9 @@ const ROUTE_B: RoutingResult = { model: 'm-b', provider: 'deepinfra', reason: 't
 const mockDisableModel = jest.fn();
 
 jest.mock('./modelConfigService', () => ({
+  // Keep the real module (AllModelsDisabledError is re-exported through it);
+  // stub only disableModel so the cool-off path never touches the DB.
+  ...jest.requireActual('./modelConfigService'),
   disableModel: (...args: unknown[]) => mockDisableModel(...args),
 }));
 
@@ -98,6 +101,50 @@ describe('withModelFailover (#168)', () => {
         },
       ),
     ).rejects.toThrow('Request too large');
+    expect(mockDisableModel).not.toHaveBeenCalled();
+  });
+
+  // #168 (decision 2026-09-26): 429 is rate-limit back-off territory, a
+  // separate mechanism from cool-off. Until back-off exists, a 429 fails the
+  // turn loudly without disabling the endpoint and without retry-draining
+  // the pool.
+  it('a 429 status failure fails immediately and does not disable or retry', async () => {
+    let invokes = 0;
+    await expect(
+      withModelFailover(
+        async () => ROUTE_A,
+        async () => {
+          invokes += 1;
+          throw Object.assign(new Error('quota exceeded'), { statusCode: 429 });
+        },
+      ),
+    ).rejects.toThrow('quota exceeded');
+    expect(mockDisableModel).not.toHaveBeenCalled();
+    expect(invokes).toBe(1);
+  });
+
+  it('a rate-limit message failure fails immediately and does not disable', async () => {
+    await expect(
+      withModelFailover(
+        async () => ROUTE_A,
+        async () => {
+          throw new Error('Rate limit reached for model m-a');
+        },
+      ),
+    ).rejects.toThrow(/rate limit/i);
+    expect(mockDisableModel).not.toHaveBeenCalled();
+  });
+
+  it('an AllModelsDisabledError escaping route passes through untouched', async () => {
+    const poolDrained = new AllModelsDisabledError();
+    await expect(
+      withModelFailover(
+        async () => {
+          throw poolDrained;
+        },
+        async () => 'never',
+      ),
+    ).rejects.toBe(poolDrained);
     expect(mockDisableModel).not.toHaveBeenCalled();
   });
 });
