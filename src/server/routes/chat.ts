@@ -1039,9 +1039,15 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
     // throwaway attachment (#116); no-op for durable assets.
     await cleanupEphemeralAsset(attachedAsset);
     if (!res.headersSent) {
-      res
-        .status(500)
-        .json({ message: 'Error processing chat', detail: streamingErrorMessage(err) });
+      // #168: every model cooled off before the stream opened (the
+      // pre-stream routeQuery throws) → the friendly message is the
+      // primary text, mirroring the non-streaming route. The client
+      // surfaces it on 503 like it does the 403 geo message.
+      const allDisabled = err instanceof AllModelsDisabledError;
+      res.status(allDisabled ? 503 : 500).json({
+        message: allDisabled ? streamingErrorMessage(err) : 'Error processing chat',
+        detail: streamingErrorMessage(err),
+      });
     } else {
       res.end();
     }

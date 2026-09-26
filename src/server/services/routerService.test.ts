@@ -1,5 +1,5 @@
 import { pickModelRef, routeQuery } from './routerService';
-import { ModelRef } from './modelConfigService';
+import { AllModelsDisabledError, ModelRef } from './modelConfigService';
 import { FitWeight } from './modelMetricsStatsService';
 import { muteConsoleError } from '../test/muteConsole';
 
@@ -24,6 +24,10 @@ jest.mock('@mastra/core/agent', () => ({
 }));
 
 jest.mock('./modelConfigService', () => ({
+  // Keep the real module (routeQuery throws AllModelsDisabledError for a
+  // cool-off drained tier — the class identity must be the real one); stub
+  // only the pool reads.
+  ...jest.requireActual('./modelConfigService'),
   listByTier: jest.fn(),
   completionsPoolFor: jest.fn(),
 }));
@@ -584,6 +588,78 @@ describe('Router Service', () => {
         expect(reason.length).toBeGreaterThan(0);
         expect(provider).toBe('groq');
       }
+    });
+  });
+
+  describe('#168 cool-off drained tiers', () => {
+    // defaultConfig reads both pools with Promise.allSettled; a drained
+    // tier's AllModelsDisabledError must only fail turns whose tier is
+    // actually picked, never the healthy tier's turns.
+    const poolsWith = (small: Promise<ModelRef[]>, large: Promise<ModelRef[]>) =>
+      mockCompletionsPoolFor.mockImplementation((tier: string) =>
+        tier === 'small' ? small : large,
+      );
+
+    // A fresh rejected promise per call: the handler (Promise.allSettled)
+    // attaches synchronously inside the same expression routeQuery builds, so
+    // no unhandled-rejection window exists. Reusing one suite-scope promise
+    // would reject before any test runs.
+    const drainedPool = () => Promise.reject(new AllModelsDisabledError());
+
+    it('serves large-tier turns while the small tier is fully cooling off', async () => {
+      poolsWith(drainedPool(), Promise.resolve([groqLarge]));
+      const result = await routeQuery('Write a Python function to sort a list', null, () => 0);
+      expect(result.model).toBe('test-large-model');
+      expect(result.reason).toBe('deterministic-code');
+    });
+
+    it('throws the user-visible all-disabled error for the drained tier itself', async () => {
+      poolsWith(drainedPool(), Promise.resolve([groqLarge]));
+      await expect(routeQuery('Hello', null, () => 0)).rejects.toBeInstanceOf(
+        AllModelsDisabledError,
+      );
+    });
+
+    it('throws the all-disabled error when BOTH tiers are drained', async () => {
+      poolsWith(drainedPool(), drainedPool());
+      await expect(routeQuery('Hello', null, () => 0)).rejects.toBeInstanceOf(
+        AllModelsDisabledError,
+      );
+    });
+
+    it('reports a drained large tier on image turns as all-disabled, not as a config gap', async () => {
+      poolsWith(Promise.resolve([groqSmall]), drainedPool());
+      await expect(
+        routeQuery('what is in this picture?', null, () => 0, { hasImage: true }),
+      ).rejects.toBeInstanceOf(AllModelsDisabledError);
+    });
+
+    it('propagates the drained large tier through the classifier-error fallback', async () => {
+      poolsWith(Promise.resolve([groqSmall]), drainedPool());
+      classifyAs('', true); // classifier down → fallback would pick large
+      await expect(
+        routeQuery('Should I buy this or that car?', null, () => 0),
+      ).rejects.toBeInstanceOf(AllModelsDisabledError);
+    });
+
+    it('a classifier-simple verdict on a drained small tier is NOT masked as a classifier error', async () => {
+      // Without the AllModelsDisabledError rethrow in the classifier catch,
+      // the drained small tier would silently serve from large and log a
+      // bogus 'Classifier error'.
+      poolsWith(drainedPool(), Promise.resolve([groqLarge]));
+      classifyAs('simple');
+      await expect(routeQuery('Tell me about classic cars', null, () => 0)).rejects.toBeInstanceOf(
+        AllModelsDisabledError,
+      );
+    });
+
+    it('keeps the generic loud error for non-cool-off pool read failures', async () => {
+      // Only AllModelsDisabledError can escape listByTier's env fallback —
+      // pin that anything else (defensive) never masquerades as cool-off.
+      poolsWith(Promise.reject(new Error('pool read exploded')), Promise.resolve([groqLarge]));
+      await expect(routeQuery('Hello', null, () => 0)).rejects.toThrow(
+        'No eligible models configured for tier: small',
+      );
     });
   });
 });

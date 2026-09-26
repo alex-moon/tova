@@ -3,6 +3,7 @@ import { createApp } from '../index';
 import { Message } from '../models/Message';
 import { Session } from '../models/Session';
 import { User } from '../models/User';
+import { AllModelsDisabledError } from '../services/modelConfigService';
 
 const mockGenerate = jest.fn();
 const mockAgentStream = jest.fn();
@@ -851,5 +852,25 @@ describe('Chat streaming route — #168 endpoint failures', () => {
     expect(mockDisableModel).toHaveBeenCalledWith('deepinfra', 'mock-small-model');
     expect(mockRouteQuery).toHaveBeenCalledTimes(1); // no re-route happened
     expect(mockRecordEndpointError).toHaveBeenCalledTimes(1);
+  });
+
+  it('returns 503 with the all-disabled message when routing fails before the stream opens (#168)', async () => {
+    // Every completion model already cooling off at turn start: routeQuery
+    // throws AllModelsDisabledError pre-SSE — the user must see the friendly
+    // message, not "Error processing chat" / a generic client failure.
+    mockRouteQuery.mockReset().mockRejectedValue(new AllModelsDisabledError());
+
+    const cookies = await registerUser('stream-pool-empty@example.com');
+    const app = createApp();
+    const response = await request(app)
+      .post('/api/chat/stream')
+      .set('Cookie', cookies)
+      .send({ content: 'hello there' });
+
+    expect(response.status).toBe(503);
+    expect(response.body.message).toMatch(/temporarily unavailable/);
+    expect(response.body.detail).toMatch(/temporarily unavailable/);
+    expect(mockDisableModel).not.toHaveBeenCalled();
+    expect(mockRecordEndpointError).not.toHaveBeenCalled();
   });
 });
