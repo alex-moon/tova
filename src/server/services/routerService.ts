@@ -175,6 +175,21 @@ const defaultConfig = async (): Promise<RouterConfig> => {
  *      defaults to 256 — reasoning content is emitted ahead of the answer
  *      word, so the reply contract (a single lowercase word) is unchanged
  *      but the answer is no longer truncated away.
+ *
+ * #169 (2026-09-26): inverted the decision boundary — the LARGE tier is now
+ * the default route and the small tier is the explicit exception. The reply
+ * contract and these verdict words stay `simple | complex` (keeps the parse
+ * regex, reason strings, and `(band, model)` feedback history keys stable),
+ * but their meaning shifts: `simple` = "trivially conversational — the user
+ * does not need a smart model" (greetings, thanks, chit-chat one-liners,
+ * short single factual questions), `complex` = "substantive — anything else
+ * a user might actually want a real answer to". The prompt text below was
+ * already written with this asymmetry in #129 (`simple` is defined narrowly
+ * with "only when", `complex` covers all conversational/work prose), so no
+ * wording change was needed; this comment records the boundary semantics.
+ * Note a consequence of the semantics: pure chit-chat that is longer than a
+ * greeting (e.g. multi-sentence small talk) classifies complex and routes
+ * large — by design, per the ticket, small models are the exception.
  */
 
 export const classifyPrompt = (query: string): string =>

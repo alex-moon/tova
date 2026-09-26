@@ -1,4 +1,4 @@
-import { pickModelRef, routeQuery } from './routerService';
+import { classifyPrompt, pickModelRef, routeQuery } from './routerService';
 import { ModelRef } from './modelConfigService';
 import { FitWeight } from './modelMetricsStatsService';
 import { muteConsoleError } from '../test/muteConsole';
@@ -253,6 +253,41 @@ describe('Router Service', () => {
       // constructed without any `tools` argument at all.
       expect('tools' in ctorCall).toBe(false);
       expect(ctorCall.model).toBe('groq/test-guard-model');
+    });
+  });
+
+  describe('Large-by-default inversion (#169)', () => {
+    it('frames small as the exception in the classifier prompt', () => {
+      // #169: the decision boundary is inverted — large is the default, the
+      // small tier gets only trivially conversational intent. The prompt's
+      // own wording must keep that asymmetry: `simple` is defined narrowly
+      // ("only when"), `complex` covers everything otherwise.
+      expect(classifyPrompt('anything')).toMatch(/"simple" only when/);
+      expect(classifyPrompt('anything')).toMatch(/only one word/);
+    });
+
+    it('still routes unambiguous greeting one-liners to the small tier', async () => {
+      const result = await routeQueryWithCfg('thanks');
+      expect(result.reason).toBe('deterministic-short');
+      expect(result.model).toBe('test-small-model');
+    });
+
+    it('routes unparseable guard replies to the LARGE tier, never small', async () => {
+      // The inversion's safe default: a classifier that fails or answers
+      // nonsense must not page the exception tier.
+      classifyAs('unsure');
+      const result = await routeQueryWithCfg('Tell me about classic cars');
+      expect(result.model).toBe('test-large-model');
+      expect(result.reason).toBe('classifier-unparseable');
+    });
+
+    it('routes a substantive multi-part request to the LARGE tier', async () => {
+      classifyAs('complex');
+      const result = await routeQueryWithCfg(
+        'We are planning a week in the Pyrenees with kids; compare rail vs flying and suggest an itinerary',
+      );
+      expect(result.model).toBe('test-large-model');
+      expect(result.reason).toBe('classifier-complex');
     });
   });
 
