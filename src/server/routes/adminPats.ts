@@ -42,9 +42,7 @@ router.get('/pats', ...adminGuard, async (_req, res) => {
 router.post('/pats', ...adminGuard, async (req: AuthRequest, res) => {
   const parsed = createPatSchema.safeParse(req.body ?? {});
   if (!parsed.success) {
-    return res
-      .status(400)
-      .json({ message: parsed.error.issues[0]?.message ?? 'Invalid payload' });
+    return res.status(400).json({ message: parsed.error.issues[0]?.message ?? 'Invalid payload' });
   }
 
   try {

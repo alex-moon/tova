@@ -37,9 +37,7 @@ describe('admin pats (#184)', () => {
     const forbidden = await request(app).get('/api/admin/pats').set('Cookie', cookie);
     expect(forbidden.status).toBe(403);
 
-    const badBearer = await request(app)
-      .get('/api/admin/pats')
-      .set('Authorization', 'Bearer nope');
+    const badBearer = await request(app).get('/api/admin/pats').set('Authorization', 'Bearer nope');
     expect(badBearer.status).toBe(401);
   });
 
@@ -81,7 +79,9 @@ describe('admin pats (#184)', () => {
       .send({ name: 'agent' });
     const token: string = created.body.pat.token;
 
-    const users = await request(app).get('/api/admin/users').set('Authorization', `Bearer ${token}`);
+    const users = await request(app)
+      .get('/api/admin/users')
+      .set('Authorization', `Bearer ${token}`);
     expect(users.status).toBe(200);
     expect(Array.isArray(users.body)).toBe(true);
 
@@ -123,7 +123,9 @@ describe('admin pats (#184)', () => {
     const revoked = await request(app).delete(`/api/admin/pats/${id}`).set('Cookie', cookie);
     expect(revoked.status).toBe(200);
 
-    const after = await request(app).get('/api/admin/users').set('Authorization', `Bearer ${token}`);
+    const after = await request(app)
+      .get('/api/admin/users')
+      .set('Authorization', `Bearer ${token}`);
     expect(after.status).toBe(401);
 
     const again = await request(app).delete(`/api/admin/pats/${id}`).set('Cookie', cookie);
@@ -142,14 +144,18 @@ describe('admin pats (#184)', () => {
       .send({ name: 'inherits-role' });
     const token: string = created.body.pat.token;
 
-    const before = await request(app).get('/api/admin/users').set('Authorization', `Bearer ${token}`);
+    const before = await request(app)
+      .get('/api/admin/users')
+      .set('Authorization', `Bearer ${token}`);
     expect(before.status).toBe(200);
 
     await User.updateOne({ email: 'soon-demoted@example.com' }, { role: 'user' });
 
     // Bearer auth succeeds (the token is valid) but requireRole now 403s —
     // the role came from the creator's live document, not the token.
-    const after = await request(app).get('/api/admin/users').set('Authorization', `Bearer ${token}`);
+    const after = await request(app)
+      .get('/api/admin/users')
+      .set('Authorization', `Bearer ${token}`);
     expect(after.status).toBe(403);
   });
 
