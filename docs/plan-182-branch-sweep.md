@@ -62,5 +62,8 @@ are fully merged by definition.
 - Ticket #179 stays open for the backend log-shipping half (wiring
   `LOKI_URL`, structured logging to Loki).
 - PR #177 remains open for `feat/168-model-errors`' un-consolidated remainder.
-- Deleting the absorbed branches listed above is safe; deferred to owner
-  confirmation.
+- Deleting the absorbed branches listed above: confirmed by the owner and
+  done on 2026-09-27, local and remote (the three ancestors were local-only
+  branches). `feat/179-persistent-log` is deletable once this PR merges —
+  its commit `e2b7314` is reachable from this branch via the `--no-ff`
+  merge.
