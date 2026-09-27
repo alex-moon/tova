@@ -225,12 +225,19 @@ describe('ProfileView theme choice (issue #53)', () => {
     expect(root).toHaveClass('flex', 'h-full', 'w-full', 'flex-col');
     expect(root).not.toHaveClass('overflow-y-auto');
 
-    // Body: the single overflow scroller holds the form and the save button.
+    // Body: the single overflow scroller holds the form.
     const scroller = root.querySelector('.overflow-y-auto');
     expect(scroller).not.toBeNull();
     expect(scroller).toHaveClass('flex-1', 'min-h-0');
-    expect(scroller).toContainElement(screen.getByTestId('profile-save'));
     expect(scroller).toContainElement(screen.getByTestId('profile-custom-instructions'));
+
+    // Action bar (#191): the save button is pinned *outside* the scroller so it
+    // stays reachable regardless of scroll position.
+    const saveButton = screen.getByTestId('profile-save');
+    expect(scroller!.contains(saveButton)).toBe(false);
+    const actionBar = saveButton.closest('.shrink-0');
+    expect(actionBar).not.toBeNull();
+    expect(scroller!.contains(actionBar!)).toBe(false);
 
     // Header: pinned above the scroller, not inside it.
     const header = screen.getByText('Profile').closest('.shrink-0');

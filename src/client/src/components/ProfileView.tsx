@@ -172,7 +172,7 @@ const ProfileView = () => {
           </div>
         )}
       </div>
-      <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-6 py-6">
+      <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-6 py-6 ambient-wash recessed-frame">
         <dl className="mb-4 space-y-2 text-sm">
           <div className="flex justify-between gap-4">
             <dt className="text-muted-foreground">Full name</dt>
@@ -279,11 +279,14 @@ const ProfileView = () => {
             </div>
           </fieldset>
         </div>
-        <div className="mt-4 flex justify-end">
-          <Button onClick={save} disabled={pending} data-testid="profile-save">
-            {pending ? 'Saving...' : 'Save'}
-          </Button>
-        </div>
+      </div>
+      {/* Action bar: pinned below the scroll pane so Save stays reachable
+       * regardless of scroll position. Shares the chrome surface treatment
+       * with the composer/sidebar (issue #191). */}
+      <div className="flex shrink-0 justify-end border-t border-border px-6 py-3 panel-surface">
+        <Button onClick={save} disabled={pending} data-testid="profile-save">
+          {pending ? 'Saving...' : 'Save'}
+        </Button>
       </div>
     </div>
   );
