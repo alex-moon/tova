@@ -14,7 +14,7 @@
 # Example — restore the latest local dump into Atlas (run LAST, after the
 # Atlas cluster and database user exist):
 #   MONGODB_RESTORE_URI='mongodb+srv://<user>:<password>@<cluster-host>/?appName=<app>' \
-#     scripts/db-restore.sh --tarball tmp/db-dumps/tova-tova-20260921-120000.tar.gz \
+#     scripts/db-restore.sh --tarball data/db-dumps/tova-tova-20260921-120000.tar.gz \
 #       --target-db tova
 set -euo pipefail
 
@@ -56,7 +56,7 @@ if [[ ${reply} != yes ]]; then
 fi
 
 REPO_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
-WORK_DIR=$(mktemp -d "${REPO_ROOT}/tmp/db-dumps/restore-XXXXXX")
+WORK_DIR=$(mktemp -d "${REPO_ROOT}/data/db-dumps/restore-XXXXXX")
 trap 'rm -rf "${WORK_DIR}"' EXIT
 tar -xzf "${TARBALL}" -C "${WORK_DIR}"
 # mongodump --out lays out <out>/<dbname>/...; the tarball is built one level

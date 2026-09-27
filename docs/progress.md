@@ -2,6 +2,18 @@
 
 ## Status (current)
 
+#182 branch-sweep rescue — database snapshot tooling: `scripts/db-sync.ts` and
+the `npm run db:dump` / `db:drop` / `db:restore` / `db:sync` scripts rescued
+from the superseded `feat/168-model-errors` branch (commit `e40b270`, PR #177).
+The #168 cool-off feature itself already landed on `main` via
+`feat/tv/168-170-model-pool`; only this self-contained tooling was left behind,
+so it was cherry-picked onto a fresh branch off `main` without the conflicting
+remainder. `db-sync.ts` dumps the source cluster (`MONGODB_DUMP_URL`) into a
+`data/db-dumps/` tarball, then drops + restores it into `MONGODB_URL` for local
+interrogation; destructive subcommands are localhost-gated unless
+`--i-know-this-is-dangerous` is passed. AGENTS.md, README, and `.env.example`
+document the workflow.
+
 #186 LangSmith admin view (merged via PR #189, plan doc in
 `docs/done/plan-186-langsmith-view.md`): read-only "Traces" tab in the admin
 view over the configured LangSmith project — recent root runs (errors-only +
