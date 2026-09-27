@@ -69,10 +69,12 @@
   --c-msg-assistant: var(--c-bg);
   /* Atmospheric depth (issue #191) — LIGHT theme (calibration anchor for the
    * ratio pass; light is the constrained case, so its values gate dark).
-   * The chat column is a *recessive* volume: it stays close to the page
-   * background (a gentle cooling/darkening, not a grey wash) with a faint warm
-   * bloom that reads as open space. Recession is carried mostly by
-   * .recessed-frame's inset shadow at the seams, not by darkening the fill. */
+   * Luminance hierarchy (owner steer): the chat column is the *brightest*
+   * surface — the luminous "space" where the action is — while the chrome
+   * (sidebar, composer) recedes as darker, solid furniture around it. So the
+   * column is lightened toward white and carries a faint warm bloom; the panels
+   * are shaded *down* from the page background. Recession is reinforced by
+   * .recessed-frame's inset shadow at the seams. */
   --c-wash:
     radial-gradient(
       ellipse 80% 60% at 50% 38%,
@@ -81,26 +83,26 @@
     ),
     linear-gradient(
       180deg,
-      color-mix(in srgb, var(--c-bg) 100%, black 3%) 0%,
-      color-mix(in srgb, var(--c-bg) 100%, black 1%) 100%
+      color-mix(in srgb, var(--c-bg) 100%, white 55%) 0%,
+      color-mix(in srgb, var(--c-bg) 100%, white 30%) 100%
     );
   --c-edge-glow: color-mix(
     in srgb,
     var(--c-primary) calc(35% * var(--edge-glow-strength)),
     transparent
   );
-  /* Seam shadow (issue #191): the inner shadow where the column tucks under the
-   * chrome. Light uses a soft warm shadow so the seam doesn't read as a hard
-   * grey band. */
-  --c-recess: rgba(44, 36, 32, 0.14);
+  /* Seam shadow (issue #191): the inner shadow where the *bright* column tucks
+   * under the darker chrome. Light uses a soft warm shadow. */
+  --c-recess: rgba(44, 36, 32, 0.16);
   /* Solidity gradient for interactive panels (issue #191): a shallow
    * linear top-lit → bottom-shaded wash of the panel's *own* surface colour,
-   * so sidebars/composer read as physical slabs you could tap — distinct from
-   * the recessive radial wash behind the chat column. */
+   * so sidebars/composer read as physical slabs you could tap. In light they
+   * tint *toward the Tova primary* (warm branded furniture) and shade down from
+   * the page background, i.e. sit darker than the luminous column. */
   --c-panel-surface: linear-gradient(
     180deg,
-    color-mix(in srgb, var(--c-sidebar-bg) 100%, white 4%) 0%,
-    color-mix(in srgb, var(--c-sidebar-bg) 100%, black 5%) 100%
+    color-mix(in srgb, var(--c-sidebar-bg) 88%, var(--c-primary) 4%) 0%,
+    color-mix(in srgb, var(--c-sidebar-bg) 82%, var(--c-primary) 9%) 100%
   );
   color-scheme: light;
 }
@@ -127,18 +129,20 @@
   --c-info: #5b9cc9;
   --c-msg-user: var(--c-accent);
   --c-msg-assistant: var(--c-bg);
-  /* Atmospheric depth (issue #191): see :root. The column stays the recessive
-   * layer; dark chrome is darker still, so the bloom is kept faint. */
+  /* Atmospheric depth (issue #191): same model as :root — the chat column
+   * washes *lighter* (the luminous "space"), the chrome recedes as darker,
+   * warm-tinted furniture. On dark this is a glow-led lift rather than a
+   * white mix, so the column gains an inner light without washing out. */
   --c-wash:
     radial-gradient(
-      ellipse 95% 70% at 50% 30%,
-      color-mix(in srgb, var(--c-primary) calc(12% * var(--wash-strength)), transparent) 0%,
-      transparent 65%
+      ellipse 90% 65% at 50% 35%,
+      color-mix(in srgb, var(--c-primary) calc(14% * var(--wash-strength)), transparent) 0%,
+      transparent 70%
     ),
     linear-gradient(
       180deg,
-      color-mix(in srgb, var(--c-bg) 100%, black 22%) 0%,
-      color-mix(in srgb, var(--c-bg) 100%, black 10%) 100%
+      color-mix(in srgb, var(--c-bg) 100%, white 7%) 0%,
+      color-mix(in srgb, var(--c-bg) 100%, white 3%) 100%
     );
   --c-edge-glow: color-mix(
     in srgb,
@@ -147,10 +151,13 @@
   );
   /* Seam shadow (issue #191): deep and neutral on the dark canvas. */
   --c-recess: rgba(0, 0, 0, 0.6);
+  /* Solidity gradient for interactive panels (issue #191): mirrors :root —
+   * warm-tinted toward the primary and shaded *down*, so the chrome sits darker
+   * than the luminous column. */
   --c-panel-surface: linear-gradient(
     180deg,
-    color-mix(in srgb, var(--c-sidebar-bg) 100%, white 6%) 0%,
-    color-mix(in srgb, var(--c-sidebar-bg) 100%, black 12%) 100%
+    color-mix(in srgb, var(--c-sidebar-bg) 92%, var(--c-primary) 4%) 0%,
+    color-mix(in srgb, var(--c-sidebar-bg) 86%, var(--c-primary) 10%) 100%
   );
   color-scheme: dark;
 }
