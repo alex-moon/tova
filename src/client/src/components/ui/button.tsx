@@ -10,7 +10,8 @@ const buttonVariants = cva(
       variant: {
         default: 'bg-primary text-primary-foreground hover:bg-(--color-primary-hover)',
         destructive: 'bg-error text-destructive-foreground hover:bg-error/90',
-        outline: 'border border-border bg-transparent transition-colors hover:bg-accent',
+        outline:
+          'border border-border bg-transparent transition-colors hover:bg-accent edge-glow-subtle',
         ghost: 'transition-colors hover:bg-accent',
         link: 'text-primary underline-offset-4 hover:underline',
       },

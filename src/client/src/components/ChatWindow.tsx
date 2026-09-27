@@ -467,7 +467,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
       <div
         ref={scrollRef}
         onScroll={handleScroll}
-        className="flex min-w-0 flex-1 flex-col overflow-x-hidden overflow-y-auto px-3 py-4 md:px-6 md:py-6"
+        className="flex min-w-0 flex-1 flex-col overflow-x-hidden overflow-y-auto px-3 py-4 md:px-6 md:py-6 ambient-wash recessed-frame"
       >
         {messages.length === 0 && !isLoading && (
           <div className="animate-message-in mx-auto my-auto max-w-full text-center">
@@ -486,7 +486,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
                     setInput(chip);
                     if (textareaRef.current) textareaRef.current.focus();
                   }}
-                  className="rounded-full border border-border bg-muted px-3.5 py-1.5 text-sm text-muted-foreground transition-colors hover:border-primary hover:bg-accent hover:text-accent-foreground focus-visible:outline-2 focus-visible:outline-primary"
+                  className="rounded-full border border-border bg-muted px-3.5 py-1.5 text-sm text-muted-foreground transition-colors hover:border-primary hover:bg-accent hover:text-accent-foreground focus-visible:outline-2 focus-visible:outline-primary edge-glow"
                 >
                   {chip}
                 </button>
@@ -615,7 +615,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
           <FollowupChips suggestions={followups} onPick={(value) => setInput(value)} />
         )}
         <form onSubmit={handleSubmit}>
-          <div className="relative rounded-lg border border-border bg-msg-assistant px-3 py-2 shadow-sm">
+          <div className="relative rounded-lg border border-border bg-msg-assistant px-3 py-2 shadow-sm edge-glow-strong panel-surface">
             {attachment && (
               <div
                 className="mb-1.5 flex items-center gap-2 rounded-md border border-border bg-muted px-2.5 py-1.5 text-xs text-muted-foreground"

@@ -397,7 +397,7 @@ function App() {
           {user.role === 'admin' && (
             <a
               href="/admin"
-              className="absolute right-4 top-4 z-10 rounded-lg border border-border bg-background px-3 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
+              className="absolute right-4 top-4 z-10 rounded-lg border border-border bg-background px-3 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground edge-glow-subtle"
             >
               Admin
             </a>

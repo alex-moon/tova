@@ -59,7 +59,7 @@ const Sidebar: React.FC<SidebarProps> = ({
       {showFiles && <AssetLibrary onClose={() => onToggleFiles(false)} onPickAsset={onPickAsset} />}
       <nav
         className={cn(
-          'fixed inset-y-0 left-0 z-40 flex h-full w-(--sidebar-width) shrink-0 flex-col border-r border-border bg-sidebar transition-transform md:static md:translate-x-0',
+          'fixed inset-y-0 left-0 z-40 flex h-full w-(--sidebar-width) shrink-0 flex-col border-r border-border bg-sidebar panel-surface transition-transform md:static md:translate-x-0',
           open ? 'translate-x-0' : '-translate-x-full invisible md:visible',
         )}
       >

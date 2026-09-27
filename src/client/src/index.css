@@ -39,6 +39,9 @@
   --radius-default: 8px;
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
   --shadow-md: 0 4px 6px rgba(0, 0, 0, 0.1);
+  /* Atmospheric depth knobs (issue #191): 0 = off, 1 = normal, >1 = turned up */
+  --wash-strength: 2.5;
+  --edge-glow-strength: 1.5;
   --header-height: 60px;
   --sidebar-width: 260px;
 }
@@ -64,6 +67,41 @@
   --c-info: #3378a8;
   --c-msg-user: var(--c-accent);
   --c-msg-assistant: var(--c-bg);
+  /* Atmospheric depth (issue #191) — LIGHT theme (calibration anchor for the
+   * ratio pass; light is the constrained case, so its values gate dark).
+   * The chat column is a *recessive* volume: it stays close to the page
+   * background (a gentle cooling/darkening, not a grey wash) with a faint warm
+   * bloom that reads as open space. Recession is carried mostly by
+   * .recessed-frame's inset shadow at the seams, not by darkening the fill. */
+  --c-wash:
+    radial-gradient(
+      ellipse 80% 60% at 50% 38%,
+      color-mix(in srgb, var(--c-primary) calc(6% * var(--wash-strength)), transparent) 0%,
+      transparent 72%
+    ),
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--c-bg) 100%, black 3%) 0%,
+      color-mix(in srgb, var(--c-bg) 100%, black 1%) 100%
+    );
+  --c-edge-glow: color-mix(
+    in srgb,
+    var(--c-primary) calc(35% * var(--edge-glow-strength)),
+    transparent
+  );
+  /* Seam shadow (issue #191): the inner shadow where the column tucks under the
+   * chrome. Light uses a soft warm shadow so the seam doesn't read as a hard
+   * grey band. */
+  --c-recess: rgba(44, 36, 32, 0.14);
+  /* Solidity gradient for interactive panels (issue #191): a shallow
+   * linear top-lit → bottom-shaded wash of the panel's *own* surface colour,
+   * so sidebars/composer read as physical slabs you could tap — distinct from
+   * the recessive radial wash behind the chat column. */
+  --c-panel-surface: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--c-sidebar-bg) 100%, white 4%) 0%,
+    color-mix(in srgb, var(--c-sidebar-bg) 100%, black 5%) 100%
+  );
   color-scheme: light;
 }
 
@@ -89,6 +127,31 @@
   --c-info: #5b9cc9;
   --c-msg-user: var(--c-accent);
   --c-msg-assistant: var(--c-bg);
+  /* Atmospheric depth (issue #191): see :root. The column stays the recessive
+   * layer; dark chrome is darker still, so the bloom is kept faint. */
+  --c-wash:
+    radial-gradient(
+      ellipse 95% 70% at 50% 30%,
+      color-mix(in srgb, var(--c-primary) calc(12% * var(--wash-strength)), transparent) 0%,
+      transparent 65%
+    ),
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--c-bg) 100%, black 22%) 0%,
+      color-mix(in srgb, var(--c-bg) 100%, black 10%) 100%
+    );
+  --c-edge-glow: color-mix(
+    in srgb,
+    var(--c-primary) calc(55% * var(--edge-glow-strength)),
+    transparent
+  );
+  /* Seam shadow (issue #191): deep and neutral on the dark canvas. */
+  --c-recess: rgba(0, 0, 0, 0.6);
+  --c-panel-surface: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--c-sidebar-bg) 100%, white 6%) 0%,
+    color-mix(in srgb, var(--c-sidebar-bg) 100%, black 12%) 100%
+  );
   color-scheme: dark;
 }
 
@@ -103,6 +166,43 @@ body {
   font-size: 16px;
   color: var(--c-text);
   background-color: var(--c-bg);
+}
+
+/* Atmospheric depth utilities (issue #191): broad wash + tight border glow.
+ * Element borders are preserved — the glow is additive on top of them. */
+.ambient-wash {
+  background-image: var(--c-wash);
+}
+
+/* Interactive chrome reads as a solid slab (issue #191): a shallow top-lit →
+ * bottom-shaded gradient of the panel's own surface colour. */
+.panel-surface {
+  background-image: var(--c-panel-surface);
+}
+
+/* Recessed frame: the chat column sits *behind* the interactive chrome. An
+ * inset shadow along the top and bottom seams makes it read as sunk beneath
+ * the composer (below) and header (above), rather than floating forward. */
+.recessed-frame {
+  box-shadow:
+    inset 0 20px 26px -22px var(--c-recess),
+    inset 0 -20px 26px -22px var(--c-recess);
+}
+
+.edge-glow {
+  box-shadow: 0 0 0 1px var(--c-edge-glow);
+}
+
+/* Subtler sibling for secondary interactive elements (Admin / New Chat), so
+ * they share the lit-edge family without competing with the composer. */
+.edge-glow-subtle {
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--c-edge-glow) 55%, transparent);
+}
+
+.edge-glow-strong {
+  box-shadow:
+    0 0 0 1px var(--c-edge-glow),
+    0 0 14px -2px var(--c-edge-glow);
 }
 
 h1,
