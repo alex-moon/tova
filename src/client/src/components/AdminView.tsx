@@ -410,7 +410,7 @@ const AdminView = () => {
       <div className="flex min-h-0 flex-1 flex-col gap-4 px-6 py-6 lg:flex-row">
         <nav
           data-testid="admin-nav"
-          className="flex shrink-0 gap-2 lg:flex-col"
+          className="flex shrink-0 gap-2 rounded-xl p-2 lg:flex-col panel-surface"
           aria-label="Admin sections"
         >
           {sectionContent.map((section) => (
@@ -437,7 +437,10 @@ const AdminView = () => {
             </button>
           ))}
         </nav>
-        <div data-testid="admin-scroller" className="min-h-0 flex-1 overflow-y-auto">
+        <div
+          data-testid="admin-scroller"
+          className="min-h-0 flex-1 overflow-y-auto rounded-xl px-4 py-4 ambient-wash"
+        >
           {activeSection === 'users' && (
             <section data-testid="admin-users-section">
               <div className="overflow-x-auto rounded-xl border border-border bg-card">
