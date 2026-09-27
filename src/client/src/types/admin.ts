@@ -26,3 +26,13 @@ export type {
 // PAT shapes (#184): list rows (metadata only) and the one-time creation
 // response, as returned by GET/POST/DELETE /api/admin/pats.
 export type { AdminPat, AdminPatCreated, AdminPatsPayload } from '@shared/contracts';
+// LangSmith read view shapes (#186), as returned by
+// GET /api/admin/langsmith/traces, /langsmith/traces/:id, /langsmith/stats.
+export type {
+  AdminTraceRow,
+  AdminTracesPayload,
+  AdminTraceRun,
+  AdminTraceDetail,
+  AdminLangsmithModelStats,
+  AdminLangsmithStatsPayload,
+} from '@shared/contracts';

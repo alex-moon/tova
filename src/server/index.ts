@@ -10,6 +10,7 @@ import chatRoutes from './routes/chat';
 import feedbackRoutes from './routes/feedback';
 import adminRoutes from './routes/admin';
 import adminPatRoutes from './routes/adminPats';
+import adminLangsmithRoutes from './routes/adminLangsmith';
 import profileRoutes from './routes/profile';
 import assetRoutes from './routes/assets';
 import mcpServerRoutes from './routes/mcpServers';
@@ -82,6 +83,7 @@ export const createApp = (): Express => {
   app.use('/api/messages', feedbackRoutes);
   app.use('/api/admin', adminRoutes);
   app.use('/api/admin', adminPatRoutes);
+  app.use('/api/admin', adminLangsmithRoutes);
   app.use('/api/profile', profileRoutes);
   app.use('/api/assets', assetRoutes);
   app.use('/api/mcp-servers', mcpServerRoutes);

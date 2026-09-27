@@ -6,6 +6,7 @@ import AdminService, {
   AdminGraphService,
   AdminPatsService,
 } from '../services/admin';
+import AdminLangsmithView from './AdminLangsmithView';
 import type {
   AdminLogEntry,
   AdminModelError,
@@ -47,7 +48,7 @@ const AdminView = () => {
   const cursorRef = useRef(0);
   const [error, setError] = useState<string | null>(null);
   const [activeSection, setActiveSection] = useState<
-    'users' | 'models' | 'logs' | 'compare' | 'graph' | 'access'
+    'users' | 'models' | 'logs' | 'compare' | 'graph' | 'traces' | 'access'
   >('users');
   // PATs (#184): Access-tab rows, the generate form, and the one-time
   // plaintext shown right after creation (cleared on reload/navigation —
@@ -377,13 +378,14 @@ const AdminView = () => {
   };
 
   const sectionContent: {
-    id: 'users' | 'models' | 'logs' | 'compare' | 'graph' | 'access';
+    id: 'users' | 'models' | 'logs' | 'compare' | 'graph' | 'traces' | 'access';
     label: string;
   }[] = [
     { id: 'users', label: 'Users' },
     { id: 'models', label: 'Models' },
     { id: 'compare', label: 'Compare' },
     { id: 'graph', label: 'Graph' },
+    { id: 'traces', label: 'Traces' },
     { id: 'logs', label: 'Logs' },
     { id: 'access', label: 'Access' },
   ];
@@ -1004,6 +1006,7 @@ const AdminView = () => {
               )}
             </section>
           )}
+          {activeSection === 'traces' && <AdminLangsmithView />}
           {activeSection === 'logs' && (
             <section data-testid="admin-logs-section">
               <h3 className="font-heading text-lg font-semibold">Logs</h3>
