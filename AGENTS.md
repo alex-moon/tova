@@ -57,7 +57,7 @@ Any change to routing policy (tier boundaries, guard classification, pool defaul
 
 ### Admin API access
 
-Admin API endpoints (`/api/admin/*`) accept a personal access token: generate one in the admin view's Access tab (it is shown once), have the owner paste it into `.env` as `TOVA_PAT`, then send `Authorization: Bearer $TOVA_PAT`. Tokens inherit the creator's live role and are revocable in the same tab. Do NOT register-and-Mongo-promote a user to act as admin — that path is exactly what PATs replaced (#184). Plain cookie-session login remains the browser flow.
+Admin API endpoints (`/api/admin/*`) accept a personal access token: generate one in the admin view's Access tab (it is shown once), have the owner paste it into `.env`, then send `Authorization: Bearer $TOVA_PAT`. Tokens are per-environment — `TOVA_PAT_LOCAL` for the local dev server, `TOVA_PAT` for the live deployment — and only authenticate against the Mongo DB they were created in. Tokens inherit the creator's live role and are revocable in the same tab. Do NOT register-and-Mongo-promote a user to act as admin — that path is exactly what PATs replaced (#184). Plain cookie-session login remains the browser flow.
 
 ### Local MongoDB
 

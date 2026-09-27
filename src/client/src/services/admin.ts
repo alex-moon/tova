@@ -9,6 +9,9 @@ import type {
   ModelComparisonRun,
   AdminGraphEntitiesPayload,
   AdminGraphEntityDetail,
+  AdminTracesPayload,
+  AdminTraceDetail,
+  AdminLangsmithStatsPayload,
 } from '../types/admin';
 
 // Normalised admin failure: message comes from the server response when one
@@ -201,4 +204,55 @@ const revokePat = async (id: string): Promise<void> => {
 
 const AdminPatsService = { listPats, createPat, revokePat };
 
-export { AdminModelsService, AdminLogsService, AdminGraphService, AdminPatsService };
+// LangSmith read view (#186): recent traces with a drill-down tree, and the
+// per-model stats rollup — the evidence-first routing loop, in-app.
+export interface ListTracesParams {
+  errorsOnly?: boolean;
+  model?: string;
+}
+
+const listTraces = async (params: ListTracesParams = {}): Promise<AdminTracesPayload> => {
+  try {
+    const res = await axios.get<AdminTracesPayload>('/api/admin/langsmith/traces', {
+      params: {
+        ...(params.errorsOnly ? { errorsOnly: 'true' } : {}),
+        ...(params.model ? { model: params.model } : {}),
+      },
+    });
+    return res.data;
+  } catch (err) {
+    throw toAdminError(err, 'Failed to load LangSmith traces.');
+  }
+};
+
+const getTrace = async (traceId: string): Promise<AdminTraceDetail> => {
+  try {
+    const res = await axios.get<AdminTraceDetail>(
+      `/api/admin/langsmith/traces/${encodeURIComponent(traceId)}`,
+    );
+    return res.data;
+  } catch (err) {
+    throw toAdminError(err, 'Failed to load LangSmith trace.');
+  }
+};
+
+const listStats = async (days = 7): Promise<AdminLangsmithStatsPayload> => {
+  try {
+    const res = await axios.get<AdminLangsmithStatsPayload>('/api/admin/langsmith/stats', {
+      params: { days },
+    });
+    return res.data;
+  } catch (err) {
+    throw toAdminError(err, 'Failed to load LangSmith stats.');
+  }
+};
+
+const AdminLangsmithService = { listTraces, getTrace, listStats };
+
+export {
+  AdminModelsService,
+  AdminLogsService,
+  AdminGraphService,
+  AdminPatsService,
+  AdminLangsmithService,
+};

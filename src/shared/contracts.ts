@@ -168,6 +168,79 @@ export interface AdminLogsPayload {
   nextCursor: number;
 }
 
+// Admin LangSmith read view (#186): wire types for the Traces tab. Rows and
+// runs are trimmed server-side projections of LangSmith run documents.
+// `model` is the trace's llm child model (e.g. 'openai/gpt-oss-20b') — null
+// when the trace has no llm child (e.g. it errored before the model call);
+// chat turns are traced without session metadata today, so the server
+// resolves it from the child run name. `appPath`, when present, deep-links
+// the run in the LangSmith UI.
+export interface AdminTraceRow {
+  id: string;
+  traceId: string;
+  name: string;
+  status: string;
+  model: string | null;
+  startedAt: string;
+  durationMs: number | null;
+  totalTokens: number | null;
+  error: string | null;
+  appPath?: string;
+}
+
+export interface AdminTracesPayload {
+  project: { id: string; name: string };
+  traces: AdminTraceRow[];
+}
+
+// One node of a trace detail tree. `parentId` is null on the trace's root;
+// the client renders depth from the chain. `inputs`/`outputs` are the raw
+// LangSmith payloads (JSON values — the tab renders them as formatted JSON),
+// included because reading prompts/outputs is the point of the tool; the
+// admin route serves the same trust audience as the LangSmith UI itself.
+export interface AdminTraceRun {
+  id: string;
+  parentId: string | null;
+  name: string;
+  runType: string;
+  status: string;
+  model: string | null;
+  startedAt: string;
+  endedAt: string | null;
+  durationMs: number | null;
+  totalTokens: number | null;
+  error: string | null;
+  inputs: unknown;
+  outputs: unknown;
+}
+
+export interface AdminTraceDetail {
+  traceId: string;
+  runs: AdminTraceRun[];
+}
+
+// Per-model rollup of llm runs in the stats window (#186), aggregated from
+// the llm runs directly (model + tokens live there, and a root-based rollup
+// would multiply API calls against LangSmith's rate limits). `calls` counts
+// llm requests — a tool-using turn makes several to the same model;
+// `errors` are llm-level failures; `avgDurationMs` is the mean end-start of
+// the calls (null when none finished); `totalTokens` sums the runs' token
+// counts. Turns that failed before any llm call do not appear here — the
+// traces list's errors-only filter covers turn-level failures.
+export interface AdminLangsmithModelStats {
+  model: string;
+  calls: number;
+  errors: number;
+  avgDurationMs: number | null;
+  totalTokens: number;
+}
+
+export interface AdminLangsmithStatsPayload {
+  since: string;
+  models: AdminLangsmithModelStats[];
+  totals: { calls: number; errors: number; totalTokens: number };
+}
+
 // `location` is the coarse country-level geolocation (issue #50): only the
 // country name and 2-letter code are exposed, and only once resolved.
 export interface AuthUserLocation {
