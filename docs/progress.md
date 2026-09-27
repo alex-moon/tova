@@ -2,6 +2,27 @@
 
 ## Status (current)
 
+#186 LangSmith admin view (merged via PR #189, plan doc in
+`docs/done/plan-186-langsmith-view.md`): read-only "Traces" tab in the admin
+view over the configured LangSmith project — recent root runs (errors-only +
+model filters, model/latency/tokens joined from the `llm:` child runs since
+chat turns carry no session metadata, per-row deep links into the LangSmith
+UI), a drill-down run tree (inputs/outputs as JSON, `chunk:` streaming
+artifacts dropped), and a per-model stats rollup aggregated from a windowed
+llm-run sweep. Raw-REST service (`langsmithTracesService.ts`) alongside the
+`tracePurge.ts` patterns with live-API learnings baked in: `runs/query`
+answers `{runs, ...}` with a hard `limit` ≤ 100 per query (route test
+enforces the cap), root `total_tokens` reads 0 under `select` so tokens come
+from llm children, bursty 429s get a backoff budget (the root-join stats
+design hung live for 2+ minutes; the llm-run sweep answers in ~7s), and
+every attempt carries a 20s timeout. Routes behind the PAT-friendly admin
+guard (`/api/admin/langsmith/*`); contracts + client service + tests both
+sides; smoke-tested against real `tova-dev` traces. `TOVA_PAT` (live) vs
+`TOVA_PAT_LOCAL` (local) documented in `.env.example`/AGENTS.md. Note:
+GitHub Actions has been failing account-wide today (billing/spending-limit
+runner startup errors) — this and the #184 merge were gated on the local
+`npm run ci` instead; owner action needed on GitHub billing.
+
 #168 Model errors disable the model (branch `feat/tv/168-170-model-pool`): a
 qualifying endpoint failure immediately cools the model off
 (`providerroutings.disabledUntil`, 6h default via `MODEL_COOL_OFF_HOURS`, lazy
