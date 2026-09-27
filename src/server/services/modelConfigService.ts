@@ -23,6 +23,24 @@ export interface ModelFilter extends ModelCapabilities {
   provider?: ProviderName;
 }
 
+/*
+ * #168: thrown when a tier's pool for the requested filter has rows, but
+ * every one of them is cooling off. This is deliberately a throw rather than
+ * an envFallback-sized empty result: `completionsPoolFor` pins the provider,
+ * so "config exists" and "all cooling off" are only distinguishable here —
+ * and silently routing a full outage to the single env model would defeat
+ * both the cool-off and the end-user-visible empty-pool error.
+ */
+export const ALL_MODELS_DISABLED_MESSAGE =
+  'All models are temporarily unavailable after failures — they cool off for a few hours and are retried automatically. Please try again later.';
+
+export class AllModelsDisabledError extends Error {
+  constructor() {
+    super(ALL_MODELS_DISABLED_MESSAGE);
+    this.name = 'AllModelsDisabledError';
+  }
+}
+
 export interface ModelRef extends ModelCapabilities {
   provider: ProviderName;
   model: string;
@@ -168,6 +186,142 @@ const SEED_ENTRIES = (): SeedEntry[] => [
     tools: true,
     contextLength: 1048576,
   },
+  /*
+   * #170: DeepInfra expansion, all `tier: 'large'` (the "<70b ignored" rule
+   * bars new small rows; the batch's one 70-170b model joins the large tier
+   * where gpt-oss-120b already sits). ZDR is non-negotiable: per
+   * docs.deepinfra.com/account/data-privacy only Google and Anthropic models
+   * share data with partners — everything here is DeepInfra-served open
+   * weights, zero retention. `contextLength`/`vision` come from the live
+   * catalog (`/v1/openai/models`, 2026-09-26 dump); capabilities were
+   * live-probed the same day — every row accepted an OpenAI-style `tools`
+   * request, and every `vision: true` row an `image_url` part in the same
+   * request (#115 probe convention). Nemotron-3-Super-120B probes "Model
+   * busy" (429) intermittently — capacity, not capability; runtime cool-off
+   * (#168) covers it. Discovery while dumping: Maverick and Qwen3-VL-8B
+   * above are DELISTED from the catalog (legacy aliases still serve) —
+   * retiring them is a follow-up ticket, not #170.
+   */
+  {
+    provider: 'deepinfra',
+    model: 'deepseek-ai/DeepSeek-V4-Pro-0813',
+    tier: 'large',
+    eligible: true,
+    tools: true,
+    contextLength: 1048576,
+  },
+  {
+    provider: 'deepinfra',
+    model: 'deepseek-ai/DeepSeek-V4.1-Flash',
+    tier: 'large',
+    eligible: true,
+    tools: true,
+    vision: true,
+    contextLength: 1048576,
+  },
+  {
+    provider: 'deepinfra',
+    model: 'moonshotai/Kimi-K3',
+    tier: 'large',
+    eligible: true,
+    tools: true,
+    vision: true,
+    contextLength: 1048576,
+  },
+  {
+    provider: 'deepinfra',
+    model: 'moonshotai/Kimi-K2.6',
+    tier: 'large',
+    eligible: true,
+    tools: true,
+    vision: true,
+    contextLength: 262144,
+  },
+  {
+    provider: 'deepinfra',
+    model: 'Qwen/Qwen3.8-2.4T-A95B',
+    tier: 'large',
+    eligible: true,
+    tools: true,
+    contextLength: 262144,
+  },
+  {
+    provider: 'deepinfra',
+    model: 'Qwen/Qwen3.5-397B-A17B',
+    tier: 'large',
+    eligible: true,
+    tools: true,
+    vision: true,
+    contextLength: 262144,
+  },
+  {
+    provider: 'deepinfra',
+    model: 'Qwen/Qwen3-VL-235B-A22B-Instruct',
+    tier: 'large',
+    eligible: true,
+    tools: true,
+    vision: true,
+    contextLength: 262144,
+  },
+  {
+    provider: 'deepinfra',
+    model: 'Qwen/Qwen3-Coder-480B-A35B-Instruct-Turbo',
+    tier: 'large',
+    eligible: true,
+    tools: true,
+    contextLength: 262144,
+  },
+  {
+    provider: 'deepinfra',
+    model: 'zai-org/GLM-5.3',
+    tier: 'large',
+    eligible: true,
+    tools: true,
+    contextLength: 1048576,
+  },
+  {
+    provider: 'deepinfra',
+    model: 'zai-org/GLM-5.3-Flash',
+    tier: 'large',
+    eligible: true,
+    tools: true,
+    vision: true,
+    contextLength: 1048576,
+  },
+  {
+    provider: 'deepinfra',
+    model: 'nvidia/NVIDIA-Nemotron-3-Ultra-550B-A55B',
+    tier: 'large',
+    eligible: true,
+    tools: true,
+    contextLength: 262144,
+  },
+  {
+    provider: 'deepinfra',
+    model: 'XiaomiMiMo/MiMo-V2.6-Pro',
+    tier: 'large',
+    eligible: true,
+    tools: true,
+    vision: true,
+    contextLength: 1048576,
+  },
+  {
+    provider: 'deepinfra',
+    model: 'MiniMaxAI/MiniMax-M3',
+    tier: 'large',
+    eligible: true,
+    tools: true,
+    vision: true,
+    contextLength: 524288,
+  },
+  {
+    provider: 'deepinfra',
+    model: 'nvidia/NVIDIA-Nemotron-3-Super-120B-A12B',
+    tier: 'large',
+    eligible: true,
+    tools: true,
+    contextLength: 262144,
+  },
   {
     provider: 'groq',
     model: envModel(GUARD_ENV),
@@ -230,24 +384,24 @@ const fromEnv = (tier: ModelTier): ModelRef => ({
 });
 
 /*
+ * #168 cool-off, applied lazily: a row whose `disabledUntil` is still in
+ * the future is cooling off; an expired (or missing/null) timestamp reads
+ * as "not disabled", so no timers are needed. Filtering happens in
+ * `listByTier` (which needs to distinguish "no rows" from "all cooling
+ * off"), not in `readRows`.
+ */
+const isCoolingOff = (row: ProviderPoolRow, now: Date): boolean =>
+  row.disabledUntil instanceof Date && row.disabledUntil.getTime() > now.getTime();
+
+/*
  * Reads a tier's eligible rows ordered `provider, model` (post-seed shape is
  * stable because seeds write in that order). Rows are returned with their
  * capability fields so callers can apply `requiredCapabilities` matching.
  */
-const readRows = async (tier: ModelTier): Promise<Array<ProviderPoolRow>> => {
-  const now = new Date();
-  const rows = (await ProviderRouting.find({ tier, eligible: true })
+const readRows = async (tier: ModelTier): Promise<Array<ProviderPoolRow>> =>
+  (await ProviderRouting.find({ tier, eligible: true })
     .sort({ provider: 1, model: 1 })
     .lean()) as Array<ProviderPoolRow>;
-  /*
-   * #168 cool-off, applied lazily: a row whose `disabledUntil` is still in
-   * the future is dropped from every pool; an expired (or missing/null)
-   * timestamp reads as "not disabled", so no timers are needed.
-   */
-  return rows.filter(
-    (row) => !(row.disabledUntil instanceof Date) || row.disabledUntil.getTime() <= now.getTime(),
-  );
-};
 
 interface ProviderPoolRow {
   provider: ProviderName;
@@ -276,8 +430,11 @@ const rowMeetsFilter = (
  * #168: immediately cool off a failed endpoint. Sets `disabledUntil` on every
  * routing row for the provider+model (a model can serve several tiers); the
  * pool reads above then exclude it until the timestamp expires. Duration is
- * env-tunable, default 6 hours. Errors are swallowed and logged: the cool-off
- * rides alongside a real failure and must not mask or duplicate it.
+ * env-tunable, default 6 hours. Returns whether the write landed: the
+ * failover loops stop on `false` (re-trying the same broken endpoint against
+ * an unchanged pool only adds latency) and surface the original endpoint
+ * error instead. Errors are logged, not thrown — the cool-off rides alongside
+ * a real failure and must not mask or duplicate it.
  */
 const coolOffHours = (): number => {
   const raw = process.env.MODEL_COOL_OFF_HOURS;
@@ -285,24 +442,33 @@ const coolOffHours = (): number => {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : 6;
 };
 
-export const disableModel = async (provider: ProviderName, model: string): Promise<void> => {
+export const disableModel = async (provider: ProviderName, model: string): Promise<boolean> => {
   try {
     await ProviderRouting.updateMany(
       { provider, model },
       { disabledUntil: new Date(Date.now() + coolOffHours() * 60 * 60 * 1000) },
     );
+    return true;
   } catch (err) {
     console.error('ProviderRouting cool-off write error:', err);
+    return false;
   }
 };
 
 /*
  * Seed on first read; idempotent upserts keep concurrent/multi-call seeding
- * safe. Falls back to the tier's env-configured model if the DB is unusable
- * or the tier has no eligible rows (e.g. with the seeding disabled in tests).
+ * safe. Three outcomes for a failing pool read (#168):
+ * - DB unusable → env fallback (existing behaviour, preserved);
+ * - no eligible rows for the tier even after seeding → env fallback;
+ * - eligible rows exist for the requested provider but every one is cooling
+ *   off → `AllModelsDisabledError`, NO env fallback: the env model is a
+ *   single point that would quietly absorb 100% of the traffic and defeat
+ *   both the cool-off and the loud empty-pool error.
  *
- * `requiredCapabilities` filters the resolved rows (capability matching for
- * completions, #94). An empty filter outcome is NOT a fallback: the caller
+ * The cool-off check runs on the provider-filtered rows (before capability
+ * matching) so the pinned `deepinfra` pools of `completionsPoolFor` still
+ * report "all cooling off" when only Groq rows elsewhere in the tier stay
+ * healthy. A capability rule-out on live rows is NOT a fallback: the caller
  * gets `[]` and fails loudly — silently completing with a degenerate env
  * model would defeat the rule-out logic.
  */
@@ -317,9 +483,17 @@ export const listByTier = async (
       rows = await readRows(tier);
       if (rows.length === 0) return [fromEnv(tier)];
     }
+    const now = new Date();
+    const providerPin = requiredFilter?.provider;
+    const providerRows =
+      providerPin === undefined ? rows : rows.filter((row) => row.provider === providerPin);
+    if (providerRows.length > 0 && !providerRows.some((row) => !isCoolingOff(row, now))) {
+      throw new AllModelsDisabledError();
+    }
+    const active = rows.filter((row) => !isCoolingOff(row, now));
     const filtered = requiredFilter
-      ? rows.filter((row) => rowMeetsFilter(row, requiredFilter))
-      : rows;
+      ? active.filter((row) => rowMeetsFilter(row, requiredFilter))
+      : active;
     return filtered.map(({ provider, model, tools, vision, contextLength }) => ({
       provider,
       model,
@@ -328,6 +502,8 @@ export const listByTier = async (
       ...(contextLength !== undefined ? { contextLength } : {}),
     }));
   } catch (err) {
+    // Deliberate pool-exhaustion signal, not a read failure — let it escape.
+    if (err instanceof AllModelsDisabledError) throw err;
     console.error('ProviderRouting config read/seed error:', err);
     return [fromEnv(tier)];
   }

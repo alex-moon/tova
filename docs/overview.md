@@ -38,7 +38,7 @@
 
 - Express-based API and app server
 - MongoDB-backed persistence for users, sessions, and messages
-- Router service that decides whether a request should stay on a smaller model or escalate to a larger one
+- Router service that picks the model pool for each turn: large models are the default route, with smaller models reserved for trivially conversational turns (a guard-model classifier judges each turn in conversation context)
 - Per-message prompt metrics persisted as a `metrics` subdocument on each message: deterministic features (counts, buckets, code/stopword/question/imperative indicators, session indices) computed synchronously at save time, plus LLM-classified dimensions (`metrics.llm`: emotional, technical, abstract, sentiment, open-ended) for user messages, filled post-save fire-and-forget via the guard-model path. Keeps message routing decisions and prompt features in one document for later routing-correlation analysis.
 
 ### Frontend

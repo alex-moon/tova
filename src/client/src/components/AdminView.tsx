@@ -4,10 +4,14 @@ import AdminService, {
   AdminModelsService,
   AdminLogsService,
   AdminGraphService,
+  AdminPatsService,
 } from '../services/admin';
+import AdminLangsmithView from './AdminLangsmithView';
 import type {
   AdminLogEntry,
+  AdminModelError,
   AdminModel,
+  AdminPat,
   AdminUser,
   ModelComparisonRun,
   AdminGraphEntitiesPayload,
@@ -20,17 +24,39 @@ const LOG_LEVELS = ['all', 'info', 'warn', 'error'] as const;
 
 const POLL_INTERVAL_MS = 3000;
 
+/*
+ * #168 cool-off badge: approximate remaining hours, computed client-side —
+ * expiry itself stays server-authoritative (lazy, on read). Returns null
+ * when the model is not cooling off, so callers render nothing.
+ */
+const coolOffHoursLeft = (disabledUntil: string | null): number | null => {
+  if (!disabledUntil) return null;
+  const ms = new Date(disabledUntil).getTime() - Date.now();
+  if (ms <= 0) return null;
+  return Math.max(1, Math.ceil(ms / 3_600_000));
+};
+
 const AdminView = () => {
   const [users, setUsers] = useState<AdminUser[] | null>(null);
   const [models, setModels] = useState<AdminModel[] | null>(null);
+  // #168 diagnostics: per-model error shapes, rendered as their own table
+  // under the models inventory.
+  const [modelErrors, setModelErrors] = useState<AdminModelError[]>([]);
   const [logLevel, setLogLevel] = useState<(typeof LOG_LEVELS)[number]>('all');
   const [logQuery, setLogQuery] = useState('');
   const [logs, setLogs] = useState<AdminLogEntry[]>([]);
   const cursorRef = useRef(0);
   const [error, setError] = useState<string | null>(null);
   const [activeSection, setActiveSection] = useState<
-    'users' | 'models' | 'logs' | 'compare' | 'graph'
+    'users' | 'models' | 'logs' | 'compare' | 'graph' | 'traces' | 'access'
   >('users');
+  // PATs (#184): Access-tab rows, the generate form, and the one-time
+  // plaintext shown right after creation (cleared on reload/navigation —
+  // it is never recoverable afterwards).
+  const [pats, setPats] = useState<AdminPat[] | null>(null);
+  const [patName, setPatName] = useState('');
+  const [newPatToken, setNewPatToken] = useState<string | null>(null);
+  const [patCopied, setPatCopied] = useState(false);
 
   // Issue #76: incremental polling via the monotonic log cursor. A filter
   // change resets the cursor because the server filters by level/text, so
@@ -62,7 +88,8 @@ const AdminView = () => {
   const loadModels = useCallback(async () => {
     try {
       const res = await AdminModelsService.listModels();
-      setModels(res);
+      setModels(res.models);
+      setModelErrors(res.errors);
       setError(null);
     } catch (err) {
       setError(err instanceof AdminError ? err.message : 'Something went wrong.');
@@ -256,6 +283,58 @@ const AdminView = () => {
     return () => clearInterval(timer);
   }, [loadLogs, logLevel, logQuery, activeSection]);
 
+  // PATs (#184): load-on-demand, only while the Access section is visible.
+  // The one-time token box is cleared on leaving the tab (in the nav click
+  // below) — the effect stays side-effect-only so nothing cascades.
+  const loadPats = useCallback(async () => {
+    try {
+      const res = await AdminPatsService.listPats();
+      setPats(res.pats);
+      setError(null);
+    } catch (err) {
+      setError(err instanceof AdminError ? err.message : 'Something went wrong.');
+    }
+  }, []);
+
+  useEffect(() => {
+    if (activeSection !== 'access') return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    loadPats();
+  }, [activeSection, loadPats]);
+
+  const createPat = async () => {
+    if (!patName.trim()) return;
+    try {
+      const created = await AdminPatsService.createPat(patName.trim());
+      setNewPatToken(created.token);
+      setPatCopied(false);
+      setPatName('');
+      await loadPats();
+    } catch (err) {
+      setError(err instanceof AdminError ? err.message : 'Something went wrong.');
+    }
+  };
+
+  const revokePat = async (pat: AdminPat) => {
+    try {
+      await AdminPatsService.revokePat(pat.id);
+      // A revoked row can be the one whose token the box is showing.
+      if (newPatToken) {
+        setNewPatToken(null);
+        setPatCopied(false);
+      }
+      await loadPats();
+    } catch (err) {
+      setError(err instanceof AdminError ? err.message : 'Something went wrong.');
+    }
+  };
+
+  const copyNewPat = async () => {
+    if (!newPatToken) return;
+    await navigator.clipboard.writeText(newPatToken);
+    setPatCopied(true);
+  };
+
   // Per-user entity graph (issue #138 plan task 5): pick a user, list their
   // nodes paginated, drill into one node for its edges. Load-on-demand and
   // read-only — writes come from extraction, never this tab.
@@ -299,14 +378,16 @@ const AdminView = () => {
   };
 
   const sectionContent: {
-    id: 'users' | 'models' | 'logs' | 'compare' | 'graph';
+    id: 'users' | 'models' | 'logs' | 'compare' | 'graph' | 'traces' | 'access';
     label: string;
   }[] = [
     { id: 'users', label: 'Users' },
     { id: 'models', label: 'Models' },
     { id: 'compare', label: 'Compare' },
     { id: 'graph', label: 'Graph' },
+    { id: 'traces', label: 'Traces' },
     { id: 'logs', label: 'Logs' },
+    { id: 'access', label: 'Access' },
   ];
 
   return (
@@ -336,7 +417,15 @@ const AdminView = () => {
             <button
               key={section.id}
               data-testid={`admin-tab-${section.id}`}
-              onClick={() => setActiveSection(section.id)}
+              onClick={() => {
+                // Leaving Access hides the one-time token box for good —
+                // the plaintext is unrecoverable after this point.
+                if (activeSection === 'access' && section.id !== 'access') {
+                  setNewPatToken(null);
+                  setPatCopied(false);
+                }
+                setActiveSection(section.id);
+              }}
               aria-current={activeSection === section.id ? 'page' : undefined}
               className={`rounded-lg border px-3 py-1.5 text-sm transition-colors ${
                 activeSection === section.id
@@ -513,73 +602,86 @@ const AdminView = () => {
                     </tr>
                   </thead>
                   <tbody>
-                    {models?.map((model) => (
-                      <tr key={model.id} className="border-b border-border last:border-b-0">
-                        <td className="px-4 py-3" data-testid={`admin-model-${model.id}`}>
-                          {model.model}
-                        </td>
-                        <td className="px-4 py-3 text-muted-foreground">{model.provider}</td>
-                        <td className="px-4 py-3">{model.tier}</td>
-                        <td className="px-4 py-3 text-muted-foreground">
-                          {model.contextLength?.toLocaleString() ?? '—'}
-                        </td>
-                        <td className="px-4 py-3">
-                          <input
-                            type="checkbox"
-                            data-testid={`model-eligible-${model.id}`}
-                            checked={model.eligible}
-                            onChange={() => toggleModelEligible(model)}
-                          />
-                        </td>
-                        <td className="px-4 py-3" data-testid={`admin-model-caps-${model.id}`}>
-                          <span
-                            className={`mr-1.5 inline-block rounded-full border px-2 py-0.5 text-xs ${
-                              model.vision
-                                ? 'border-primary text-primary'
-                                : 'border-border text-muted-foreground'
-                            }`}
-                            data-testid={`admin-model-vision-${model.id}`}
-                          >
-                            vision {model.vision ? '✓' : '✗'}
-                          </span>
-                          <span
-                            className={`mr-1.5 inline-block rounded-full border px-2 py-0.5 text-xs ${
-                              model.tools
-                                ? 'border-primary text-primary'
-                                : 'border-border text-muted-foreground'
-                            }`}
-                          >
-                            tools {model.tools ? '✓' : '✗'}
-                          </span>
-                          <span className="inline-block px-2 py-0.5 text-xs text-muted-foreground">
-                            {model.contextLength
-                              ? `${model.contextLength.toLocaleString()} tok`
-                              : ''}
-                          </span>
-                        </td>
-                        <td className="px-4 py-3 text-muted-foreground">
-                          {model.stats.length === 0
-                            ? '—'
-                            : model.stats.map((s) => `${s.band}: ${s.up}↑ ${s.down}↓`).join(' · ')}
-                        </td>
-                        <td className="px-4 py-3">
-                          <button
-                            data-testid={`model-edit-${model.id}`}
-                            onClick={() => startEdit(model)}
-                            className="mr-2 rounded-lg border border-border px-2 py-1 text-xs transition-colors hover:bg-accent"
-                          >
-                            Edit
-                          </button>
-                          <button
-                            data-testid={`model-delete-${model.id}`}
-                            onClick={() => deleteModel(model)}
-                            className="rounded-lg border border-destructive px-2 py-1 text-xs text-destructive transition-colors hover:bg-destructive/10"
-                          >
-                            Delete
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
+                    {models?.map((model) => {
+                      const coolOff = coolOffHoursLeft(model.disabledUntil);
+                      return (
+                        <tr key={model.id} className="border-b border-border last:border-b-0">
+                          <td className="px-4 py-3" data-testid={`admin-model-${model.id}`}>
+                            {model.model}
+                            {coolOff !== null && (
+                              <span
+                                data-testid={`admin-model-cooloff-${model.id}`}
+                                className="ml-2 inline-block rounded-full border border-warning px-2 py-0.5 text-xs text-warning"
+                              >
+                                Cooling off · ~{coolOff}h left
+                              </span>
+                            )}
+                          </td>
+                          <td className="px-4 py-3 text-muted-foreground">{model.provider}</td>
+                          <td className="px-4 py-3">{model.tier}</td>
+                          <td className="px-4 py-3 text-muted-foreground">
+                            {model.contextLength?.toLocaleString() ?? '—'}
+                          </td>
+                          <td className="px-4 py-3">
+                            <input
+                              type="checkbox"
+                              data-testid={`model-eligible-${model.id}`}
+                              checked={model.eligible}
+                              onChange={() => toggleModelEligible(model)}
+                            />
+                          </td>
+                          <td className="px-4 py-3" data-testid={`admin-model-caps-${model.id}`}>
+                            <span
+                              className={`mr-1.5 inline-block rounded-full border px-2 py-0.5 text-xs ${
+                                model.vision
+                                  ? 'border-primary text-primary'
+                                  : 'border-border text-muted-foreground'
+                              }`}
+                              data-testid={`admin-model-vision-${model.id}`}
+                            >
+                              vision {model.vision ? '✓' : '✗'}
+                            </span>
+                            <span
+                              className={`mr-1.5 inline-block rounded-full border px-2 py-0.5 text-xs ${
+                                model.tools
+                                  ? 'border-primary text-primary'
+                                  : 'border-border text-muted-foreground'
+                              }`}
+                            >
+                              tools {model.tools ? '✓' : '✗'}
+                            </span>
+                            <span className="inline-block px-2 py-0.5 text-xs text-muted-foreground">
+                              {model.contextLength
+                                ? `${model.contextLength.toLocaleString()} tok`
+                                : ''}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3 text-muted-foreground">
+                            {model.stats.length === 0
+                              ? '—'
+                              : model.stats
+                                  .map((s) => `${s.band}: ${s.up}↑ ${s.down}↓`)
+                                  .join(' · ')}
+                          </td>
+                          <td className="px-4 py-3">
+                            <button
+                              data-testid={`model-edit-${model.id}`}
+                              onClick={() => startEdit(model)}
+                              className="mr-2 rounded-lg border border-border px-2 py-1 text-xs transition-colors hover:bg-accent"
+                            >
+                              Edit
+                            </button>
+                            <button
+                              data-testid={`model-delete-${model.id}`}
+                              onClick={() => deleteModel(model)}
+                              className="rounded-lg border border-destructive px-2 py-1 text-xs text-destructive transition-colors hover:bg-destructive/10"
+                            >
+                              Delete
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
                     {models?.length === 0 && (
                       <tr>
                         <td className="px-4 py-3 text-muted-foreground" colSpan={8}>
@@ -590,6 +692,66 @@ const AdminView = () => {
                   </tbody>
                 </table>
               </div>
+              {modelErrors.length > 0 && (
+                <div className="mt-4">
+                  <h4 className="font-heading text-sm font-semibold">Recent endpoint errors</h4>
+                  <p className="text-xs text-muted-foreground">
+                    Completion failures tallied per provider route (status + category), newest first
+                    — kept in Mongo because deploys wipe the logs. Highlighted rows are currently
+                    cooling off.
+                  </p>
+                  <div
+                    data-testid="admin-model-errors"
+                    className="mt-2 overflow-x-auto rounded-xl border border-border bg-card"
+                  >
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="border-b border-border text-left text-muted-foreground">
+                          <th className="px-4 py-3 font-medium">Model</th>
+                          <th className="px-4 py-3 font-medium">Error</th>
+                          <th className="px-4 py-3 font-medium">Count</th>
+                          <th className="px-4 py-3 font-medium">Last seen</th>
+                          <th className="px-4 py-3 font-medium">Last message</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {modelErrors.map((e) => {
+                          const cooling = (models ?? []).some(
+                            (m) =>
+                              m.provider === e.provider &&
+                              m.model === e.model &&
+                              coolOffHoursLeft(m.disabledUntil) !== null,
+                          );
+                          return (
+                            <tr
+                              key={`${e.provider}/${e.model}/${e.status ?? 'none'}/${e.category}`}
+                              data-testid={`admin-model-error-${e.provider}-${e.model}-${e.status ?? 'none'}`}
+                              className="border-b border-border last:border-b-0"
+                            >
+                              <td
+                                className={`px-4 py-3 ${cooling ? 'text-warning' : 'text-muted-foreground'}`}
+                              >
+                                {e.provider}/{e.model}
+                              </td>
+                              <td className="px-4 py-3">
+                                {e.status !== null ? `${e.status} · ` : ''}
+                                {e.category}
+                              </td>
+                              <td className="px-4 py-3 text-muted-foreground">{e.count}</td>
+                              <td className="px-4 py-3 text-muted-foreground">
+                                {new Date(e.lastSeenAt).toLocaleString()}
+                              </td>
+                              <td className="max-w-md break-all px-4 py-3 text-muted-foreground">
+                                {e.lastMessage}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
             </section>
           )}
           {activeSection === 'compare' && (
@@ -844,6 +1006,7 @@ const AdminView = () => {
               )}
             </section>
           )}
+          {activeSection === 'traces' && <AdminLangsmithView />}
           {activeSection === 'logs' && (
             <section data-testid="admin-logs-section">
               <h3 className="font-heading text-lg font-semibold">Logs</h3>
@@ -895,6 +1058,107 @@ const AdminView = () => {
                     <span>{log.msg}</span>
                   </div>
                 ))}
+              </div>
+            </section>
+          )}
+          {activeSection === 'access' && (
+            <section data-testid="admin-access-section">
+              <h3 className="font-heading text-lg font-semibold">Access</h3>
+              <p className="-mt-4 text-xs text-muted-foreground">
+                Personal access tokens (#184) — for agents and CLI scripts. Paste into{' '}
+                <code>.env</code> as <code>TOVA_PAT</code> and send it as{' '}
+                <code>Authorization: Bearer</code>. Tokens inherit their creator&apos;s role.
+              </p>
+              <div className="mt-4 flex flex-wrap items-end gap-3 rounded-xl border border-border bg-card p-4">
+                <label className="text-sm">
+                  <span className="mr-2 text-muted-foreground">Name</span>
+                  <input
+                    data-testid="pat-name-input"
+                    value={patName}
+                    onChange={(e) => setPatName(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') void createPat();
+                    }}
+                    placeholder="agent laptop"
+                    className="rounded-lg border border-border bg-background px-2 py-1"
+                  />
+                </label>
+                <button
+                  data-testid="pat-create-button"
+                  onClick={() => void createPat()}
+                  className="rounded-lg border border-primary bg-primary px-3 py-1.5 text-sm text-primary-foreground transition-colors hover:bg-primary/90"
+                >
+                  Generate token
+                </button>
+              </div>
+              {newPatToken && (
+                <div
+                  data-testid="pat-one-time-token"
+                  className="mt-4 rounded-xl border border-border bg-card p-4"
+                >
+                  <p className="text-xs font-semibold text-yellow-500">
+                    Copy it now — this token is shown once and never stored in plaintext.
+                  </p>
+                  <div className="mt-2 flex flex-wrap items-center gap-3">
+                    <code className="max-w-full overflow-x-auto rounded-lg border border-border bg-background px-2 py-1 font-mono text-xs">
+                      {newPatToken}
+                    </code>
+                    <button
+                      data-testid="pat-copy-button"
+                      onClick={() => void copyNewPat()}
+                      className="rounded-lg border border-border px-3 py-1.5 text-sm transition-colors hover:bg-accent hover:text-accent-foreground"
+                    >
+                      {patCopied ? 'Copied!' : 'Copy'}
+                    </button>
+                  </div>
+                </div>
+              )}
+              <div className="mt-4 overflow-x-auto rounded-xl border border-border bg-card">
+                <table data-testid="admin-pats" className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-border text-left text-muted-foreground">
+                      <th className="px-4 py-3 font-medium">Name</th>
+                      <th className="px-4 py-3 font-medium">Created</th>
+                      <th className="px-4 py-3 font-medium">Last used</th>
+                      <th className="px-4 py-3 font-medium">Expires</th>
+                      <th className="px-4 py-3 font-medium">Created by</th>
+                      <th className="px-4 py-3" />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(pats ?? []).map((pat) => (
+                      <tr key={pat.id} className="border-b border-border last:border-b-0">
+                        <td className="px-4 py-3">{pat.name}</td>
+                        <td className="px-4 py-3 text-muted-foreground">
+                          {new Date(pat.createdAt).toLocaleString()}
+                        </td>
+                        <td className="px-4 py-3 text-muted-foreground">
+                          {pat.lastUsedAt ? new Date(pat.lastUsedAt).toLocaleString() : 'never'}
+                        </td>
+                        <td className="px-4 py-3 text-muted-foreground">
+                          {pat.expiresAt ? new Date(pat.expiresAt).toLocaleString() : 'never'}
+                        </td>
+                        <td className="px-4 py-3 text-muted-foreground">{pat.creatorEmail}</td>
+                        <td className="px-4 py-3">
+                          <button
+                            data-testid={`pat-revoke-${pat.name}`}
+                            onClick={() => void revokePat(pat)}
+                            className="rounded-lg border border-border px-3 py-1.5 text-sm transition-colors hover:bg-accent hover:text-accent-foreground"
+                          >
+                            Revoke
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                    {pats?.length === 0 && (
+                      <tr>
+                        <td className="px-4 py-3 text-muted-foreground" colSpan={6}>
+                          No tokens yet.
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
               </div>
             </section>
           )}

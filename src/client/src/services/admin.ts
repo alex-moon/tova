@@ -1,11 +1,17 @@
 import axios from 'axios';
 import type {
   AdminModel,
+  AdminModelsPayload,
   AdminUser,
   AdminLogsPayload,
+  AdminPatCreated,
+  AdminPatsPayload,
   ModelComparisonRun,
   AdminGraphEntitiesPayload,
   AdminGraphEntityDetail,
+  AdminTracesPayload,
+  AdminTraceDetail,
+  AdminLangsmithStatsPayload,
 } from '../types/admin';
 
 // Normalised admin failure: message comes from the server response when one
@@ -61,14 +67,16 @@ export default AdminService;
 
 // Model inventory with CRUD (issue #104): list, create, update, delete
 // routing rows in the admin view. Mutations return the row id (POST/PUT) or
-// nothing (DELETE); callers refetch for the authoritative list.
+// nothing (DELETE); callers refetch for the authoritative list. #168: the
+// list also carries per-model error diagnostics (deploy wipes logs, so the
+// shapes accumulate in Mongo instead).
 type ModelInput = Partial<Omit<AdminModel, 'id' | 'stats' | 'contextLength'>> & {
   contextLength?: number | null;
 };
 
-const listModels = async (): Promise<AdminModel[]> => {
+const listModels = async (): Promise<AdminModelsPayload> => {
   try {
-    const res = await axios.get<AdminModel[]>('/api/admin/models');
+    const res = await axios.get<AdminModelsPayload>('/api/admin/models');
     return res.data;
   } catch (err) {
     throw toAdminError(err, 'Failed to load models.');
@@ -165,4 +173,86 @@ const getGraphEntity = async (id: string): Promise<AdminGraphEntityDetail> => {
 
 const AdminGraphService = { listGraphEntities, getGraphEntity };
 
-export { AdminModelsService, AdminLogsService, AdminGraphService };
+// PAT management (#184): the Access tab's list/generate/revoke. The create
+// response carries the plaintext token exactly once — nothing here ever
+// stores or re-fetches it.
+const listPats = async (): Promise<AdminPatsPayload> => {
+  try {
+    const res = await axios.get<AdminPatsPayload>('/api/admin/pats');
+    return res.data;
+  } catch (err) {
+    throw toAdminError(err, 'Failed to load tokens.');
+  }
+};
+
+const createPat = async (name: string): Promise<AdminPatCreated> => {
+  try {
+    const res = await axios.post<{ pat: AdminPatCreated }>('/api/admin/pats', { name });
+    return res.data.pat;
+  } catch (err) {
+    throw toAdminError(err, 'Failed to create token.');
+  }
+};
+
+const revokePat = async (id: string): Promise<void> => {
+  try {
+    await axios.delete(`/api/admin/pats/${id}`);
+  } catch (err) {
+    throw toAdminError(err, 'Failed to revoke token.');
+  }
+};
+
+const AdminPatsService = { listPats, createPat, revokePat };
+
+// LangSmith read view (#186): recent traces with a drill-down tree, and the
+// per-model stats rollup — the evidence-first routing loop, in-app.
+export interface ListTracesParams {
+  errorsOnly?: boolean;
+  model?: string;
+}
+
+const listTraces = async (params: ListTracesParams = {}): Promise<AdminTracesPayload> => {
+  try {
+    const res = await axios.get<AdminTracesPayload>('/api/admin/langsmith/traces', {
+      params: {
+        ...(params.errorsOnly ? { errorsOnly: 'true' } : {}),
+        ...(params.model ? { model: params.model } : {}),
+      },
+    });
+    return res.data;
+  } catch (err) {
+    throw toAdminError(err, 'Failed to load LangSmith traces.');
+  }
+};
+
+const getTrace = async (traceId: string): Promise<AdminTraceDetail> => {
+  try {
+    const res = await axios.get<AdminTraceDetail>(
+      `/api/admin/langsmith/traces/${encodeURIComponent(traceId)}`,
+    );
+    return res.data;
+  } catch (err) {
+    throw toAdminError(err, 'Failed to load LangSmith trace.');
+  }
+};
+
+const listStats = async (days = 7): Promise<AdminLangsmithStatsPayload> => {
+  try {
+    const res = await axios.get<AdminLangsmithStatsPayload>('/api/admin/langsmith/stats', {
+      params: { days },
+    });
+    return res.data;
+  } catch (err) {
+    throw toAdminError(err, 'Failed to load LangSmith stats.');
+  }
+};
+
+const AdminLangsmithService = { listTraces, getTrace, listStats };
+
+export {
+  AdminModelsService,
+  AdminLogsService,
+  AdminGraphService,
+  AdminPatsService,
+  AdminLangsmithService,
+};

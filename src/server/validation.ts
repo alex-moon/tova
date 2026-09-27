@@ -17,6 +17,17 @@ export const loginSchema = z.object({
     .min(1, { message: 'Password is required' }),
 });
 
+// POST /api/admin/pats body (#184): display name for the token in the
+// Access tab.
+export const createPatSchema = z.object({
+  name: z
+    .string({ message: 'Name is required' })
+    .min(1, { message: 'Name is required' })
+    .max(100, { message: 'Name must be at most 100 characters' }),
+});
+
+export type CreatePatRequest = z.infer<typeof createPatSchema>;
+
 // PATCH /api/profile body (issue #35). Strict on purpose: unknown keys
 // (name, avatarUrl, email, role…) are a 400, not silently dropped — a client
 // bug must not pretend success while losing data. Telegram-style: absent keys

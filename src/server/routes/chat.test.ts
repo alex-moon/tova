@@ -3,6 +3,7 @@ import { streamingErrorMessage } from './chat';
 import { createApp } from '../index';
 import { Message } from '../models/Message';
 import { User } from '../models/User';
+import { AllModelsDisabledError } from '../services/modelConfigService';
 
 const mockGenerate = jest.fn();
 
@@ -24,7 +25,7 @@ jest.mock('../services/titleService', () => ({
   generateChatTitle: jest.fn().mockResolvedValue('Hello'),
 }));
 
-const MOCK_ROUTING = { model: 'mock-small-model', reason: 'deterministic-short' };
+const MOCK_ROUTING = { model: 'mock-small-model', reason: 'classifier-simple' };
 
 const registerUser = async (app: ReturnType<typeof createApp>, email: string) => {
   const response = await request(app)
@@ -99,6 +100,49 @@ describe('Chat route routing metadata', () => {
       { model: string },
     ];
     expect(ctorCall[0].model).toBe('deepinfra/Qwen/Qwen2.5-72B-Instruct');
+  });
+
+  it('passes prior turns, oldest first, to the guard classifier — never the current turn (#169 phase 2)', async () => {
+    const app = createApp();
+    const cookies = await registerUser(app, 'routing-guard-history@example.com');
+    const cookieHeader = Array.isArray(cookies) ? cookies : [cookies];
+
+    const first = await request(app)
+      .post('/api/chat')
+      .set('Cookie', cookieHeader)
+      .send({ content: 'first question' });
+    expect(first.status).toBe(200);
+    // First turn of a session: no prior turns exist, so the guard context
+    // is the empty tail — the guard judges the bare message.
+    expect(mockRouteQuery).toHaveBeenLastCalledWith('first question', undefined, undefined, {
+      band: expect.any(String),
+      hasImage: false,
+      history: [],
+    });
+
+    const second = await request(app)
+      .post('/api/chat')
+      .set('Cookie', cookieHeader)
+      .send({ sessionId: first.body.sessionId, content: 'second question' });
+    expect(second.status).toBe(200);
+    expect(mockRouteQuery).toHaveBeenLastCalledWith(
+      'second question',
+      undefined,
+      undefined,
+      expect.objectContaining({
+        hasImage: false,
+        history: [
+          { role: 'user', content: 'first question' },
+          { role: 'assistant', content: 'e2e-ok' },
+        ],
+      }),
+    );
+    // The current turn rides separately as the query — it must never
+    // also appear inside the guard's history tail.
+    const lastDeps = mockRouteQuery.mock.calls[mockRouteQuery.mock.calls.length - 1]?.[3] as {
+      history?: { content: string }[];
+    };
+    expect(lastDeps.history?.some((m) => m.content === 'second question')).toBe(false);
   });
 
   it('persists deduped sources when the agent ran web_search (#16)', async () => {
@@ -522,5 +566,36 @@ describe('pre-stream 429 surfacing (#117)', () => {
     expect(res.status).toBe(500);
     expect(res.body.message).toBe('Error processing chat');
     expect(res.body.detail).toMatch(/Rate limited/);
+  });
+});
+
+describe('#168 all-cooling-off surfacing', () => {
+  beforeEach(() => {
+    mockGenerate.mockReset().mockResolvedValue({
+      text: 'e2e-ok',
+    });
+    mockRouteQuery.mockReset().mockRejectedValue(new AllModelsDisabledError());
+  });
+
+  it('the non-stream route returns 503 with the friendly message as the primary text', async () => {
+    const app = createApp();
+    const cookie = await registerUser(app, 'all-disabled-nonstream@example.com');
+    const res = await request(app).post('/api/chat').set('Cookie', cookie).send({
+      content: 'Give me restaurant ideas near Bandra in Mumbai',
+    });
+    expect(res.status).toBe(503);
+    expect(res.body.message).toMatch(/temporarily unavailable/);
+    expect(res.body.detail).toMatch(/temporarily unavailable/);
+  });
+
+  it('the stream route returns 503 with the friendly message before any SSE event', async () => {
+    const app = createApp();
+    const cookie = await registerUser(app, 'all-disabled-stream@example.com');
+    const res = await request(app).post('/api/chat/stream').set('Cookie', cookie).send({
+      content: 'Give me restaurant ideas near Bandra in Mumbai',
+    });
+    expect(res.status).toBe(503);
+    expect(res.body.message).toMatch(/temporarily unavailable/);
+    expect(res.body.detail).toMatch(/temporarily unavailable/);
   });
 });

@@ -1,5 +1,7 @@
 import type { RoutingResult } from './routerService';
-import { disableModel } from './modelConfigService';
+import { AllModelsDisabledError, disableModel } from './modelConfigService';
+
+export { ALL_MODELS_DISABLED_MESSAGE, AllModelsDisabledError } from './modelConfigService';
 
 /*
  * Model-failure cool-off (#168): when a routed completion endpoint fails, the
@@ -12,24 +14,39 @@ import { disableModel } from './modelConfigService';
  * - prompt-size errors (`isPromptSizeErrors` below): the 413 family is a
  *   prompt-shape problem surfaced with its own actionable message — disabling
  *   a healthy endpoint for hours on a single oversized prompt would be wrong.
+ * - rate-limit errors (#168, decision 2026-09-26): 429 gets a back-off
+ *   mechanism, which is a separate mechanism from cool-off and does not
+ *   exist yet — until it does, a 429 fails the turn loudly without
+ *   disabling the endpoint (retry-looping into other models would drain the
+ *   pool on rate limits, which is not a per-endpoint failure state).
+ *
+ * An `AllModelsDisabledError` escaping `route` (a pool that was already
+ * drained by cool-off before this turn) passes through untouched.
  *
  * The guard classifier lives outside this path (`routeQuery` handles its own
  * error fallback); the cool-off applies to the tier pools (`disableModel`
  * writes `providerroutings.disabledUntil`, which every pool read excludes).
  */
 
-export const ALL_MODELS_DISABLED_MESSAGE =
-  'All models are temporarily unavailable after failures — they cool off for a few hours and are retried automatically. Please try again later.';
-
-export class AllModelsDisabledError extends Error {
-  constructor() {
-    super(ALL_MODELS_DISABLED_MESSAGE);
-    this.name = 'AllModelsDisabledError';
-  }
-}
-
 export const isClientAbort = (err: unknown): boolean =>
   err instanceof Error && (err.name === 'AbortError' || err.name === 'CanceledError');
+
+/*
+ * Mirrors the 413 discrimination in `streamingErrorMessage` (routes/chat.ts):
+ * a status code when present, plus the Groq/Mastra message bodies that
+ * rethrow without one. A stricter (narrower) matcher here would disable an
+ * endpoint on a rate-limit-shaped error the route layer treats as a retry.
+ */
+export const isRateLimitError = (err: unknown): boolean => {
+  const message = err instanceof Error ? err.message : '';
+  const statusCode = (err as { statusCode?: unknown } | null | undefined)?.statusCode;
+  return (
+    statusCode === 429 ||
+    /rate[ _-]?limit/i.test(message) ||
+    /(tokens per minute|requests per minute)/i.test(message) ||
+    /\bTPM\b|\bRPM\b|\btoo many requests\b/i.test(message)
+  );
+};
 
 /*
  * Mirrors the 413 / "Request too large" detection in `streamingErrorMessage`
@@ -48,7 +65,7 @@ export interface FailoverOutcome<T> {
 }
 
 /** Safety cap: one disable per attempt exhausts any sane pool long before. */
-const MAX_ATTEMPTS = 8;
+export const MAX_ATTEMPTS = 8;
 
 export const withModelFailover = async <T>(
   route: () => Promise<RoutingResult>,
@@ -73,8 +90,14 @@ export const withModelFailover = async <T>(
     } catch (err) {
       if (isClientAbort(err)) throw err;
       if (isPromptSizeError(err)) throw err;
+      if (isRateLimitError(err)) throw err;
       lastError = err;
-      await disableModel(routing.provider, routing.model);
+      const disabled = await disableModel(routing.provider, routing.model);
+      if (!disabled) {
+        // Cool-off write failed: the pool is unchanged, so a re-route would
+        // re-pick the same broken endpoint — surface the original error.
+        throw err;
+      }
       disabledAny = true;
     }
   }

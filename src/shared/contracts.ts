@@ -26,6 +26,8 @@ export interface AdminUser {
 // by model name. #115 badge fields: `tools` is schema-defaulted to true;
 // `vision` is only ever true when the row explicitly claims it;
 // `contextLength` is the advertised limit (omitted when none is known).
+// #168: `disabledUntil` is the system-owned cool-off expiry (ISO wire
+// string), null when the model is not cooling off.
 export interface AdminModel {
   id: string;
   provider: string;
@@ -35,7 +37,32 @@ export interface AdminModel {
   tools: boolean;
   vision: boolean;
   contextLength?: number;
+  disabledUntil: string | null;
   stats: { band: string; up: number; down: number }[];
+}
+
+// #168 per-model endpoint-error diagnostics (Alex, 2026-09-26): every
+// completion failure is tallied at the inferenceService choke point into the
+// #175 `modelrouteerrors` collection, so real connector error shapes
+// accumulate in Mongo and survive deploys. One row per
+// (provider, model, status, category) cell; `status` is null when the
+// failure carried no HTTP status; `lastMessage` is a redacted, capped
+// excerpt of the most recent failure.
+export interface AdminModelError {
+  provider: string;
+  model: string;
+  status: number | null;
+  category: string;
+  count: number;
+  lastMessage: string;
+  lastSeenAt: string;
+}
+
+// GET /api/admin/models payload. `errors` is keyed provider+model (one model
+// can serve several tiers, so a per-row join would duplicate rows).
+export interface AdminModelsPayload {
+  models: AdminModel[];
+  errors: AdminModelError[];
 }
 
 // One in-memory log buffer row, GET /api/admin/logs (issue #76). `id` is a
@@ -45,6 +72,29 @@ export interface AdminLogEntry {
   ts: string;
   level: 'info' | 'warn' | 'error';
   msg: string;
+}
+
+// Admin PATs (#184): agent/CLI credentials managed in the Access tab.
+// `AdminPat` is the list shape — metadata only, no token (the plaintext is
+// returned exactly once, in AdminPatCreated at creation).
+export interface AdminPat {
+  id: string;
+  name: string;
+  createdAt: string;
+  lastUsedAt: string | null;
+  expiresAt: string | null;
+  creatorEmail: string | null;
+}
+
+export interface AdminPatCreated {
+  id: string;
+  name: string;
+  token: string;
+  createdAt: string;
+}
+
+export interface AdminPatsPayload {
+  pats: AdminPat[];
 }
 
 // Direct model comparison (issue #129): one prompt run against the existing
@@ -116,6 +166,79 @@ export interface AdminGraphEntityDetail {
 export interface AdminLogsPayload {
   logs: AdminLogEntry[];
   nextCursor: number;
+}
+
+// Admin LangSmith read view (#186): wire types for the Traces tab. Rows and
+// runs are trimmed server-side projections of LangSmith run documents.
+// `model` is the trace's llm child model (e.g. 'openai/gpt-oss-20b') — null
+// when the trace has no llm child (e.g. it errored before the model call);
+// chat turns are traced without session metadata today, so the server
+// resolves it from the child run name. `appPath`, when present, deep-links
+// the run in the LangSmith UI.
+export interface AdminTraceRow {
+  id: string;
+  traceId: string;
+  name: string;
+  status: string;
+  model: string | null;
+  startedAt: string;
+  durationMs: number | null;
+  totalTokens: number | null;
+  error: string | null;
+  appPath?: string;
+}
+
+export interface AdminTracesPayload {
+  project: { id: string; name: string };
+  traces: AdminTraceRow[];
+}
+
+// One node of a trace detail tree. `parentId` is null on the trace's root;
+// the client renders depth from the chain. `inputs`/`outputs` are the raw
+// LangSmith payloads (JSON values — the tab renders them as formatted JSON),
+// included because reading prompts/outputs is the point of the tool; the
+// admin route serves the same trust audience as the LangSmith UI itself.
+export interface AdminTraceRun {
+  id: string;
+  parentId: string | null;
+  name: string;
+  runType: string;
+  status: string;
+  model: string | null;
+  startedAt: string;
+  endedAt: string | null;
+  durationMs: number | null;
+  totalTokens: number | null;
+  error: string | null;
+  inputs: unknown;
+  outputs: unknown;
+}
+
+export interface AdminTraceDetail {
+  traceId: string;
+  runs: AdminTraceRun[];
+}
+
+// Per-model rollup of llm runs in the stats window (#186), aggregated from
+// the llm runs directly (model + tokens live there, and a root-based rollup
+// would multiply API calls against LangSmith's rate limits). `calls` counts
+// llm requests — a tool-using turn makes several to the same model;
+// `errors` are llm-level failures; `avgDurationMs` is the mean end-start of
+// the calls (null when none finished); `totalTokens` sums the runs' token
+// counts. Turns that failed before any llm call do not appear here — the
+// traces list's errors-only filter covers turn-level failures.
+export interface AdminLangsmithModelStats {
+  model: string;
+  calls: number;
+  errors: number;
+  avgDurationMs: number | null;
+  totalTokens: number;
+}
+
+export interface AdminLangsmithStatsPayload {
+  since: string;
+  models: AdminLangsmithModelStats[];
+  totals: { calls: number; errors: number; totalTokens: number };
 }
 
 // `location` is the coarse country-level geolocation (issue #50): only the

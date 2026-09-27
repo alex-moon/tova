@@ -4,6 +4,7 @@ import { createApp } from '../index';
 import { User } from '../models/User';
 import { ProviderRouting } from '../models/ProviderRouting';
 import { ModelMetricStat } from '../models/ModelMetricStat';
+import { ModelRouteError } from '../models/ModelRouteError';
 import { Entity } from '../models/Entity';
 import { EntityEdge } from '../models/EntityEdge';
 import { clearLogs, pushLog } from '../services/logService';
@@ -270,20 +271,89 @@ describe('admin routes', () => {
 
       const res = await request(app).get('/api/admin/models').set('Cookie', cookie);
       expect(res.status).toBe(200);
-      const rows = res.body.filter((m: { model: string }) => m.model === 'test-large') as Record<
-        string,
-        unknown
-      >[];
+      const rows = res.body.models.filter(
+        (m: { model: string }) => m.model === 'test-large',
+      ) as Record<string, unknown>[];
       expect(rows).toHaveLength(2);
       const byTier = new Map(rows.map((r) => [r.tier, r]));
       expect(byTier.get('guard')).toMatchObject({
         eligible: false,
         stats: [{ band: 'short|prose', up: 3, down: 1 }],
+        disabledUntil: null,
       });
       expect(byTier.get('large')).toMatchObject({ eligible: true, contextLength: 131072 });
       for (const row of rows) {
         expect(typeof row.id).toBe('string');
         expect(row.id).not.toBe('groq/test-large'); // per-row Mongo ids, #104
+      }
+    });
+
+    // #168: the cool-off expiry and the per-model error diagnostics ride
+    // the same payload — the badge and the errors table read them.
+    it('surfaces disabledUntil and per-model error tallies in the payload', async () => {
+      const app = createApp();
+      const cookie = await registerAdmin(app, 'models-cooloff@example.com');
+
+      const until = new Date(Date.now() + 3 * 60 * 60 * 1000);
+      await ProviderRouting.create({
+        provider: 'deepinfra',
+        model: 'test-cooling',
+        tier: 'large',
+        eligible: true,
+        disabledUntil: until,
+      });
+      await ProviderRouting.create({
+        provider: 'groq',
+        model: 'test-healthy',
+        tier: 'guard',
+        eligible: true,
+      });
+      // #175 tally rows (modelrouteerrors) are the single diagnostics
+      // mechanism — the admin table reads them (OQ-7 lean consolidation).
+      await ModelRouteError.create({
+        provider: 'deepinfra',
+        model: 'test-cooling',
+        status: 502,
+        category: 'server_error',
+        count: 2,
+        lastMessage: 'Error: bad gateway',
+        lastSeenAt: new Date(),
+      });
+      await ModelRouteError.create({
+        provider: 'deepinfra',
+        model: 'test-cooling',
+        status: null,
+        category: 'network',
+        count: 1,
+        lastMessage: 'Error: connection reset',
+        lastSeenAt: new Date(),
+      });
+
+      const res = await request(app).get('/api/admin/models').set('Cookie', cookie);
+      expect(res.status).toBe(200);
+      const cooling = res.body.models.find((m: { model: string }) => m.model === 'test-cooling');
+      const healthy = res.body.models.find((m: { model: string }) => m.model === 'test-healthy');
+      expect(cooling.disabledUntil).toBe(until.toISOString());
+      expect(healthy.disabledUntil).toBeNull();
+
+      const errors: Record<string, unknown>[] = res.body.errors.filter(
+        (e: { model: string }) => e.model === 'test-cooling',
+      );
+      expect(errors).toHaveLength(2);
+      const byCategory = new Map(errors.map((e) => [e.category as string, e]));
+      expect(byCategory.get('server_error')).toMatchObject({
+        provider: 'deepinfra',
+        count: 2,
+        status: 502,
+        lastMessage: 'Error: bad gateway',
+      });
+      expect(byCategory.get('network')).toMatchObject({
+        status: null,
+        count: 1,
+        lastMessage: 'Error: connection reset',
+      });
+      for (const e of errors) {
+        expect(isNaN(Date.parse(e.lastSeenAt as string))).toBe(false);
       }
     });
 

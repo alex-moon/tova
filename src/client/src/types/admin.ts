@@ -6,6 +6,8 @@ export type { AdminUser } from '@shared/contracts';
 // Public shape of a read-only admin models row, as returned by
 // GET /api/admin/models (issue #33). Re-exported from the shared contract.
 export type { AdminModel } from '@shared/contracts';
+// #168: per-model error diagnostics rows and the full models payload.
+export type { AdminModelError, AdminModelsPayload } from '@shared/contracts';
 // Public shape of a log buffer row and the logs response, as returned by
 // GET /api/admin/logs (issue #76). Re-exported from the shared contract.
 export type { AdminLogEntry, AdminLogsPayload } from '@shared/contracts';
@@ -20,4 +22,17 @@ export type {
   AdminGraphEntitiesPayload,
   AdminGraphEntityDetail,
   AdminGraphSourceRef,
+} from '@shared/contracts';
+// PAT shapes (#184): list rows (metadata only) and the one-time creation
+// response, as returned by GET/POST/DELETE /api/admin/pats.
+export type { AdminPat, AdminPatCreated, AdminPatsPayload } from '@shared/contracts';
+// LangSmith read view shapes (#186), as returned by
+// GET /api/admin/langsmith/traces, /langsmith/traces/:id, /langsmith/stats.
+export type {
+  AdminTraceRow,
+  AdminTracesPayload,
+  AdminTraceRun,
+  AdminTraceDetail,
+  AdminLangsmithModelStats,
+  AdminLangsmithStatsPayload,
 } from '@shared/contracts';
