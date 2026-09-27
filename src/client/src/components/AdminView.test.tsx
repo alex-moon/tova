@@ -15,6 +15,9 @@ const listLogs = vi.fn();
 const compareModels = vi.fn();
 const listGraphEntities = vi.fn();
 const getGraphEntity = vi.fn();
+const listPats = vi.fn();
+const createPat = vi.fn();
+const revokePat = vi.fn();
 
 vi.mock('../services/admin', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../services/admin')>();
@@ -36,6 +39,11 @@ vi.mock('../services/admin', async (importOriginal) => {
     AdminGraphService: {
       listGraphEntities: (...args: unknown[]) => listGraphEntities(...args),
       getGraphEntity: (...args: unknown[]) => getGraphEntity(...args),
+    },
+    AdminPatsService: {
+      listPats: (...args: unknown[]) => listPats(...args),
+      createPat: (...args: unknown[]) => createPat(...args),
+      revokePat: (...args: unknown[]) => revokePat(...args),
     },
   };
 });
@@ -717,5 +725,91 @@ describe('AdminView graph section (issue #138)', () => {
     expect(await screen.findByTestId('graph-error')).toHaveTextContent(
       'Failed to load graph entities.',
     );
+  });
+});
+
+describe('AdminView access section (#184)', () => {
+  const writeText = vi.fn().mockResolvedValue(undefined);
+
+  afterEach(cleanup);
+
+  beforeEach(() => {
+    listUsers.mockReset().mockResolvedValue([admin()]);
+    listModels.mockReset().mockResolvedValue(modelsPayload());
+    listPats.mockReset().mockResolvedValue({ pats: [] });
+    createPat.mockReset();
+    revokePat.mockReset();
+    writeText.mockClear();
+    Object.assign(navigator, { clipboard: { writeText } });
+  });
+
+  it('loads tokens on opening the tab and shows the empty state', async () => {
+    render(<AdminView />);
+    fireEvent.click(await screen.findByTestId('admin-tab-access'));
+    await waitFor(() => expect(listPats).toHaveBeenCalled());
+    expect(await screen.findByText('No tokens yet.')).toBeInTheDocument();
+  });
+
+  it('lists tokens with their metadata', async () => {
+    listPats.mockResolvedValue({
+      pats: [
+        {
+          id: 'p1',
+          name: 'agent laptop',
+          createdAt: '2026-09-27T10:00:00.000Z',
+          lastUsedAt: null,
+          expiresAt: null,
+          creatorEmail: 'someone@example.com',
+        },
+      ],
+    });
+    render(<AdminView />);
+    fireEvent.click(await screen.findByTestId('admin-tab-access'));
+    expect(await screen.findByText('agent laptop')).toBeInTheDocument();
+    expect(screen.getByText('someone@example.com')).toBeInTheDocument();
+    // 'never' for both last-used and expiry — one row has no dates yet.
+    expect(screen.getAllByText('never')).toHaveLength(2);
+  });
+
+  it('generates a token and shows the plaintext exactly once with a copy button', async () => {
+    createPat.mockResolvedValue({
+      id: 'p2',
+      name: 'agent laptop',
+      token: 'tova_pat_newtoken',
+      createdAt: '2026-09-27T10:00:00.000Z',
+    });
+    render(<AdminView />);
+    fireEvent.click(await screen.findByTestId('admin-tab-access'));
+    const input = await screen.findByTestId('pat-name-input');
+    fireEvent.change(input, { target: { value: 'agent laptop' } });
+    fireEvent.click(screen.getByTestId('pat-create-button'));
+    expect(await screen.findByTestId('pat-one-time-token')).toHaveTextContent('tova_pat_newtoken');
+    expect(createPat).toHaveBeenCalledWith('agent laptop');
+    fireEvent.click(screen.getByTestId('pat-copy-button'));
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith('tova_pat_newtoken'));
+    expect(await screen.findByText('Copied!')).toBeInTheDocument();
+  });
+
+  it('revokes a token via the API and refreshes the list', async () => {
+    listPats
+      .mockResolvedValueOnce({
+        pats: [
+          {
+            id: 'p1',
+            name: 'old token',
+            createdAt: '2026-09-27T10:00:00.000Z',
+            lastUsedAt: null,
+            expiresAt: null,
+            creatorEmail: 'someone@example.com',
+          },
+        ],
+      })
+      .mockResolvedValueOnce({ pats: [] });
+    revokePat.mockResolvedValue(undefined);
+    render(<AdminView />);
+    fireEvent.click(await screen.findByTestId('admin-tab-access'));
+    fireEvent.click(await screen.findByTestId('pat-revoke-old token'));
+    await waitFor(() => expect(revokePat).toHaveBeenCalledWith('p1'));
+    expect(await screen.findByText('No tokens yet.')).toBeInTheDocument();
   });
 });

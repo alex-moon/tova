@@ -4,6 +4,8 @@ import type {
   AdminModelsPayload,
   AdminUser,
   AdminLogsPayload,
+  AdminPatCreated,
+  AdminPatsPayload,
   ModelComparisonRun,
   AdminGraphEntitiesPayload,
   AdminGraphEntityDetail,
@@ -168,4 +170,35 @@ const getGraphEntity = async (id: string): Promise<AdminGraphEntityDetail> => {
 
 const AdminGraphService = { listGraphEntities, getGraphEntity };
 
-export { AdminModelsService, AdminLogsService, AdminGraphService };
+// PAT management (#184): the Access tab's list/generate/revoke. The create
+// response carries the plaintext token exactly once — nothing here ever
+// stores or re-fetches it.
+const listPats = async (): Promise<AdminPatsPayload> => {
+  try {
+    const res = await axios.get<AdminPatsPayload>('/api/admin/pats');
+    return res.data;
+  } catch (err) {
+    throw toAdminError(err, 'Failed to load tokens.');
+  }
+};
+
+const createPat = async (name: string): Promise<AdminPatCreated> => {
+  try {
+    const res = await axios.post<{ pat: AdminPatCreated }>('/api/admin/pats', { name });
+    return res.data.pat;
+  } catch (err) {
+    throw toAdminError(err, 'Failed to create token.');
+  }
+};
+
+const revokePat = async (id: string): Promise<void> => {
+  try {
+    await axios.delete(`/api/admin/pats/${id}`);
+  } catch (err) {
+    throw toAdminError(err, 'Failed to revoke token.');
+  }
+};
+
+const AdminPatsService = { listPats, createPat, revokePat };
+
+export { AdminModelsService, AdminLogsService, AdminGraphService, AdminPatsService };

@@ -74,6 +74,29 @@ export interface AdminLogEntry {
   msg: string;
 }
 
+// Admin PATs (#184): agent/CLI credentials managed in the Access tab.
+// `AdminPat` is the list shape — metadata only, no token (the plaintext is
+// returned exactly once, in AdminPatCreated at creation).
+export interface AdminPat {
+  id: string;
+  name: string;
+  createdAt: string;
+  lastUsedAt: string | null;
+  expiresAt: string | null;
+  creatorEmail: string | null;
+}
+
+export interface AdminPatCreated {
+  id: string;
+  name: string;
+  token: string;
+  createdAt: string;
+}
+
+export interface AdminPatsPayload {
+  pats: AdminPat[];
+}
+
 // Direct model comparison (issue #129): one prompt run against the existing
 // agent on chosen routing rows. `answer` is null with `error` set when that
 // model's completion failed; `latencyMs` covers the full agent call.

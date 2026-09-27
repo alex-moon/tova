@@ -4,11 +4,13 @@ import AdminService, {
   AdminModelsService,
   AdminLogsService,
   AdminGraphService,
+  AdminPatsService,
 } from '../services/admin';
 import type {
   AdminLogEntry,
   AdminModelError,
   AdminModel,
+  AdminPat,
   AdminUser,
   ModelComparisonRun,
   AdminGraphEntitiesPayload,
@@ -45,8 +47,15 @@ const AdminView = () => {
   const cursorRef = useRef(0);
   const [error, setError] = useState<string | null>(null);
   const [activeSection, setActiveSection] = useState<
-    'users' | 'models' | 'logs' | 'compare' | 'graph'
+    'users' | 'models' | 'logs' | 'compare' | 'graph' | 'access'
   >('users');
+  // PATs (#184): Access-tab rows, the generate form, and the one-time
+  // plaintext shown right after creation (cleared on reload/navigation —
+  // it is never recoverable afterwards).
+  const [pats, setPats] = useState<AdminPat[] | null>(null);
+  const [patName, setPatName] = useState('');
+  const [newPatToken, setNewPatToken] = useState<string | null>(null);
+  const [patCopied, setPatCopied] = useState(false);
 
   // Issue #76: incremental polling via the monotonic log cursor. A filter
   // change resets the cursor because the server filters by level/text, so
@@ -273,6 +282,58 @@ const AdminView = () => {
     return () => clearInterval(timer);
   }, [loadLogs, logLevel, logQuery, activeSection]);
 
+  // PATs (#184): load-on-demand, only while the Access section is visible.
+  // The one-time token box is cleared on leaving the tab (in the nav click
+  // below) — the effect stays side-effect-only so nothing cascades.
+  const loadPats = useCallback(async () => {
+    try {
+      const res = await AdminPatsService.listPats();
+      setPats(res.pats);
+      setError(null);
+    } catch (err) {
+      setError(err instanceof AdminError ? err.message : 'Something went wrong.');
+    }
+  }, []);
+
+  useEffect(() => {
+    if (activeSection !== 'access') return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    loadPats();
+  }, [activeSection, loadPats]);
+
+  const createPat = async () => {
+    if (!patName.trim()) return;
+    try {
+      const created = await AdminPatsService.createPat(patName.trim());
+      setNewPatToken(created.token);
+      setPatCopied(false);
+      setPatName('');
+      await loadPats();
+    } catch (err) {
+      setError(err instanceof AdminError ? err.message : 'Something went wrong.');
+    }
+  };
+
+  const revokePat = async (pat: AdminPat) => {
+    try {
+      await AdminPatsService.revokePat(pat.id);
+      // A revoked row can be the one whose token the box is showing.
+      if (newPatToken) {
+        setNewPatToken(null);
+        setPatCopied(false);
+      }
+      await loadPats();
+    } catch (err) {
+      setError(err instanceof AdminError ? err.message : 'Something went wrong.');
+    }
+  };
+
+  const copyNewPat = async () => {
+    if (!newPatToken) return;
+    await navigator.clipboard.writeText(newPatToken);
+    setPatCopied(true);
+  };
+
   // Per-user entity graph (issue #138 plan task 5): pick a user, list their
   // nodes paginated, drill into one node for its edges. Load-on-demand and
   // read-only — writes come from extraction, never this tab.
@@ -316,7 +377,7 @@ const AdminView = () => {
   };
 
   const sectionContent: {
-    id: 'users' | 'models' | 'logs' | 'compare' | 'graph';
+    id: 'users' | 'models' | 'logs' | 'compare' | 'graph' | 'access';
     label: string;
   }[] = [
     { id: 'users', label: 'Users' },
@@ -324,6 +385,7 @@ const AdminView = () => {
     { id: 'compare', label: 'Compare' },
     { id: 'graph', label: 'Graph' },
     { id: 'logs', label: 'Logs' },
+    { id: 'access', label: 'Access' },
   ];
 
   return (
@@ -353,7 +415,15 @@ const AdminView = () => {
             <button
               key={section.id}
               data-testid={`admin-tab-${section.id}`}
-              onClick={() => setActiveSection(section.id)}
+              onClick={() => {
+                // Leaving Access hides the one-time token box for good —
+                // the plaintext is unrecoverable after this point.
+                if (activeSection === 'access' && section.id !== 'access') {
+                  setNewPatToken(null);
+                  setPatCopied(false);
+                }
+                setActiveSection(section.id);
+              }}
               aria-current={activeSection === section.id ? 'page' : undefined}
               className={`rounded-lg border px-3 py-1.5 text-sm transition-colors ${
                 activeSection === section.id
@@ -985,6 +1055,107 @@ const AdminView = () => {
                     <span>{log.msg}</span>
                   </div>
                 ))}
+              </div>
+            </section>
+          )}
+          {activeSection === 'access' && (
+            <section data-testid="admin-access-section">
+              <h3 className="font-heading text-lg font-semibold">Access</h3>
+              <p className="-mt-4 text-xs text-muted-foreground">
+                Personal access tokens (#184) — for agents and CLI scripts. Paste into{' '}
+                <code>.env</code> as <code>TOVA_PAT</code> and send it as{' '}
+                <code>Authorization: Bearer</code>. Tokens inherit their creator&apos;s role.
+              </p>
+              <div className="mt-4 flex flex-wrap items-end gap-3 rounded-xl border border-border bg-card p-4">
+                <label className="text-sm">
+                  <span className="mr-2 text-muted-foreground">Name</span>
+                  <input
+                    data-testid="pat-name-input"
+                    value={patName}
+                    onChange={(e) => setPatName(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') void createPat();
+                    }}
+                    placeholder="agent laptop"
+                    className="rounded-lg border border-border bg-background px-2 py-1"
+                  />
+                </label>
+                <button
+                  data-testid="pat-create-button"
+                  onClick={() => void createPat()}
+                  className="rounded-lg border border-primary bg-primary px-3 py-1.5 text-sm text-primary-foreground transition-colors hover:bg-primary/90"
+                >
+                  Generate token
+                </button>
+              </div>
+              {newPatToken && (
+                <div
+                  data-testid="pat-one-time-token"
+                  className="mt-4 rounded-xl border border-border bg-card p-4"
+                >
+                  <p className="text-xs font-semibold text-yellow-500">
+                    Copy it now — this token is shown once and never stored in plaintext.
+                  </p>
+                  <div className="mt-2 flex flex-wrap items-center gap-3">
+                    <code className="max-w-full overflow-x-auto rounded-lg border border-border bg-background px-2 py-1 font-mono text-xs">
+                      {newPatToken}
+                    </code>
+                    <button
+                      data-testid="pat-copy-button"
+                      onClick={() => void copyNewPat()}
+                      className="rounded-lg border border-border px-3 py-1.5 text-sm transition-colors hover:bg-accent hover:text-accent-foreground"
+                    >
+                      {patCopied ? 'Copied!' : 'Copy'}
+                    </button>
+                  </div>
+                </div>
+              )}
+              <div className="mt-4 overflow-x-auto rounded-xl border border-border bg-card">
+                <table data-testid="admin-pats" className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-border text-left text-muted-foreground">
+                      <th className="px-4 py-3 font-medium">Name</th>
+                      <th className="px-4 py-3 font-medium">Created</th>
+                      <th className="px-4 py-3 font-medium">Last used</th>
+                      <th className="px-4 py-3 font-medium">Expires</th>
+                      <th className="px-4 py-3 font-medium">Created by</th>
+                      <th className="px-4 py-3" />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(pats ?? []).map((pat) => (
+                      <tr key={pat.id} className="border-b border-border last:border-b-0">
+                        <td className="px-4 py-3">{pat.name}</td>
+                        <td className="px-4 py-3 text-muted-foreground">
+                          {new Date(pat.createdAt).toLocaleString()}
+                        </td>
+                        <td className="px-4 py-3 text-muted-foreground">
+                          {pat.lastUsedAt ? new Date(pat.lastUsedAt).toLocaleString() : 'never'}
+                        </td>
+                        <td className="px-4 py-3 text-muted-foreground">
+                          {pat.expiresAt ? new Date(pat.expiresAt).toLocaleString() : 'never'}
+                        </td>
+                        <td className="px-4 py-3 text-muted-foreground">{pat.creatorEmail}</td>
+                        <td className="px-4 py-3">
+                          <button
+                            data-testid={`pat-revoke-${pat.name}`}
+                            onClick={() => void revokePat(pat)}
+                            className="rounded-lg border border-border px-3 py-1.5 text-sm transition-colors hover:bg-accent hover:text-accent-foreground"
+                          >
+                            Revoke
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                    {pats?.length === 0 && (
+                      <tr>
+                        <td className="px-4 py-3 text-muted-foreground" colSpan={6}>
+                          No tokens yet.
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
               </div>
             </section>
           )}

@@ -55,6 +55,10 @@ Any change to routing policy (tier boundaries, guard classification, pool defaul
 - Compare candidate models directly with the one-off eval script (`scripts/eval-model-compare.ts`): `npx tsx scripts/eval-model-compare.ts "<prompt>" --models deepinfra/Qwen/Qwen3-14B,groq/openai/gpt-oss-20b`. It runs a single prompt through the existing agent on each model, printing answers side by side. The admin view's "Compare" tab does the exact same thing in the browser (it shares the same server code).
 - Read LangSmith traces liberally before judging a routing change (read-only): project `tova-dev` via the `LANGCHAIN_*` credentials in `.env`. Real traces are the best evidence for which tier a conversational prompt belongs in — e.g. ticket #129 was diagnosed entirely from a trace showing the guard model returning empty replies.
 
+### Admin API access
+
+Admin API endpoints (`/api/admin/*`) accept a personal access token: generate one in the admin view's Access tab (it is shown once), have the owner paste it into `.env` as `TOVA_PAT`, then send `Authorization: Bearer $TOVA_PAT`. Tokens inherit the creator's live role and are revocable in the same tab. Do NOT register-and-Mongo-promote a user to act as admin — that path is exactly what PATs replaced (#184). Plain cookie-session login remains the browser flow.
+
 ### Local MongoDB
 
 A local MongoDB is available at `mongodb://localhost:27017/tova` at any time. If it is not running, start the stack with `npm run stack:up`.

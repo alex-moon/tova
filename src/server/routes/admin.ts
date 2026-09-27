@@ -1,7 +1,7 @@
 import express from 'express';
 import mongoose from 'mongoose';
 import { User, UserDocument } from '../models/User';
-import { authenticate, requireRole, AuthRequest } from '../middleware/auth';
+import { authenticateBearerOrSession, requireRole, AuthRequest } from '../middleware/auth';
 import { AdminUser } from '../../shared/contracts';
 import { ProviderRouting } from '../models/ProviderRouting';
 import { ModelMetricStat } from '../models/ModelMetricStat';
@@ -24,7 +24,8 @@ import type {
 
 const router = express.Router();
 
-const adminGuard = [authenticate, requireRole('admin')];
+// Bearer PATs (#184) and cookie sessions both pass through the first leg.
+const adminGuard = [authenticateBearerOrSession, requireRole('admin')];
 
 const KNOWN_PERMISSIONS = ['routing'] as const;
 

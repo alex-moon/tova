@@ -23,3 +23,6 @@ export type {
   AdminGraphEntityDetail,
   AdminGraphSourceRef,
 } from '@shared/contracts';
+// PAT shapes (#184): list rows (metadata only) and the one-time creation
+// response, as returned by GET/POST/DELETE /api/admin/pats.
+export type { AdminPat, AdminPatCreated, AdminPatsPayload } from '@shared/contracts';
