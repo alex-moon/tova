@@ -215,7 +215,7 @@ const AssetLibrary: React.FC<AssetLibraryProps> = ({ onClose, onPickAsset }) => 
       onClick={onClose}
     >
       <div
-        className="flex max-h-[85dvh] w-full max-w-2xl flex-col rounded-xl border border-border bg-background shadow-lg"
+        className="flex max-h-[85dvh] w-full max-w-2xl flex-col rounded-xl border border-border shadow-lg panel-surface"
         onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-label="Asset library"

@@ -31,7 +31,7 @@ const Login: React.FC = () => {
   };
 
   return (
-    <main className="flex h-dvh w-full overflow-hidden">
+    <main className="flex h-dvh w-full overflow-hidden ambient-wash">
       <Card className="mx-auto my-auto w-[min(20rem,calc(100vw-2rem))]">
         <CardHeader>
           <div className="mb-1 flex justify-center">
