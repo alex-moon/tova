@@ -610,12 +610,12 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
           </div>
         )}
       </div>
-      <footer className="pointer-events-auto shrink-0 border-t border-border bg-background p-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] md:px-6">
+      <footer className="pointer-events-auto shrink-0 border-t border-border panel-surface p-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] md:px-6">
         {!isLoading && followups.length > 0 && (
           <FollowupChips suggestions={followups} onPick={(value) => setInput(value)} />
         )}
         <form onSubmit={handleSubmit}>
-          <div className="relative rounded-lg border border-border bg-msg-assistant px-3 py-2 shadow-sm edge-glow-strong panel-surface">
+          <div className="relative rounded-lg border border-border px-3 py-2 shadow-sm edge-glow-strong panel-surface">
             {attachment && (
               <div
                 className="mb-1.5 flex items-center gap-2 rounded-md border border-border bg-muted px-2.5 py-1.5 text-xs text-muted-foreground"
