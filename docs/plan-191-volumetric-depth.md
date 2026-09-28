@@ -58,13 +58,14 @@ elevation.
 - [x] Chat interface: column wash + recessed frame; composer solidity + strong
       edge glow; example chips edge glow; New Chat + Admin subtle edge glow
 - [x] Sidebar: solidity gradient (calibration anchor)
-- [ ] Light-theme calibration: vignette/bloom balanced for light (currently
-      muddy; needs its own values)
-- [ ] Final volume-down pass: reduce knobs to a subtle default, sidebar as ref
-- [ ] Roll out: profile, admin, asset library, login
-- [ ] Visual verification against `mockups/` in both themes via Playwright
-- [ ] Theme test: wash/glow/panel tokens resolve per theme; light borders kept
-- [ ] Gate: `npm run ci` green
+- [x] Light-theme calibration: vignette/bloom balanced for light
+- [x] Final volume-down pass: knobs reduced to the subtle default of 1,
+      sidebar as ref
+- [x] Roll out: profile, admin, asset library, login
+- [x] Visual verification in both themes via Playwright
+- [x] Theme test: wash/glow/panel tokens resolve per theme; light borders kept
+      (`src/client/src/depth-tokens.test.ts`)
+- [x] Gate: `npm run ci` green
 
 ## Open questions
 
@@ -72,6 +73,26 @@ elevation.
   wash. Panels that are mostly interactive chrome should be solid; the admin
   content tables may be better recessive. Decide per surface during rollout.
 
+## Closeout fixes (owner review)
+
+After the rollout, owner review surfaced the following; all fixed here:
+
+- **Dark luminance inverted.** The first pass lifted the chat column lighter
+  than the panels in *both* themes. Owner steer: light keeps column-lighter,
+  but **dark must go the other way** — column recessed *darker* than the
+  chrome. Dark `--c-wash` now shades the column down from `--c-bg`; dark
+  `--c-panel-surface` lifts the panels toward the background/white.
+- **Admin mobile tabs** clipped with no scroll. The section nav is now
+  `overflow-x-auto` (horizontal) below `lg`, with `shrink-0 whitespace-nowrap`
+  buttons, and returns to the vertical column at `lg`.
+- **Admin h3 collision.** `Graph`/`Logs`/`Access` subheadings used a `-mt-4`
+  hack that pulled them under the heading; removed to match `Models`/`Compare`.
+- **Admin + Profile h2 misalignment.** The title headers had top padding but
+  no bottom padding, so the h2 sat flush to the header edge and below the
+  floating `Back to chat` link. Both headers now use a shared `h-14` title bar
+  and `BackToChatLink` centers on the same bar.
+
 ## Follow-ups
+
 
 - None; tuning stays in CSS variables (no user-facing settings surface).

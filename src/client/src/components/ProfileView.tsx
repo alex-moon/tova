@@ -161,12 +161,14 @@ const ProfileView = () => {
       data-testid="profile-view"
       className="flex h-full w-full flex-col bg-background text-foreground"
     >
-      <div className="shrink-0 px-6 pt-6">
-        <h2 className="font-heading text-xl font-semibold">Profile</h2>
+      <div className="shrink-0 px-6">
+        <div className="flex h-14 items-center">
+          <h2 className="font-heading text-xl font-semibold">Profile</h2>
+        </div>
         {error && (
           <div
             data-testid="profile-error"
-            className="mt-3 rounded-lg border border-destructive bg-destructive/10 p-3 text-sm text-destructive"
+            className="mb-4 rounded-lg border border-destructive bg-destructive/10 p-3 text-sm text-destructive"
           >
             {error}
           </div>

@@ -132,20 +132,21 @@
   --c-info: #5b9cc9;
   --c-msg-user: var(--c-accent);
   --c-msg-assistant: var(--c-bg);
-  /* Atmospheric depth (issue #191): same model as :root — the chat column
-   * washes *lighter* (the luminous "space"), the chrome recedes as darker,
-   * warm-tinted furniture. On dark this is a glow-led lift rather than a
-   * white mix, so the column gains an inner light without washing out. */
+  /* Atmospheric depth (issue #191): same model as :root — the chat column is
+   * the *recessive* plane, the chrome (sidebar, composer) is the solid
+   * furniture around it. In dark, recessing means shading the column *down*
+   * from the page background (darker), while the panels sit lighter than it.
+   * The warm primary bloom stays: it reads as ambient light, not luminance. */
   --c-wash:
     radial-gradient(
       ellipse 90% 65% at 50% 35%,
-      color-mix(in srgb, var(--c-primary) calc(14% * var(--wash-strength)), transparent) 0%,
+      color-mix(in srgb, var(--c-primary) calc(10% * var(--wash-strength)), transparent) 0%,
       transparent 70%
     ),
     linear-gradient(
       180deg,
-      color-mix(in srgb, var(--c-bg) 100%, white 7%) 0%,
-      color-mix(in srgb, var(--c-bg) 100%, white 3%) 100%
+      color-mix(in srgb, var(--c-bg) 100%, black 14%) 0%,
+      color-mix(in srgb, var(--c-bg) 100%, black 20%) 100%
     );
   --c-edge-glow: color-mix(
     in srgb,
@@ -154,13 +155,15 @@
   );
   /* Seam shadow (issue #191): deep and neutral on the dark canvas. */
   --c-recess: rgba(0, 0, 0, 0.6);
-  /* Solidity gradient for interactive panels (issue #191): mirrors :root —
-   * warm-tinted toward the primary and shaded *down*, so the chrome sits darker
-   * than the luminous column. */
+  /* Solidity gradient for interactive panels (issue #191): the mirror of :root.
+   * In light the panels shade *down* from the page background; in dark they
+   * shade *up* — warm-tinted and lifted slightly toward the background/white —
+   * so the chrome reads as solid furniture sitting *in front of* the darker,
+   * recessed column. */
   --c-panel-surface: linear-gradient(
     180deg,
-    color-mix(in srgb, var(--c-sidebar-bg) 92%, var(--c-primary) 4%) 0%,
-    color-mix(in srgb, var(--c-sidebar-bg) 86%, var(--c-primary) 10%) 100%
+    color-mix(in srgb, var(--c-sidebar-bg) 100%, white 8%) 0%,
+    color-mix(in srgb, var(--c-sidebar-bg) 100%, var(--c-primary) 6%) 100%
   );
   color-scheme: dark;
 }

@@ -395,13 +395,15 @@ const AdminView = () => {
       data-testid="admin-view"
       className="flex h-full w-full flex-col bg-background text-foreground"
     >
-      <div className="shrink-0 px-6 pt-6">
-        <h2 className="font-heading text-xl font-semibold">Admin</h2>
-        {!users && !error && <p className="mt-3 text-sm text-muted-foreground">Loading users...</p>}
+      <div className="shrink-0 px-6">
+        <div className="flex h-14 items-center">
+          <h2 className="font-heading text-xl font-semibold">Admin</h2>
+        </div>
+        {!users && !error && <p className="text-sm text-muted-foreground">Loading users...</p>}
         {error && (
           <div
             data-testid="admin-error"
-            className="mt-3 rounded-lg border border-destructive bg-destructive/10 p-3 text-sm text-destructive"
+            className="mb-4 rounded-lg border border-destructive bg-destructive/10 p-3 text-sm text-destructive"
           >
             {error}
           </div>
@@ -410,7 +412,7 @@ const AdminView = () => {
       <div className="flex min-h-0 flex-1 flex-col gap-4 px-6 py-6 lg:flex-row">
         <nav
           data-testid="admin-nav"
-          className="flex shrink-0 gap-2 rounded-xl p-2 lg:flex-col panel-surface"
+          className="flex shrink-0 gap-2 overflow-x-auto rounded-xl p-2 lg:flex-col lg:overflow-x-visible panel-surface"
           aria-label="Admin sections"
         >
           {sectionContent.map((section) => (
@@ -427,7 +429,7 @@ const AdminView = () => {
                 setActiveSection(section.id);
               }}
               aria-current={activeSection === section.id ? 'page' : undefined}
-              className={`rounded-lg border px-3 py-1.5 text-sm transition-colors ${
+              className={`shrink-0 whitespace-nowrap rounded-lg border px-3 py-1.5 text-sm transition-colors ${
                 activeSection === section.id
                   ? 'border-primary bg-primary text-primary-foreground'
                   : 'border-border hover:bg-accent hover:text-accent-foreground'
@@ -837,7 +839,7 @@ const AdminView = () => {
           {activeSection === 'graph' && (
             <section data-testid="admin-graph-section">
               <h3 className="font-heading text-lg font-semibold">Graph</h3>
-              <p className="-mt-4 text-xs text-muted-foreground">
+              <p className="text-xs text-muted-foreground">
                 Per-user entity graph (issue #138) — nodes and edges extracted across chats, with
                 source links for audit.
               </p>
@@ -1013,7 +1015,7 @@ const AdminView = () => {
           {activeSection === 'logs' && (
             <section data-testid="admin-logs-section">
               <h3 className="font-heading text-lg font-semibold">Logs</h3>
-              <p className="-mt-4 text-xs text-muted-foreground">
+              <p className="text-xs text-muted-foreground">
                 Live server log tail (issue #76) — filters the admin API's in-memory buffer.
               </p>
               <div className="mt-4 flex flex-wrap items-center gap-3">
@@ -1067,7 +1069,7 @@ const AdminView = () => {
           {activeSection === 'access' && (
             <section data-testid="admin-access-section">
               <h3 className="font-heading text-lg font-semibold">Access</h3>
-              <p className="-mt-4 text-xs text-muted-foreground">
+              <p className="text-xs text-muted-foreground">
                 Personal access tokens (#184) — for agents and CLI scripts. Paste into{' '}
                 <code>.env</code> as <code>TOVA_PAT</code> and send it as{' '}
                 <code>Authorization: Bearer</code>. Tokens inherit their creator&apos;s role.
