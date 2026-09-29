@@ -11,6 +11,8 @@ module.exports = {
   silent: true,
   roots: ['<rootDir>/src/server'],
   testMatch: ['**/*.test.ts'],
+  globalSetup: '<rootDir>/src/server/test/globalSetup.ts',
+  globalTeardown: '<rootDir>/src/server/test/globalSetup.ts',
   setupFilesAfterEnv: ['<rootDir>/src/server/test/setup.ts'],
   modulePathIgnorePatterns: ['<rootDir>/dist/'],
   // `@mastra/core`'s CJS build requires ESM-only transitive deps (e.g.
