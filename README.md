@@ -71,31 +71,32 @@ Required: set `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, and `GOOGLE_CALLBACK_U
 
 ### Individual commands
 
-| Command                                  | What it does                                                           |
-| ---------------------------------------- | ---------------------------------------------------------------------- |
-| `npm install`                            | Install root and client dependencies (`postinstall` adds the client)   |
-| `npm run install:all`                    | Explicit form of the above                                             |
-| `npm run stack:up` / `stack:down`        | Start/stop the Dockerized MongoDB backing service                      |
-| `npm run db:migrate` / `db:migrate:down` | Run/undo DB migrations (`mongo-migrate-ts`, `migrations/`)             |
-| `npm run db:dump`                        | `mongodump` from `MONGODB_DUMP_URL` into a `data/db-dumps/` tarball    |
-| `npm run db:drop`                        | Drop the database in `MONGODB_URL` (localhost-gated, see below)        |
-| `npm run db:restore`                     | Restore the latest `data/db-dumps/` tarball into `MONGODB_URL` (gated) |
-| `npm run db:sync`                        | Dump from `MONGODB_DUMP_URL`, drop, and restore into `MONGODB_URL`     |
-| `npm run dev`                            | Run backend + frontend together                                        |
-| `npm run dev:server`                     | Run backend only (watch mode)                                          |
-| `npm run dev:client`                     | Run frontend only (Vite dev server)                                    |
-| `npm run build`                          | Compile backend TypeScript to `dist/`                                  |
-| `npm run build:client`                   | Build the frontend bundle                                              |
-| `npm start`                              | Start the built backend from `dist/index.js`                           |
-| `npm test`                               | Run the backend Jest suite (also run via `test:server`)                |
-| `npm run test:e2e`                       | Run the Playwright e2e suite (`e2e/`)                                  |
-| `npm run lint` / `lint:fix`              | ESLint over `src/` and `migrations/`; `fix` lint-fixes + formats       |
-| `npm run format` / `format:check`        | Prettier over the repo                                                 |
-| `npm run typecheck`                      | TypeScript, no emit                                                    |
-| `npm run ci`                             | Full gate: lint, format, typecheck, tests, client checks + build       |
-| `npm run deploy`                         | Deploy the live stack over SSH (see below)                             |
+| Command                                  | What it does                                                              |
+| ---------------------------------------- | ------------------------------------------------------------------------- |
+| `npm install`                            | Install root and client dependencies (`postinstall` adds the client)      |
+| `npm run install:all`                    | Explicit form of the above                                                |
+| `npm run stack:up` / `stack:down`        | Start/stop the Dockerized MongoDB backing service                         |
+| `npm run db:migrate` / `db:migrate:down` | Run/undo DB migrations (`mongo-migrate-ts`, `migrations/`)                |
+| `npm run db:dump`                        | `mongodump` from `MONGODB_DUMP_URL` into a `data/db-dumps/` tarball       |
+| `npm run db:drop`                        | Drop the database in `MONGODB_URL` (localhost-gated, see below)           |
+| `npm run db:restore`                     | Restore the latest `data/db-dumps/` tarball into `MONGODB_URL` (gated)    |
+| `npm run db:sync`                        | Dump from `MONGODB_DUMP_URL`, drop, and restore into `MONGODB_URL`        |
+| `npm run db:password`                    | Reset all passwords to `password` and all PATs to `tova_pat_TEST` (gated) |
+| `npm run dev`                            | Run backend + frontend together                                           |
+| `npm run dev:server`                     | Run backend only (watch mode)                                             |
+| `npm run dev:client`                     | Run frontend only (Vite dev server)                                       |
+| `npm run build`                          | Compile backend TypeScript to `dist/`                                     |
+| `npm run build:client`                   | Build the frontend bundle                                                 |
+| `npm start`                              | Start the built backend from `dist/index.js`                              |
+| `npm test`                               | Run the backend Jest suite (also run via `test:server`)                   |
+| `npm run test:e2e`                       | Run the Playwright e2e suite (`e2e/`)                                     |
+| `npm run lint` / `lint:fix`              | ESLint over `src/` and `migrations/`; `fix` lint-fixes + formats          |
+| `npm run format` / `format:check`        | Prettier over the repo                                                    |
+| `npm run typecheck`                      | TypeScript, no emit                                                       |
+| `npm run ci`                             | Full gate: lint, format, typecheck, tests, client checks + build          |
+| `npm run deploy`                         | Deploy the live stack over SSH (see below)                                |
 
-`db:drop`, `db:restore`, and `db:sync` are destructive against `MONGODB_URL`, so they refuse to run if that URL points anywhere except `localhost`/`127.0.0.1` unless you append `-- --i-know-this-is-dangerous` (e.g. `npm run db:sync -- --i-know-this-is-dangerous`). Dumps land in `data/db-dumps/` (git-ignored).
+`db:drop`, `db:restore`, `db:sync`, and `db:password` are destructive against `MONGODB_URL`, so they refuse to run if that URL points anywhere except `localhost`/`127.0.0.1` unless you append `-- --i-know-this-is-dangerous` (e.g. `npm run db:sync -- --i-know-this-is-dangerous`). Dumps land in `data/db-dumps/` (git-ignored).
 
 ## Live (all-in-Docker) Workflow
 

@@ -1,19 +1,30 @@
 import 'dotenv/config';
 import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { mkdirSync, readdirSync, existsSync } from 'node:fs';
 import path from 'node:path';
+import bcrypt from 'bcryptjs';
 import { MongoClient } from 'mongodb';
 import { buildMongoUri } from '../src/server/mongoUri';
 
-// One script, four subcommands:
-//   dump    — mongodump MONGODB_DUMP_URL -> data/db-dumps tarball
-//   drop    — drop the database in MONGODB_URL
-//   restore — mongorestore --drop a tarball into MONGODB_URL
-//   sync    — dump, drop, restore (the full migration round-trip)
+// One script, five subcommands:
+//   dump     — mongodump MONGODB_DUMP_URL -> data/db-dumps tarball
+//   drop     — drop the database in MONGODB_URL
+//   restore  — mongorestore --drop a tarball into MONGODB_URL
+//   sync     — dump, drop, restore (the full migration round-trip)
+//   password — reset every user password to "password" and every PAT to
+//              the shared literal "tova_pat_TEST" (local fixtures only)
 //
-// drop and restore are destructive against MONGODB_URL, so each refuses to
-// run unless that URL points at localhost/127.0.0.1, or the caller appends
-// --i-know-this-is-dangerous.
+// drop, restore and password are destructive against MONGODB_URL, so each
+// refuses to run unless that URL points at localhost/127.0.0.1, or the
+// caller appends --i-know-this-is-dangerous.
+
+// Shared test credentials written by the `password` subcommand. The PAT is
+// deliberately below the real token format (`tova_pat_` + 43 base64url
+// chars) so it can never have been minted by the app — it is a fixture, not
+// a production-safe token.
+const TEST_PASSWORD = 'password';
+const TEST_PAT = 'tova_pat_TEST';
 
 const [, , cmd, ...args] = process.argv;
 const FORCE = args.includes('--i-know-this-is-dangerous');
@@ -35,7 +46,7 @@ const targetUrl = () => {
     console.error(
       `MONGODB_URL does not point at localhost/127.0.0.1 — refusing the destructive step.\n` +
         `Re-run with --i-know-this-is-dangerous if you really mean it:\n` +
-        `  npm run db:<drop|restore|sync> -- --i-know-this-is-dangerous`,
+        `  npm run db:<drop|restore|sync|password> -- --i-know-this-is-dangerous`,
     );
     process.exit(1);
   }
@@ -123,6 +134,53 @@ const restore = () => {
   console.log(`restored ${tarball} into ${db}`);
 };
 
+// Reset every login credential in the target db to a known fixture value:
+// user passwords become TEST_PASSWORD (bcrypt-hashed) and PAT rows collapse
+// to sha256(TEST_PAT). The `password` command is destructive against
+// MONGODB_URL, so it goes through the same localhost guard as drop/restore.
+const resetPasswords = async () => {
+  const url = targetUrl();
+  const db = targetDb(url);
+  const client = new MongoClient(url);
+  try {
+    await client.connect();
+    const database = client.db(db);
+
+    // Users use bcrypt cost 10 (see src/server/models/User.ts pre-save hook);
+    // hash once and bulk-write so a large dump stays fast. Bumping the model
+    // cost would require bumping it here too.
+    const passwordHash = await bcrypt.hash(TEST_PASSWORD, 10);
+    const users = await database.collection('users').updateMany({}, { $set: { passwordHash } });
+
+    // Every PAT collapses onto one tokenHash, which violates the unique
+    // index on `tokenHash` (src/server/models/Pat.ts) as soon as a second
+    // PAT exists. Drop it first, then warn loudly: the local schema is now
+    // missing a constraint until it is re-created.
+    const pats = database.collection('pats');
+    const indexes = await pats.indexes();
+    if (indexes.some((i) => i.name === 'tokenHash_1' && i.unique)) {
+      await pats.dropIndex('tokenHash_1');
+      console.warn(
+        'warn: dropped unique index tokenHash_1 on pats so every PAT can share one digest — ' +
+          're-create it (or restore a fresh dump) before trusting this database.',
+      );
+    }
+    const patTokenHash = createHash('sha256').update(TEST_PAT).digest('hex');
+    const patResult = await pats.updateMany({}, { $set: { tokenHash: patTokenHash } });
+
+    console.log(
+      `reset ${users.modifiedCount} user passwords to "${TEST_PASSWORD}" ` +
+        `and ${patResult.modifiedCount} PATs to "${TEST_PAT}"`,
+    );
+    console.warn(
+      `warn: "${TEST_PAT}" is a shared test credential, not a valid app-issued token — ` +
+        'do not use it outside a local fixture database.',
+    );
+  } finally {
+    await client.close();
+  }
+};
+
 (async () => {
   switch (cmd) {
     case 'dump':
@@ -139,9 +197,12 @@ const restore = () => {
       await drop();
       restore();
       break;
+    case 'password':
+      await resetPasswords();
+      break;
     default:
       console.error(
-        'Usage: npx tsx scripts/db-sync.ts <dump|drop|restore|sync> [--tarball <file>] [--i-know-this-is-dangerous]',
+        'Usage: npx tsx scripts/db-sync.ts <dump|drop|restore|sync|password> [--tarball <file>] [--i-know-this-is-dangerous]',
       );
       process.exit(1);
   }

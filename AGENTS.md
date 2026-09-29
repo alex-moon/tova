@@ -74,6 +74,7 @@ Take a live dump of production at any time to aid diagnostics (it is non-destruc
 
 - `npm run db:dump` — dumps the production/Atlas cluster (`MONGODB_DUMP_URL` in `.env`) into a tarball under `data/db-dumps/` (git-ignored). `npm run db:sync` additionally drops and restores it into the local stack (`MONGODB_URL`) so you can interrogate real data locally; the destructive steps refuse to run against a non-localhost target without `-- --i-know-this-is-dangerous`.
 - Prefer the sync-then-interrogate-locally route: run `npm run db:sync`, then use `scripts/mongo.ts` snippets against the local db.
+- `npm run db:password` resets every user password to `password` and every PAT to the shared literal `tova_pat_TEST` (dropping the PAT unique index so they can share one digest) — a local fixture convenience, guarded like the other destructive commands. The shared PAT is not a valid app-issued token.
 
 Reading the dump artifacts directly has a catch: they live under `data/`, which is `.gitignore`d, and the native search/read tools skip ignored files — they will report "not found" even though the file exists. Use CLI tools instead for these paths (e.g. `bash`-tool `tar -tzf data/db-dumps/<file>.tar.gz` to list contents, `rg` explicitly pointed at the path). Preferably, don't read the artifacts at all: load one into the local stack with `npm run db:restore -- --tarball data/db-dumps/<file>.tar.gz` and interrogate it with `scripts/mongo.ts` (the dump/restore payloads are also binary BSON, so text tools get little out of them anyway).
 
