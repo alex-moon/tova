@@ -8,8 +8,9 @@ import { config } from '../config';
  * mastraService), so traces belonging to a chat are deletable by that id:
  *
  *  - resolve the project's LangSmith id from its name (GET /api/v1/sessions)
- *  - query the run ids (POST /api/v1/runs/query, filter on
- *    metadata_key/metadata_value — the documented compliance pattern)
+ *  - query the run ids (POST /api/v1/runs/query, which returns
+ *    `{ runs, ... }`, filter on metadata_key/metadata_value — the documented
+ *    compliance pattern)
  *  - batch-delete the trace ids (POST /api/v1/runs/delete)
  *
  * Known limitations, all deliberate: the delete endpoint is asynchronous
@@ -52,7 +53,12 @@ const purgeSessionTraces = async (
     if (!queryRes.ok) {
       throw new Error(`run query failed: HTTP ${queryRes.status}`);
     }
-    const runs = (await queryRes.json()) as { trace_id?: string }[];
+    // The endpoint answers an object (`{ runs, cursors, ... }`), not an array.
+    // Keep the array guard as a shape assertion on `runs`: a missing or
+    // malformed key must throw into the best-effort catch, not read as an
+    // empty page.
+    const body = (await queryRes.json()) as { runs?: { trace_id?: string }[] };
+    const runs = body.runs;
     if (!Array.isArray(runs)) throw new Error('unexpected run query response shape');
     for (const run of runs) if (run.trace_id) traceIds.add(run.trace_id);
     if (runs.length < PAGE_SIZE) break;
