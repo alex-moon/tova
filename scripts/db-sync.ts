@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto';
 import { mkdirSync, readdirSync, existsSync } from 'node:fs';
 import path from 'node:path';
 import bcrypt from 'bcryptjs';
-import { MongoClient } from 'mongodb';
+import { MongoClient, type IndexDescriptionInfo } from 'mongodb';
 import { buildMongoUri } from '../src/server/mongoUri';
 
 // One script, five subcommands:
@@ -54,9 +54,20 @@ const targetUrl = () => {
 };
 
 // MONGODB_URL carries its own db name; parse it out (default `tova`).
+// A standard URI is `mongodb://user:pass@host:port/<db>?...`, so the db name
+// is the LAST path segment, not the first (`url.split('/')[1]` is the empty
+// string between `mongodb:` and `//`). Parsing via the URL API honours a
+// non-`tova` target instead of silently defaulting to `tova`, and returns
+// nothing for a URI with no db path (which then falls back to `tova`).
 const targetDb = (url: string): string => {
-  const base = url.split('?')[0].replace(/\/+$/, '');
-  return base.split('/')[1] || 'tova';
+  try {
+    const parsed = new URL(url);
+    const name = decodeURIComponent(parsed.pathname.replace(/^\/+|\/+$/g, ''));
+    return name || 'tova';
+  } catch {
+    const base = url.split('?')[0].replace(/\/+$/, '');
+    return base.split('/').pop() || 'tova';
+  }
 };
 
 const dump = () => {
@@ -157,7 +168,16 @@ const resetPasswords = async () => {
     // PAT exists. Drop it first, then warn loudly: the local schema is now
     // missing a constraint until it is re-created.
     const pats = database.collection('pats');
-    const indexes = await pats.indexes();
+    // A db with no PATs yet (fresh dump, or nobody ever minted a token) has no
+    // `pats` collection; `indexes()` throws NamespaceNotFound (code 26) on it.
+    // Treat that as "no index to drop" — the whole point is a fixture reset, so
+    // zero PATs is a normal case, not an error.
+    let indexes: IndexDescriptionInfo[] = [];
+    try {
+      indexes = await pats.indexes();
+    } catch (err) {
+      if ((err as { code?: number }).code !== 26) throw err;
+    }
     if (indexes.some((i) => i.name === 'tokenHash_1' && i.unique)) {
       await pats.dropIndex('tokenHash_1');
       console.warn(
