@@ -72,4 +72,47 @@ describe('ChatWindow copy as Markdown (issue #200)', () => {
     expect(button.querySelector('.lucide-check')).not.toBeInTheDocument();
     errorSpy.mockRestore();
   });
+
+  it('warns and no-ops when the Clipboard API is unavailable', async () => {
+    const original = navigator.clipboard;
+    Object.assign(navigator, { clipboard: undefined });
+    const errorSpy = vi.spyOn(toast, 'error');
+    try {
+      renderChat([msg()]);
+      const button = screen.getByLabelText('Copy message as Markdown');
+      fireEvent.click(button);
+      await waitFor(() => expect(errorSpy).toHaveBeenCalledWith('Copy not supported'));
+      expect(button.querySelector('.lucide-check')).not.toBeInTheDocument();
+    } finally {
+      Object.assign(navigator, { clipboard: original });
+      errorSpy.mockRestore();
+    }
+  });
+
+  it('preserves surrounding whitespace verbatim (raw source, no trim)', async () => {
+    renderChat([msg({ content: '  padded **md**  \n' })]);
+    fireEvent.click(screen.getByLabelText('Copy message as Markdown'));
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith('  padded **md**  \n'));
+  });
+
+  it('no-ops without throwing for an empty user message', async () => {
+    renderChat([msg({ _id: 'u-empty', role: 'user', content: '', modelName: undefined })]);
+    const button = screen.getByLabelText('Copy message as Markdown');
+    fireEvent.click(button);
+    await waitFor(() => expect(writeText).not.toHaveBeenCalled());
+    expect(button.querySelector('.lucide-check')).not.toBeInTheDocument();
+  });
+
+  it('only flags the most recently copied message as copied', async () => {
+    renderChat([
+      msg({ _id: 'a', content: 'first' }),
+      msg({ _id: 'b', modelName: undefined, content: 'second' }),
+    ]);
+    const buttons = screen.getAllByLabelText('Copy message as Markdown');
+    fireEvent.click(buttons[0]);
+    await waitFor(() => expect(buttons[0].querySelector('.lucide-check')).toBeInTheDocument());
+    fireEvent.click(buttons[1]);
+    await waitFor(() => expect(buttons[1].querySelector('.lucide-check')).toBeInTheDocument());
+    expect(buttons[0].querySelector('.lucide-check')).not.toBeInTheDocument();
+  });
 });
