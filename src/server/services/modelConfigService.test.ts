@@ -4,7 +4,9 @@ import {
   completionsPoolFor,
   disableModel,
   listByTier,
+  MAX_MODEL_PRICE_USD_PER_MTOK,
   ModelRef,
+  routingPrice,
 } from './modelConfigService';
 import { muteConsoleError } from '../test/muteConsole';
 
@@ -93,6 +95,8 @@ describe('Model Config Service', () => {
             tools: true,
             vision: false,
             contextLength: 1048576,
+            inputPrice: 1.3,
+            outputPrice: 2.6,
           },
           {
             provider: 'deepinfra',
@@ -100,6 +104,8 @@ describe('Model Config Service', () => {
             tools: true,
             vision: true,
             contextLength: 1048576,
+            inputPrice: 0.2,
+            outputPrice: 0.6,
           },
           {
             provider: 'deepinfra',
@@ -107,6 +113,8 @@ describe('Model Config Service', () => {
             tools: true,
             vision: true,
             contextLength: 1048576,
+            inputPrice: 2.85,
+            outputPrice: 14.25,
           },
           {
             provider: 'deepinfra',
@@ -114,6 +122,8 @@ describe('Model Config Service', () => {
             tools: true,
             vision: true,
             contextLength: 262144,
+            inputPrice: 0.75,
+            outputPrice: 3.5,
           },
           {
             provider: 'deepinfra',
@@ -121,6 +131,8 @@ describe('Model Config Service', () => {
             tools: true,
             vision: false,
             contextLength: 262144,
+            inputPrice: 2,
+            outputPrice: 6,
           },
           {
             provider: 'deepinfra',
@@ -128,6 +140,8 @@ describe('Model Config Service', () => {
             tools: true,
             vision: true,
             contextLength: 262144,
+            inputPrice: 0.45,
+            outputPrice: 3,
           },
           {
             provider: 'deepinfra',
@@ -135,6 +149,8 @@ describe('Model Config Service', () => {
             tools: true,
             vision: true,
             contextLength: 262144,
+            inputPrice: 0.2,
+            outputPrice: 0.88,
           },
           {
             provider: 'deepinfra',
@@ -142,6 +158,8 @@ describe('Model Config Service', () => {
             tools: true,
             vision: false,
             contextLength: 262144,
+            inputPrice: 0.3,
+            outputPrice: 1,
           },
           {
             provider: 'deepinfra',
@@ -149,6 +167,8 @@ describe('Model Config Service', () => {
             tools: true,
             vision: false,
             contextLength: 1048576,
+            inputPrice: 0.9,
+            outputPrice: 4,
           },
           {
             provider: 'deepinfra',
@@ -156,6 +176,8 @@ describe('Model Config Service', () => {
             tools: true,
             vision: true,
             contextLength: 1048576,
+            inputPrice: 0.15,
+            outputPrice: 0.5,
           },
           {
             provider: 'deepinfra',
@@ -163,6 +185,8 @@ describe('Model Config Service', () => {
             tools: true,
             vision: false,
             contextLength: 262144,
+            inputPrice: 0.5,
+            outputPrice: 2.2,
           },
           {
             provider: 'deepinfra',
@@ -170,6 +194,8 @@ describe('Model Config Service', () => {
             tools: true,
             vision: true,
             contextLength: 1048576,
+            inputPrice: 0.435,
+            outputPrice: 0.87,
           },
           {
             provider: 'deepinfra',
@@ -177,6 +203,8 @@ describe('Model Config Service', () => {
             tools: true,
             vision: true,
             contextLength: 524288,
+            inputPrice: 0.28,
+            outputPrice: 1.1,
           },
           {
             provider: 'deepinfra',
@@ -184,6 +212,8 @@ describe('Model Config Service', () => {
             tools: true,
             vision: false,
             contextLength: 262144,
+            inputPrice: 0.085,
+            outputPrice: 0.4,
           },
         ]),
       );
@@ -431,6 +461,48 @@ describe('Model Config Service', () => {
         contextLength?: number;
       }>();
       expect(gemma).toMatchObject({ vision: false, contextLength: 999 });
+    });
+  });
+
+  describe('pricing (#199)', () => {
+    afterEach(() => {
+      delete process.env.MODEL_MAX_PRICE_USD_PER_MTOK;
+    });
+
+    it('sums input and output price when both are present', () => {
+      expect(routingPrice({ inputPrice: 1.3, outputPrice: 2.6 })).toBeCloseTo(3.9);
+      expect(routingPrice({ inputPrice: 0.085, outputPrice: 0.4 })).toBeCloseTo(0.485);
+    });
+
+    it('treats a missing component as unknown, not zero', () => {
+      expect(routingPrice({ outputPrice: 2.6 })).toBeUndefined();
+      expect(routingPrice({ inputPrice: 1.3 })).toBeUndefined();
+      expect(routingPrice({})).toBeUndefined();
+    });
+
+    it('defaults the cap to the ticket literal $1.50', () => {
+      expect(MAX_MODEL_PRICE_USD_PER_MTOK()).toBe(1.5);
+    });
+
+    it('honours a valid env override and rejects garbage', () => {
+      process.env.MODEL_MAX_PRICE_USD_PER_MTOK = '2.25';
+      expect(MAX_MODEL_PRICE_USD_PER_MTOK()).toBe(2.25);
+      process.env.MODEL_MAX_PRICE_USD_PER_MTOK = '0';
+      expect(MAX_MODEL_PRICE_USD_PER_MTOK()).toBe(1.5);
+      process.env.MODEL_MAX_PRICE_USD_PER_MTOK = 'not-a-number';
+      expect(MAX_MODEL_PRICE_USD_PER_MTOK()).toBe(1.5);
+      process.env.MODEL_MAX_PRICE_USD_PER_MTOK = '';
+      expect(MAX_MODEL_PRICE_USD_PER_MTOK()).toBe(1.5);
+    });
+
+    it('carries prices through listByTier for seated #170 rows', async () => {
+      const large = await listByTier('large');
+      const kimi = large.find((ref) => ref.model === 'moonshotai/Kimi-K3');
+      expect(kimi).toMatchObject({ inputPrice: 2.85, outputPrice: 14.25 });
+      // Pre-#170 rows have no tabulated price: absent, not zero.
+      const oss = large.find((ref) => ref.model === 'openai/gpt-oss-120b');
+      expect(oss?.inputPrice).toBeUndefined();
+      expect(routingPrice(oss!)).toBeUndefined();
     });
   });
 

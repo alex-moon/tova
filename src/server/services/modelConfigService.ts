@@ -50,7 +50,38 @@ export interface ModelRef extends ModelCapabilities {
    * model (#104). Absent on the env fallback and on legacy rows.
    */
   contextLength?: number;
+  /*
+   * #199 pricing, USD per 1M tokens. Both optional: absent means "unknown"
+   * (distinct from zero). `routingPrice` sums them for the cap comparison.
+   */
+  inputPrice?: number;
+  outputPrice?: number;
 }
+
+/*
+ * #199 cap: no model whose summed (in + out) price exceeds this may be
+ * selected. `inputPrice + outputPrice` in USD per 1M tokens, ignoring cached
+ * pricing. Env-tunable for parity with `MODEL_COOL_OFF_HOURS`; a
+ * non-finite/non-positive override falls back to the ticket's literal $1.50.
+ */
+export const MAX_MODEL_PRICE_USD_PER_MTOK = (): number => {
+  const raw = process.env.MODEL_MAX_PRICE_USD_PER_MTOK;
+  const parsed = raw === undefined || raw === '' ? NaN : Number(raw);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 1.5;
+};
+
+/*
+ * Summed routing price for a ref, or `undefined` when either component is
+ * missing. Unknown is deliberately distinct from 0: a half-priced row is not
+ * treated as cheap. Callers decide unknown semantics (see #199 OQ-3).
+ */
+export const routingPrice = (ref: {
+  inputPrice?: number;
+  outputPrice?: number;
+}): number | undefined =>
+  typeof ref.inputPrice === 'number' && typeof ref.outputPrice === 'number'
+    ? ref.inputPrice + ref.outputPrice
+    : undefined;
 
 /*
  * Completions always run tool-carrying (web_search / asset tools / MCP
@@ -66,6 +97,8 @@ interface SeedEntry extends ModelRef {
   tier: ModelTier;
   eligible: boolean;
   contextLength?: number;
+  inputPrice?: number;
+  outputPrice?: number;
 }
 
 // Single source of truth for the env var and its default per tier, shared by
@@ -209,6 +242,8 @@ const SEED_ENTRIES = (): SeedEntry[] => [
     eligible: true,
     tools: true,
     contextLength: 1048576,
+    inputPrice: 1.3,
+    outputPrice: 2.6,
   },
   {
     provider: 'deepinfra',
@@ -218,6 +253,8 @@ const SEED_ENTRIES = (): SeedEntry[] => [
     tools: true,
     vision: true,
     contextLength: 1048576,
+    inputPrice: 0.2,
+    outputPrice: 0.6,
   },
   {
     provider: 'deepinfra',
@@ -227,6 +264,8 @@ const SEED_ENTRIES = (): SeedEntry[] => [
     tools: true,
     vision: true,
     contextLength: 1048576,
+    inputPrice: 2.85,
+    outputPrice: 14.25,
   },
   {
     provider: 'deepinfra',
@@ -236,6 +275,8 @@ const SEED_ENTRIES = (): SeedEntry[] => [
     tools: true,
     vision: true,
     contextLength: 262144,
+    inputPrice: 0.75,
+    outputPrice: 3.5,
   },
   {
     provider: 'deepinfra',
@@ -244,6 +285,8 @@ const SEED_ENTRIES = (): SeedEntry[] => [
     eligible: true,
     tools: true,
     contextLength: 262144,
+    inputPrice: 2,
+    outputPrice: 6,
   },
   {
     provider: 'deepinfra',
@@ -253,6 +296,8 @@ const SEED_ENTRIES = (): SeedEntry[] => [
     tools: true,
     vision: true,
     contextLength: 262144,
+    inputPrice: 0.45,
+    outputPrice: 3,
   },
   {
     provider: 'deepinfra',
@@ -262,6 +307,8 @@ const SEED_ENTRIES = (): SeedEntry[] => [
     tools: true,
     vision: true,
     contextLength: 262144,
+    inputPrice: 0.2,
+    outputPrice: 0.88,
   },
   {
     provider: 'deepinfra',
@@ -270,6 +317,8 @@ const SEED_ENTRIES = (): SeedEntry[] => [
     eligible: true,
     tools: true,
     contextLength: 262144,
+    inputPrice: 0.3,
+    outputPrice: 1,
   },
   {
     provider: 'deepinfra',
@@ -278,6 +327,8 @@ const SEED_ENTRIES = (): SeedEntry[] => [
     eligible: true,
     tools: true,
     contextLength: 1048576,
+    inputPrice: 0.9,
+    outputPrice: 4,
   },
   {
     provider: 'deepinfra',
@@ -287,6 +338,8 @@ const SEED_ENTRIES = (): SeedEntry[] => [
     tools: true,
     vision: true,
     contextLength: 1048576,
+    inputPrice: 0.15,
+    outputPrice: 0.5,
   },
   {
     provider: 'deepinfra',
@@ -295,6 +348,8 @@ const SEED_ENTRIES = (): SeedEntry[] => [
     eligible: true,
     tools: true,
     contextLength: 262144,
+    inputPrice: 0.5,
+    outputPrice: 2.2,
   },
   {
     provider: 'deepinfra',
@@ -304,6 +359,8 @@ const SEED_ENTRIES = (): SeedEntry[] => [
     tools: true,
     vision: true,
     contextLength: 1048576,
+    inputPrice: 0.435,
+    outputPrice: 0.87,
   },
   {
     provider: 'deepinfra',
@@ -313,6 +370,8 @@ const SEED_ENTRIES = (): SeedEntry[] => [
     tools: true,
     vision: true,
     contextLength: 524288,
+    inputPrice: 0.28,
+    outputPrice: 1.1,
   },
   {
     provider: 'deepinfra',
@@ -321,6 +380,8 @@ const SEED_ENTRIES = (): SeedEntry[] => [
     eligible: true,
     tools: true,
     contextLength: 262144,
+    inputPrice: 0.085,
+    outputPrice: 0.4,
   },
   {
     provider: 'groq',
@@ -335,12 +396,21 @@ const SEED_ENTRIES = (): SeedEntry[] => [
  * driver serialises those as `null`, which would clobber the schema defaults
  * for such rows on first insert and covertly rule them out of tool pools.
  */
-const seedDocFrom = ({ eligible, tools, vision, contextLength }: SeedEntry) => {
+const seedDocFrom = ({
+  eligible,
+  tools,
+  vision,
+  contextLength,
+  inputPrice,
+  outputPrice,
+}: SeedEntry) => {
   const doc: {
     eligible: boolean;
     tools?: boolean;
     vision?: boolean;
     contextLength?: number;
+    inputPrice?: number;
+    outputPrice?: number;
     disabledUntil: null;
   } = {
     eligible,
@@ -354,6 +424,8 @@ const seedDocFrom = ({ eligible, tools, vision, contextLength }: SeedEntry) => {
   if (tools !== undefined) doc.tools = tools;
   if (vision !== undefined) doc.vision = vision;
   if (contextLength !== undefined) doc.contextLength = contextLength;
+  if (inputPrice !== undefined) doc.inputPrice = inputPrice;
+  if (outputPrice !== undefined) doc.outputPrice = outputPrice;
   return doc;
 };
 
@@ -409,6 +481,8 @@ interface ProviderPoolRow {
   tools?: boolean;
   vision?: boolean;
   contextLength?: number;
+  inputPrice?: number;
+  outputPrice?: number;
   disabledUntil?: Date | null;
 }
 
@@ -494,13 +568,17 @@ export const listByTier = async (
     const filtered = requiredFilter
       ? active.filter((row) => rowMeetsFilter(row, requiredFilter))
       : active;
-    return filtered.map(({ provider, model, tools, vision, contextLength }) => ({
-      provider,
-      model,
-      ...(tools !== undefined ? { tools } : {}),
-      ...(vision !== undefined ? { vision } : {}),
-      ...(contextLength !== undefined ? { contextLength } : {}),
-    }));
+    return filtered.map(
+      ({ provider, model, tools, vision, contextLength, inputPrice, outputPrice }) => ({
+        provider,
+        model,
+        ...(tools !== undefined ? { tools } : {}),
+        ...(vision !== undefined ? { vision } : {}),
+        ...(contextLength !== undefined ? { contextLength } : {}),
+        ...(inputPrice !== undefined ? { inputPrice } : {}),
+        ...(outputPrice !== undefined ? { outputPrice } : {}),
+      }),
+    );
   } catch (err) {
     // Deliberate pool-exhaustion signal, not a read failure — let it escape.
     if (err instanceof AllModelsDisabledError) throw err;
