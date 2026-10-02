@@ -506,6 +506,19 @@ const rowMeetsFilter = (
   (filter.vision === undefined || filter.vision === false || row.vision === true);
 
 /*
+ * #199 hard cap: a row whose summed (in + out) price EXCEEDS the cap is
+ * ruled out of every pool. A row exactly at the cap stays (the ticket says
+ * "no models **over** $1.50"). An unset/partial/non-finite price is
+ * "unknown", not "expensive": it is admitted (excluding it would empty the
+ * small tier, whose pre-#170 rows are all unpriced) and the admin table flags
+ * it so it can be priced. Unknown-is-eligible is deliberate — see OQ-3.
+ */
+const rowWithinPriceCap = (row: { inputPrice?: number; outputPrice?: number }): boolean => {
+  const price = routingPrice(row);
+  return price === undefined || price <= MAX_MODEL_PRICE_USD_PER_MTOK();
+};
+
+/*
  * #168: immediately cool off a failed endpoint. Sets `disabledUntil` on every
  * routing row for the provider+model (a model can serve several tiers); the
  * pool reads above then exclude it until the timestamp expires. Duration is
@@ -570,9 +583,15 @@ export const listByTier = async (
       throw new AllModelsDisabledError();
     }
     const active = rows.filter((row) => !isCoolingOff(row, now));
+    /*
+     * #199: the price cap is a rule-out, not a fallback — over-cap rows are
+     * dropped before capability matching, and a filtered-empty pool returns
+     * `[]` so callers fail loudly (same semantics as a capability rule-out).
+     */
+    const withinCap = active.filter((row) => rowWithinPriceCap(row));
     const filtered = requiredFilter
-      ? active.filter((row) => rowMeetsFilter(row, requiredFilter))
-      : active;
+      ? withinCap.filter((row) => rowMeetsFilter(row, requiredFilter))
+      : withinCap;
     return filtered.map(
       ({ provider, model, tools, vision, contextLength, inputPrice, outputPrice }) => ({
         provider,

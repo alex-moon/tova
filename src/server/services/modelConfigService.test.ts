@@ -89,15 +89,8 @@ describe('Model Config Service', () => {
           // #170 batch: 14 more DeepInfra large-tier rows (ZDR-only: no
           // Google/Anthropic partner models), catalog + live-probed
           // 2026-09-26 (tools for all, image parts for the vision rows).
-          {
-            provider: 'deepinfra',
-            model: 'deepseek-ai/DeepSeek-V4-Pro-0813',
-            tools: true,
-            vision: false,
-            contextLength: 1048576,
-            inputPrice: 1.3,
-            outputPrice: 2.6,
-          },
+          // #199: only the rows at or under the $1.50 in+out cap appear in
+          // the pool — the over-cap ones are asserted absent below.
           {
             provider: 'deepinfra',
             model: 'deepseek-ai/DeepSeek-V4.1-Flash',
@@ -106,42 +99,6 @@ describe('Model Config Service', () => {
             contextLength: 1048576,
             inputPrice: 0.2,
             outputPrice: 0.6,
-          },
-          {
-            provider: 'deepinfra',
-            model: 'moonshotai/Kimi-K3',
-            tools: true,
-            vision: true,
-            contextLength: 1048576,
-            inputPrice: 2.85,
-            outputPrice: 14.25,
-          },
-          {
-            provider: 'deepinfra',
-            model: 'moonshotai/Kimi-K2.6',
-            tools: true,
-            vision: true,
-            contextLength: 262144,
-            inputPrice: 0.75,
-            outputPrice: 3.5,
-          },
-          {
-            provider: 'deepinfra',
-            model: 'Qwen/Qwen3.8-2.4T-A95B',
-            tools: true,
-            vision: false,
-            contextLength: 262144,
-            inputPrice: 2,
-            outputPrice: 6,
-          },
-          {
-            provider: 'deepinfra',
-            model: 'Qwen/Qwen3.5-397B-A17B',
-            tools: true,
-            vision: true,
-            contextLength: 262144,
-            inputPrice: 0.45,
-            outputPrice: 3,
           },
           {
             provider: 'deepinfra',
@@ -163,30 +120,12 @@ describe('Model Config Service', () => {
           },
           {
             provider: 'deepinfra',
-            model: 'zai-org/GLM-5.3',
-            tools: true,
-            vision: false,
-            contextLength: 1048576,
-            inputPrice: 0.9,
-            outputPrice: 4,
-          },
-          {
-            provider: 'deepinfra',
             model: 'zai-org/GLM-5.3-Flash',
             tools: true,
             vision: true,
             contextLength: 1048576,
             inputPrice: 0.15,
             outputPrice: 0.5,
-          },
-          {
-            provider: 'deepinfra',
-            model: 'nvidia/NVIDIA-Nemotron-3-Ultra-550B-A55B',
-            tools: true,
-            vision: false,
-            contextLength: 262144,
-            inputPrice: 0.5,
-            outputPrice: 2.2,
           },
           {
             provider: 'deepinfra',
@@ -506,12 +445,64 @@ describe('Model Config Service', () => {
 
     it('carries prices through listByTier for seated #170 rows', async () => {
       const large = await listByTier('large');
-      const kimi = large.find((ref) => ref.model === 'moonshotai/Kimi-K3');
-      expect(kimi).toMatchObject({ inputPrice: 2.85, outputPrice: 14.25 });
+      const flash = large.find((ref) => ref.model === 'deepseek-ai/DeepSeek-V4.1-Flash');
+      expect(flash).toMatchObject({ inputPrice: 0.2, outputPrice: 0.6 });
       // Pre-#170 rows have no tabulated price: absent, not zero.
       const oss = large.find((ref) => ref.model === 'openai/gpt-oss-120b');
       expect(oss?.inputPrice).toBeUndefined();
       expect(routingPrice(oss!)).toBeUndefined();
+    });
+
+    it('rules out rows whose summed price exceeds the cap', async () => {
+      const large = await listByTier('large');
+      const models = large.map(({ model }) => model);
+      // Over-cap #170 rows (in+out > 1.50) never surface in a pool.
+      expect(models).not.toContain('moonshotai/Kimi-K3');
+      expect(models).not.toContain('moonshotai/Kimi-K2.6');
+      expect(models).not.toContain('Qwen/Qwen3.8-2.4T-A95B');
+      expect(models).not.toContain('Qwen/Qwen3.5-397B-A17B');
+      expect(models).not.toContain('deepseek-ai/DeepSeek-V4-Pro-0813');
+      expect(models).not.toContain('zai-org/GLM-5.3');
+      expect(models).not.toContain('nvidia/NVIDIA-Nemotron-3-Ultra-550B-A55B');
+      // At/under cap survives; the exact-boundary row is tested below.
+      expect(models).toContain('MiniMaxAI/MiniMax-M3');
+      expect(models).toContain('XiaomiMiMo/MiMo-V2.6-Pro');
+      expect(models).toContain('nvidia/NVIDIA-Nemotron-3-Super-120B-A12B');
+    });
+
+    it('admits an unpriced row (unknown is not over-cap) and surfaces it in admin', async () => {
+      // The small tier is entirely unpriced pre-#170; excluding unknown would
+      // empty it. It must stay eligible.
+      const small = await listByTier('small');
+      expect(small.map(({ model }) => model)).toContain('openai/gpt-oss-20b');
+      expect(small.map(({ model }) => model)).toContain('Qwen/Qwen3-14B');
+    });
+
+    it('keeps a row priced exactly at the cap (no models OVER $1.50)', async () => {
+      await listByTier('large');
+      await ProviderRouting.updateOne(
+        { model: 'MiniMaxAI/MiniMax-M3' },
+        { inputPrice: 0.75, outputPrice: 0.75 },
+      );
+      try {
+        const models = (await listByTier('large')).map(({ model }) => model);
+        expect(models).toContain('MiniMaxAI/MiniMax-M3');
+      } finally {
+        await ProviderRouting.updateOne(
+          { model: 'MiniMaxAI/MiniMax-M3' },
+          { inputPrice: 0.28, outputPrice: 1.1 },
+        );
+      }
+    });
+
+    it('honours the env override when deciding the cap', async () => {
+      process.env.MODEL_MAX_PRICE_USD_PER_MTOK = '0.5';
+      const models = (await listByTier('large')).map(({ model }) => model);
+      // 0.8 > 0.5 → excluded under the raised-strictness override.
+      expect(models).not.toContain('deepseek-ai/DeepSeek-V4.1-Flash');
+      process.env.MODEL_MAX_PRICE_USD_PER_MTOK = '20';
+      const all = (await listByTier('large')).map(({ model }) => model);
+      expect(all).toContain('moonshotai/Kimi-K3');
     });
   });
 
@@ -553,17 +544,15 @@ describe('Model Config Service', () => {
       await listByTier('large');
       const visionModels = (await listByTier('large', { vision: true })).map(({ model }) => model);
       // Sorted `provider, model` (binary collation: uppercase first, `-` < `.`);
-      // 2 #115 rows + 8 #170 vision rows; all image turns route through here.
+      // 2 #115 rows + the 5 #170 vision rows under the #199 cap; over-cap
+      // vision rows (Kimi-K3, Kimi-K2.6, Qwen3.5-397B) are ruled out.
       expect(visionModels).toEqual([
         'MiniMaxAI/MiniMax-M3',
         'Qwen/Qwen3-VL-235B-A22B-Instruct',
         'Qwen/Qwen3-VL-30B-A3B-Instruct',
         'Qwen/Qwen3-VL-8B-Instruct',
-        'Qwen/Qwen3.5-397B-A17B',
         'XiaomiMiMo/MiMo-V2.6-Pro',
         'deepseek-ai/DeepSeek-V4.1-Flash',
-        'moonshotai/Kimi-K2.6',
-        'moonshotai/Kimi-K3',
         'zai-org/GLM-5.3-Flash',
       ]);
     });
