@@ -480,6 +480,15 @@ describe('Model Config Service', () => {
       expect(routingPrice({})).toBeUndefined();
     });
 
+    it('treats a non-finite component as unknown, so it cannot pass the cap', () => {
+      // A NaN sum would make `sum > cap` false and silently admit an
+      // over-cap row; unknown is the safe reading.
+      expect(routingPrice({ inputPrice: NaN, outputPrice: 1 })).toBeUndefined();
+      expect(routingPrice({ inputPrice: 1, outputPrice: NaN })).toBeUndefined();
+      expect(routingPrice({ inputPrice: Infinity, outputPrice: 1 })).toBeUndefined();
+      expect(routingPrice({ inputPrice: 1, outputPrice: -Infinity })).toBeUndefined();
+    });
+
     it('defaults the cap to the ticket literal $1.50', () => {
       expect(MAX_MODEL_PRICE_USD_PER_MTOK()).toBe(1.5);
     });

@@ -74,14 +74,19 @@ export const MAX_MODEL_PRICE_USD_PER_MTOK = (): number => {
  * Summed routing price for a ref, or `undefined` when either component is
  * missing. Unknown is deliberately distinct from 0: a half-priced row is not
  * treated as cheap. Callers decide unknown semantics (see #199 OQ-3).
+ *
+ * Non-finite components (NaN, Infinity) also read as unknown. A `NaN` sum
+ * would make `sum > cap` false and silently pass an over-cap row through the
+ * gate, so the helper never returns a non-finite number.
  */
 export const routingPrice = (ref: {
   inputPrice?: number;
   outputPrice?: number;
-}): number | undefined =>
-  typeof ref.inputPrice === 'number' && typeof ref.outputPrice === 'number'
-    ? ref.inputPrice + ref.outputPrice
-    : undefined;
+}): number | undefined => {
+  const { inputPrice, outputPrice } = ref;
+  if (!Number.isFinite(inputPrice) || !Number.isFinite(outputPrice)) return undefined;
+  return (inputPrice as number) + (outputPrice as number);
+};
 
 /*
  * Completions always run tool-carrying (web_search / asset tools / MCP
