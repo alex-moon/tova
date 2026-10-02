@@ -1,5 +1,5 @@
 import request from 'supertest';
-import { streamingErrorMessage } from './chat';
+import { confirmationForToolResults, streamingErrorMessage } from './chat';
 import { createApp } from '../index';
 import { Message } from '../models/Message';
 import { User } from '../models/User';
@@ -498,6 +498,88 @@ describe('Chat route prompt metrics', () => {
   });
 });
 
+describe('confirmationForToolResults (#195)', () => {
+  it('returns null for an empty list', () => {
+    expect(confirmationForToolResults([])).toBeNull();
+  });
+
+  it('returns null when only non-user-facing tools ran', () => {
+    expect(confirmationForToolResults([{ name: 'current_datetime', result: {} }])).toBeNull();
+  });
+
+  it('names the file when generate_file succeeded', () => {
+    expect(
+      confirmationForToolResults([
+        { name: 'generate_file', result: { file: { filename: 'agi-final.md' } } },
+      ]),
+    ).toBe('Created agi-final.md.');
+  });
+
+  it('falls back to a generic file sentence when generate_file failed', () => {
+    expect(confirmationForToolResults([{ name: 'generate_file', result: { error: 'boom' } }])).toBe(
+      'Created the file.',
+    );
+    expect(confirmationForToolResults([{ name: 'generate_file', result: { file: {} } }])).toBe(
+      'Created the file.',
+    );
+  });
+
+  it('uses a known sentence per first-party tool', () => {
+    expect(confirmationForToolResults([{ name: 'web_search', result: {} }])).toBe(
+      'Searched the web.',
+    );
+    expect(confirmationForToolResults([{ name: 'fetch_url', result: {} }])).toBe(
+      'Fetched the page.',
+    );
+    expect(confirmationForToolResults([{ name: 'list_files', result: {} }])).toBe(
+      'Listed your files.',
+    );
+    expect(confirmationForToolResults([{ name: 'read_file', result: {} }])).toBe('Read the file.');
+  });
+
+  it('falls back to a generic sentence for an unknown tool', () => {
+    expect(confirmationForToolResults([{ name: 'list_repositories', result: {} }])).toBe(
+      'Finished the task.',
+    );
+  });
+
+  it('joins distinct phrases in first-execution order', () => {
+    expect(
+      confirmationForToolResults([
+        { name: 'list_files', result: {} },
+        { name: 'read_file', result: {} },
+        { name: 'generate_file', result: { file: { filename: 'out.md' } } },
+      ]),
+    ).toBe('Listed your files. Read the file. Created out.md.');
+  });
+
+  it('deduplicates repeated phrases and caps long runs', () => {
+    expect(
+      confirmationForToolResults([
+        { name: 'web_search', result: {} },
+        { name: 'web_search', result: {} },
+      ]),
+    ).toBe('Searched the web.');
+    expect(
+      confirmationForToolResults([
+        { name: 'web_search', result: {} },
+        { name: 'fetch_url', result: {} },
+        { name: 'list_files', result: {} },
+        { name: 'read_file', result: {} },
+      ]),
+    ).toBe('Searched the web. Fetched the page. Listed your files. And more.');
+  });
+
+  it('ignores current_datetime when it accompanies a real tool', () => {
+    expect(
+      confirmationForToolResults([
+        { name: 'current_datetime', result: {} },
+        { name: 'read_file', result: {} },
+      ]),
+    ).toBe('Read the file.');
+  });
+});
+
 describe('streamingErrorMessage (#77, #117)', () => {
   it('maps 413 / request-too-large errors to an actionable MCP-rate-limit message', () => {
     expect(streamingErrorMessage({ statusCode: 413 })).toMatch(/MCP servers/);
@@ -597,5 +679,71 @@ describe('#168 all-cooling-off surfacing', () => {
     expect(res.status).toBe(503);
     expect(res.body.message).toMatch(/temporarily unavailable/);
     expect(res.body.detail).toMatch(/temporarily unavailable/);
+  });
+});
+
+describe('non-streaming tool-only confirmation (#195)', () => {
+  beforeEach(() => {
+    mockGenerate.mockReset().mockResolvedValue({ text: 'e2e-ok' });
+    mockRouteQuery.mockReset().mockResolvedValue(MOCK_ROUTING);
+  });
+
+  it('persists and returns a synthesized confirmation when a tool ran with no text', async () => {
+    mockGenerate.mockImplementation(async (messages?: { role: string; content: string }[]) => {
+      if (isClassifierCall({ messages })) return { text: CLASSIFIER_REPLY };
+      return {
+        text: '',
+        toolResults: [{ name: 'generate_file', result: { file: { filename: 'agi-final.md' } } }],
+      };
+    });
+    const app = createApp();
+    const cookies = await registerUser(app, 'confirm-nonstream@example.com');
+
+    const response = await request(app)
+      .post('/api/chat')
+      .set('Cookie', Array.isArray(cookies) ? cookies : [cookies])
+      .send({ content: 'Write the document' });
+
+    expect(response.status).toBe(200);
+    expect(response.body.message.content).toBe('Created agi-final.md.');
+    const saved = await Message.findOne({ role: 'assistant' });
+    expect(saved?.content).toBe('Created agi-final.md.');
+  });
+
+  it('leaves a real assistant answer untouched even when tools ran', async () => {
+    mockGenerate.mockImplementation(async (messages?: { role: string; content: string }[]) => {
+      if (isClassifierCall({ messages })) return { text: CLASSIFIER_REPLY };
+      return {
+        text: 'The document is ready.',
+        toolResults: [{ name: 'generate_file', result: { file: { filename: 'agi-final.md' } } }],
+      };
+    });
+    const app = createApp();
+    const cookies = await registerUser(app, 'confirm-nonstream-real@example.com');
+
+    const response = await request(app)
+      .post('/api/chat')
+      .set('Cookie', Array.isArray(cookies) ? cookies : [cookies])
+      .send({ content: 'Write the document' });
+
+    expect(response.status).toBe(200);
+    expect(response.body.message.content).toBe('The document is ready.');
+  });
+
+  it('does not confirm a turn whose only tool is current_datetime', async () => {
+    mockGenerate.mockImplementation(async (messages?: { role: string; content: string }[]) => {
+      if (isClassifierCall({ messages })) return { text: CLASSIFIER_REPLY };
+      return { text: '', toolResults: [{ name: 'current_datetime', result: {} }] };
+    });
+    const app = createApp();
+    const cookies = await registerUser(app, 'confirm-nonstream-datetime@example.com');
+
+    const response = await request(app)
+      .post('/api/chat')
+      .set('Cookie', Array.isArray(cookies) ? cookies : [cookies])
+      .send({ content: 'What is the time' });
+
+    expect(response.status).toBe(200);
+    expect(response.body.message.content).toBe('');
   });
 });

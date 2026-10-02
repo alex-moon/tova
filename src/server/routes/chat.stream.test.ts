@@ -520,6 +520,172 @@ describe('Chat streaming route', () => {
     expect(toolEvent.resultCount).toBeUndefined();
   });
 
+  it('emits a confirmation delta and persists it when a tool ran with no assistant text (#195)', async () => {
+    const cookies = await registerUser('stream-confirm-tool-only@example.com');
+    // The Mastra-documented silent turn: the run ends on a tool call, so the
+    // stream carries the generate_file call/result but no text-delta.
+    mockAgentStream.mockImplementation(async () => ({
+      fullStream: (async function* () {
+        yield { type: 'tool-call', payload: { toolName: 'generate_file', args: {} } };
+        yield {
+          type: 'tool-result',
+          payload: {
+            toolName: 'generate_file',
+            result: { file: { filename: 'agi-final.md' } },
+          },
+        };
+      })(),
+    }));
+
+    const app = createApp();
+    const response = await request(app)
+      .post('/api/chat/stream')
+      .set('Cookie', cookies)
+      .send({ content: 'write the document' });
+
+    expect(response.status).toBe(200);
+    const events = response.text
+      .split('\n\n')
+      .filter((part) => part.trim().length > 0)
+      .map((part) => {
+        const eventLine = part.split('\n').find((l) => l.startsWith('event: '));
+        const dataLine = part.split('\n').find((l) => l.startsWith('data: '));
+        return {
+          event: eventLine?.slice(7),
+          data: dataLine ? JSON.parse(dataLine.slice(6)) : undefined,
+        };
+      });
+    const deltas = events.filter((e) => e.event === 'delta');
+    expect(deltas.map((e) => e.data.content)).toEqual(['Created agi-final.md.']);
+    const done = events.find((e) => e.event === 'done');
+    expect(done?.data).toMatchObject({
+      complete: true,
+      message: { content: 'Created agi-final.md.' },
+    });
+    const persisted = await Message.findOne({ role: 'assistant' });
+    expect(persisted?.content).toBe('Created agi-final.md.');
+  });
+
+  it('leaves deltas as exactly the model text when a tool also ran (#195)', async () => {
+    const cookies = await registerUser('stream-confirm-real-text@example.com');
+    mockAgentStream.mockImplementation(async () => ({
+      fullStream: (async function* () {
+        yield { type: 'tool-call', payload: { toolName: 'web_search', args: {} } };
+        yield {
+          type: 'tool-result',
+          payload: { toolName: 'web_search', result: { results: [] } },
+        };
+        yield { type: 'text-delta', payload: { text: 'Here is the answer.' } };
+      })(),
+    }));
+
+    const app = createApp();
+    const response = await request(app)
+      .post('/api/chat/stream')
+      .set('Cookie', cookies)
+      .send({ content: 'look it up' });
+
+    expect(response.status).toBe(200);
+    const deltas = response.text
+      .split('\n\n')
+      .filter((part) => part.includes('event: delta'))
+      .map((part) =>
+        JSON.parse(
+          part
+            .split('\n')
+            .find((l) => l.startsWith('data: '))!
+            .slice(6),
+        ),
+      );
+    expect(deltas.map((d) => d.content).join('')).toBe('Here is the answer.');
+    const persisted = await Message.findOne({ role: 'assistant' });
+    expect(persisted?.content).toBe('Here is the answer.');
+  });
+
+  it('labels generate_file and reports its filename on the result event (#195)', async () => {
+    const cookies = await registerUser('stream-generate-file-label@example.com');
+    mockAgentStream.mockImplementation(async () => ({
+      fullStream: (async function* () {
+        yield { type: 'tool-call', payload: { toolName: 'generate_file', args: {} } };
+        yield {
+          type: 'tool-result',
+          payload: {
+            toolName: 'generate_file',
+            result: { file: { filename: 'agi-final.md' } },
+          },
+        };
+        yield { type: 'text-delta', payload: { text: 'Done.' } };
+      })(),
+    }));
+
+    const app = createApp();
+    const response = await request(app)
+      .post('/api/chat/stream')
+      .set('Cookie', cookies)
+      .send({ content: 'write it' });
+
+    expect(response.status).toBe(200);
+    const toolEvents = response.text
+      .split('\n\n')
+      .filter((part) => part.includes('event: tool'))
+      .map((part) =>
+        JSON.parse(
+          part
+            .split('\n')
+            .find((l) => l.startsWith('data: '))!
+            .slice(6),
+        ),
+      );
+    expect(toolEvents[0]).toMatchObject({
+      phase: 'call',
+      name: 'generate_file',
+      label: 'Created a file',
+    });
+    expect(toolEvents[1]).toEqual(
+      expect.objectContaining({
+        phase: 'result',
+        name: 'generate_file',
+        status: 'ok',
+        filename: 'agi-final.md',
+      }),
+    );
+  });
+
+  it('reports an empty status when generate_file returned an error (#195)', async () => {
+    const cookies = await registerUser('stream-generate-file-error@example.com');
+    mockAgentStream.mockImplementation(async () => ({
+      fullStream: (async function* () {
+        yield { type: 'tool-call', payload: { toolName: 'generate_file', args: {} } };
+        yield {
+          type: 'tool-result',
+          payload: { toolName: 'generate_file', result: { error: 'disk full' } },
+        };
+      })(),
+    }));
+
+    const app = createApp();
+    const response = await request(app)
+      .post('/api/chat/stream')
+      .set('Cookie', cookies)
+      .send({ content: 'write it' });
+
+    expect(response.status).toBe(200);
+    const resultEvent = response.text
+      .split('\n\n')
+      .filter((part) => part.includes('event: tool'))
+      .map((part) =>
+        JSON.parse(
+          part
+            .split('\n')
+            .find((l) => l.startsWith('data: '))!
+            .slice(6),
+        ),
+      )
+      .find((e) => e.phase === 'result');
+    expect(resultEvent).toMatchObject({ name: 'generate_file', status: 'empty' });
+    expect(resultEvent.filename).toBeUndefined();
+  });
+
   it('delivers follow-up suggestions on done and persists them on the message', async () => {
     const cookies = await registerUser('stream-suggestions@example.com');
     mockAgentStream.mockImplementation(async () => ({

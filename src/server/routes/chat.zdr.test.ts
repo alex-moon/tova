@@ -144,6 +144,37 @@ describe('Zero-data retention chats (issue #116)', () => {
     expect(await Message.countDocuments()).toBe(0);
   });
 
+  it('ends a tool-only ZDR stream with a synthesized confirmation (#195)', async () => {
+    const email = 'zdr-tool-only-stream@example.com';
+    const cookies = await registerUser(email);
+    await enableZdr(email);
+    mockAgentStream.mockImplementation(async () => {
+      return (async function* () {
+        yield {
+          toolResult: {
+            name: 'generate_file',
+            result: { file: { filename: 'agi-final.md' } },
+          },
+        };
+      })();
+    });
+
+    const response = await streamMessage(cookies, { content: 'write it offline' });
+
+    expect(response.status).toBe(200);
+    const events = eventsFrom(response.text);
+    const deltas = events.filter((e) => e.event === 'delta');
+    expect(deltas.map((e) => e.data.content)).toEqual(['Created agi-final.md.']);
+    const done = events.find((e) => e.event === 'done');
+    expect(done?.data).toMatchObject({
+      complete: true,
+      message: { content: 'Created agi-final.md.' },
+    });
+    // ZDR still writes nothing.
+    expect(await Session.countDocuments()).toBe(0);
+    expect(await Message.countDocuments()).toBe(0);
+  });
+
   it('replays the client history into the provider prompt, newest-first after the turn', async () => {
     const email = 'zdr-history@example.com';
     const cookies = await registerUser(email);
@@ -218,6 +249,23 @@ describe('Zero-data retention chats (issue #116)', () => {
         ],
       }),
     );
+  });
+
+  it('ends a tool-only plain ZDR turn with a synthesized confirmation (#195)', async () => {
+    mockPlainGenerate.mockResolvedValue({
+      choices: [{ message: { content: '' } }],
+      toolResults: [{ name: 'generate_file', result: { file: { filename: 'agi-final.md' } } }],
+    });
+    const email = 'zdr-tool-only-plain@example.com';
+    const cookies = await registerUser(email);
+    await enableZdr(email);
+
+    const response = await plainMessage(cookies, { content: 'write it offline' });
+
+    expect(response.status).toBe(200);
+    expect(response.body.message.content).toBe('Created agi-final.md.');
+    expect(await Session.countDocuments()).toBe(0);
+    expect(await Message.countDocuments()).toBe(0);
   });
 
   it('refuses to write into an already-persisted session', async () => {

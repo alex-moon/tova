@@ -175,7 +175,54 @@ const toolLabelFrom = (name: string): string =>
         ? 'Listed your files'
         : name === 'read_file'
           ? 'Read a file'
-          : name || 'Tool run';
+          : name === 'generate_file'
+            ? 'Created a file'
+            : name || 'Tool run';
+
+/*
+ * Tools that are internal bookkeeping, not user-facing "work". A turn whose
+ * only tool was one of these must not synthesize a confirmation ("I checked
+ * the time.") — see plan #195. A turn with these plus any real tool still
+ * confirms, but only for the real tool.
+ */
+const NON_CONFIRMING_TOOLS = new Set(['current_datetime']);
+
+// Completed-tool confirmation (issue #195): when a turn ran at least one
+// user-facing tool but produced no assistant text — the Mastra-documented
+// "run ends on a tool call" case, e.g. `maxSteps` exhausting on tool rounds —
+// this derives a short natural-language sentence naming what happened. It is
+// only ever consulted when the model's own text is empty/whitespace, so a real
+// answer always wins byte-for-byte.
+export const confirmationForToolResults = (
+  results: Array<{ name: string; result: unknown }>,
+): string | null => {
+  const phrases: string[] = [];
+  for (const { name, result } of results) {
+    if (NON_CONFIRMING_TOOLS.has(name)) continue;
+    let phrase: string;
+    if (name === 'generate_file') {
+      const filename = (result as { file?: { filename?: unknown } } | null)?.file?.filename;
+      phrase =
+        typeof filename === 'string' && filename !== ''
+          ? `Created ${filename}.`
+          : 'Created the file.';
+    } else if (name === 'web_search') {
+      phrase = 'Searched the web.';
+    } else if (name === 'fetch_url') {
+      phrase = 'Fetched the page.';
+    } else if (name === 'list_files') {
+      phrase = 'Listed your files.';
+    } else if (name === 'read_file') {
+      phrase = 'Read the file.';
+    } else {
+      phrase = 'Finished the task.';
+    }
+    if (!phrases.includes(phrase)) phrases.push(phrase);
+  }
+  if (phrases.length === 0) return null;
+  if (phrases.length <= 3) return phrases.join(' ');
+  return `${phrases.slice(0, 3).join(' ')} And more.`;
+};
 
 const toolCallEvent = (call: NonNullable<NeutralStreamChunk['toolCall']>) => ({
   phase: 'call' as const,
@@ -264,6 +311,18 @@ const toolResultEvent = (result: { name: string; result: unknown }) => {
       status: urls.length > 0 ? ('ok' as const) : ('empty' as const),
       ...(hasResults ? { resultCount: items.length } : {}),
       ...(urls.length > 0 ? { domains: domainsFrom(urls) } : {}),
+    };
+  }
+  if (result.name === 'generate_file') {
+    const payload = result.result as { file?: { filename?: unknown }; error?: unknown } | null;
+    const filename = payload?.file?.filename;
+    if (payload && typeof payload.error === 'string') {
+      return { ...base, status: 'empty' as const };
+    }
+    return {
+      ...base,
+      status: 'ok' as const,
+      ...(typeof filename === 'string' && filename !== '' ? { filename } : {}),
     };
   }
   if (result.name === 'list_files') {
@@ -565,12 +624,19 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
           }),
       );
       const zdrAssistantContent = chatCompletion.choices[0]?.message?.content ?? '';
+      // #195: a tool-only ZDR turn still ends with a short confirmation.
+      const zdrConfirmation = zdrAssistantContent.trim()
+        ? null
+        : confirmationForToolResults(chatCompletion.toolResults ?? []);
+      const zdrFinalContent = zdrAssistantContent.trim()
+        ? zdrAssistantContent
+        : (zdrConfirmation ?? zdrAssistantContent);
       await cleanupIfEphemeral();
       return res.json({
         routing: routingResult,
         message: {
           role: 'assistant',
-          content: zdrAssistantContent,
+          content: zdrFinalContent,
           modelName: routingResult.model,
         },
       });
@@ -652,13 +718,19 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
 
     // Empty provider responses persist as '' (fail-visibility, #4 J); the
     // UI presents the '(no content returned)' placeholder.
-    const assistantContent = chatCompletion.choices[0]?.message?.content ?? '';
+    const rawAssistantContent = chatCompletion.choices[0]?.message?.content ?? '';
+    const toolResults = chatCompletion.toolResults ?? [];
+    // #195: a tool-only turn ends with a synthesized confirmation instead of
+    // silence (the model's own text, when present, is untouched).
+    const assistantContent = rawAssistantContent.trim()
+      ? rawAssistantContent
+      : (confirmationForToolResults(toolResults) ?? rawAssistantContent);
 
     // Sources from any web_search the agent chose to run (issue #16),
     // persisted only when non-empty. Titles ride along (#33).
     let sources: string[] = [];
     const titles = new Map<string, string>();
-    for (const r of chatCompletion.toolResults ?? []) {
+    for (const r of toolResults) {
       collectSourcesInto(sources, r.result, titles);
     }
     const sourceTitles = sources
@@ -891,6 +963,9 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
     let assistantContent = '';
     let sources: string[] = [];
     const titles = new Map<string, string>();
+    // #195: every executed tool of the turn, in order, so a turn that ends
+    // with no assistant text can still be confirmed.
+    const toolResults: { name: string; result: unknown }[] = [];
 
     // Abort the provider call when the client disconnects mid-stream. 'close'
     // also fires after a normal end, so only abort when the response did not
@@ -938,6 +1013,7 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
             if (chunk.toolResult) {
               sendEvent('tool', toolResultEvent(chunk.toolResult));
               collectSourcesInto(sources, chunk.toolResult.result, titles);
+              toolResults.push(chunk.toolResult);
             }
             const delta = chunk.delta;
             if (delta) {
@@ -990,6 +1066,19 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
       await cleanupEphemeralAsset(attachedAsset);
       res.end();
       return;
+    }
+
+    // #195: if the turn ran a user-facing tool but streamed no assistant
+    // text — the Mastra-documented "run ends on a tool call" case, e.g. the
+    // step cap landing on a tool round — emit a short confirmation as a
+    // normal `delta` so the client renders it exactly like model text. A
+    // turn that errored above returned already and is never confirmed.
+    if (!assistantContent.trim()) {
+      const confirmation = confirmationForToolResults(toolResults);
+      if (confirmation) {
+        assistantContent = confirmation;
+        sendEvent('delta', { content: confirmation });
+      }
     }
 
     // Save assistant message. A provider stream that yields no (or only
