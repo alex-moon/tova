@@ -115,15 +115,15 @@ jobs:
 
       - name: Client lint
         if: needs.changed.outputs.client == 'true'
-        run: npm --prefix src/client run lint
+        run: npm run lint:client
 
       - name: Client tests
         if: needs.changed.outputs.client == 'true'
-        run: npm --prefix src/client run test
+        run: npm run test:client
 
       - name: Client build
         if: needs.changed.outputs.client == 'true'
-        run: npm --prefix src/client run build
+        run: npm run build:client
 
   # Security scans gated on deploy: these run on main pushes only (same
   # workflow run as `ci`) and the gate below requires them, so deploy
