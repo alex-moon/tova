@@ -15,6 +15,7 @@ vi.mock('../services/assets', async (importOriginal) => {
       list: vi.fn(),
       content: vi.fn(),
       downloadUrl: vi.fn(),
+      thumbnailUrl: vi.fn(),
       delete: vi.fn(),
       bulkDownloadUrl: vi.fn(() => '/api/assets/bulk-download'),
       bulkDelete: vi.fn(),
@@ -73,6 +74,7 @@ describe('AssetsView (issue #197)', () => {
   beforeEach(() => {
     vi.mocked(AssetService.list).mockReset();
     vi.mocked(AssetService.content).mockReset();
+    vi.mocked(AssetService.thumbnailUrl).mockReset();
   });
 
   it('shows the select-a-file prompt before anything is chosen', async () => {
@@ -137,5 +139,67 @@ describe('AssetsView (issue #197)', () => {
     expect(await screen.findByTestId('assets-preview-error')).toHaveTextContent(
       'Could not load this file',
     );
+  });
+
+  it('renders the thumbnail for a ready image asset (#208)', async () => {
+    vi.mocked(AssetService.list).mockResolvedValue({
+      assets: [
+        asset({
+          id: 'img1',
+          filename: 'photo.png',
+          contentType: 'image/png',
+          thumbnailStatus: 'ready',
+        }),
+      ],
+      nextCursor: null,
+    });
+    vi.mocked(AssetService.thumbnailUrl).mockResolvedValue({
+      url: 'https://spaces.example/thumb',
+      status: 'ready',
+    });
+    renderView();
+    fireEvent.click(await screen.findByTestId('asset-preview-img1'));
+    const img = await screen.findByRole('img', { name: 'photo.png' });
+    expect(img).toHaveAttribute('src', 'https://spaces.example/thumb');
+    expect(AssetService.thumbnailUrl).toHaveBeenCalledWith('img1');
+    // Images never fetch the text content endpoint.
+    expect(AssetService.content).not.toHaveBeenCalled();
+  });
+
+  it('shows a preparing state while an image thumbnail is pending (#208)', async () => {
+    vi.mocked(AssetService.list).mockResolvedValue({
+      assets: [
+        asset({
+          id: 'img2',
+          filename: 'photo.png',
+          contentType: 'image/png',
+          thumbnailStatus: 'pending',
+        }),
+      ],
+      nextCursor: null,
+    });
+    vi.mocked(AssetService.thumbnailUrl).mockResolvedValue({ url: null, status: 'pending' });
+    renderView();
+    fireEvent.click(await screen.findByTestId('asset-preview-img2'));
+    expect(await screen.findByText(/preparing preview/i)).toBeInTheDocument();
+    expect(AssetService.thumbnailUrl).toHaveBeenCalledWith('img2');
+  });
+
+  it('falls back to a no-preview state when the image thumbnail is unavailable (#208)', async () => {
+    vi.mocked(AssetService.list).mockResolvedValue({
+      assets: [
+        asset({
+          id: 'img3',
+          filename: 'photo.png',
+          contentType: 'image/png',
+          thumbnailStatus: 'none',
+        }),
+      ],
+      nextCursor: null,
+    });
+    vi.mocked(AssetService.thumbnailUrl).mockResolvedValue({ url: null, status: 'none' });
+    renderView();
+    fireEvent.click(await screen.findByTestId('asset-preview-img3'));
+    expect(await screen.findByText('(no preview available)')).toBeInTheDocument();
   });
 });

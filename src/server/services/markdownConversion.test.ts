@@ -1,6 +1,7 @@
 import { readFileSync } from 'fs';
 import { Types } from 'mongoose';
 import path from 'path';
+import { createCanvas } from '@napi-rs/canvas';
 import {
   CONVERSION_TIMEOUT_MS,
   MAX_MARKDOWN_CHARS,
@@ -14,9 +15,11 @@ import { AssetJob } from '../models/AssetJob';
 import { runAssetJobTick } from './assetJobService';
 
 const mockGetObjectBuffer = jest.fn();
+const mockPutObject = jest.fn();
 
 jest.mock('./storageService', () => ({
   getObjectBuffer: (...args: unknown[]) => mockGetObjectBuffer(...args),
+  putObject: (...args: unknown[]) => mockPutObject(...args),
 }));
 
 // Issue #67: real JS-native converters exercised against fixture files
@@ -28,6 +31,15 @@ jest.mock('./storageService', () => ({
 const FIXTURE_DIR = path.join(__dirname, 'fixtures');
 const fixture = (file: 'sample.pdf' | 'sample.docx' | 'sample.html'): Buffer =>
   readFileSync(`${FIXTURE_DIR}/${file}`);
+
+// In-memory PNG for the #208 thumbnail path (no binary fixture to drift).
+const pngOf = (width: number, height: number): Buffer => {
+  const canvas = createCanvas(width, height);
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#3366ff';
+  ctx.fillRect(0, 0, width, height);
+  return canvas.toBuffer('image/png');
+};
 
 describe('isConvertible (#67)', () => {
   it('accepts the v1 toolchain extensions and rejects the rest', () => {
@@ -146,5 +158,56 @@ describe('conversion job end-to-end (#67)', () => {
     const job = await AssetJob.findOne({ assetId: asset._id });
     expect(job?.status).toBe('pending');
     expect(job?.attempts).toBe(1);
+  });
+});
+
+describe('thumbnail job end-to-end (#208)', () => {
+  const seedImage = async (buffer: Buffer) => {
+    const userId = new Types.ObjectId();
+    const asset = await Asset.create({
+      userId,
+      filename: 'photo.png',
+      key: 'u/a/photo.png',
+      contentType: 'image/png',
+      size: buffer.length,
+      status: 'ready',
+      thumbnailStatus: 'pending',
+    });
+    mockGetObjectBuffer.mockResolvedValue(buffer);
+    return { asset, userId: String(userId) };
+  };
+
+  beforeEach(() => {
+    jest.resetAllMocks();
+  });
+
+  it('derives and stores a bounded thumbnail then marks it ready', async () => {
+    const { asset, userId } = await seedImage(pngOf(1200, 600));
+    await AssetJob.create({ assetId: asset._id, status: 'pending' });
+    await runAssetJobTick(processAssetConversionJob);
+
+    const stored = await Asset.findById(asset._id);
+    expect(stored?.thumbnailStatus).toBe('ready');
+    expect(stored?.thumbnailKey).toBe(`${userId}/${String(asset._id)}/thumbnail`);
+    // No markdown path ran: the PNG is not a convertible document.
+    expect(stored?.markdownStatus).toBe('none');
+
+    const [key, body, contentType] = mockPutObject.mock.calls[0] as [string, Buffer, string];
+    expect(key).toBe(`${userId}/${String(asset._id)}/thumbnail`);
+    expect(contentType).toBe('image/png');
+    expect(body.subarray(0, 8)).toEqual(
+      Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    );
+  });
+
+  it('leaves a ready markdown untouched when only the thumbnail is pending', async () => {
+    const { asset } = await seedImage(pngOf(40, 40));
+    await Asset.updateOne({ _id: asset._id }, { $set: { markdownStatus: 'ready' } });
+    await AssetJob.create({ assetId: asset._id, status: 'pending' });
+    await runAssetJobTick(processAssetConversionJob);
+
+    const stored = await Asset.findById(asset._id);
+    expect(stored?.thumbnailStatus).toBe('ready');
+    expect(stored?.markdownStatus).toBe('ready');
   });
 });
