@@ -730,6 +730,124 @@ describe('Asset hasText & failureReason serialization (issue #83)', () => {
   });
 });
 
+describe('Asset content viewer (issue #197)', () => {
+  const seedAssetFor = async (
+    email: string,
+    extra: Record<string, unknown>,
+  ): Promise<{ cookie: string; id: string }> => {
+    const cookie = await registerUser(email);
+    const user = await User.findOne({ email });
+    const id = new Types.ObjectId();
+    await Asset.create({
+      _id: id,
+      userId: user?._id,
+      filename: 'report.pdf',
+      key: `k/${String(id)}/report.pdf`,
+      contentType: 'application/pdf',
+      size: 12,
+      status: 'ready',
+      ...extra,
+    });
+    return { cookie, id: String(id) };
+  };
+
+  it('returns the converted markdown body for a converted document', async () => {
+    const { cookie, id } = await seedAssetFor('assets-content-md@example.com', {
+      textExtracted: null,
+      markdownExtracted: '# converted report',
+      markdownStatus: 'ready',
+    });
+    const response = await request(app).get(`/api/assets/${id}/content`).set('Cookie', [cookie]);
+    expect(response.status).toBe(200);
+    expect(response.body.asset).toMatchObject({
+      id,
+      filename: 'report.pdf',
+      content: '# converted report',
+      format: 'markdown',
+      markdownStatus: 'ready',
+    });
+  });
+
+  it('prefers fast-path extracted text and reports format text', async () => {
+    const { cookie, id } = await seedAssetFor('assets-content-txt@example.com', {
+      textExtracted: 'plain report body',
+      markdownStatus: 'none',
+    });
+    const response = await request(app).get(`/api/assets/${id}/content`).set('Cookie', [cookie]);
+    expect(response.status).toBe(200);
+    expect(response.body.asset.content).toBe('plain report body');
+    expect(response.body.asset.format).toBe('text');
+  });
+
+  it('renders a Markdown upload as format markdown even though its body is in textExtracted', async () => {
+    const cookie = await registerUser('assets-content-markdown-file@example.com');
+    const user = await User.findOne({ email: 'assets-content-markdown-file@example.com' });
+    const id = new Types.ObjectId();
+    await Asset.create({
+      _id: id,
+      userId: user?._id,
+      filename: 'README.md',
+      key: `k/${String(id)}/README.md`,
+      contentType: 'text/markdown',
+      size: 12,
+      status: 'ready',
+      textExtracted: '# Title',
+      markdownStatus: 'none',
+    });
+    const response = await request(app)
+      .get(`/api/assets/${String(id)}/content`)
+      .set('Cookie', [cookie]);
+    expect(response.status).toBe(200);
+    expect(response.body.asset.format).toBe('markdown');
+    expect(response.body.asset.content).toBe('# Title');
+  });
+
+  it('returns null content when nothing was extracted', async () => {
+    const { cookie, id } = await seedAssetFor('assets-content-none@example.com', {
+      textExtracted: null,
+      markdownExtracted: null,
+      markdownStatus: 'none',
+    });
+    const response = await request(app).get(`/api/assets/${id}/content`).set('Cookie', [cookie]);
+    expect(response.status).toBe(200);
+    expect(response.body.asset.content).toBeNull();
+    expect(response.body.asset.format).toBe('text');
+  });
+
+  it('surfaces the failure reason without content on a failed conversion', async () => {
+    const { cookie, id } = await seedAssetFor('assets-content-fail@example.com', {
+      textExtracted: null,
+      markdownExtracted: null,
+      markdownStatus: 'failed',
+      markdownFailureReason: 'converter exploded',
+    });
+    const response = await request(app).get(`/api/assets/${id}/content`).set('Cookie', [cookie]);
+    expect(response.status).toBe(200);
+    expect(response.body.asset.content).toBeNull();
+    expect(response.body.asset.markdownFailureReason).toBe('converter exploded');
+  });
+
+  it('404s for another user and 401s for a guest', async () => {
+    const { id } = await seedAssetFor('assets-content-owner@example.com', {
+      textExtracted: 'owned',
+    });
+    const otherCookie = await registerUser('assets-content-other@example.com');
+    const cross = await request(app).get(`/api/assets/${id}/content`).set('Cookie', [otherCookie]);
+    expect(cross.status).toBe(404);
+
+    const guest = await request(app).get(`/api/assets/${id}/content`);
+    expect(guest.status).toBe(401);
+  });
+
+  it('404s for an unknown id without leaking content', async () => {
+    const cookie = await registerUser('assets-content-missing@example.com');
+    const response = await request(app)
+      .get(`/api/assets/${new Types.ObjectId().toString()}/content`)
+      .set('Cookie', [cookie]);
+    expect(response.status).toBe(404);
+  });
+});
+
 describe('Assets ownership isolation', () => {
   let cookieA: string;
   let cookieB: string;

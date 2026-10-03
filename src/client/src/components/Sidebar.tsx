@@ -87,6 +87,13 @@ const Sidebar: React.FC<SidebarProps> = ({
             <Files />
             Files
           </Button>
+          {/* Issue #197: the full assets view (with previews) lives at /assets. */}
+          <a
+            href="/assets"
+            className="mt-1 flex w-full items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+          >
+            View all files
+          </a>
         </div>
         <div className="flex-1 overflow-y-auto px-4">
           <div className="py-2 text-sm text-muted-foreground">Previous Chats</div>

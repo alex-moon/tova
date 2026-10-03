@@ -13,6 +13,7 @@ import {
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import AssetService, { type AssetSummary } from '@/services/assets';
+import { cn } from '@/lib/utils';
 import { useConfirmDelete } from '../hooks/useConfirmDelete';
 
 const formatSize = (bytes: number): string => {
@@ -40,13 +41,26 @@ const IconFor: React.FC<{ contentType: string; filename: string }> = ({
 };
 
 interface AssetLibraryProps {
-  onClose: () => void;
+  // Omitted when `embedded` (issue #197): a full view has no overlay to close.
+  onClose?: () => void;
   // Issue #51: hands a library asset back to the composer without re-uploading
   // bytes. Optional so the library works standalone (Sidebar render).
   onPickAsset?: (asset: AssetSummary) => void;
+  // Issue #197: render as a plain pane (no modal overlay/backdrop) so the
+  // separate `/assets` view can host it beside a preview. When embedded,
+  // `onSelect` reports the clicked asset.
+  embedded?: boolean;
+  onSelect?: (asset: AssetSummary) => void;
+  selectedId?: string | null;
 }
 
-const AssetLibrary: React.FC<AssetLibraryProps> = ({ onClose, onPickAsset }) => {
+const AssetLibrary: React.FC<AssetLibraryProps> = ({
+  onClose,
+  onPickAsset,
+  embedded = false,
+  onSelect,
+  selectedId = null,
+}) => {
   const [assets, setAssets] = useState<AssetSummary[]>([]);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -209,6 +223,340 @@ const AssetLibrary: React.FC<AssetLibraryProps> = ({ onClose, onPickAsset }) => 
     void handleFiles(e.dataTransfer.files);
   };
 
+  const body = (
+    <>
+      <div className="flex h-14 shrink-0 items-center justify-between border-b border-border px-4">
+        <h2 className="font-heading text-lg font-semibold">Files</h2>
+        {!embedded && (
+          <Button
+            variant="ghost"
+            size="icon"
+            aria-label="Close files"
+            onClick={onClose}
+            className="text-muted-foreground"
+          >
+            <X />
+          </Button>
+        )}
+      </div>
+      <div className="flex-1 overflow-y-auto p-4">
+        {loading ? (
+          <div
+            className="flex items-center justify-center gap-2 py-10 text-muted-foreground"
+            data-testid="asset-loading"
+          >
+            <Loader2 className="size-5 animate-spin" /> Loading…
+          </div>
+        ) : assets.length === 0 ? (
+          <p className="py-6 text-center text-sm text-muted-foreground">
+            No files yet. Upload one below or attach it to a message in the chat.
+          </p>
+        ) : (
+          <>
+            {selectedIds.size > 0 &&
+              (armedId === 'bulk' ? (
+                <div
+                  data-testid="confirm-delete-file-bulk"
+                  className="mb-2 flex items-center gap-1 rounded-lg border border-destructive bg-destructive/10 px-3 py-2.5 text-sm text-destructive"
+                >
+                  <span className="min-w-0 flex-1 truncate">
+                    Delete {selectedIds.size} selected? Irreversible.
+                  </span>
+                  <button
+                    type="button"
+                    data-testid="confirm-yes"
+                    aria-label="Yes, delete selected files"
+                    autoFocus
+                    disabled={bulkDeleting}
+                    onClick={onYes}
+                    className="shrink-0 rounded-md px-2 py-1 text-xs font-medium hover:bg-destructive hover:text-destructive-foreground disabled:opacity-50"
+                  >
+                    Yes
+                  </button>
+                  <button
+                    type="button"
+                    data-testid="confirm-always"
+                    aria-label="Always delete files without asking"
+                    disabled={bulkDeleting}
+                    onClick={() => void onAlways()}
+                    className="shrink-0 rounded-md px-2 py-1 text-xs font-medium hover:bg-destructive hover:text-destructive-foreground disabled:opacity-50"
+                  >
+                    Always
+                  </button>
+                  <button
+                    type="button"
+                    data-testid="confirm-no"
+                    aria-label="No, keep the files"
+                    disabled={bulkDeleting}
+                    onClick={onNo}
+                    className="shrink-0 rounded-md px-2 py-1 text-xs font-medium hover:bg-destructive hover:text-destructive-foreground disabled:opacity-50"
+                  >
+                    No
+                  </button>
+                </div>
+              ) : (
+                <div className="mb-2 flex items-center justify-between gap-2">
+                  <span className="text-xs text-muted-foreground">{selectedIds.size} selected</span>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={bulkDownloading}
+                      data-testid="asset-bulk-download"
+                      onClick={() => void handleBulkDownload()}
+                    >
+                      {bulkDownloading ? (
+                        <Loader2 className="size-4 animate-spin" />
+                      ) : (
+                        'Download selected'
+                      )}
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={bulkDeleting}
+                      data-testid="asset-bulk-delete"
+                      aria-label="Delete selected files"
+                      onClick={() => arm('bulk')}
+                      className="text-destructive hover:bg-destructive hover:text-destructive-foreground"
+                    >
+                      {bulkDeleting ? (
+                        <Loader2 className="size-4 animate-spin" />
+                      ) : (
+                        'Delete selected'
+                      )}
+                    </Button>
+                  </div>
+                </div>
+              ))}
+            <ul
+              className={cn('grid grid-cols-1 gap-2', embedded ? 'grid-cols-1' : 'sm:grid-cols-2')}
+            >
+              {assets.map((asset) =>
+                armedId === asset.id ? (
+                  <li
+                    key={asset.id}
+                    data-testid={`confirm-delete-file-${asset.id}`}
+                    className="flex items-center gap-1 rounded-lg border border-destructive bg-destructive/10 px-3 py-2.5 text-sm text-destructive"
+                  >
+                    <span className="min-w-0 flex-1 truncate">Sure? Irreversible.</span>
+                    <button
+                      type="button"
+                      data-testid="confirm-yes"
+                      aria-label="Yes, delete file"
+                      autoFocus
+                      disabled={deletingId === asset.id}
+                      onClick={onYes}
+                      className="shrink-0 rounded-md px-2 py-1 text-xs font-medium hover:bg-destructive hover:text-destructive-foreground disabled:opacity-50"
+                    >
+                      Yes
+                    </button>
+                    <button
+                      type="button"
+                      data-testid="confirm-always"
+                      aria-label="Always delete files without asking"
+                      disabled={deletingId === asset.id}
+                      onClick={() => void onAlways()}
+                      className="shrink-0 rounded-md px-2 py-1 text-xs font-medium hover:bg-destructive hover:text-destructive-foreground disabled:opacity-50"
+                    >
+                      Always
+                    </button>
+                    <button
+                      type="button"
+                      data-testid="confirm-no"
+                      aria-label="No, keep the file"
+                      disabled={deletingId === asset.id}
+                      onClick={onNo}
+                      className="shrink-0 rounded-md px-2 py-1 text-xs font-medium hover:bg-destructive hover:text-destructive-foreground disabled:opacity-50"
+                    >
+                      No
+                    </button>
+                  </li>
+                ) : (
+                  <li
+                    key={asset.id}
+                    className={cn(
+                      'flex items-center gap-3 rounded-lg border border-border bg-msg-assistant px-3 py-2.5',
+                      embedded && selectedId === asset.id && 'border-primary bg-accent',
+                    )}
+                  >
+                    <input
+                      type="checkbox"
+                      aria-label={`Select ${asset.filename}`}
+                      disabled={asset.status !== 'ready'}
+                      checked={selectedIds.has(asset.id)}
+                      data-testid="asset-select"
+                      onChange={() => toggleSelected(asset)}
+                      className="size-4 shrink-0 cursor-pointer accent-primary disabled:cursor-not-allowed disabled:opacity-50"
+                    />
+                    <IconFor contentType={asset.contentType} filename={asset.filename} />
+                    <button
+                      type="button"
+                      disabled={!embedded}
+                      aria-label={`Preview ${asset.filename}`}
+                      data-testid={embedded ? `asset-preview-${asset.id}` : undefined}
+                      onClick={embedded ? () => onSelect?.(asset) : undefined}
+                      className={cn('min-w-0 flex-1 text-left', embedded && 'cursor-pointer')}
+                    >
+                      <span className="block truncate text-sm">{asset.filename}</span>
+                      <span className="block text-xs text-muted-foreground">
+                        {formatSize(asset.size)} · {new Date(asset.createdAt).toLocaleDateString()}
+                        {asset.markdownStatus === 'pending' && (
+                          <span data-testid="asset-extracting">
+                            {' '}
+                            · <Loader2 className="inline size-3 animate-spin align-[-2px]" />{' '}
+                            Extracting text…
+                          </span>
+                        )}
+                        {asset.markdownStatus === 'ready' && (
+                          <span data-testid="asset-extract-ready"> · Text extracted</span>
+                        )}
+                        {asset.markdownStatus === 'failed' && (
+                          <span
+                            data-testid="asset-extract-failed"
+                            className="text-destructive"
+                            title={asset.markdownFailureReason ?? 'Text extraction failed'}
+                          >
+                            {' '}
+                            · Extraction failed
+                          </span>
+                        )}
+                      </span>
+                    </button>
+                    {onPickAsset && (
+                      <button
+                        type="button"
+                        title={
+                          asset.status === 'ready'
+                            ? 'Attach to chat'
+                            : 'This file is not ready to attach'
+                        }
+                        aria-label={`Attach ${asset.filename} to chat`}
+                        disabled={asset.status !== 'ready' || deletingId === asset.id}
+                        data-testid="asset-attach"
+                        onClick={() => onPickAsset(asset)}
+                        className="shrink-0 rounded p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        <Paperclip className="size-4" />
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      title="Download"
+                      aria-label={`Download ${asset.filename}`}
+                      onClick={() => void handleDownload(asset)}
+                      className="shrink-0 rounded p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                    >
+                      <span className="text-xs underline">Get</span>
+                    </button>
+                    <button
+                      type="button"
+                      title="Delete"
+                      aria-label={`Delete ${asset.filename}`}
+                      disabled={deletingId === asset.id}
+                      onClick={() => arm(asset.id)}
+                      className="shrink-0 rounded p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-destructive disabled:opacity-50"
+                    >
+                      <Trash2 className="size-4" />
+                    </button>
+                  </li>
+                ),
+              )}
+            </ul>
+            {nextCursor && (
+              <button
+                type="button"
+                onClick={() =>
+                  void AssetService.list(nextCursor)
+                    .then((page) => {
+                      setAssets((prev) => [...prev, ...page.assets]);
+                      setNextCursor(page.nextCursor);
+                    })
+                    .catch(() => toast.error('Could not load more files'))
+                }
+                className="mt-3 w-full rounded-lg border border-border py-2 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+              >
+                Show more
+              </button>
+            )}
+          </>
+        )}
+      </div>
+      <div className="shrink-0 border-t border-border p-4">
+        <div
+          onDrop={onDrop}
+          onDragOver={(e) => e.preventDefault()}
+          className="flex flex-col items-center gap-1.5 rounded-lg border border-dashed border-border px-4 py-4 text-center text-sm text-muted-foreground transition-colors hover:border-primary hover:text-accent-foreground"
+        >
+          <Upload className="size-4" />
+          {uploadRows.length > 0 ? (
+            <ul className="w-full space-y-1" data-testid="upload-rows">
+              {uploadRows.map((row, i) => (
+                <li key={`${row.name}-${i}`} className="flex flex-col gap-0.5 text-left">
+                  <span
+                    className="flex items-center justify-between gap-2 truncate text-xs"
+                    data-testid={`upload-row-${i}`}
+                  >
+                    <span className="truncate">{row.name}</span>
+                    <span
+                      className={
+                        row.status === 'error' ? 'text-destructive' : 'text-muted-foreground'
+                      }
+                    >
+                      {row.status === 'uploading' && `Uploading ${row.progress}%`}
+                      {row.status === 'done' && 'Uploaded'}
+                      {row.status === 'error' && (row.message ?? 'Upload failed')}
+                    </span>
+                  </span>
+                  {row.status === 'uploading' && (
+                    <progress max={100} value={row.progress} className="h-1 w-full" />
+                  )}
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p>
+              Drag files here, or{' '}
+              <button
+                type="button"
+                className="text-primary underline underline-offset-2 hover:text-primary-hover"
+                onClick={() => inputRef.current?.click()}
+              >
+                choose files
+              </button>
+            </p>
+          )}
+          <span className="text-xs">Up to 15 MB each · txt, md, csv, json, pdf, images</span>
+          <input
+            ref={inputRef}
+            type="file"
+            className="hidden"
+            aria-hidden
+            multiple
+            data-testid="asset-input"
+            onChange={(e) => {
+              void handleFiles(e.target.files);
+              e.target.value = '';
+            }}
+          />
+        </div>
+      </div>
+    </>
+  );
+
+  // Issue #197: the `/assets` view hosts the same list without the modal
+  // overlay; the chat surface keeps the overlay unchanged.
+  if (embedded) {
+    return (
+      <div
+        className="flex h-full min-h-0 flex-col border-r border-border panel-surface"
+        data-testid="asset-library"
+      >
+        {body}
+      </div>
+    );
+  }
+
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
@@ -221,311 +569,7 @@ const AssetLibrary: React.FC<AssetLibraryProps> = ({ onClose, onPickAsset }) => 
         aria-label="Asset library"
         data-testid="asset-library"
       >
-        <div className="flex h-14 shrink-0 items-center justify-between border-b border-border px-4">
-          <h2 className="font-heading text-lg font-semibold">Files</h2>
-          <Button
-            variant="ghost"
-            size="icon"
-            aria-label="Close files"
-            onClick={onClose}
-            className="text-muted-foreground"
-          >
-            <X />
-          </Button>
-        </div>
-        <div className="flex-1 overflow-y-auto p-4">
-          {loading ? (
-            <div
-              className="flex items-center justify-center gap-2 py-10 text-muted-foreground"
-              data-testid="asset-loading"
-            >
-              <Loader2 className="size-5 animate-spin" /> Loading…
-            </div>
-          ) : assets.length === 0 ? (
-            <p className="py-6 text-center text-sm text-muted-foreground">
-              No files yet. Upload one below or attach it to a message in the chat.
-            </p>
-          ) : (
-            <>
-              {selectedIds.size > 0 &&
-                (armedId === 'bulk' ? (
-                  <div
-                    data-testid="confirm-delete-file-bulk"
-                    className="mb-2 flex items-center gap-1 rounded-lg border border-destructive bg-destructive/10 px-3 py-2.5 text-sm text-destructive"
-                  >
-                    <span className="min-w-0 flex-1 truncate">
-                      Delete {selectedIds.size} selected? Irreversible.
-                    </span>
-                    <button
-                      type="button"
-                      data-testid="confirm-yes"
-                      aria-label="Yes, delete selected files"
-                      autoFocus
-                      disabled={bulkDeleting}
-                      onClick={onYes}
-                      className="shrink-0 rounded-md px-2 py-1 text-xs font-medium hover:bg-destructive hover:text-destructive-foreground disabled:opacity-50"
-                    >
-                      Yes
-                    </button>
-                    <button
-                      type="button"
-                      data-testid="confirm-always"
-                      aria-label="Always delete files without asking"
-                      disabled={bulkDeleting}
-                      onClick={() => void onAlways()}
-                      className="shrink-0 rounded-md px-2 py-1 text-xs font-medium hover:bg-destructive hover:text-destructive-foreground disabled:opacity-50"
-                    >
-                      Always
-                    </button>
-                    <button
-                      type="button"
-                      data-testid="confirm-no"
-                      aria-label="No, keep the files"
-                      disabled={bulkDeleting}
-                      onClick={onNo}
-                      className="shrink-0 rounded-md px-2 py-1 text-xs font-medium hover:bg-destructive hover:text-destructive-foreground disabled:opacity-50"
-                    >
-                      No
-                    </button>
-                  </div>
-                ) : (
-                  <div className="mb-2 flex items-center justify-between gap-2">
-                    <span className="text-xs text-muted-foreground">
-                      {selectedIds.size} selected
-                    </span>
-                    <div className="flex items-center gap-2">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        disabled={bulkDownloading}
-                        data-testid="asset-bulk-download"
-                        onClick={() => void handleBulkDownload()}
-                      >
-                        {bulkDownloading ? (
-                          <Loader2 className="size-4 animate-spin" />
-                        ) : (
-                          'Download selected'
-                        )}
-                      </Button>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        disabled={bulkDeleting}
-                        data-testid="asset-bulk-delete"
-                        aria-label="Delete selected files"
-                        onClick={() => arm('bulk')}
-                        className="text-destructive hover:bg-destructive hover:text-destructive-foreground"
-                      >
-                        {bulkDeleting ? (
-                          <Loader2 className="size-4 animate-spin" />
-                        ) : (
-                          'Delete selected'
-                        )}
-                      </Button>
-                    </div>
-                  </div>
-                ))}
-              <ul className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                {assets.map((asset) =>
-                  armedId === asset.id ? (
-                    <li
-                      key={asset.id}
-                      data-testid={`confirm-delete-file-${asset.id}`}
-                      className="flex items-center gap-1 rounded-lg border border-destructive bg-destructive/10 px-3 py-2.5 text-sm text-destructive"
-                    >
-                      <span className="min-w-0 flex-1 truncate">Sure? Irreversible.</span>
-                      <button
-                        type="button"
-                        data-testid="confirm-yes"
-                        aria-label="Yes, delete file"
-                        autoFocus
-                        disabled={deletingId === asset.id}
-                        onClick={onYes}
-                        className="shrink-0 rounded-md px-2 py-1 text-xs font-medium hover:bg-destructive hover:text-destructive-foreground disabled:opacity-50"
-                      >
-                        Yes
-                      </button>
-                      <button
-                        type="button"
-                        data-testid="confirm-always"
-                        aria-label="Always delete files without asking"
-                        disabled={deletingId === asset.id}
-                        onClick={() => void onAlways()}
-                        className="shrink-0 rounded-md px-2 py-1 text-xs font-medium hover:bg-destructive hover:text-destructive-foreground disabled:opacity-50"
-                      >
-                        Always
-                      </button>
-                      <button
-                        type="button"
-                        data-testid="confirm-no"
-                        aria-label="No, keep the file"
-                        disabled={deletingId === asset.id}
-                        onClick={onNo}
-                        className="shrink-0 rounded-md px-2 py-1 text-xs font-medium hover:bg-destructive hover:text-destructive-foreground disabled:opacity-50"
-                      >
-                        No
-                      </button>
-                    </li>
-                  ) : (
-                    <li
-                      key={asset.id}
-                      className="flex items-center gap-3 rounded-lg border border-border bg-msg-assistant px-3 py-2.5"
-                    >
-                      <input
-                        type="checkbox"
-                        aria-label={`Select ${asset.filename}`}
-                        disabled={asset.status !== 'ready'}
-                        checked={selectedIds.has(asset.id)}
-                        data-testid="asset-select"
-                        onChange={() => toggleSelected(asset)}
-                        className="size-4 shrink-0 cursor-pointer accent-primary disabled:cursor-not-allowed disabled:opacity-50"
-                      />
-                      <IconFor contentType={asset.contentType} filename={asset.filename} />
-                      <span className="min-w-0 flex-1">
-                        <span className="block truncate text-sm">{asset.filename}</span>
-                        <span className="block text-xs text-muted-foreground">
-                          {formatSize(asset.size)} ·{' '}
-                          {new Date(asset.createdAt).toLocaleDateString()}
-                          {asset.markdownStatus === 'pending' && (
-                            <span data-testid="asset-extracting">
-                              {' '}
-                              · <Loader2 className="inline size-3 animate-spin align-[-2px]" />{' '}
-                              Extracting text…
-                            </span>
-                          )}
-                          {asset.markdownStatus === 'ready' && (
-                            <span data-testid="asset-extract-ready"> · Text extracted</span>
-                          )}
-                          {asset.markdownStatus === 'failed' && (
-                            <span
-                              data-testid="asset-extract-failed"
-                              className="text-destructive"
-                              title={asset.markdownFailureReason ?? 'Text extraction failed'}
-                            >
-                              {' '}
-                              · Extraction failed
-                            </span>
-                          )}
-                        </span>
-                      </span>
-                      {onPickAsset && (
-                        <button
-                          type="button"
-                          title={
-                            asset.status === 'ready'
-                              ? 'Attach to chat'
-                              : 'This file is not ready to attach'
-                          }
-                          aria-label={`Attach ${asset.filename} to chat`}
-                          disabled={asset.status !== 'ready' || deletingId === asset.id}
-                          data-testid="asset-attach"
-                          onClick={() => onPickAsset(asset)}
-                          className="shrink-0 rounded p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
-                        >
-                          <Paperclip className="size-4" />
-                        </button>
-                      )}
-                      <button
-                        type="button"
-                        title="Download"
-                        aria-label={`Download ${asset.filename}`}
-                        onClick={() => void handleDownload(asset)}
-                        className="shrink-0 rounded p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-                      >
-                        <span className="text-xs underline">Get</span>
-                      </button>
-                      <button
-                        type="button"
-                        title="Delete"
-                        aria-label={`Delete ${asset.filename}`}
-                        disabled={deletingId === asset.id}
-                        onClick={() => arm(asset.id)}
-                        className="shrink-0 rounded p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-destructive disabled:opacity-50"
-                      >
-                        <Trash2 className="size-4" />
-                      </button>
-                    </li>
-                  ),
-                )}
-              </ul>
-              {nextCursor && (
-                <button
-                  type="button"
-                  onClick={() =>
-                    void AssetService.list(nextCursor)
-                      .then((page) => {
-                        setAssets((prev) => [...prev, ...page.assets]);
-                        setNextCursor(page.nextCursor);
-                      })
-                      .catch(() => toast.error('Could not load more files'))
-                  }
-                  className="mt-3 w-full rounded-lg border border-border py-2 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-                >
-                  Show more
-                </button>
-              )}
-            </>
-          )}
-        </div>
-        <div className="shrink-0 border-t border-border p-4">
-          <div
-            onDrop={onDrop}
-            onDragOver={(e) => e.preventDefault()}
-            className="flex flex-col items-center gap-1.5 rounded-lg border border-dashed border-border px-4 py-4 text-center text-sm text-muted-foreground transition-colors hover:border-primary hover:text-accent-foreground"
-          >
-            <Upload className="size-4" />
-            {uploadRows.length > 0 ? (
-              <ul className="w-full space-y-1" data-testid="upload-rows">
-                {uploadRows.map((row, i) => (
-                  <li key={`${row.name}-${i}`} className="flex flex-col gap-0.5 text-left">
-                    <span
-                      className="flex items-center justify-between gap-2 truncate text-xs"
-                      data-testid={`upload-row-${i}`}
-                    >
-                      <span className="truncate">{row.name}</span>
-                      <span
-                        className={
-                          row.status === 'error' ? 'text-destructive' : 'text-muted-foreground'
-                        }
-                      >
-                        {row.status === 'uploading' && `Uploading ${row.progress}%`}
-                        {row.status === 'done' && 'Uploaded'}
-                        {row.status === 'error' && (row.message ?? 'Upload failed')}
-                      </span>
-                    </span>
-                    {row.status === 'uploading' && (
-                      <progress max={100} value={row.progress} className="h-1 w-full" />
-                    )}
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <p>
-                Drag files here, or{' '}
-                <button
-                  type="button"
-                  className="text-primary underline underline-offset-2 hover:text-primary-hover"
-                  onClick={() => inputRef.current?.click()}
-                >
-                  choose files
-                </button>
-              </p>
-            )}
-            <span className="text-xs">Up to 15 MB each · txt, md, csv, json, pdf, images</span>
-            <input
-              ref={inputRef}
-              type="file"
-              className="hidden"
-              aria-hidden
-              multiple
-              data-testid="asset-input"
-              onChange={(e) => {
-                void handleFiles(e.target.files);
-                e.target.value = '';
-              }}
-            />
-          </div>
-        </div>
+        {body}
       </div>
     </div>
   );

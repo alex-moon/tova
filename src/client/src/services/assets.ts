@@ -25,6 +25,22 @@ export interface AssetListPage {
   nextCursor: string | null;
 }
 
+// Issue #197: the in-app viewer payload — the extracted body, which the list
+// payload deliberately never carries. `content` is null when nothing could be
+// extracted; `format` says whether to render it as markdown or as plain text.
+export interface AssetContent {
+  id: string;
+  filename: string;
+  contentType: string;
+  size: number;
+  status: string;
+  content: string | null;
+  format: 'text' | 'markdown';
+  markdownStatus?: string;
+  markdownFailureReason?: string | null;
+  createdAt: string;
+}
+
 export class AssetError extends Error {
   constructor(message = 'Something went wrong with that file', options?: { cause?: unknown }) {
     super(message, options);
@@ -191,6 +207,16 @@ const AssetService = {
       params: cursor ? { cursor } : {},
     });
     return res.data;
+  },
+
+  // Issue #197: fetch the extracted body for the in-app preview.
+  async content(assetId: string): Promise<AssetContent> {
+    try {
+      const res = await axios.get<{ asset: AssetContent }>(`/api/assets/${assetId}/content`);
+      return res.data.asset;
+    } catch (err) {
+      throw toAssetError(err);
+    }
   },
 
   async downloadUrl(assetId: string): Promise<string> {

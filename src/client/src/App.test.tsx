@@ -90,6 +90,15 @@ describe('App', () => {
     window.history.pushState({}, '', '/');
   });
 
+  it('renders the assets view at the /assets route (issue #197)', async () => {
+    mockMe('user');
+    window.history.pushState({}, '', '/assets');
+    renderApp();
+    expect(await screen.findByTestId('assets-view')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Back to chat' }).getAttribute('href')).toBe('/');
+    window.history.pushState({}, '', '/');
+  });
+
   it('renders the profile view for admins too (profile branch wins over admin, #95)', async () => {
     mockMe('admin');
     window.history.pushState({}, '', '/profile');
