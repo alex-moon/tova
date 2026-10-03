@@ -90,9 +90,9 @@ tests cover reconciliation, the summary box, and the richer detail; live
 Playwright check confirmed one resolved chip, persisted `Message.tools`, and
 survival across reload.
 
-### #208 — Asset viewer: image preview (after thumbnailing) · branch `feat/tv/208-image-preview` (PR #211)
+### #208 — Asset viewer: image preview (after thumbnailing) · branch `feat/tv/208-image-preview` (PR #211, **MERGED**)
 
-**Status: DONE — implemented, verified, `npm run ci` green.**
+**Status: DONE — merged to `main` (PR #211, commit `68c14ea`).**
 
 Follow-up split out of #197. The `/assets` detail pane now renders a derived
 image thumbnail so the original is never loaded into the viewer. Both calls
@@ -252,8 +252,9 @@ shouldn't pick it unilaterally.
    **Done:** PR #210 **merged**; separate `/assets` view implemented; #208/#209
    split out; plan doc `docs/plan-197-asset-viewer.md` recorded.
 5. ~~**#208** — design the thumbnail pipeline, add the image preview, ship.~~
-   **Done:** worker-derived thumbnails + `AssetsView` image branch; `npm run ci`
-   green; plan doc `docs/plan-208-image-preview.md` recorded; PR #211 open.
+   **Done:** PR #211 **merged**; worker-derived thumbnails + `AssetsView` image
+   branch; `npm run ci` green; plan doc archived to
+   `docs/done/plan-208-image-preview.md`.
 6. **#209** — needs an OCR-engine call (WASM vs. native binary) + target field.
 7. **#195** — needs your two answers + repro before it leaves draft.
 8. **#179**, **#166** — need owner decisions; #166 also welcomes a proposal
@@ -267,7 +268,7 @@ shouldn't pick it unilaterally.
 | #199   | `feat/199-model-pricing` / #206             | ✅ DONE | merged to `main` (`c199f60`)        |
 | #196   | `feat/196-tool-ux`                          | ✅ DONE | merged (`plan-196` archived)        |
 | #197   | `feat/197-asset-viewer` / #210              | ✅ DONE | merged to `main` (`8a68b0d`)        |
-| #208   | `feat/tv/208-image-preview` / #211          | ✅ DONE | PR open, ci green                   |
+| #208   | `feat/tv/208-image-preview` / #211          | ✅ DONE | merged to `main` (`68c14ea`)        |
 | #209   | —                                           | (c)     | OCR-engine call + target field      |
 | #195   | `feat/195-confirm-completed` / #205 (draft) | (c)     | your 2 answers + repro              |
 | #179   | —                                           | (c)     | your infra topology call            |
