@@ -172,8 +172,10 @@ jobs:
 
       - run: npm ci
 
+      # better-npm-audit wraps `npm audit` and honours the .nsprc allowlist of
+      # accepted-risk advisories (npm audit itself has no ignore mechanism).
       - name: Audit production dependencies
-        run: npm audit --omit=dev --audit-level=high --fail-on=all
+        run: npm run audit
 
   # dependency-review-action needs GitHub Advanced Security on private repos,
   # which this repository doesn't have; osv-scanner over the lockfile covers
