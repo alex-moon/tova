@@ -64,12 +64,19 @@ Completed this pass:
 
 ## (b) Blocked on a call I can make confidently
 
-### #196 — Tool UX · branch `feat/196-tool-ux`
+### #196 — Tool UX · branch `feat/tv/196-tool-ux` (PR #212, open)
 
-**Status: DONE — all four UX items implemented, verified, `npm run ci` green.**
+**Status: DONE — landed this pass via PR #212. Prior "DONE" was inaccurate:**
+the work was implemented on `feat/196-tool-ux` but **never merged** — no PR was
+opened and the branch predated the later #197/#199/#208 merges, so the code was
+not on `main`. This pass cherry-picked the two #196 commits onto current `main`
+as `feat/tv/196-tool-ux` (PR #212). The single conflict (`ChatWindow.tsx` using
+`MarkdownContent`, extracted by #197, vs. the old `MessageContent` name) was
+resolved in favour of `MarkdownContent`. `npm run ci` exits 0 (997 server
+tests).
 
 The server half (tool summaries persisted/reconciled on `Message`, replayed on
-history load) landed earlier on this branch with server tests. This pass
+history load) landed earlier on the old branch with server tests. This pass
 finished the client half so every reported symptom is fixed:
 
 1. **Stuck throbber.** `App.tsx` now mirrors the server reconcile on live SSE
@@ -245,9 +252,11 @@ shouldn't pick it unilaterally.
 2. ~~**#199** — branch is complete; fix tests, run the routing-evidence pass,
    Playwright the admin table, ship.~~ **Done:** PR #206 **merged**; plan doc
    added, evidence pass and Playwright check recorded.
-3. ~~**#196** — make the presentation calls, add the missing client half, ship.~~
-   **Done:** all four UX items implemented + verified; `npm run ci` green; plan
-   doc `docs/plan-196-tool-ux.md` recorded.
+3. **#196** — ~~make the presentation calls, add the missing client half, ship.~~
+   **Done (this pass):** all four UX items were already implemented on the old
+   `feat/196-tool-ux` branch but had **never actually merged to `main`**. This
+   pass re-applied them onto current `main` as PR #212 (`feat/tv/196-tool-ux`),
+   `npm run ci` green; plan doc `docs/plan-196-tool-ux.md` present.
 4. ~~**#197** — I make the scope call, split the tickets, implement the core.~~
    **Done:** PR #210 **merged**; separate `/assets` view implemented; #208/#209
    split out; plan doc `docs/plan-197-asset-viewer.md` recorded.
@@ -266,7 +275,7 @@ shouldn't pick it unilaterally.
 | ------ | ------------------------------------------- | ------- | ----------------------------------- |
 | #181   | `feat/181-speed-up` / #204                  | ✅ DONE | merged to `main`                    |
 | #199   | `feat/199-model-pricing` / #206             | ✅ DONE | merged to `main` (`c199f60`)        |
-| #196   | `feat/196-tool-ux`                          | ✅ DONE | merged (`plan-196` archived)        |
+| #196   | `feat/tv/196-tool-ux` / #212                | ✅ DONE | PR #212 open (re-applied to main)   |
 | #197   | `feat/197-asset-viewer` / #210              | ✅ DONE | merged to `main` (`8a68b0d`)        |
 | #208   | `feat/tv/208-image-preview` / #211          | ✅ DONE | merged to `main` (`68c14ea`)        |
 | #209   | —                                           | (c)     | OCR-engine call + target field      |
