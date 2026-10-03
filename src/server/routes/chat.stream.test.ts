@@ -527,16 +527,21 @@ describe('Chat streaming route', () => {
     }));
     // The follow-up generator is the next plain completion call (the chat
     // itself streams); classification also rides mockGenerate, so gate it.
-    mockGenerate.mockImplementation(async (messages?: { role: string; content: string }[]) => {
-      if (isClassifierCall({ messages })) return { text: CLASSIFIER_REPLY };
-      if (
-        messages?.[0]?.role === 'system' &&
-        String(messages[0].content).startsWith('Generate 2-3')
-      ) {
-        return { text: '["What about pricing?","Show an example"]' };
-      }
-      return { text: 'plain' };
-    });
+    // #198: the tool-free connector folds the suggestion system prompt into
+    // the per-call `instructions` override, so the follow-up call is
+    // identified by its instructions rather than a leading system message.
+    mockGenerate.mockImplementation(
+      async (
+        messages?: { role: string; content: string }[],
+        options?: { instructions?: string },
+      ) => {
+        if (isClassifierCall({ messages })) return { text: CLASSIFIER_REPLY };
+        if (String(options?.instructions ?? '').startsWith('Generate 2-3')) {
+          return { text: '["What about pricing?","Show an example"]' };
+        }
+        return { text: 'plain' };
+      },
+    );
 
     const app = createApp();
     const response = await request(app)
@@ -594,13 +599,23 @@ describe('Chat streaming route', () => {
   });
 
   describe('per-user system prompt (issue #35)', () => {
+    // #198: the connector strips the caller's leading system message(s) out of
+    // the messages array and folds them into the per-call `instructions`
+    // override, merged with the agent's tool instructions (which lead the
+    // merged string, separated by exactly one blank line). Dropping only that
+    // first separator leaves the caller's own system content — which may itself
+    // contain blank lines — intact.
     const streamSystemContent = (): string => {
-      const [messages] = mockAgentStream.mock.calls[
-        mockAgentStream.mock.calls.length - 1
-      ] as unknown as [{ role: string; content: string }[]];
-      const system = messages.find((m) => m.role === 'system');
-      if (!system) throw new Error('no system message found in stream call');
-      return system.content;
+      const call = mockAgentStream.mock.calls[mockAgentStream.mock.calls.length - 1] as unknown as [
+        unknown,
+        { instructions?: string } | undefined,
+      ];
+      const instructions = call[1]?.instructions;
+      if (typeof instructions !== 'string') {
+        throw new Error('no system message found in stream call');
+      }
+      const [, ...callerParts] = instructions.split('\n\n');
+      return callerParts.join('\n\n');
     };
 
     it('uses the global prompt when the user has no setting or profile', async () => {
