@@ -15,23 +15,19 @@ A cross-cutting blocker applies to everything below: see "Blocker #0" first.
 
 ## Blocker #0 — `main` CI is red (blocks every merge)
 
-Every main run is failing. Two independent causes:
+**Status: RESOLVED.** Both causes fixed and `main` is green again.
 
-1. **Security scans** — fixed today (commit `d621f25`, run
+1. **Security scans** — fixed (commit `d621f25`, run
    [37123669001](https://github.com/alex-moon/tova/actions/runs/37123669001)):
    `gitleaks`, `semgrep`, `npm-audit`, `osv-scanner` all **green**.
-2. **`ci` server tests — still red, pre-existing.** The `ci` job fails on
-   flaky/interfering server tests that also fail on `main` before any of this
-   week's work (e.g. run `37065093274`): `chat.test.ts` / `chat.stream.test.ts`
-   "per-user system prompt (#35)" and follow-up-suggestions, and
-   `modelConfigService.test.ts` "capabilities (#94)". They pass locally but
-   fail under CI timing. Root cause is the test harness: each suite spins up
-   its own `MongoMemoryServer` in `beforeAll`, and `--runInBand` shares one
-   mongoose connection across suites, so suites interfere (read-after-write
-   staleness). **#181's branch already fixes exactly this** (see below).
-
-**Recommendation:** land **#181** first. It is the unblocker for the merge gate
-and for #195/#196/#199, all of which currently cannot be observed green.
+2. **`ci` server tests — fixed by #181 (PR #204, merged).** The flaky/interfering
+   server tests (`chat.test.ts` / `chat.stream.test.ts` "per-user system prompt
+   (#35)", follow-up-suggestions, `modelConfigService.test.ts` "capabilities
+   (#94)") were a test-harness artefact: each suite spun up its own
+   `MongoMemoryServer` and `--runInBand` shared one mongoose connection, so
+   suites interfered. #181 replaces this with one shared mongod
+   (`globalSetup`/`globalTeardown`), per-worker DBs, and dropped `--runInBand`.
+   `main` CI is green since #204 merged.
 
 ---
 
@@ -106,27 +102,35 @@ I can make both confidently:
 
 I can create the split tickets, update #197, and implement the core today.
 
-### #199 — Model pricing · branch `feat/199-model-pricing` (PR #206, open, not draft)
+### #199 — Model pricing · branch `feat/199-model-pricing` (PR #206, **MERGED**)
 
-**Status: implementation complete; two open questions already answered by you
-("Proposals accepted. Fix tests."), plus a CI/evidence gate.**
+**Status: DONE — merged to `main` (PR #206, commit `c199f60`).**
 
-All three requirements are implemented and reviewed: admin price columns + cap
-badge, `rowWithinPriceCap` hard cap in `listByTier`, and price-weighted selection
-in `pickModelRef`. The owner accepted the migration `$set` and env-cap proposals.
+All three requirements shipped: admin price columns + cap badge,
+`rowWithinPriceCap` hard cap in `listByTier`, and price-weighted selection in
+`pickModelRef`. The missing `docs/plan-199-model-pricing.md` (the workflow
+requires it in-repo; it had been living only in git-ignored `.iteration/docs/`)
+was added on the branch this pass.
 
-Remaining:
+Completed this pass:
 
-- Fix the server tests on the branch (you instructed this) — entangled with
-  Blocker #0; #181 first.
-- Per the repo's own **evidence-first routing policy** (AGENTS.md "Model routing
-  decisions"), the price-weighting distribution should get a LangSmith/eval
-  pass before it's treated as final — I can do that.
-- A live Playwright check of the admin price table was never run; I can do it.
+- **Tests fixed.** `npm run ci` exits 0 on the branch: 974 server / 208 client
+  tests green; CI green on the branch's pre-merge HEAD. #181's harness landed on
+  `main` as the permanent unblocker.
+- **Evidence pass done** (AGENTS.md "Model routing decisions"), recorded in the
+  plan doc: a LangSmith `tova-dev` trace read (100 traces; the large-tier draw is
+  spread, guard model dominates) plus `scripts/eval-model-compare.ts` showing the
+  in-cap `DeepSeek-V4.1-Flash` ($0.80/M) matches the over-cap `Kimi-K3`
+  ($17.10/M) on quality. Cap blast radius measured against the live pool: no pool
+  empties (large/text 4 survivors, large/vision 6, small/guard non-empty).
+- **Playwright check done** against a live local stack: the Models table renders
+  `In $/M` / `Out $/M` / `In+Out` columns, exactly **7** over-cap badges land on
+  the 7 catalog-rule-out rows, and the edit form pre-fills the price inputs
+  (`GLM-5.3-Flash` → `0.15`/`0.5`). Screenshots captured.
 
-The only genuine product judgement (does the cap retire 7 seeded models and
-shrink the vision pool 10→7?) was already surfaced and accepted in the thread.
-I can land this after #181.
+The product judgement (the cap retires 7 seeded rows and shrinks the vision pool
+10→7) was surfaced and accepted; the measured counts confirm the pools stay
+non-empty.
 
 ---
 
@@ -185,9 +189,10 @@ shouldn't pick it unilaterally.
 ## Suggested order
 
 1. ~~**#181** — finish + ship (cleanup, record timing, confirm the flake clears).~~
-   **Done this pass:** ~29s suite, flake stable 5/5, PR #204 green.
-2. **#199** — branch is complete; fix tests, run the routing-evidence pass,
-   Playwright the admin table, ship.
+   **Done:** ~29s suite, flake stable 5/5, PR #204 **merged**.
+2. ~~**#199** — branch is complete; fix tests, run the routing-evidence pass,
+   Playwright the admin table, ship.~~ **Done:** PR #206 **merged**; plan doc
+   added, evidence pass and Playwright check recorded.
 3. **#196** — make the presentation calls, add the missing client half, ship.
 4. **#197** — I make the scope call, split the tickets, implement the core.
 5. **#195** — needs your two answers + repro before it leaves draft.
@@ -198,10 +203,10 @@ shouldn't pick it unilaterally.
 
 | Ticket | Branch/PR                                   | Bucket  | Next action                                  |
 | ------ | ------------------------------------------- | ------- | -------------------------------------------- |
-| #181   | `feat/181-speed-up` / #204                  | ✅ DONE | shipped; PR green, ready for review          |
+| #181   | `feat/181-speed-up` / #204                  | ✅ DONE | merged to `main`                             |
+| #199   | `feat/199-model-pricing` / #206             | ✅ DONE | merged to `main` (`c199f60`)                 |
 | #196   | `feat/196-tool-ux`                          | (b)     | make presentation calls, finish client, ship |
 | #197   | —                                           | (b)     | decide view + split, implement core          |
-| #199   | `feat/199-model-pricing` / #206             | (b)     | fix tests, evidence pass, Playwright, ship   |
 | #195   | `feat/195-confirm-completed` / #205 (draft) | (c)     | your 2 answers + repro                       |
 | #179   | —                                           | (c)     | your infra topology call                     |
 | #166   | —                                           | (c)     | your mechanism call (I can propose)          |
