@@ -54,6 +54,14 @@ export interface RoutingResult {
    * size their `max_tokens` against it. Absent only for legacy pools.
    */
   contextLength?: number;
+  /*
+   * #214: the guard's AUX `files` vote — true when the user is likely
+   * referring to a specific file in their library, so the chat route should
+   * inject the bounded library index into the system prompt. This never
+   * influences the tier (see AUX_CATEGORIES); absent on image turns (guard
+   * skipped) and false on unparseable/error paths (no speculative read).
+   */
+  filesLikely?: boolean;
 }
 
 // Feedback-weighting injectables (issue #18): `band` is the deterministic
@@ -264,9 +272,9 @@ export const classifyPrompt = (
         .map((m) => `${m.role}: ${m.content}`)
         .join('\n')}\n`
     : '';
-  return `Classify the user's current request below by replying with ONLY one JSON object, nothing else, with exactly these four keys, each "yes" or "no":
+  return `Classify the user's current request below by replying with ONLY one JSON object, nothing else, with exactly these five keys, each "yes" or "no":
 
-{"reasoning":"yes|no","code":"yes|no","emotional":"yes|no","creative":"yes|no"}
+{"reasoning":"yes|no","code":"yes|no","emotional":"yes|no","creative":"yes|no","files":"yes|no"}
 ${transcript}
 Current request: ${query}
 
@@ -275,11 +283,18 @@ Judge what answering the current request well needs, in light of the conversatio
 - code: writing, debugging, reviewing, or discussing code — including a tool, command, or implementation choice that continues technical work in the conversation.
 - emotional: emotional support, comfort, or weighty personal talk. Casual small talk ("how has your day been?") is "no".
 - creative: creative writing — stories, poems, lyrics, role-play, and the like.
+- files: is the user likely referring to a specific file in their library — an existing uploaded document they expect you to find, open, or quote ("summarise my CV", "what did the lease say about pets", "check the Q3 report")? Say "no" when they ask you to create or save a new file, and "no" for general chat that does not point at an existing document.
 
-Greetings, thanks, and yes/no confirmations with no work behind them score "no" on all four keys.`;
+Greetings, thanks, and yes/no confirmations with no work behind them score "no" on all five keys.`;
 };
 
 const VOTE_CATEGORIES = ['reasoning', 'code', 'emotional', 'creative'] as const;
+
+// #214: the `files` vote is AUX — it selects prompt enrichment (library-index
+// injection), never the tier. Kept out of VOTE_CATEGORIES so a bare file
+// reference with no other signal can still route SMALL; parsing it separately
+// (guardFilesVoteFromReply) is what keeps the tier gate unchanged.
+const AUX_CATEGORIES = ['files'] as const;
 
 /*
  * Extract the guard's vote object: the LAST balanced, JSON-parseable {...}
@@ -316,7 +331,7 @@ export const parseGuardVotes = (raw: string): Record<string, unknown> | null => 
     start = raw.indexOf('{', start + 1);
   }
   for (let i = objects.length - 1; i >= 0; i -= 1) {
-    if (VOTE_CATEGORIES.some((c) => c in objects[i])) return objects[i];
+    if ([...VOTE_CATEGORIES, ...AUX_CATEGORIES].some((c) => c in objects[i])) return objects[i];
   }
   return null;
 };
@@ -338,6 +353,27 @@ export const guardVerdictFromReply = (content: string): 'complex' | 'simple' | n
   )
     ? 'complex'
     : 'simple';
+};
+
+/*
+ * #214: the AUX `files` vote → "is the user likely referring to a specific
+ * file in their library?". Unlike the tier votes, a MISSING key is a no (not
+ * doubt): a guard still on the old four-key contract must not trigger the
+ * library read, and the injected block is only worth paying for on an actual
+ * signal. Explicit "no"/missing → false; any other present value → true
+ * (doubt prefers enrichment; the block is cheap and harmless). No vote object
+ * at all → false. Never feeds back into the tier decision (D2).
+ */
+export const guardFilesVoteFromReply = (content: string): boolean => {
+  const votes = parseGuardVotes(content);
+  if (!votes) return false;
+  return AUX_CATEGORIES.some(
+    (c) =>
+      c in votes &&
+      String(votes[c] ?? '')
+        .trim()
+        .toLowerCase() !== 'no',
+  );
 };
 
 const guardMaxTokens = (): number => {
@@ -448,6 +484,13 @@ export const routeQuery = async (
     // small.
     const content = response.choices[0]?.message?.content ?? '';
     const verdict = guardVerdictFromReply(content);
+    // #214: AUX vote — parsed beside the tier verdict, never part of it.
+    // guardFilesVoteFromReply returns false for a missing key or unparseable
+    // reply; the field is emitted only when true so non-file turns keep the
+    // pre-#214 RoutingResult shape exactly (same "no undefined keys" rule as
+    // spreadRef).
+    const filesLikely = guardFilesVoteFromReply(content);
+    const filesField = filesLikely ? { filesLikely: true } : {};
 
     if (verdict === 'complex') {
       const { pool, forced, reasonSuffix } = await orderPoolByFit(largePool, band, readWeight);
@@ -456,6 +499,7 @@ export const routeQuery = async (
         model: modelRef.model,
         reason: `classifier-complex${reasonSuffix}`,
         ...spreadRef(modelRef),
+        ...filesField,
       };
     }
     if (verdict === 'simple') {
@@ -465,6 +509,7 @@ export const routeQuery = async (
         model: modelRef.model,
         reason: `classifier-simple${reasonSuffix}`,
         ...spreadRef(modelRef),
+        ...filesField,
       };
     }
     // Unparseable reply (empty, or no vote object anywhere): route large as
@@ -477,6 +522,7 @@ export const routeQuery = async (
       model: modelRef.model,
       reason: `classifier-unparseable${reasonSuffix}`,
       ...spreadRef(modelRef),
+      ...filesField,
     };
   } catch (err) {
     if (err instanceof AllModelsDisabledError) throw err;

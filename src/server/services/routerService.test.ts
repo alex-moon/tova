@@ -1,5 +1,6 @@
 import {
   classifyPrompt,
+  guardFilesVoteFromReply,
   guardVerdictFromReply,
   parseGuardVotes,
   pickModelRef,
@@ -228,6 +229,62 @@ describe('Router Service', () => {
     });
   });
 
+  describe('AUX files vote (#214 preliminary)', () => {
+    it('marks filesLikely on an explicit yes', () => {
+      expect(
+        guardFilesVoteFromReply(
+          '{"reasoning":"no","code":"no","emotional":"no","creative":"no","files":"yes"}',
+        ),
+      ).toBe(true);
+    });
+
+    it('marks filesLikely false on an explicit no', () => {
+      expect(
+        guardFilesVoteFromReply(
+          '{"reasoning":"no","code":"no","emotional":"no","creative":"no","files":"no"}',
+        ),
+      ).toBe(false);
+    });
+
+    it('treats a missing files key as false (no speculative read)', () => {
+      // A guard that follows the OLD four-key contract must not trigger the
+      // injected block — absence is a no, unlike the tier votes where
+      // absence is doubt and routes large.
+      expect(
+        guardFilesVoteFromReply('{"reasoning":"no","code":"no","emotional":"no","creative":"no"}'),
+      ).toBe(false);
+    });
+
+    it('returns false when no vote object parses at all', () => {
+      expect(guardFilesVoteFromReply('')).toBe(false);
+      expect(guardFilesVoteFromReply('unsure')).toBe(false);
+    });
+
+    it('does NOT feed the tier decision — files:yes with four nos routes simple', async () => {
+      guardReplies('{"reasoning":"no","code":"no","emotional":"no","creative":"no","files":"yes"}');
+      const result = await routeQueryWithCfg('summarise my CV');
+      expect(result.reason).toBe('classifier-simple');
+      expect(result.model).toBe('test-small-model');
+      expect(result.filesLikely).toBe(true);
+    });
+
+    it('omits filesLikely on the complex path when the vote is no', async () => {
+      guardReplies('{"reasoning":"yes","code":"no","emotional":"no","creative":"no","files":"no"}');
+      const result = await routeQueryWithCfg('explain event sourcing');
+      expect(result.filesLikely).toBeUndefined();
+    });
+
+    it('leaves filesLikely absent on the classifier-error path', async () => {
+      guardReplies('', true);
+      const result = await routeQueryWithCfg('anything');
+      expect(result.filesLikely).toBeUndefined();
+    });
+
+    it('parses a five-key vote object (the new contract)', () => {
+      expect(parseGuardVotes('{"files":"no"}')).toEqual({ files: 'no' });
+    });
+  });
+
   describe('Classifier Routing', () => {
     it('should route any-yes votes to the larger model', async () => {
       classifyAs('complex');
@@ -433,6 +490,16 @@ describe('Router Service', () => {
       expect(classifyPrompt('bare question')).not.toContain('Conversation so far');
       expect(classifyPrompt('bare question', [])).not.toContain('Conversation so far');
       expect(classifyPrompt('bare question', [])).toContain('Current request: bare question');
+    });
+
+    it('asks for the five-key vote including files (#214 preliminary)', () => {
+      const prompt = classifyPrompt('summarise my CV');
+      expect(prompt).toContain(
+        '{"reasoning":"yes|no","code":"yes|no","emotional":"yes|no","creative":"yes|no","files":"yes|no"}',
+      );
+      expect(prompt).toContain('files:');
+      expect(prompt).toContain('specific file in their library');
+      expect(prompt).toContain('five keys');
     });
 
     it('pins the context-sensitivity plumbing: same text, history decides', async () => {

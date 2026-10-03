@@ -11,7 +11,7 @@ import { spacesWorkspaceStorage } from '../services/workspaceStorage';
 import { routeQuery } from '../services/routerService';
 import { generateChatTitle } from '../services/titleService';
 import { hasPermission, ROUTING_PERMISSION } from '../services/userService';
-import { buildSystemContent } from '../services/promptAssembly';
+import { buildSystemContent, fileLibraryIndex } from '../services/promptAssembly';
 import {
   isEntityInjectionEnabled,
   retrieveKnowledgeBlock,
@@ -531,6 +531,26 @@ const knowledgeBlockFor = async (prompt: string, userId: string): Promise<string
   }
 };
 
+/*
+ * #214 preliminary: bounded library index for the system prompt, injected only
+ * when the guard's AUX `files` vote fires. Mirrors `list_files` exactly —
+ * newest first, 20 rows, the 21st only sets the truncation notice — so the
+ * injected list and the tool agree. Never throws: a prompt-enrichment read must
+ * not degrade a chat turn (same posture as the entity-graph block).
+ */
+const libraryBlockFor = async (userId: string): Promise<string> => {
+  try {
+    const rows = await Asset.find({ userId, status: 'ready' })
+      .sort({ _id: -1 })
+      .limit(21)
+      .select('filename contentType createdAt');
+    return fileLibraryIndex(rows as unknown as Parameters<typeof fileLibraryIndex>[0]);
+  } catch (err) {
+    console.error('File library retrieval error:', redactForLog(err));
+    return '';
+  }
+};
+
 // Chat endpoint (non-streaming, preserved for compatibility)
 router.post('/', authenticate, async (req: AuthRequest, res) => {
   // Held outside try so the catch can erase a throwaway attachment on any
@@ -630,18 +650,12 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
         await cleanupIfEphemeral();
         return res.status(400).json({ message: 'Invalid chat history' });
       }
-      const messages = buildZdrMessages(zdrHistory.value, content);
       await ensureUserLocation(userDoc, req.ip);
       // Plan task 8: ZDR/incognito turns DO retrieve the graph read-only
       // (Alex, 2026-09-21) — but they write nothing, and this branch an early
       // return before any persistence does exactly that. Extraction below
       // never runs for ZDR.
       const zdrEntityBlock = await knowledgeBlockFor(content, userId as string);
-      messages.unshift({
-        role: 'system',
-        content: buildSystemContent(userDoc, zdrEntityBlock),
-      });
-      appendAssetBlock(messages, attachedAsset);
 
       const zdrRoutingBand = buildRoutingBand(computeDeterministicMetrics(content));
       const { routing: routingResult, completion: chatCompletion } = await withModelFailover(
@@ -652,14 +666,23 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
             band: zdrRoutingBand,
             history: zdrHistory.value,
           }),
-        (r) =>
-          inferenceService.createCompletion({
-            messages,
+        async (r) => {
+          // #214: library index injected only on the guard's files vote.
+          const libraryBlock = r.filesLikely ? await libraryBlockFor(userId as string) : '';
+          const turnMessages = buildZdrMessages(zdrHistory.value, content);
+          turnMessages.unshift({
+            role: 'system',
+            content: buildSystemContent(userDoc, zdrEntityBlock, libraryBlock),
+          });
+          appendAssetBlock(turnMessages, attachedAsset);
+          return inferenceService.createCompletion({
+            messages: turnMessages,
             model: r.model,
             provider: r.provider,
             userId,
             abortSignal: abortController.signal,
-          }),
+          });
+        },
       );
       const zdrAssistantContent = chatCompletion.choices[0]?.message?.content ?? '';
       // #195: a tool-only ZDR turn still ends with a short confirmation.
@@ -719,20 +742,23 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
       history as unknown as { _id: unknown; role: string; content: string }[],
       userMessage._id,
     );
-    const messages = messagesFromPersistedHistory(history as { role: string; content: string }[]);
     // Coarse geolocation (#50): awaited so this turn's prompt can include the
     // country; cheap when cached (fresh/cooldown returns immediately) and the
     // service itself never throws, so chat cannot block hard on it.
     await ensureUserLocation(userDoc, req.ip);
     const entityBlock = await knowledgeBlockFor(content, userId as string);
-    messages.unshift({
-      role: 'system',
-      content: buildSystemContent(userDoc, entityBlock),
-    });
-    if (attachedAsset) {
-      const imageAttached = hasImage ? await buildImageTurn(messages, attachedAsset) : false;
-      if (!imageAttached) appendAssetBlock(messages, attachedAsset);
-    }
+    // #214: the library index is injected per-routing-decision, so the prompt
+    // is assembled inside the failover closure from a fresh message array
+    // (unshift/append must not accumulate across retry attempts).
+    const withSystemAndAsset = async (systemContent: string) => {
+      const next = messagesFromPersistedHistory(history as { role: string; content: string }[]);
+      next.unshift({ role: 'system', content: systemContent });
+      if (attachedAsset) {
+        const imageAttached = hasImage ? await buildImageTurn(next, attachedAsset) : false;
+        if (!imageAttached) appendAssetBlock(next, attachedAsset);
+      }
+      return next;
+    };
 
     const { routing: routingResult, completion: chatCompletion } = await withModelFailover(
       () =>
@@ -741,17 +767,22 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
           hasImage,
           history: guardHistory,
         }),
-      (r) =>
-        inferenceService.createCompletion({
-          messages,
+      async (r) => {
+        const libraryBlock = r.filesLikely ? await libraryBlockFor(userId as string) : '';
+        const turnMessages = await withSystemAndAsset(
+          buildSystemContent(userDoc, entityBlock, libraryBlock),
+        );
+        return inferenceService.createCompletion({
+          messages: turnMessages,
           model: r.model,
           provider: r.provider,
           // #104: always send an output-token budget so the provider cannot
           // default it to the model's whole context window.
-          max_tokens: outputTokensFor(r.contextLength, promptCharsFrom(messages)),
+          max_tokens: outputTokensFor(r.contextLength, promptCharsFrom(turnMessages)),
           userId,
           abortSignal: abortController.signal,
-        }),
+        });
+      },
     );
 
     // Empty provider responses persist as '' (fail-visibility, #4 J); the
@@ -978,9 +1009,15 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
     }
 
     const streamEntityBlock = await knowledgeBlockFor(content, userId as string);
+    // #214: library index injected only on the guard's files vote. Built once
+    // from the initial routing — the system prompt is frozen across failover
+    // retries (the re-route below only swaps the model, not the messages).
+    const streamLibraryBlock = routingResult.filesLikely
+      ? await libraryBlockFor(userId as string)
+      : '';
     messages.unshift({
       role: 'system',
-      content: buildSystemContent(streamUserDoc, streamEntityBlock),
+      content: buildSystemContent(streamUserDoc, streamEntityBlock, streamLibraryBlock),
     });
     if (attachedAsset) {
       const imageAttached = hasImage ? await buildImageTurn(messages, attachedAsset) : false;

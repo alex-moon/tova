@@ -1,4 +1,4 @@
-import { buildSystemContent, resolveSystemPrompt } from './promptAssembly';
+import { buildSystemContent, fileLibraryIndex, resolveSystemPrompt } from './promptAssembly';
 import { UserDocument } from '../models/User';
 
 const userWith = (
@@ -113,6 +113,64 @@ describe('buildSystemContent / coarse location (issue #50)', () => {
         buildSystemContent(userWith({}), '   \n').split('<user:knowledge_graph>'),
       ).toHaveLength(1);
       expect(buildSystemContent(null, undefined).split('<user:knowledge_graph>')).toHaveLength(1);
+    });
+  });
+
+  describe('buildSystemContent / file library block (#214 preliminary)', () => {
+    it('rides in its own envelope when the caller supplies a library index', () => {
+      const content = buildSystemContent(
+        userWith({ preferredName: 'Alex' }),
+        undefined,
+        '- CV.pdf (application/pdf, added 2026-09-01) [id: abc123]',
+      );
+      expect(content).toContain('<user:file_library>');
+      expect(content).toContain('- CV.pdf (application/pdf, added 2026-09-01) [id: abc123]');
+      expect(content).toContain('</user:file_library>');
+      expect(content).toContain('read_file');
+    });
+
+    it('emits no library envelope when the block is empty, whitespace, or not requested', () => {
+      expect(buildSystemContent(userWith({})).split('<user:file_library>')).toHaveLength(1);
+      expect(buildSystemContent(userWith({}), '', '').split('<user:file_library>')).toHaveLength(1);
+      expect(
+        buildSystemContent(userWith({}), undefined, '   \n').split('<user:file_library>'),
+      ).toHaveLength(1);
+      expect(buildSystemContent(null, undefined).split('<user:file_library>')).toHaveLength(1);
+    });
+
+    it('renders both context blocks in a stable order when both are present', () => {
+      const content = buildSystemContent(userWith({}), 'graph-data', 'library-data');
+      expect(content.indexOf('<user:knowledge_graph>')).toBeLessThan(
+        content.indexOf('<user:file_library>'),
+      );
+    });
+  });
+
+  describe('fileLibraryIndex (#214 preliminary)', () => {
+    const row = (n: number) => ({
+      filename: `file-${n}.pdf`,
+      contentType: 'application/pdf',
+      createdAt: new Date('2026-09-01T00:00:00Z'),
+      _id: { toString: () => `id-${n}` },
+    });
+
+    it('is empty for an empty library (no-op injection)', () => {
+      expect(fileLibraryIndex([])).toBe('');
+    });
+
+    it('lists files with their id and date', () => {
+      const block = fileLibraryIndex([row(1)]);
+      expect(block).toContain('- file-1.pdf (application/pdf, added 2026-09-01) [id: id-1]');
+    });
+
+    it('caps at 20 and adds the truncation notice at 21', () => {
+      const twenty = Array.from({ length: 20 }, (_, i) => row(i));
+      expect(fileLibraryIndex(twenty)).not.toContain('More files exist');
+      const twentyOne = Array.from({ length: 21 }, (_, i) => row(i));
+      const block = fileLibraryIndex(twentyOne);
+      expect(block).toContain('More files exist than are shown');
+      // 20 file lines + 1 notice line.
+      expect(block.split('\n')).toHaveLength(21);
     });
   });
 });
