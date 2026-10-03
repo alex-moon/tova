@@ -1,6 +1,6 @@
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, cleanup, waitFor } from '@testing-library/react';
-import App from './App';
+import App, { reconcileToolEvents, type ToolEvent } from './App';
 import { AuthProvider } from './context/AuthContext';
 
 const axiosGet = vi.fn();
@@ -190,5 +190,54 @@ describe('App startup chat (issue #96)', () => {
     mockStartup('recent');
     await axiosGet;
     renderApp();
+  });
+});
+
+// Client mirror of the server reconcile (#196, D2) — this is what stops the
+// live chip from stacking a second entry and leaving the throbber stuck.
+describe('reconcileToolEvents (#196)', () => {
+  const call = (name: string, query?: string): ToolEvent => ({
+    phase: 'call',
+    name,
+    label: name,
+    ...(query ? { query } : {}),
+  });
+  const result = (name: string): ToolEvent => ({
+    phase: 'result',
+    name,
+    label: name,
+    status: 'ok',
+    resultCount: 1,
+  });
+
+  it('merges a result into the most recent open call of the same name', () => {
+    const list = reconcileToolEvents([call('web_search', 'groq pricing')], result('web_search'));
+    expect(list).toEqual([
+      {
+        phase: 'result',
+        name: 'web_search',
+        label: 'web_search',
+        status: 'ok',
+        resultCount: 1,
+        query: 'groq pricing',
+      },
+    ]);
+  });
+
+  it('appends a result with no matching open call', () => {
+    expect(reconcileToolEvents([], result('web_search'))).toEqual([result('web_search')]);
+  });
+
+  it('appends a second result of the same name as a standalone entry', () => {
+    let list = reconcileToolEvents([call('web_search')], result('web_search'));
+    list = reconcileToolEvents(list, result('web_search'));
+    expect(list).toHaveLength(2);
+    expect(list.every((e) => e.phase === 'result')).toBe(true);
+  });
+
+  it('does not mutate the input list', () => {
+    const original = [call('web_search')];
+    reconcileToolEvents(original, result('web_search'));
+    expect(original[0].phase).toBe('call');
   });
 });
