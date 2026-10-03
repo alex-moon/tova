@@ -64,24 +64,31 @@ Completed this pass:
 
 ## (b) Blocked on a call I can make confidently
 
-### #196 — Tool UX · branch `feat/196-tool-ux` (no PR yet)
+### #196 — Tool UX · branch `feat/196-tool-ux`
 
-**Status: implementation started, decision implicitly made by the branch.**
+**Status: DONE — all four UX items implemented, verified, `npm run ci` green.**
 
-The ticket bundles four UX fixes and explicitly asks for a proposed solution to
-the "expand arrow shows only `1 results`" item and to the "tool use summary"
-box, then implement. The branch already implements the server half: tool calls
-persisted on `Message` (`src/server/models/Message.ts`), chat route emits/
-replays them, tests added. The remaining calls are presentational (where the
-summary box lives, what the expanded chip shows) and the ticket itself says _any
-defensible proposal_ is acceptable — so I can decide these confidently from the
-existing admin/chat design language.
+The server half (tool summaries persisted/reconciled on `Message`, replayed on
+history load) landed earlier on this branch with server tests. This pass
+finished the client half so every reported symptom is fixed:
 
-⚠️ **Gap:** the branch has **no client changes** (no `.tsx` diff), so "chips
-disappear on refresh" and the summary box are untouched client-side. This is a
-half-delivery; the visible symptoms live in the client.
+1. **Stuck throbber.** `App.tsx` now mirrors the server reconcile on live SSE
+   `tool` frames — a `result` replaces its open `call` in place, so the chip
+   flips spinner → check instead of stacking a second chip.
+2. **Expand arrow shows only `1 results`.** The expanded detail now surfaces the
+   query carried from the call, the outcome status (`No results` on empty), the
+   count, and the domains — i.e. how the tool was used, not a restatement.
+3. **Chips vanish on refresh.** On `done` the client adopts the server's
+   reconciled `Message.tools`; persisted summaries rehydrate on reload.
+4. **Tool-use summary box.** A collapsed **"Used N tools"** box sits at the top
+   of the assistant turn (activity → answer reading order; a single stable
+   element that does not jump as text streams), auto-expands while the turn is
+   in flight, and expands to the individual chips.
 
-I can take this and finish it today once #181 unblocks the gate.
+Proposal choices are recorded in `docs/plan-196-tool-ux.md` (D4–D6). Client
+tests cover reconciliation, the summary box, and the richer detail; live
+Playwright check confirmed one resolved chip, persisted `Message.tools`, and
+survival across reload.
 
 ### #197 — In-app asset viewer · no branch
 
@@ -193,7 +200,9 @@ shouldn't pick it unilaterally.
 2. ~~**#199** — branch is complete; fix tests, run the routing-evidence pass,
    Playwright the admin table, ship.~~ **Done:** PR #206 **merged**; plan doc
    added, evidence pass and Playwright check recorded.
-3. **#196** — make the presentation calls, add the missing client half, ship.
+3. ~~**#196** — make the presentation calls, add the missing client half, ship.~~
+   **Done:** all four UX items implemented + verified; `npm run ci` green; plan
+   doc `docs/plan-196-tool-ux.md` recorded.
 4. **#197** — I make the scope call, split the tickets, implement the core.
 5. **#195** — needs your two answers + repro before it leaves draft.
 6. **#179**, **#166** — need owner decisions; #166 also welcomes a proposal
@@ -205,7 +214,7 @@ shouldn't pick it unilaterally.
 | ------ | ------------------------------------------- | ------- | -------------------------------------------- |
 | #181   | `feat/181-speed-up` / #204                  | ✅ DONE | merged to `main`                             |
 | #199   | `feat/199-model-pricing` / #206             | ✅ DONE | merged to `main` (`c199f60`)                 |
-| #196   | `feat/196-tool-ux`                          | (b)     | make presentation calls, finish client, ship |
+| #196   | `feat/196-tool-ux`                          | ✅ DONE | all four UX items done; ci green             |
 | #197   | —                                           | (b)     | decide view + split, implement core          |
 | #195   | `feat/195-confirm-completed` / #205 (draft) | (c)     | your 2 answers + repro                       |
 | #179   | —                                           | (c)     | your infra topology call                     |
