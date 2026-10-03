@@ -202,15 +202,23 @@ describe('Chat route routing metadata', () => {
   });
 
   describe('per-user system prompt (issue #35)', () => {
+    // #198: the connector strips the caller's leading system message(s) out of
+    // the messages array and folds them into the per-call `instructions`
+    // override, merged with the agent's tool instructions (which lead the
+    // merged string, separated by exactly one blank line). Dropping only that
+    // first separator leaves the caller's own system content — which may itself
+    // contain blank lines — intact.
     const systemContentFromCall = (): string => {
       for (const call of mockGenerate.mock.calls) {
         const messages = call[0] as unknown as { role: string; content: string }[] | undefined;
+        const options = call[1] as { instructions?: string } | undefined;
         if (
           Array.isArray(messages) &&
-          messages[0]?.role === 'system' &&
+          typeof options?.instructions === 'string' &&
           !isClassifierCall({ messages })
         ) {
-          return messages[0].content;
+          const [, ...callerParts] = options.instructions.split('\n\n');
+          return callerParts.join('\n\n');
         }
       }
       throw new Error('no chat completion call with a system message found');
