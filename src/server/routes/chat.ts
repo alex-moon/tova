@@ -245,6 +245,44 @@ const singleArrayFieldLength = (result: unknown): number | null => {
   return arrayFields.length === 1 ? (arrayFields[0] as unknown[]).length : null;
 };
 
+type ToolCallEvent = ReturnType<typeof toolCallEvent>;
+type ToolResultEvent = ReturnType<typeof toolResultEvent>;
+
+// Persisted tool entry (#196): a call that has not yet seen its result stays
+// phase 'call' (the live throbber), while a resolved entry carries the result
+// summary plus the query copied from the call so the chip's expanded detail
+// has something to show.
+export type PersistedToolEvent = (ToolCallEvent | ToolResultEvent) & { query?: string };
+
+/*
+ * Reconcile a tool event onto the running per-turn list (#196, decision D1).
+ * A result merges into the most recent still-unresolved call of the same
+ * name, flipping it to 'result' and carrying the call's query forward. A
+ * result with no matching open call (e.g. a second web_search result) is
+ * appended as its own entry rather than dropped; once an entry has flipped
+ * to 'result' it is no longer a merge target, so a like-named second result
+ * becomes a standalone entry. Mutates and returns the list for convenience.
+ */
+export const reconcileToolEvent = <T extends PersistedToolEvent>(
+  list: T[],
+  ev: PersistedToolEvent,
+): T[] => {
+  if (ev.phase === 'result') {
+    for (let i = list.length - 1; i >= 0; i--) {
+      const candidate = list[i];
+      if (candidate.phase === 'call' && candidate.name === ev.name) {
+        list[i] = {
+          ...ev,
+          ...(candidate.query ? { query: candidate.query } : {}),
+        } as T;
+        return list;
+      }
+    }
+  }
+  list.push(ev as T);
+  return list;
+};
+
 const toolResultEvent = (result: { name: string; result: unknown }) => {
   const base = {
     phase: 'result' as const,
@@ -891,6 +929,10 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
     let assistantContent = '';
     let sources: string[] = [];
     const titles = new Map<string, string>();
+    // Reconciled tool events for this turn (#196). Raw SSE 'tool' frames keep
+    // firing unchanged; this array is the deduped, persisted companion that
+    // the 'done' message and a later refresh read from.
+    const toolEvents: PersistedToolEvent[] = [];
 
     // Abort the provider call when the client disconnects mid-stream. 'close'
     // also fires after a normal end, so only abort when the response did not
@@ -933,10 +975,14 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
             // prose status hint — the call event names the tool + query, the
             // result event carries a compact outcome summary.
             if (chunk.toolCall) {
-              sendEvent('tool', toolCallEvent(chunk.toolCall));
+              const ev = toolCallEvent(chunk.toolCall);
+              reconcileToolEvent(toolEvents, ev);
+              sendEvent('tool', ev);
             }
             if (chunk.toolResult) {
-              sendEvent('tool', toolResultEvent(chunk.toolResult));
+              const ev = toolResultEvent(chunk.toolResult);
+              reconcileToolEvent(toolEvents, ev);
+              sendEvent('tool', ev);
               collectSourcesInto(sources, chunk.toolResult.result, titles);
             }
             const delta = chunk.delta;
@@ -1001,6 +1047,9 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
       .filter((url) => titles.has(url))
       .map((url) => ({ url, title: titles.get(url) as string }));
     if (zdr) {
+      // #196 (D6): reconciled tool summaries are deliberately not attached to
+      // ZDR `done` payloads — the turn is not stored, matching the existing
+      // "nothing is written" contract. Live 'tool' frames still stream.
       if (!isTriviallyNeutral(content) && assistantContent) {
         // Suggestions are still generated (cheap guard model) — they are
         // delivered without ever being written anywhere.
@@ -1044,6 +1093,8 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
       routingBand,
       ...(sources.length > 0 ? { sources } : {}),
       ...(sourceTitleList.length > 0 ? { sourceTitles: sourceTitleList } : {}),
+      // #196: persist the reconciled tool summaries so chips survive a refresh.
+      ...(toolEvents.length > 0 ? { tools: toolEvents } : {}),
       metrics: await buildMessageMetrics(String(session!._id), assistantContent),
     });
     await assistantMessage.save();
