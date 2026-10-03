@@ -66,6 +66,27 @@ const messageSchema = new mongoose.Schema({
     type: [String],
     default: undefined,
   },
+  /*
+   * Reconciled tool-use summaries for the assistant turn (#196): one entry per
+   * resolved call (or an orphan result with no matching call), so the chat can
+   * render tool chips after a refresh. Additive/optional — old messages have
+   * no `tools` and render exactly as before, no migration required.
+   */
+  tools: {
+    type: [
+      {
+        _id: false,
+        phase: { type: String, enum: ['call', 'result'] },
+        name: String,
+        label: String,
+        query: String,
+        status: { type: String, enum: ['ok', 'empty'] },
+        resultCount: Number,
+        domains: [String],
+      },
+    ],
+    default: undefined,
+  },
   routingBand: {
     type: String,
   },

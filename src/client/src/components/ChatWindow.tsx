@@ -162,9 +162,16 @@ const countDisplay = (event: ToolEvent): number | null => {
   return event.resultCount === 0 && !showZero ? null : event.resultCount;
 };
 
+// Expanded detail (#196, D4): show *how* the tool was used rather than echoing
+// the chip label. A resolved chip surfaces the query carried from its call, its
+// outcome status, the count when meaningful, and the result domains; a running
+// chip surfaces its query. Null when there is genuinely nothing extra to reveal
+// (the arrow is hidden then).
 const detailText = (event: ToolEvent): string | null =>
   event.phase === 'result'
     ? [
+        event.query ? `Query: ${event.query}` : null,
+        event.status === 'empty' ? 'No results' : null,
         countDisplay(event) != null ? `${countDisplay(event)} result(s)` : null,
         ...(event.domains ?? []),
       ]
@@ -213,14 +220,49 @@ const ToolChip: React.FC<{ event: ToolEvent }> = ({ event }) => {
   );
 };
 
-const ToolChips: React.FC<{ message: Message }> = ({ message }) =>
-  message.tools?.length ? (
-    <div className="mb-2 flex flex-wrap gap-1.5" data-testid="tool-chips">
-      {message.tools.map((event, i) => (
-        <ToolChip key={`${event.phase}-${event.name}-${i}`} event={event} />
-      ))}
+// Tool-use summary box (#196, D5/D6): one collapsed line — "Used N tools" —
+// that expands in place to the individual chips. Sitting at the top of the
+// assistant turn (where chips already render, before the answer) keeps a single
+// stable element that does not jump as answer text streams in, and follows the
+// natural reading order of activity → answer. The count is the number of chips
+// (resolved plus any still-running), so it climbs live during the turn. While
+// streaming it auto-expands (activity is what's happening); once the turn
+// settles it collapses, unless the user has toggled it themselves.
+const ToolSummary: React.FC<{ tools: ToolEvent[]; streaming?: boolean }> = ({
+  tools,
+  streaming = false,
+}) => {
+  const [userToggled, setUserToggled] = useState<boolean | null>(null);
+  if (tools.length === 0) return null;
+  const open = userToggled ?? streaming;
+  return (
+    <div className="mb-2 text-xs text-muted-foreground" data-testid="tool-summary">
+      <button
+        type="button"
+        onClick={() => setUserToggled(!open)}
+        aria-expanded={open}
+        data-testid="tool-summary-toggle"
+        className="inline-flex items-center gap-1.5 rounded-md border border-border bg-muted px-2.5 py-1 hover:bg-accent focus-visible:outline-2 focus-visible:outline-primary"
+      >
+        <ChevronDown
+          size={12}
+          aria-hidden
+          className={`transition-transform ${open ? 'rotate-180' : ''}`}
+        />
+        <span>
+          Used {tools.length} {tools.length === 1 ? 'tool' : 'tools'}
+        </span>
+      </button>
+      {open && (
+        <div className="mt-1.5 flex flex-wrap gap-1.5" data-testid="tool-chips">
+          {tools.map((event, i) => (
+            <ToolChip key={`${event.phase}-${event.name}-${i}`} event={event} />
+          ))}
+        </div>
+      )}
     </div>
-  ) : null;
+  );
+};
 
 const FollowupChips: React.FC<{ suggestions: string[]; onPick: (value: string) => void }> = ({
   suggestions,
@@ -532,7 +574,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
                     Tova
                   </div>
                   <div className="px-4 py-3 md:px-5">
-                    <ToolChips message={msg} />
+                    <ToolSummary tools={msg.tools ?? []} />
                     <MarkdownContent content={msg.content || EMPTY_RESPONSE_PLACEHOLDER} markdown />
                   </div>
                   {msg.sources && msg.sources.length > 0 && <SourcesBlock message={msg} />}
@@ -611,7 +653,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
             </div>
             {pendingTools.length > 0 && (
               <div className="px-4 pt-2 md:px-5">
-                {<ToolChips message={{ tools: pendingTools } as Message} />}
+                <ToolSummary tools={pendingTools} streaming />
               </div>
             )}
           </div>

@@ -139,6 +139,9 @@ describe('Zero-data retention chats (issue #116)', () => {
       complete: true,
       message: { role: 'assistant', content: 'Ephemeral answer', modelName: 'mock-small-model' },
     });
+    // #196 (D6): a ZDR turn carries no reconciled tool summaries — the turn is
+    // not stored, so there is nothing to rehydrate on refresh.
+    expect(done?.data.message.tools).toBeUndefined();
 
     expect(await Session.countDocuments()).toBe(0);
     expect(await Message.countDocuments()).toBe(0);

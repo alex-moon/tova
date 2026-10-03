@@ -21,6 +21,26 @@ export interface ToolEvent {
   domains?: string[];
 }
 
+// Client-side mirror of the server reconcile (#196, D2): a result replaces the
+// most recent still-open call of the same name, carrying its query forward, so
+// the live chip flips spinner → check in place instead of stacking two chips.
+// An unmatched result is appended standalone; a resolved entry is never a merge
+// target, so a like-named second result becomes its own chip. Kept in sync with
+// `reconcileToolEvent` in `src/server/routes/chat.ts` (their tests pin both).
+export const reconcileToolEvents = (list: ToolEvent[], ev: ToolEvent): ToolEvent[] => {
+  if (ev.phase === 'result') {
+    for (let i = list.length - 1; i >= 0; i -= 1) {
+      const candidate = list[i];
+      if (candidate.phase === 'call' && candidate.name === ev.name) {
+        const next = [...list];
+        next[i] = { ...ev, ...(candidate.query ? { query: candidate.query } : {}) };
+        return next;
+      }
+    }
+  }
+  return [...list, ev];
+};
+
 export interface SourceTitle {
   url: string;
   title: string;
@@ -275,12 +295,15 @@ function App() {
               ),
             );
           } else if (event === 'tool') {
-            // Tool feedback for the streaming chip (issue #33): appended to
-            // the in-flight message in order, so call → result states render.
+            // Tool feedback for the streaming chip (issue #33): reconciled in
+            // order so a call's result replaces it in place (#196, D2) rather
+            // than stacking a second chip and leaving the spinner stuck.
             const toolEvent = data as unknown as ToolEvent;
             setMessages((prev) =>
               prev.map((m) =>
-                m._id === streamId ? { ...m, tools: [...(m.tools ?? []), toolEvent] } : m,
+                m._id === streamId
+                  ? { ...m, tools: reconcileToolEvents(m.tools ?? [], toolEvent) }
+                  : m,
               ),
             );
           } else if (event === 'done' && data.complete) {
@@ -299,6 +322,9 @@ function App() {
                       sources: saved.sources,
                       sourceTitles: saved.sourceTitles ?? sourceTitles,
                       suggestions: saved.suggestions,
+                      // #196 (D3): adopt the server-reconciled summaries so
+                      // the settled turn matches what a refresh would load.
+                      ...(saved.tools ? { tools: saved.tools } : {}),
                     }
                   : m,
               ),

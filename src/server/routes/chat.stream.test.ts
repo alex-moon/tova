@@ -4,6 +4,7 @@ import { Message } from '../models/Message';
 import { Session } from '../models/Session';
 import { User } from '../models/User';
 import { AllModelsDisabledError } from '../services/modelConfigService';
+import { reconcileToolEvent, type PersistedToolEvent } from './chat';
 
 const mockGenerate = jest.fn();
 const mockAgentStream = jest.fn();
@@ -328,6 +329,24 @@ describe('Chat streaming route', () => {
     // Titles ride the final done event so the client has them mid-stream.
     const done = events.find((e) => e.event === 'done');
     expect(done?.data.sourceTitles).toHaveLength(3);
+    // #196: reconciled tool summaries are persisted on the assistant message.
+    // The first call merges with the first result (query carried forward); the
+    // second result has no open call left, so it stays a standalone result.
+    // No entry remains phase 'call' (the stuck-throbber defect).
+    const tools = persisted?.toObject().tools;
+    expect(tools).toEqual([
+      {
+        phase: 'result',
+        name: 'web_search',
+        label: 'Searched the web',
+        query: 'groq pricing',
+        status: 'ok',
+        resultCount: 2,
+        domains: expect.arrayContaining(['a.example.com', 'b.example.com']),
+      },
+      expect.objectContaining({ phase: 'result', name: 'web_search' }),
+    ]);
+    expect(tools?.some((t) => t.phase === 'call')).toBe(false);
   });
 
   it('emits structured tool events when the agent calls fetch_url and persists the fetched page (#113)', async () => {
@@ -484,6 +503,17 @@ describe('Chat streaming route', () => {
     ]);
     expect(toolEvents[0].domains).toBeUndefined();
     expect(toolEvents[2].resultCount).toBeUndefined();
+    // #196: the persisted array mirrors the reconciled events — every entry is
+    // a resolved result (call+result pairs merged), and the count-less
+    // read_file entry keeps no resultCount.
+    const persisted = await Message.findOne({ role: 'assistant' });
+    const tools = persisted?.toObject().tools;
+    expect(tools).toEqual([
+      expect.objectContaining({ phase: 'result', name: 'list_files', resultCount: 2 }),
+      expect.objectContaining({ phase: 'result', name: 'list_repositories', resultCount: 4 }),
+      expect.objectContaining({ phase: 'result', name: 'read_file' }),
+    ]);
+    expect(tools?.[2].resultCount).toBeUndefined();
   });
 
   it('suppresses the count on a degraded list_files result (empty files + error)', async () => {
@@ -915,5 +945,52 @@ describe('Chat streaming route — #168 endpoint failures', () => {
     expect(response.body.message).toMatch(/temporarily unavailable/);
     expect(response.body.detail).toMatch(/temporarily unavailable/);
     expect(mockDisableModel).not.toHaveBeenCalled();
+  });
+});
+
+describe('reconcileToolEvent (#196)', () => {
+  const call = (name: string, query?: string): PersistedToolEvent => ({
+    phase: 'call',
+    name,
+    label: name,
+    ...(query ? { query } : {}),
+  });
+  const result = (name: string): PersistedToolEvent => ({
+    phase: 'result',
+    name,
+    label: name,
+    status: 'ok',
+    resultCount: 1,
+  });
+
+  it('merges a result into the most recent open call of the same name', () => {
+    const list = [call('web_search', 'groq pricing')];
+    reconcileToolEvent(list, result('web_search'));
+    expect(list).toEqual([
+      {
+        phase: 'result',
+        name: 'web_search',
+        label: 'web_search',
+        status: 'ok',
+        resultCount: 1,
+        query: 'groq pricing',
+      },
+    ]);
+  });
+
+  it('appends a result with no matching open call', () => {
+    const list: PersistedToolEvent[] = [];
+    reconcileToolEvent(list, result('web_search'));
+    expect(list).toEqual([
+      { phase: 'result', name: 'web_search', label: 'web_search', status: 'ok', resultCount: 1 },
+    ]);
+  });
+
+  it('appends a second result of the same name as a standalone entry', () => {
+    const list = [call('web_search')];
+    reconcileToolEvent(list, result('web_search'));
+    reconcileToolEvent(list, result('web_search'));
+    expect(list).toHaveLength(2);
+    expect(list.every((e) => e.phase === 'result')).toBe(true);
   });
 });
