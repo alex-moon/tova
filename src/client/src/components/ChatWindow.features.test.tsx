@@ -41,6 +41,10 @@ const renderChat = (
     />,
   );
 
+// Settled turns collapse the summary box (#196, D5); tests that assert on the
+// individual chips must expand it first. The streaming case auto-expands.
+const expandTools = () => fireEvent.click(screen.getByTestId('tool-summary-toggle'));
+
 describe('Tool chip (issue #33)', () => {
   afterEach(cleanup);
 
@@ -51,6 +55,7 @@ describe('Tool chip (issue #33)', () => {
       ],
     });
     renderChat([msg]);
+    expandTools();
     const chip = screen.getByTestId('tool-chip-web_search');
     expect(chip).toBeInTheDocument();
     expect(chip).toHaveTextContent('Searched the web');
@@ -77,6 +82,7 @@ describe('Tool chip (issue #33)', () => {
       },
     ];
     renderChat(messages);
+    expandTools();
     const chips = screen.getAllByTestId('tool-chip-web_search');
     expect(chips[1]).toHaveTextContent('5 results');
   });
@@ -100,10 +106,75 @@ describe('Tool chip (issue #33)', () => {
       },
     ];
     renderChat(messages);
+    expandTools();
     expect(screen.queryByTestId('tool-detail')).not.toBeInTheDocument();
     fireEvent.click(screen.getByTestId('tool-chip-web_search').querySelector('button')!);
     expect(screen.getByTestId('tool-detail')).toHaveTextContent('5 result(s) · groq.com');
     expect(screen.getByTestId('tool-detail')).toHaveTextContent('groq.com');
+  });
+});
+
+describe('Tool-use summary box (issue #196)', () => {
+  afterEach(cleanup);
+
+  it('collapses chips behind a "Used N tools" line on a settled turn', () => {
+    renderChat([
+      base({
+        tools: [{ phase: 'result', name: 'web_search', label: 'Searched the web', status: 'ok' }],
+      }),
+    ]);
+    const summary = screen.getByTestId('tool-summary');
+    expect(summary).toHaveTextContent('Used 1 tool');
+    expect(screen.queryByTestId('tool-chips')).not.toBeInTheDocument();
+    expandTools();
+    expect(screen.getByTestId('tool-chips')).toBeInTheDocument();
+    expect(screen.getByTestId('tool-chip-web_search')).toBeInTheDocument();
+  });
+
+  it('pluralises the count and auto-expands while streaming', () => {
+    renderChat(
+      [
+        base({
+          _id: 'stream-1',
+          content: '',
+          tools: [
+            { phase: 'result', name: 'web_search', label: 'Searched the web', status: 'ok' },
+            { phase: 'call', name: 'fetch_url', label: 'Read a page', query: 'example.com' },
+          ],
+        }),
+      ],
+      true,
+    );
+    expect(screen.getByTestId('tool-summary')).toHaveTextContent('Used 2 tools');
+    // streaming ⇒ open without a click
+    expect(screen.getByTestId('tool-chips')).toBeInTheDocument();
+  });
+
+  it('renders no summary box when the turn used no tools', () => {
+    renderChat([base({ tools: undefined })]);
+    expect(screen.queryByTestId('tool-summary')).not.toBeInTheDocument();
+  });
+
+  it('shows the carried query and status in a resolved chip detail (#196, D4)', () => {
+    renderChat([
+      base({
+        tools: [
+          {
+            phase: 'result',
+            name: 'web_search',
+            label: 'Searched the web',
+            query: 'groq pricing',
+            status: 'empty',
+            resultCount: 0,
+          },
+        ],
+      }),
+    ]);
+    expandTools();
+    fireEvent.click(screen.getByTestId('tool-chip-web_search').querySelector('button')!);
+    const detail = screen.getByTestId('tool-detail');
+    expect(detail).toHaveTextContent('Query: groq pricing');
+    expect(detail).toHaveTextContent('No results');
   });
 });
 
@@ -126,6 +197,7 @@ describe('Tool chip result counts (issue #114)', () => {
         },
       ]),
     );
+    expandTools();
     expect(screen.getByTestId('tool-chip-list_files')).toHaveTextContent('3 results');
   });
 
@@ -133,6 +205,7 @@ describe('Tool chip result counts (issue #114)', () => {
     renderChat(
       resultMessage([{ phase: 'result', name: 'read_file', label: 'Read a file', status: 'ok' }]),
     );
+    expandTools();
     expect(screen.getByTestId('tool-chip-read_file')).not.toHaveTextContent('results');
   });
 
@@ -148,6 +221,7 @@ describe('Tool chip result counts (issue #114)', () => {
         },
       ]),
     );
+    expandTools();
     expect(screen.getByTestId('tool-chip-list_repositories')).not.toHaveTextContent('results');
   });
 
@@ -163,6 +237,7 @@ describe('Tool chip result counts (issue #114)', () => {
         },
       ]),
     );
+    expandTools();
     expect(screen.getByTestId('tool-chip-web_search')).toHaveTextContent('0 results');
   });
 });
