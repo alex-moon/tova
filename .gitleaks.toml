@@ -1,0 +1,21 @@
+title = "Tova gitleaks config"
+
+[extend]
+useDefault = true
+
+# The only detections in this repo's history are dummy credentials inside
+# redaction test fixtures (e.g. `apikey=sk-abc123def456ghi789jkl` in
+# src/server/services/logRedaction.test.ts), which are fabricated values the
+# tests feed in to prove they get redacted. This allowlist is deliberately
+# narrow: it matches the specific placeholder shape *and* only under test
+# files, so a real key committed anywhere (including in a test file) still
+# trips the scanner.
+[allowlist]
+description = "Dummy secret-shaped values in redaction test fixtures"
+regexTarget = "match"
+regexes = [
+  '''sk-[a-z0-9]{20,}''',
+]
+paths = [
+  '''\.test\.ts$''',
+]

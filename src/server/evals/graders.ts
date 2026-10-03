@@ -120,7 +120,11 @@ const evaluateAssertion = (run: EvalRun, assertion: Assertion): boolean => {
       // A case-declared pattern can be malformed; a throw there must fail the
       // assertion, never crash the whole graded run.
       try {
-        return matchesFinalText(run, new RegExp(assertion.pattern, assertion.flags ?? 'i'));
+        // `assertion.pattern` is authored in the checked-in eval case fixtures,
+        // not user input, so it is not an attacker-controlled ReDoS surface.
+        // nosemgrep: javascript.lang.security.audit.detect-non-literal-regexp.detect-non-literal-regexp
+        const pattern = new RegExp(assertion.pattern, assertion.flags ?? 'i');
+        return matchesFinalText(run, pattern);
       } catch {
         return false;
       }

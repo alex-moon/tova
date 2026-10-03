@@ -101,6 +101,10 @@ describe('runAssetJobTick (#67)', () => {
 
   it('terminal-fails at the attempt cap and flips the asset markdown status', async () => {
     const asset = await createAssetDoc('tick-cap');
+    // A job only exists because a lifecycle is pending (#208: a job can also
+    // stand for a thumbnail); seed the markdown lifecycle so the terminal
+    // failure has something to flip.
+    await Asset.updateOne({ _id: asset.id }, { $set: { markdownStatus: 'pending' } });
     await enqueueAssetJob(asset.id);
     const processor = jest.fn().mockRejectedValue(new Error('converter exploded'));
     for (let i = 0; i < MAX_JOB_ATTEMPTS; i++) {
@@ -115,6 +119,23 @@ describe('runAssetJobTick (#67)', () => {
     const updated = await Asset.findById(asset.id);
     expect(updated?.markdownStatus).toBe('failed');
     expect(updated?.markdownFailureReason).toBe('converter exploded');
+  });
+
+  it('terminal-fails a pending thumbnail without clobbering a ready markdown (#208)', async () => {
+    const asset = await createAssetDoc('tick-cap-thumb');
+    await Asset.updateOne(
+      { _id: asset.id },
+      { $set: { markdownStatus: 'ready', thumbnailStatus: 'pending' } },
+    );
+    await enqueueAssetJob(asset.id);
+    const processor = jest.fn().mockRejectedValue(new Error('image decode exploded'));
+    for (let i = 0; i < MAX_JOB_ATTEMPTS; i++) {
+      await runAssetJobTick(processor);
+    }
+    const updated = await Asset.findById(asset.id);
+    expect(updated?.thumbnailStatus).toBe('failed');
+    expect(updated?.markdownStatus).toBe('ready');
+    expect(updated?.markdownFailureReason).toBeNull();
   });
 });
 

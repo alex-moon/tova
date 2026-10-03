@@ -1,6 +1,6 @@
 import { Asset, type AssetDocument } from '../models/Asset';
 import { spacesWorkspaceStorage } from './workspaceStorage';
-import { MAX_ASSET_SIZE } from './assetLimits';
+import { MAX_ASSET_SIZE, isImageContentType } from './assetLimits';
 import { enqueueAssetJob } from './assetJobService';
 import { isConvertible } from './markdownConversion';
 import { extractText, isExtractable, truncateForPrompt } from './textExtraction';
@@ -63,30 +63,41 @@ const confirmAsset = async (asset: AssetDocument): Promise<ConfirmResult> => {
   }
 
   asset.status = 'ready';
-  // Ephemeral assets (#116) never queue conversion: the job would keep the
-  // extracted markdown alive in storage after the turn deletes the row and
-  // bytes. Fast-path extraction already covers the turn's prompt needs.
-  // Issue #67: fast-path extraction won, nothing to convert. Otherwise
-  // queue a background conversion job — the response latency of /confirm
-  // stays low, conversion retries under the job cap, and a failed
-  // conversion never fails the asset (the binary is fine).
-  if (text === null && isConvertible(asset.filename) && !asset.ephemeral) {
-    asset.markdownStatus = 'pending';
-    asset.markdownFailureReason = null;
+  // Ephemeral assets (#116) never queue work: the job would keep derived
+  // objects alive in storage after the turn deletes the row and bytes.
+  // Fast-path extraction already covers the turn's prompt needs.
+  // Issue #67: fast-path extraction won, nothing to convert. Otherwise queue
+  // a background conversion job — the response latency of /confirm stays low,
+  // conversion retries under the job cap, and a failed conversion never fails
+  // the asset (the binary is fine).
+  // Issue #208: images additionally queue a thumbnail job so the /assets
+  // viewer never loads the original; the two pending lifecycles share one job.
+  const needsConversion = text === null && isConvertible(asset.filename);
+  const needsThumbnail = isImageContentType(asset.contentType);
+  if ((needsConversion || needsThumbnail) && !asset.ephemeral) {
+    if (needsConversion) {
+      asset.markdownStatus = 'pending';
+      asset.markdownFailureReason = null;
+    }
+    if (needsThumbnail) {
+      asset.thumbnailStatus = 'pending';
+      asset.thumbnailKey = null;
+    }
     await asset.save();
     // Enqueue is best-effort: the asset is confirmed and the binary is
-    // fine, so a failed enqueue must not 500 the confirm. Reverting to
-    // 'none' avoids a forever-'pending' badge on an asset no poller will
-    // ever claim a job for; the failure is logged for diagnosis.
+    // fine, so a failed enqueue must not 500 the confirm. Reverting the
+    // pending flags avoids a forever-'pending' badge on an asset no poller
+    // will ever claim a job for; the failure is logged for diagnosis.
     try {
       await enqueueAssetJob(asset._id);
     } catch (enqueueErr) {
-      asset.markdownStatus = 'none';
-      console.error('Asset conversion enqueue error:', enqueueErr);
-      await Asset.updateOne(
-        { _id: asset._id, markdownStatus: 'pending' },
-        { $set: { markdownStatus: 'none' } },
-      );
+      console.error('Asset job enqueue error:', enqueueErr);
+      const revert: Record<string, string> = {};
+      if (needsConversion) revert.markdownStatus = 'none';
+      if (needsThumbnail) revert.thumbnailStatus = 'none';
+      await Asset.updateOne({ _id: asset._id }, { $set: revert });
+      if (needsConversion) asset.markdownStatus = 'none';
+      if (needsThumbnail) asset.thumbnailStatus = 'none';
     }
     return { status: 'ok', asset: safeAsset(asset) };
   }

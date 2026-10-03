@@ -27,7 +27,10 @@ export interface AdminUser {
 // `vision` is only ever true when the row explicitly claims it;
 // `contextLength` is the advertised limit (omitted when none is known).
 // #168: `disabledUntil` is the system-owned cool-off expiry (ISO wire
-// string), null when the model is not cooling off.
+// string), null when the model is not cooling off. #199: `inputPrice`/
+// `outputPrice` are USD per 1M tokens, omitted when unknown; the row's
+// routing price is their sum and rows over the admin cap are excluded from
+// the routing pools.
 export interface AdminModel {
   id: string;
   provider: string;
@@ -37,6 +40,8 @@ export interface AdminModel {
   tools: boolean;
   vision: boolean;
   contextLength?: number;
+  inputPrice?: number;
+  outputPrice?: number;
   disabledUntil: string | null;
   stats: { band: string; up: number; down: number }[];
 }

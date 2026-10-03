@@ -8,8 +8,9 @@
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
-    "format": "prettier --write src",
-    "format:check": "prettier --check src",
+    "format": "prettier --check src",
+    "format:check": "npm run format",
+    "format:fix": "prettier --write src",
     "test": "vitest run",
     "preview": "vite preview"
   },

@@ -36,6 +36,18 @@ const coolOffHoursLeft = (disabledUntil: string | null): number | null => {
   return Math.max(1, Math.ceil(ms / 3_600_000));
 };
 
+/*
+ * #199: mirror of the server cap (USD per 1M tokens, in + out). Display-only
+ * — the server enforces exclusion from the pools — but the admin table flags
+ * a row that would be ruled out so a bad price is visible before it bites.
+ */
+const MAX_MODEL_PRICE_USD_PER_MTOK = 1.5;
+
+const modelPrice = (m: AdminModel): number | undefined =>
+  m.inputPrice !== undefined && m.outputPrice !== undefined
+    ? m.inputPrice + m.outputPrice
+    : undefined;
+
 const AdminView = () => {
   const [users, setUsers] = useState<AdminUser[] | null>(null);
   const [models, setModels] = useState<AdminModel[] | null>(null);
@@ -147,6 +159,8 @@ const AdminView = () => {
     model: string;
     tier: string;
     contextLength: string;
+    inputPrice: string;
+    outputPrice: string;
     tools: boolean;
     vision: boolean;
   }>({
@@ -154,6 +168,8 @@ const AdminView = () => {
     model: '',
     tier: 'small',
     contextLength: '',
+    inputPrice: '',
+    outputPrice: '',
     tools: true,
     vision: false,
   });
@@ -163,6 +179,8 @@ const AdminView = () => {
     model: m.model,
     tier: m.tier as string,
     contextLength: m.contextLength === undefined ? '' : String(m.contextLength),
+    inputPrice: m.inputPrice === undefined ? '' : String(m.inputPrice),
+    outputPrice: m.outputPrice === undefined ? '' : String(m.outputPrice),
     tools: m.tools,
     vision: m.vision,
   });
@@ -178,15 +196,20 @@ const AdminView = () => {
       model: form.model,
       tier: form.tier as AdminModel['tier'],
       ...(form.contextLength ? { contextLength: Number(form.contextLength) } : {}),
+      ...(form.inputPrice ? { inputPrice: Number(form.inputPrice) } : {}),
+      ...(form.outputPrice ? { outputPrice: Number(form.outputPrice) } : {}),
       tools: form.tools,
       vision: form.vision,
     };
     try {
       if (editingModelId) {
-        await AdminModelsService.updateModel(
-          editingModelId,
-          form.contextLength ? payload : { ...payload, contextLength: null },
-        );
+        // Blank price/context fields clear the value on the existing row.
+        await AdminModelsService.updateModel(editingModelId, {
+          ...payload,
+          contextLength: form.contextLength ? Number(form.contextLength) : null,
+          inputPrice: form.inputPrice ? Number(form.inputPrice) : null,
+          outputPrice: form.outputPrice ? Number(form.outputPrice) : null,
+        });
       } else {
         await AdminModelsService.createModel(payload);
       }
@@ -196,6 +219,8 @@ const AdminView = () => {
         model: '',
         tier: 'small',
         contextLength: '',
+        inputPrice: '',
+        outputPrice: '',
         tools: true,
         vision: false,
       });
@@ -553,6 +578,28 @@ const AdminView = () => {
                     className="w-28 rounded-lg border border-border bg-background px-2 py-1"
                   />
                 </label>
+                <label className="text-sm">
+                  <span className="mr-2 text-muted-foreground">In $/M</span>
+                  <input
+                    data-testid="model-form-input-price"
+                    value={form.inputPrice}
+                    onChange={(e) => setForm((f) => ({ ...f, inputPrice: e.target.value }))}
+                    inputMode="decimal"
+                    placeholder="e.g. 0.15"
+                    className="w-24 rounded-lg border border-border bg-background px-2 py-1"
+                  />
+                </label>
+                <label className="text-sm">
+                  <span className="mr-2 text-muted-foreground">Out $/M</span>
+                  <input
+                    data-testid="model-form-output-price"
+                    value={form.outputPrice}
+                    onChange={(e) => setForm((f) => ({ ...f, outputPrice: e.target.value }))}
+                    inputMode="decimal"
+                    placeholder="e.g. 0.5"
+                    className="w-24 rounded-lg border border-border bg-background px-2 py-1"
+                  />
+                </label>
                 <label className="inline-flex items-center gap-1.5 text-sm">
                   <input
                     type="checkbox"
@@ -600,6 +647,9 @@ const AdminView = () => {
                       <th className="px-4 py-3 font-medium">Provider</th>
                       <th className="px-4 py-3 font-medium">Tier</th>
                       <th className="px-4 py-3 font-medium">Context</th>
+                      <th className="px-4 py-3 font-medium">In $/M</th>
+                      <th className="px-4 py-3 font-medium">Out $/M</th>
+                      <th className="px-4 py-3 font-medium">In+Out</th>
                       <th className="px-4 py-3 font-medium">Eligible</th>
                       <th className="px-4 py-3 font-medium">Capabilities</th>
                       <th className="px-4 py-3 font-medium">Feedback</th>
@@ -609,6 +659,8 @@ const AdminView = () => {
                   <tbody>
                     {models?.map((model) => {
                       const coolOff = coolOffHoursLeft(model.disabledUntil);
+                      const price = modelPrice(model);
+                      const overCap = price !== undefined && price > MAX_MODEL_PRICE_USD_PER_MTOK;
                       return (
                         <tr key={model.id} className="border-b border-border last:border-b-0">
                           <td className="px-4 py-3" data-testid={`admin-model-${model.id}`}>
@@ -621,11 +673,43 @@ const AdminView = () => {
                                 Cooling off · ~{coolOff}h left
                               </span>
                             )}
+                            {overCap && (
+                              <span
+                                data-testid={`admin-model-overcap-${model.id}`}
+                                className="ml-2 inline-block rounded-full border border-destructive px-2 py-0.5 text-xs text-destructive"
+                              >
+                                Over ${MAX_MODEL_PRICE_USD_PER_MTOK.toFixed(2)} cap ✓ excluded
+                              </span>
+                            )}
                           </td>
                           <td className="px-4 py-3 text-muted-foreground">{model.provider}</td>
                           <td className="px-4 py-3">{model.tier}</td>
                           <td className="px-4 py-3 text-muted-foreground">
                             {model.contextLength?.toLocaleString() ?? '—'}
+                          </td>
+                          <td
+                            className="px-4 py-3 text-muted-foreground"
+                            data-testid={`admin-model-input-price-${model.id}`}
+                          >
+                            {model.inputPrice !== undefined
+                              ? `$${model.inputPrice.toFixed(3)}`
+                              : '—'}
+                          </td>
+                          <td
+                            className="px-4 py-3 text-muted-foreground"
+                            data-testid={`admin-model-output-price-${model.id}`}
+                          >
+                            {model.outputPrice !== undefined
+                              ? `$${model.outputPrice.toFixed(3)}`
+                              : '—'}
+                          </td>
+                          <td
+                            className={`px-4 py-3 ${
+                              overCap ? 'font-medium text-destructive' : 'text-muted-foreground'
+                            }`}
+                            data-testid={`admin-model-price-${model.id}`}
+                          >
+                            {price !== undefined ? `$${price.toFixed(3)}` : '—'}
                           </td>
                           <td className="px-4 py-3">
                             <input
@@ -689,7 +773,7 @@ const AdminView = () => {
                     })}
                     {models?.length === 0 && (
                       <tr>
-                        <td className="px-4 py-3 text-muted-foreground" colSpan={8}>
+                        <td className="px-4 py-3 text-muted-foreground" colSpan={11}>
                           No models configured.
                         </td>
                       </tr>

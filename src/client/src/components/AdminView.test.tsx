@@ -266,6 +266,55 @@ describe('AdminView models table (issue #33/#104)', () => {
     await waitFor(() => expect(listModels).toHaveBeenCalledTimes(2));
     expect(updateModel).not.toHaveBeenCalled();
   });
+
+  // #199: price columns, the derived in+out total, and the over-cap flag.
+  it('renders price columns and flags a row over the cap', async () => {
+    listModels.mockResolvedValue(
+      modelsPayload([
+        {
+          ...sampleRow(),
+          id: 'cheap',
+          model: 'cheap-model',
+          inputPrice: 0.2,
+          outputPrice: 0.6,
+        },
+        {
+          ...sampleRow(),
+          id: 'pricey',
+          model: 'pricey-model',
+          inputPrice: 2.85,
+          outputPrice: 14.25,
+        },
+        { ...sampleRow(), id: 'unpriced', model: 'unpriced-model' },
+      ]),
+    );
+    render(<AdminView />);
+    fireEvent.click(await screen.findByTestId('admin-tab-models'));
+    expect(await screen.findByTestId('admin-model-price-cheap')).toHaveTextContent('$0.800');
+    expect(screen.getByTestId('admin-model-input-price-cheap')).toHaveTextContent('$0.200');
+    expect(screen.getByTestId('admin-model-output-price-cheap')).toHaveTextContent('$0.600');
+    expect(screen.getByTestId('admin-model-price-pricey')).toHaveTextContent('$17.100');
+    expect(screen.getByTestId('admin-model-overcap-pricey')).toBeInTheDocument();
+    expect(screen.queryByTestId('admin-model-overcap-cheap')).not.toBeInTheDocument();
+    // Unpriced rows show a dash, not $0.000, and are not flagged.
+    expect(screen.getByTestId('admin-model-price-unpriced')).toHaveTextContent('—');
+    expect(screen.queryByTestId('admin-model-overcap-unpriced')).not.toBeInTheDocument();
+  });
+
+  it('round-trips prices through the inline form', async () => {
+    setup();
+    fireEvent.click(await screen.findByTestId('admin-tab-models'));
+    fireEvent.click(await screen.findByTestId('model-edit-r1'));
+    fireEvent.change(screen.getByTestId('model-form-input-price'), { target: { value: '0.15' } });
+    fireEvent.change(screen.getByTestId('model-form-output-price'), { target: { value: '0.5' } });
+    fireEvent.click(screen.getByTestId('model-form-submit'));
+    await waitFor(() =>
+      expect(updateModel).toHaveBeenCalledWith(
+        'r1',
+        expect.objectContaining({ inputPrice: 0.15, outputPrice: 0.5 }),
+      ),
+    );
+  });
 });
 
 /*

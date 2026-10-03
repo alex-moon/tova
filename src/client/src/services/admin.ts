@@ -70,8 +70,12 @@ export default AdminService;
 // nothing (DELETE); callers refetch for the authoritative list. #168: the
 // list also carries per-model error diagnostics (deploy wipes logs, so the
 // shapes accumulate in Mongo instead).
-type ModelInput = Partial<Omit<AdminModel, 'id' | 'stats' | 'contextLength'>> & {
+type ModelInput = Partial<
+  Omit<AdminModel, 'id' | 'stats' | 'contextLength' | 'inputPrice' | 'outputPrice'>
+> & {
   contextLength?: number | null;
+  inputPrice?: number | null;
+  outputPrice?: number | null;
 };
 
 const listModels = async (): Promise<AdminModelsPayload> => {

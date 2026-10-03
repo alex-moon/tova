@@ -1,0 +1,7 @@
+{
+  "GHSA-vfj7-8cjw-p6xm": {
+    "active": true,
+    "notes": "braces <=3.0.3 stack-exhaustion DoS; no fixed release exists (3.0.3 is the latest). Reached only via http-proxy-middleware -> micromatch -> braces during dev-server proxying, never with untrusted glob input. Re-check when a patched braces ships.",
+    "expiry": 1793750399000
+  }
+}

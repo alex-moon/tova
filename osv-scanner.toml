@@ -1,0 +1,10 @@
+# Accepted-risk entries for advisories with no upstream fix.
+#
+# Each entry is time-boxed: once `ignoreUntil` passes, the scan fails again so
+# the exception is revisited. Remove an entry as soon as its dependency can be
+# bumped to a patched release.
+
+[[IgnoredVulns]]
+id = "GHSA-vfj7-8cjw-p6xm"
+ignoreUntil = 2026-11-03
+reason = "braces <=3.0.3 stack-exhaustion DoS; no fixed release exists (3.0.3 is the latest). Reached only via http-proxy-middleware -> micromatch -> braces during dev-server proxying, never with untrusted glob input. Re-check when a patched braces ships."

@@ -82,11 +82,13 @@ Reading the dump artifacts directly has a catch: they live under `data/`, which 
 
 `npm run ci` is the single gate for any code change. It runs everything in sequence (server lint, format check, typecheck, server tests, client lint, client format check, client tests, client build), fails at the first error, and is mirrored by the CI workflow that gates merges to `main`. Run it as the final step before finishing any change; it must pass with exit code 0. Per-step commands below are only for iterating on a single failure without re-running the whole gate:
 
+Naming convention: a bare verb **checks**; append `:fix` to **write**. So `lint`/`format` check, `lint:fix`/`format:fix` change files.
+
 - `npm run lint` — ESLint (TypeScript rules + Prettier rules) over `src/` and `migrations/`. Use `npm run lint:fix` to auto-fix.
 - `npm run typecheck` — TypeScript.
 - `npm test` — backend Jest suite.
-- `npm run format` / `npm run format:check` — Prettier over the repo (config in `.prettierrc`). Do not hand-format; let these run.
+- `npm run format` — Prettier check over the repo (config in `.prettierrc`). Use `npm run format:fix` to write. (`format:check` is an alias of `format`.) Do not hand-format; let these run.
 
-After changing frontend code, iterate with `npm --prefix src/client run lint` and the client shortcut scripts: `lint:client` / `format:client` / `test:client` (vitest, config in `src/client/vite.config.ts`).
+Iterate per side with the shortcut scripts: `ci:server` / `ci:client`, plus `lint:server` / `format:server` / `test:server` and `lint:client` / `format:client` / `test:client` (vitest, config in `src/client/vite.config.ts`).
 
 Style: Prettier settings in `.prettierrc` (single quotes, trailing commas, 100 print width). Rules live in the root `eslint.config.js`.

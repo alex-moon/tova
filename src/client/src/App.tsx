@@ -8,6 +8,7 @@ import ChatWindow from './components/ChatWindow';
 import Login from './components/Login';
 import AdminView from './components/AdminView';
 import ProfileView from './components/ProfileView';
+import AssetsView from './components/AssetsView';
 import BackToChatLink from './components/BackToChatLink';
 
 export interface ToolEvent {
@@ -59,10 +60,16 @@ export function isProfileRoute() {
   return typeof window !== 'undefined' && window.location.pathname.startsWith('/profile');
 }
 
+// Issue #197: the assets view gets its own URL alongside profile/admin.
+export function isAssetsRoute() {
+  return typeof window !== 'undefined' && window.location.pathname.startsWith('/assets');
+}
+
 function App() {
   const { user, loading } = useAuth();
   const showAdminView = isAdminRoute();
   const showProfileView = isProfileRoute();
+  const showAssetsView = isAssetsRoute();
   const [sessions, setSessions] = useState<Session[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -387,6 +394,8 @@ function App() {
           <BackToChatLink />
           <ProfileView />
         </>
+      ) : showAssetsView ? (
+        <AssetsView />
       ) : showAdminView && user.role === 'admin' ? (
         <>
           <BackToChatLink />

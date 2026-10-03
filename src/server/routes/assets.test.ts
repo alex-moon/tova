@@ -629,7 +629,7 @@ describe('Assets confirm markdown conversion queue (#67)', () => {
     expect(await AssetJob.countDocuments({ assetId })).toBe(0);
   });
 
-  it('non-convertible binaries stay markdownStatus none with no job', async () => {
+  it('image uploads queue a thumbnail job and leave markdownStatus none (#208)', async () => {
     const cookie = await registerUser('assets-image@example.com');
     const assetId = await presignOk(cookie, 'picture.png', 'image/png', 100);
 
@@ -639,7 +639,8 @@ describe('Assets confirm markdown conversion queue (#67)', () => {
     expect(confirm.status).toBe(200);
     const stored = await Asset.findById(assetId);
     expect(stored?.markdownStatus).toBe('none');
-    expect(await AssetJob.countDocuments({ assetId })).toBe(0);
+    expect(stored?.thumbnailStatus).toBe('pending');
+    expect(await AssetJob.countDocuments({ assetId })).toBe(1);
   });
 
   it('a failed enqueue downgrades the asset to none instead of a stuck pending (#67)', async () => {
@@ -654,6 +655,22 @@ describe('Assets confirm markdown conversion queue (#67)', () => {
     const stored = await Asset.findById(assetId);
     expect(stored?.status).toBe('ready');
     expect(stored?.markdownStatus).toBe('none');
+    expect(await AssetJob.countDocuments({ assetId })).toBe(0);
+  });
+
+  it('a failed enqueue for an image reverts the thumbnail status to none (#208)', async () => {
+    mockEnqueueAssetJob.mockRejectedValueOnce(new Error('enqueue blip'));
+    const cookie = await registerUser('assets-thumb-enqueue-fail@example.com');
+    const assetId = await presignOk(cookie, 'pic.png', 'image/png', 100);
+
+    mockHead.mockResolvedValue(headerForObject(100, 'image/png'));
+    const confirm = await confirmFor(cookie, assetId);
+
+    expect(confirm.status).toBe(200);
+    const stored = await Asset.findById(assetId);
+    expect(stored?.status).toBe('ready');
+    expect(stored?.thumbnailStatus).toBe('none');
+    expect(stored?.thumbnailKey).toBeNull();
     expect(await AssetJob.countDocuments({ assetId })).toBe(0);
   });
 });
@@ -727,6 +744,197 @@ describe('Asset hasText & failureReason serialization (issue #83)', () => {
     expect(asset.hasText).toBe(false);
     // No markdown text content may reach the client payload.
     expect(JSON.stringify(response.body)).not.toContain('converted report');
+  });
+});
+
+describe('Asset content viewer (issue #197)', () => {
+  const seedAssetFor = async (
+    email: string,
+    extra: Record<string, unknown>,
+  ): Promise<{ cookie: string; id: string }> => {
+    const cookie = await registerUser(email);
+    const user = await User.findOne({ email });
+    const id = new Types.ObjectId();
+    await Asset.create({
+      _id: id,
+      userId: user?._id,
+      filename: 'report.pdf',
+      key: `k/${String(id)}/report.pdf`,
+      contentType: 'application/pdf',
+      size: 12,
+      status: 'ready',
+      ...extra,
+    });
+    return { cookie, id: String(id) };
+  };
+
+  it('returns the converted markdown body for a converted document', async () => {
+    const { cookie, id } = await seedAssetFor('assets-content-md@example.com', {
+      textExtracted: null,
+      markdownExtracted: '# converted report',
+      markdownStatus: 'ready',
+    });
+    const response = await request(app).get(`/api/assets/${id}/content`).set('Cookie', [cookie]);
+    expect(response.status).toBe(200);
+    expect(response.body.asset).toMatchObject({
+      id,
+      filename: 'report.pdf',
+      content: '# converted report',
+      format: 'markdown',
+      markdownStatus: 'ready',
+    });
+  });
+
+  it('prefers fast-path extracted text and reports format text', async () => {
+    const { cookie, id } = await seedAssetFor('assets-content-txt@example.com', {
+      textExtracted: 'plain report body',
+      markdownStatus: 'none',
+    });
+    const response = await request(app).get(`/api/assets/${id}/content`).set('Cookie', [cookie]);
+    expect(response.status).toBe(200);
+    expect(response.body.asset.content).toBe('plain report body');
+    expect(response.body.asset.format).toBe('text');
+  });
+
+  it('renders a Markdown upload as format markdown even though its body is in textExtracted', async () => {
+    const cookie = await registerUser('assets-content-markdown-file@example.com');
+    const user = await User.findOne({ email: 'assets-content-markdown-file@example.com' });
+    const id = new Types.ObjectId();
+    await Asset.create({
+      _id: id,
+      userId: user?._id,
+      filename: 'README.md',
+      key: `k/${String(id)}/README.md`,
+      contentType: 'text/markdown',
+      size: 12,
+      status: 'ready',
+      textExtracted: '# Title',
+      markdownStatus: 'none',
+    });
+    const response = await request(app)
+      .get(`/api/assets/${String(id)}/content`)
+      .set('Cookie', [cookie]);
+    expect(response.status).toBe(200);
+    expect(response.body.asset.format).toBe('markdown');
+    expect(response.body.asset.content).toBe('# Title');
+  });
+
+  it('returns null content when nothing was extracted', async () => {
+    const { cookie, id } = await seedAssetFor('assets-content-none@example.com', {
+      textExtracted: null,
+      markdownExtracted: null,
+      markdownStatus: 'none',
+    });
+    const response = await request(app).get(`/api/assets/${id}/content`).set('Cookie', [cookie]);
+    expect(response.status).toBe(200);
+    expect(response.body.asset.content).toBeNull();
+    expect(response.body.asset.format).toBe('text');
+  });
+
+  it('surfaces the failure reason without content on a failed conversion', async () => {
+    const { cookie, id } = await seedAssetFor('assets-content-fail@example.com', {
+      textExtracted: null,
+      markdownExtracted: null,
+      markdownStatus: 'failed',
+      markdownFailureReason: 'converter exploded',
+    });
+    const response = await request(app).get(`/api/assets/${id}/content`).set('Cookie', [cookie]);
+    expect(response.status).toBe(200);
+    expect(response.body.asset.content).toBeNull();
+    expect(response.body.asset.markdownFailureReason).toBe('converter exploded');
+  });
+
+  it('404s for another user and 401s for a guest', async () => {
+    const { id } = await seedAssetFor('assets-content-owner@example.com', {
+      textExtracted: 'owned',
+    });
+    const otherCookie = await registerUser('assets-content-other@example.com');
+    const cross = await request(app).get(`/api/assets/${id}/content`).set('Cookie', [otherCookie]);
+    expect(cross.status).toBe(404);
+
+    const guest = await request(app).get(`/api/assets/${id}/content`);
+    expect(guest.status).toBe(401);
+  });
+
+  it('404s for an unknown id without leaking content', async () => {
+    const cookie = await registerUser('assets-content-missing@example.com');
+    const response = await request(app)
+      .get(`/api/assets/${new Types.ObjectId().toString()}/content`)
+      .set('Cookie', [cookie]);
+    expect(response.status).toBe(404);
+  });
+});
+
+describe('Asset thumbnail URL (issue #208)', () => {
+  const seedImage = async (
+    email: string,
+    extra: Record<string, unknown>,
+  ): Promise<{ cookie: string; id: string }> => {
+    const cookie = await registerUser(email);
+    const user = await User.findOne({ email });
+    const id = new Types.ObjectId();
+    await Asset.create({
+      _id: id,
+      userId: user?._id,
+      filename: 'photo.png',
+      key: `k/${String(id)}/photo.png`,
+      contentType: 'image/png',
+      size: 100,
+      status: 'ready',
+      ...extra,
+    });
+    return { cookie, id: String(id) };
+  };
+
+  it('signs the thumbnail object once it is ready', async () => {
+    mockPresignGet.mockResolvedValue('https://spaces.example/thumb');
+    const { cookie, id } = await seedImage('assets-thumb-ready@example.com', {
+      thumbnailStatus: 'ready',
+      thumbnailKey: 'u/a/thumbnail',
+    });
+    const response = await request(app)
+      .get(`/api/assets/${id}/thumbnail-url`)
+      .set('Cookie', [cookie]);
+    expect(response.status).toBe(200);
+    expect(response.body.url).toBe('https://spaces.example/thumb');
+    expect(mockPresignGet).toHaveBeenCalledWith('u/a/thumbnail', 300);
+  });
+
+  it('reports a null url while the thumbnail is pending and when it failed', async () => {
+    const pending = await seedImage('assets-thumb-pending@example.com', {
+      thumbnailStatus: 'pending',
+      thumbnailKey: null,
+    });
+    const pendingRes = await request(app)
+      .get(`/api/assets/${pending.id}/thumbnail-url`)
+      .set('Cookie', [pending.cookie]);
+    expect(pendingRes.status).toBe(200);
+    expect(pendingRes.body).toEqual({ url: null, status: 'pending' });
+
+    const failed = await seedImage('assets-thumb-failed@example.com', {
+      thumbnailStatus: 'failed',
+      thumbnailKey: null,
+    });
+    const failedRes = await request(app)
+      .get(`/api/assets/${failed.id}/thumbnail-url`)
+      .set('Cookie', [failed.cookie]);
+    expect(failedRes.status).toBe(200);
+    expect(failedRes.body).toEqual({ url: null, status: 'failed' });
+  });
+
+  it('404s for another user and 401s for a guest', async () => {
+    const { id } = await seedImage('assets-thumb-owner@example.com', {
+      thumbnailStatus: 'ready',
+      thumbnailKey: 'u/a/thumbnail',
+    });
+    const otherCookie = await registerUser('assets-thumb-other@example.com');
+    const cross = await request(app)
+      .get(`/api/assets/${id}/thumbnail-url`)
+      .set('Cookie', [otherCookie]);
+    expect(cross.status).toBe(404);
+
+    const guest = await request(app).get(`/api/assets/${id}/thumbnail-url`);
+    expect(guest.status).toBe(401);
   });
 });
 

@@ -465,6 +465,64 @@ describe('admin routes', () => {
         expect(created.status).toBe(409);
       });
 
+      // #199: prices are admin-editable config; the list surfaces them and
+      // the cap reads them. Non-negative finite numbers only (sub-cent rates
+      // like 0.085 are legal, so not integers).
+      it('creates, updates, lists and clears model prices', async () => {
+        const created = await request(app)
+          .post('/api/admin/models')
+          .send({
+            provider: 'deepinfra',
+            model: 'org/test-crud',
+            tier: 'large',
+            inputPrice: 0.085,
+            outputPrice: 0.4,
+          })
+          .set('Cookie', cookie);
+        expect(created.status).toBe(201);
+        const id = created.body.id as string;
+
+        let rows = await ProviderRouting.find({ model: 'org/test-crud' }).lean();
+        expect(rows[0]).toMatchObject({ inputPrice: 0.085, outputPrice: 0.4 });
+
+        const listed = await request(app).get('/api/admin/models').set('Cookie', cookie);
+        const row = listed.body.models.find((m: { model: string }) => m.model === 'org/test-crud');
+        expect(row).toMatchObject({ inputPrice: 0.085, outputPrice: 0.4 });
+
+        const updated = await request(app)
+          .put(`/api/admin/models/${id}`)
+          .send({ inputPrice: 0.15, outputPrice: 0.5 })
+          .set('Cookie', cookie);
+        expect(updated.status).toBe(200);
+        rows = await ProviderRouting.find({ model: 'org/test-crud' }).lean();
+        expect(rows[0]).toMatchObject({ inputPrice: 0.15, outputPrice: 0.5 });
+
+        // `null` clears back to "unknown" (admitted by the cap, flagged in UI).
+        await request(app)
+          .put(`/api/admin/models/${id}`)
+          .send({ inputPrice: null, outputPrice: '' })
+          .set('Cookie', cookie);
+        rows = await ProviderRouting.find({ model: 'org/test-crud' }).lean();
+        expect(rows[0].inputPrice).toBeNull();
+        expect(rows[0].outputPrice).toBeNull();
+      });
+
+      it('rejects negative, non-numeric and boolean prices', async () => {
+        for (const payload of [
+          { inputPrice: -0.1 },
+          { outputPrice: -1 },
+          { inputPrice: 'free' },
+          { outputPrice: 'NaN' },
+          { inputPrice: true },
+        ]) {
+          const res = await request(app)
+            .post('/api/admin/models')
+            .send({ provider: 'deepinfra', model: 'org/test-crud', tier: 'large', ...payload })
+            .set('Cookie', cookie);
+          expect(res.status).toBe(400);
+        }
+      });
+
       it('rejects unknown and malformed fields on update', async () => {
         await ProviderRouting.create({ provider: 'groq', model: 'upd', tier: 'small' });
         const row = (await ProviderRouting.findOne({ model: 'upd' }))!;

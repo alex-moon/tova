@@ -1,6 +1,11 @@
 import { inferenceService } from './inferenceService';
 import { LlmProvider } from './llmTypes';
-import { AllModelsDisabledError, completionsPoolFor, ModelRef } from './modelConfigService';
+import {
+  AllModelsDisabledError,
+  completionsPoolFor,
+  ModelRef,
+  routingPrice,
+} from './modelConfigService';
 import { redactForLog } from './logRedaction';
 import { FitWeight, getFitWeight } from './modelMetricsStatsService';
 
@@ -8,10 +13,12 @@ import { FitWeight, getFitWeight } from './modelMetricsStatsService';
  * Routing tiers resolve to an ELIGIBLE pool of models (MongoDB-backed,
  * `modelConfigService`) instead of a single env-config model. When exactly
  * one model qualifies for a tier, that model always runs (deterministic).
- * When several qualify, the choice is ε-random with a uniform distribution
- * so per-model feedback accrues (#4 D): `ROUTER_EPSILON` (default 1) is the
- * probability of picking uniformly at random instead of always the first
- * entry. An empty pool — no available model at all — fails loudly (#4 G).
+ * When several qualify, the choice is ε-random with a PRICE-WEIGHTED
+ * distribution (#199: cheaper models draw higher probability) so cheaper
+ * models are preferred while expensive ones still get sampled for feedback;
+ * `ROUTER_EPSILON` (default 1) is the probability of exploring the weighted
+ * draw instead of always the first entry. An empty pool — no available model
+ * at all — fails loudly (#4 G).
  */
 
 export interface RouterConfig {
@@ -138,7 +145,36 @@ const orderPoolByFit = async (
 /*
  * ε-random pick within one tier's pool. `random` is injectable so tests can
  * pin exact selections deterministically.
+ *
+ * #199: the explore draw is PRICE-WEIGHTED, not uniform — a cheaper model
+ * (lower `inputPrice + outputPrice`) draws a higher selection probability, as
+ * the ticket requires. Weight is the inverse summed price; a model with no
+ * known price is neutral (weight 1, the same as a $1/mtok model) so unpriced
+ * rows are neither favoured nor starved. With ε at its default 1 the explore
+ * branch is always taken, so price shapes the pick by default; the forced-fit
+ * leader path in `orderPoolByFit` still overrides on strong feedback.
  */
+const priceWeight = (modelRef: ModelRef): number => {
+  const price = routingPrice(modelRef);
+  // Unknown price is neutral (weight 1). A known price — including an
+  // explicit 0 — weights by inverse price; a tiny floor keeps a free model
+  // finite (and most probable) instead of producing Infinity.
+  return price === undefined ? 1 : 1 / Math.max(price, 0.0001);
+};
+
+const priceWeightedIndex = (pool: ModelRef[], random: () => number): number => {
+  const weights = pool.map(priceWeight);
+  const total = weights.reduce((sum, w) => sum + w, 0);
+  if (!Number.isFinite(total) || total <= 0)
+    return Math.floor(random() * pool.length) % pool.length;
+  let target = random() * total;
+  for (let i = 0; i < weights.length; i += 1) {
+    target -= weights[i];
+    if (target < 0) return i;
+  }
+  return weights.length - 1;
+};
+
 export const pickModelRef = (
   pool: ModelRef[],
   tier: string,
@@ -148,13 +184,13 @@ export const pickModelRef = (
   if (pool.length === 0) {
     throw new Error(`No eligible models configured for tier: ${tier}`);
   }
-  // Explore: an independent draw keeps the within-pool choice uniform —
-  // reusing the epsilon draw would skew the distribution toward the start
-  // of the pool whenever epsilon < uniform mass of the first entry.
   if (pool.length === 1 || random() >= epsilon) {
     return pool[0];
   }
-  return pool[Math.floor(random() * pool.length) % pool.length];
+  // Explore: an independent draw keeps the within-pool choice price-weighted
+  // (reusing the epsilon draw would skew the distribution toward the start
+  // of the pool whenever epsilon < uniform mass of the first entry).
+  return pool[priceWeightedIndex(pool, random)];
 };
 
 /*

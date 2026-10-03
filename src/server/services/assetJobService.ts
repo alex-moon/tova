@@ -47,8 +47,9 @@ export const claimNextAssetJob = async (): Promise<AssetJobDocument | null> =>
 
 // One poll tick: claim a job, run the processor, and settle the outcome.
 // Processor failures retry until MAX_JOB_ATTEMPTS attempts have been made,
-// at which point the job terminal-fails and the asset's markdown status flips
-// to 'failed' (the asset itself stays 'ready' — the original binary is fine).
+// at which point the job terminal-fails and whichever asset lifecycles are
+// still pending flip to 'failed' (the asset itself stays 'ready' — the
+// original binary is fine). A job may cover conversion, thumbnail, or both.
 export const runAssetJobTick = async (processor: AssetJobProcessor): Promise<void> => {
   const job = await claimNextAssetJob();
   if (!job) return;
@@ -69,14 +70,16 @@ export const runAssetJobTick = async (processor: AssetJobProcessor): Promise<voi
       },
     );
     if (exhausted) {
+      // Fail only the lifecycles the processor did not finish; a job that was
+      // conversion-only must not clobber a ready thumbnail status, and vice
+      // versa.
       await Asset.updateOne(
-        { _id: job.assetId },
-        {
-          $set: {
-            markdownStatus: 'failed',
-            markdownFailureReason: message,
-          },
-        },
+        { _id: job.assetId, markdownStatus: 'pending' },
+        { $set: { markdownStatus: 'failed', markdownFailureReason: message } },
+      );
+      await Asset.updateOne(
+        { _id: job.assetId, thumbnailStatus: 'pending' },
+        { $set: { thumbnailStatus: 'failed' } },
       );
     }
   }

@@ -85,6 +85,8 @@ type ProviderRow = {
   tools?: boolean;
   vision?: boolean;
   contextLength?: number;
+  inputPrice?: number;
+  outputPrice?: number;
   disabledUntil?: Date;
   _id: mongoose.Types.ObjectId;
 };
@@ -97,6 +99,8 @@ interface ModelMutation {
   tools?: boolean;
   vision?: boolean;
   contextLength?: number | null;
+  inputPrice?: number | null;
+  outputPrice?: number | null;
 }
 
 const isProvided = (v: unknown): boolean =>
@@ -157,6 +161,23 @@ const validateModelMutation = (
     // casting silently drops undefined keys.
     out.contextLength = null;
   }
+  /*
+   * #199 prices: USD per 1M tokens, non-negative finite numbers (not
+   * integers — sub-cent rates like $0.085 are legal). `''`/`null` clears the
+   * field back to "unknown", mirroring the contextLength branch. A cleared
+   * price is admitted by the cap (unknown ≠ expensive).
+   */
+  for (const field of ['inputPrice', 'outputPrice'] as const) {
+    if (b[field] !== undefined && isProvided(b[field])) {
+      const n = Number(b[field]);
+      if (typeof b[field] === 'boolean' || !Number.isFinite(n) || n < 0) {
+        return { error: `Invalid ${field}` };
+      }
+      out[field] = n;
+    } else if (forUpdate && (b[field] === '' || b[field] === null)) {
+      out[field] = null;
+    }
+  }
   if (forUpdate) {
     const allowed = new Set([
       'provider',
@@ -166,6 +187,8 @@ const validateModelMutation = (
       'tools',
       'vision',
       'contextLength',
+      'inputPrice',
+      'outputPrice',
     ]);
     if (Object.keys(b).some((k) => !allowed.has(k))) {
       return { error: 'Unknown field' };
@@ -204,6 +227,10 @@ router.get('/models', ...adminGuard, async (_req, res) => {
         tools: route.tools !== false,
         vision: route.vision === true,
         contextLength: route.contextLength,
+        // #199 pricing (USD per 1M tokens); undefined on unpriced rows, which
+        // JSON drops so the client only sees the key when a price is known.
+        inputPrice: route.inputPrice,
+        outputPrice: route.outputPrice,
         // #168: system-owned cool-off, surfaced for the admin badge (absent
         // on legacy rows → null). Cleared only by expiry, not admin CRUD.
         disabledUntil: route.disabledUntil ? new Date(route.disabledUntil).toISOString() : null,
@@ -250,6 +277,12 @@ router.post('/models', ...adminGuard, async (req, res) => {
       ...(payload.tools !== undefined ? { tools: payload.tools } : {}),
       ...(payload.vision !== undefined ? { vision: payload.vision } : {}),
       ...(payload.contextLength !== undefined ? { contextLength: payload.contextLength } : {}),
+      ...(payload.inputPrice !== undefined && payload.inputPrice !== null
+        ? { inputPrice: payload.inputPrice }
+        : {}),
+      ...(payload.outputPrice !== undefined && payload.outputPrice !== null
+        ? { outputPrice: payload.outputPrice }
+        : {}),
     });
     res.status(201).json({ id: doc.id });
   } catch (err) {

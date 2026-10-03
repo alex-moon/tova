@@ -17,12 +17,40 @@ export interface AssetSummary {
   markdownStatus?: string;
   // Issue #83: worker's last failure reason for the failed-card tooltip.
   markdownFailureReason?: string | null;
+  // Issue #208: derived-thumbnail lifecycle ('none'|'pending'|'ready'|'failed');
+  // the viewer waits for 'ready' before rendering an image preview.
+  thumbnailStatus?: string;
   createdAt: string;
 }
 
 export interface AssetListPage {
   assets: AssetSummary[];
   nextCursor: string | null;
+}
+
+// Issue #197: the in-app viewer payload — the extracted body, which the list
+// payload deliberately never carries. `content` is null when nothing could be
+// extracted; `format` says whether to render it as markdown or as plain text.
+export interface AssetContent {
+  id: string;
+  filename: string;
+  contentType: string;
+  size: number;
+  status: string;
+  content: string | null;
+  format: 'text' | 'markdown';
+  markdownStatus?: string;
+  markdownFailureReason?: string | null;
+  thumbnailStatus?: string;
+  createdAt: string;
+}
+
+// Issue #208: the derived-thumbnail state for an image asset. `url` is null
+// until the worker has produced the thumbnail; `status` mirrors the server
+// lifecycle so the viewer can keep polling while it is 'pending'.
+export interface AssetThumbnail {
+  url: string | null;
+  status: string;
 }
 
 export class AssetError extends Error {
@@ -193,9 +221,31 @@ const AssetService = {
     return res.data;
   },
 
+  // Issue #197: fetch the extracted body for the in-app preview.
+  async content(assetId: string): Promise<AssetContent> {
+    try {
+      const res = await axios.get<{ asset: AssetContent }>(`/api/assets/${assetId}/content`);
+      return res.data.asset;
+    } catch (err) {
+      throw toAssetError(err);
+    }
+  },
+
   async downloadUrl(assetId: string): Promise<string> {
     const res = await axios.get<{ url: string }>(`/api/assets/${assetId}/url`);
     return res.data.url;
+  },
+
+  // Issue #208: presigned URL for the derived image thumbnail, plus the
+  // current lifecycle status. `url` is null while the thumbnail is still
+  // pending or if it failed.
+  async thumbnailUrl(assetId: string): Promise<AssetThumbnail> {
+    try {
+      const res = await axios.get<AssetThumbnail>(`/api/assets/${assetId}/thumbnail-url`);
+      return res.data;
+    } catch (err) {
+      throw toAssetError(err);
+    }
   },
 
   // Issue #69: bulk download is a plain GET with a repeatable `id` query
