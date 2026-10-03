@@ -7,7 +7,13 @@ import { ModelMetricStat } from '../models/ModelMetricStat';
 import { ModelRouteError } from '../models/ModelRouteError';
 import { Entity } from '../models/Entity';
 import { EntityEdge } from '../models/EntityEdge';
-import { clearLogs, pushLog } from '../services/logService';
+import { queryRetainedLogs } from '../services/lokiLogs';
+
+jest.mock('../services/lokiLogs', () => ({
+  queryRetainedLogs: jest.fn(),
+}));
+
+const mockedQueryRetainedLogs = queryRetainedLogs as jest.MockedFunction<typeof queryRetainedLogs>;
 
 const cookieOf = (res: request.Response) => {
   const cookie = res.headers['set-cookie'];
@@ -550,7 +556,7 @@ describe('admin routes', () => {
   });
 });
 
-describe('admin logs endpoint (issue #76)', () => {
+describe('admin retained logs endpoint (#179)', () => {
   const adminCookieOf = async (app: ReturnType<typeof createApp>) => {
     await request(app)
       .post('/api/auth/register')
@@ -565,7 +571,8 @@ describe('admin logs endpoint (issue #76)', () => {
   };
 
   beforeEach(() => {
-    clearLogs();
+    mockedQueryRetainedLogs.mockReset();
+    mockedQueryRetainedLogs.mockResolvedValue({ logs: [], configured: true });
   });
 
   it('is admin-only', async () => {
@@ -593,82 +600,66 @@ describe('admin logs endpoint (issue #76)', () => {
     const res = await request(app).get('/api/admin/logs?level=bogus').set('Cookie', cookie);
     expect(res.status).toBe(400);
     expect(res.body.message).toMatch(/level/);
+    expect(mockedQueryRetainedLogs).not.toHaveBeenCalled();
   });
 
-  it('filters by level and q, paginates by cursor, and ignores garbage cursor/limit', async () => {
+  it('passes level, q, hours and limit through to the Loki service', async () => {
     const app = createApp();
     const cookie = await adminCookieOf(app);
-    const seed = pushLog('info', 'noise alpha');
-    const warn = pushLog('warn', 'needle alert');
-    const boom = pushLog('error', 'alpha boom');
-
-    const filtered = await request(app).get('/api/admin/logs?q=alpha').set('Cookie', cookie);
-    expect(filtered.status).toBe(200);
-    expect(filtered.body.logs.map((l: { msg: string }) => l.msg)).toEqual([
-      'noise alpha',
-      'alpha boom',
-    ]);
-    expect(filtered.body.nextCursor).toBe(boom.id);
-
-    const level = await request(app)
-      .get('/api/admin/logs?level=warn&cursor=' + seed.id)
+    const res = await request(app)
+      .get('/api/admin/logs?level=error&q=boom&hours=6&limit=50')
       .set('Cookie', cookie);
-    expect(level.body.logs.map((l: { msg: string }) => l.msg)).toEqual(['needle alert']);
-
-    const fromSecond = await request(app)
-      .get('/api/admin/logs?cursor=' + warn.id)
-      .set('Cookie', cookie);
-    const msgAfterWarn = fromSecond.body.logs.map((l: { msg: string }) => l.msg);
-    expect(msgAfterWarn).toContain('alpha boom');
-    expect(msgAfterWarn).not.toContain('needle alert');
-
-    const empty = await request(app).get('/api/admin/logs?cursor=999999').set('Cookie', cookie);
-    expect(empty.body.logs).toEqual([]);
-    expect(empty.body.nextCursor).toBe(999999);
-
-    // garbage pagination values fall back to defaults rather than 500-ing
-    const garbage = await request(app)
-      .get('/api/admin/logs?cursor=nope&limit=nope')
-      .set('Cookie', cookie);
-    expect(garbage.status).toBe(200);
-    expect(garbage.body.logs.map((l: { msg: string }) => l.msg)).toContain('alpha boom');
+    expect(res.status).toBe(200);
+    expect(mockedQueryRetainedLogs).toHaveBeenCalledWith({
+      level: 'error',
+      q: 'boom',
+      hours: 6,
+      limit: 50,
+    });
   });
 
-  it('honours valid limits and clamps oversized ones to the sane range', async () => {
+  it('ignores garbage hours/limit rather than 500-ing', async () => {
     const app = createApp();
     const cookie = await adminCookieOf(app);
-    pushLog('info', 'one');
-    pushLog('warn', 'two');
-
-    const limited = await request(app).get('/api/admin/logs?limit=1').set('Cookie', cookie);
-    expect(limited.body.logs).toHaveLength(1);
-    // >=400 request lines land as warn, so level filtering spans sources
-    const warnOnly = await request(app).get('/api/admin/logs?level=warn').set('Cookie', cookie);
-    expect(warnOnly.body.logs.map((l: { msg: string }) => l.msg)).toContain('two');
-
-    const oversized = await request(app)
-      .get('/api/admin/logs?limit=99999999')
+    const res = await request(app)
+      .get('/api/admin/logs?hours=nope&limit=nope')
       .set('Cookie', cookie);
-    expect(oversized.status).toBe(200);
-    expect(oversized.body.logs.length).toBeGreaterThanOrEqual(2);
+    expect(res.status).toBe(200);
+    expect(mockedQueryRetainedLogs).toHaveBeenCalledWith({
+      level: undefined,
+      q: undefined,
+      hours: undefined,
+      limit: undefined,
+    });
   });
 
-  it('returns logs with cursor pagination shape', async () => {
+  it('returns the retained shape including configured and error', async () => {
+    mockedQueryRetainedLogs.mockResolvedValue({
+      logs: [
+        { id: '1700000000000000000', ts: '2026-10-03T10:00:00.000Z', level: 'info', msg: 'hello' },
+      ],
+      configured: true,
+    });
     const app = createApp();
     const cookie = await adminCookieOf(app);
-    const first = await request(app).get('/api/admin/logs').set('Cookie', cookie);
-    expect(first.status).toBe(200);
-    expect(first.body).toHaveProperty('logs');
-    expect(first.body).toHaveProperty('nextCursor');
-    expect(Array.isArray(first.body.logs)).toBe(true);
-    if (first.body.logs.length > 0) {
-      const entry = first.body.logs[0];
-      expect(typeof entry.id).toBe('number');
-      expect(typeof entry.ts).toBe('string');
-      expect(['info', 'warn', 'error']).toContain(entry.level);
-      expect(typeof entry.msg).toBe('string');
-    }
-    expect(Number(first.body.nextCursor)).toBeGreaterThanOrEqual(0);
+    const res = await request(app).get('/api/admin/logs').set('Cookie', cookie);
+    expect(res.status).toBe(200);
+    expect(res.body.configured).toBe(true);
+    expect(res.body.logs).toHaveLength(1);
+    expect(res.body.logs[0]).toMatchObject({ level: 'info', msg: 'hello' });
+  });
+
+  it('surfaces graceful degradation (unconfigured / error) without a 500', async () => {
+    mockedQueryRetainedLogs.mockResolvedValue({
+      logs: [],
+      configured: false,
+      error: 'Loki unreachable',
+    });
+    const app = createApp();
+    const cookie = await adminCookieOf(app);
+    const res = await request(app).get('/api/admin/logs').set('Cookie', cookie);
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ logs: [], configured: false, error: 'Loki unreachable' });
   });
 });
 

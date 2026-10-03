@@ -63,6 +63,21 @@ export const config = {
     },
   },
 
+  // #179: Grafana Cloud (hosted Loki) for retained logs. `url` is the full
+  // push URL (as supplied by Grafana Cloud); the read side strips the
+  // /loki/api/v1/push suffix to reach the query API on the same host.
+  loki: {
+    get url(): string | undefined {
+      return process.env.LOKI_URL;
+    },
+    get username(): string | undefined {
+      return process.env.LOKI_USERNAME;
+    },
+    get password(): string | undefined {
+      return process.env.LOKI_PASSWORD;
+    },
+  },
+
   safeBrowsing: {
     get apiKey(): string | undefined {
       return process.env.GOOGLE_SAFE_BROWSING_API_KEY || process.env.GOOGLE_API_KEY || undefined;

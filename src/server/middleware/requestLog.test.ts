@@ -1,11 +1,26 @@
 import request from 'supertest';
 import express from 'express';
 import { requestLog } from './requestLog';
-import { clearLogs, getLogs } from '../services/logService';
+import { attachConsoleCapture, detachConsoleCapture } from '../services/logService';
 
+// #179: the in-memory ring buffer was removed, so requestLog is observed via
+// the console line it emits (logger writes to console; retained viewing is
+// covered by lokiLogs.test.ts).
 describe('requestLog middleware', () => {
+  let info: jest.SpyInstance;
+  let warn: jest.SpyInstance;
+  let error: jest.SpyInstance;
+
   beforeEach(() => {
-    clearLogs();
+    attachConsoleCapture();
+    info = jest.spyOn(console, 'info').mockImplementation(() => {});
+    warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    error = jest.spyOn(console, 'error').mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    detachConsoleCapture();
+    jest.restoreAllMocks();
   });
 
   const buildApp = () => {
@@ -22,30 +37,27 @@ describe('requestLog middleware', () => {
 
   it('records one info line per request with method, path and status', async () => {
     await request(buildApp()).get('/ping');
-    const { logs } = getLogs();
-    expect(logs).toHaveLength(1);
-    expect(logs[0].level).toBe('info');
-    expect(logs[0].msg).toMatch(/^GET \/ping -> 200 \(\d+ms\)$/);
+    expect(info).toHaveBeenCalledTimes(1);
+    expect(info.mock.calls[0][0]).toMatch(/^GET \/ping -> 200 \(\d+ms\)$/);
   });
 
-  it('records non-GET methods and error statuses', async () => {
+  it('records non-GET methods and error statuses at the right level', async () => {
     const app = buildApp();
     await request(app).post('/ping');
     await request(app).get('/boom');
-    const { logs } = getLogs();
-    expect(logs[0].msg).toMatch(/^POST \/ping -> 404/);
-    expect(logs[1].msg).toMatch(/^GET \/boom -> 500/);
-    expect(logs[0].level).toBe('warn');
-    expect(logs[1].level).toBe('error');
+    expect(warn.mock.calls[0][0]).toMatch(/^POST \/ping -> 404/);
+    expect(error.mock.calls[0][0]).toMatch(/^GET \/boom -> 500/);
   });
 
-  it('does not record GET /api/admin/logs so polling cannot spam the buffer', async () => {
+  it('does not record GET /api/admin/logs so polling cannot spam the logs', async () => {
     const app = express();
     app.use(requestLog, (_req, res) => {
       res.json({});
     });
     await request(app).get('/api/admin/logs');
     await request(app).get('/api/admin/logs?q=boom');
-    expect(getLogs().logs).toHaveLength(0);
+    expect(info).not.toHaveBeenCalled();
+    expect(warn).not.toHaveBeenCalled();
+    expect(error).not.toHaveBeenCalled();
   });
 });

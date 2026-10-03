@@ -136,11 +136,13 @@ const AdminModelsService = { listModels, createModel, updateModel, deleteModel, 
 export interface ListLogsParams {
   level?: 'info' | 'warn' | 'error';
   q?: string;
-  cursor?: number;
+  hours?: number;
+  limit?: number;
 }
 
-// Read-only log tail (issue #76): `cursor` from a previous response returns
-// only newer entries so polling stays incremental.
+// Retained logs (#179): one time-window page from Grafana Cloud Loki. No
+// cursor — the view re-queries the window; `configured`/`error` describe
+// degradation when Loki is absent or unreachable.
 const listLogs = async (params: ListLogsParams = {}): Promise<AdminLogsPayload> => {
   try {
     const res = await axios.get<AdminLogsPayload>('/api/admin/logs', { params });
