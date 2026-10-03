@@ -70,10 +70,12 @@ export interface AdminModelsPayload {
   errors: AdminModelError[];
 }
 
-// One in-memory log buffer row, GET /api/admin/logs (issue #76). `id` is a
-// monotonic cursor the client passes back for incremental polling.
+// One retained log row, GET /api/admin/logs (#179). Sourced from Grafana Cloud
+// Loki (which survives deploys) rather than the old in-memory ring buffer.
+// `level` is a best-effort classification of the raw line; `id` is derived from
+// the line's nanosecond timestamp so React keys stay stable.
 export interface AdminLogEntry {
-  id: number;
+  id: string;
   ts: string;
   level: 'info' | 'warn' | 'error';
   msg: string;
@@ -167,10 +169,14 @@ export interface AdminGraphEntityDetail {
   edges: AdminGraphEdge[];
 }
 
-// Response of GET /api/admin/logs (issue #76).
+// Response of GET /api/admin/logs (#179): one time-window page of retained
+// logs, newest first. No cursor — the view re-queries the window instead of
+// polling incrementally. `configured` is false when Loki env vars are absent;
+// `error` carries a human message when the Loki query itself failed.
 export interface AdminLogsPayload {
   logs: AdminLogEntry[];
-  nextCursor: number;
+  configured: boolean;
+  error?: string;
 }
 
 // Admin LangSmith read view (#186): wire types for the Traces tab. Rows and

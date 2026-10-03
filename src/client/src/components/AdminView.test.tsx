@@ -496,7 +496,7 @@ describe('AdminView layout (issue #91)', () => {
   });
 });
 
-describe('AdminView logs section (issue #76)', () => {
+describe('AdminView logs section (#179)', () => {
   afterEach(cleanup);
 
   beforeEach(() => {
@@ -504,21 +504,21 @@ describe('AdminView logs section (issue #76)', () => {
     listModels.mockReset().mockResolvedValue(modelsPayload());
     updatePermissions.mockReset().mockResolvedValue(admin());
     updateRole.mockReset().mockResolvedValue(admin());
-    listLogs.mockReset().mockResolvedValue({ logs: [], nextCursor: 0 });
+    listLogs.mockReset().mockResolvedValue({ logs: [], configured: true });
   });
 
   const log = (): AdminLogEntry => ({
-    id: 1,
+    id: '1759449600000000000',
     ts: '2026-09-18T12:00:00.000Z',
     level: 'warn',
     msg: 'GET /api/chat -> 404 (12ms)',
   });
 
-  it('does not mount the logs section or poll logs while it is not active', async () => {
+  it('does not mount the logs section or fetch logs while it is not active', async () => {
     vi.useFakeTimers();
     render(<AdminView />);
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(7000); // two poll intervals
+      await vi.advanceTimersByTimeAsync(70000); // more than one refresh interval
       await vi.runAllTimersAsync();
     });
     expect(screen.queryByTestId('admin-logs-section')).not.toBeInTheDocument();
@@ -529,38 +529,53 @@ describe('AdminView logs section (issue #76)', () => {
     });
     expect(screen.getByTestId('admin-logs-section')).toBeInTheDocument();
     expect(listLogs).toHaveBeenCalledTimes(1);
-    const pollCalls = listLogs.mock.calls.length;
+    const refreshCalls = listLogs.mock.calls.length;
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(6500); // two poll intervals while active
+      await vi.advanceTimersByTimeAsync(65000); // two refresh intervals while active
     });
-    expect(listLogs.mock.calls.length).toBeGreaterThan(pollCalls);
+    expect(listLogs.mock.calls.length).toBeGreaterThan(refreshCalls);
     vi.useRealTimers();
   });
 
   it('renders log entries returned by the logs API', async () => {
-    listLogs.mockResolvedValue({ logs: [log()], nextCursor: 1 });
+    listLogs.mockResolvedValue({ logs: [log()], configured: true });
     render(<AdminView />);
     fireEvent.click(await screen.findByTestId('admin-tab-logs'));
     expect(await screen.findByTestId('admin-logs')).toBeInTheDocument();
     expect(screen.getByTestId('admin-logs')).toHaveTextContent('GET /api/chat -> 404 (12ms)');
-    expect(listLogs).toHaveBeenCalledWith({ level: undefined, q: '', cursor: 0 });
+    expect(listLogs).toHaveBeenCalledWith({ level: undefined, q: '' });
   });
 
-  it('shows an empty state when the buffer has no matching entries', async () => {
+  it('shows an empty state when the window has no matching entries', async () => {
     render(<AdminView />);
     fireEvent.click(await screen.findByTestId('admin-tab-logs'));
     expect(await screen.findByText('No log entries.')).toBeInTheDocument();
   });
 
-  it('re-fetches with the selected level filter and resets the cursor', async () => {
+  it('shows a not-configured state when Loki env is absent', async () => {
+    listLogs.mockResolvedValue({ logs: [], configured: false });
+    render(<AdminView />);
+    fireEvent.click(await screen.findByTestId('admin-tab-logs'));
+    expect(
+      await screen.findByText('Retained logs are not configured (Loki env absent).'),
+    ).toBeInTheDocument();
+  });
+
+  it('surfaces a Loki query error instead of an empty state', async () => {
+    listLogs.mockResolvedValue({ logs: [], configured: true, error: 'Loki unreachable' });
+    render(<AdminView />);
+    fireEvent.click(await screen.findByTestId('admin-tab-logs'));
+    expect(await screen.findByText('Loki unreachable')).toBeInTheDocument();
+    expect(screen.queryByText('No log entries.')).not.toBeInTheDocument();
+  });
+
+  it('re-fetches with the selected level filter', async () => {
     render(<AdminView />);
     fireEvent.click(await screen.findByTestId('admin-tab-logs'));
     await screen.findByTestId('admin-logs');
     listLogs.mockClear();
     fireEvent.click(screen.getByTestId('log-level-error'));
-    await waitFor(() =>
-      expect(listLogs).toHaveBeenCalledWith({ level: 'error', q: '', cursor: 0 }),
-    );
+    await waitFor(() => expect(listLogs).toHaveBeenCalledWith({ level: 'error', q: '' }));
   });
 
   it('re-fetches with the text filter', async () => {
@@ -570,7 +585,7 @@ describe('AdminView logs section (issue #76)', () => {
     listLogs.mockClear();
     fireEvent.change(screen.getByTestId('log-search'), { target: { value: '/api/chat' } });
     await waitFor(() =>
-      expect(listLogs).toHaveBeenCalledWith({ level: undefined, q: '/api/chat', cursor: 0 }),
+      expect(listLogs).toHaveBeenCalledWith({ level: undefined, q: '/api/chat' }),
     );
   });
 });

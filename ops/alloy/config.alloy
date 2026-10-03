@@ -1,3 +1,17 @@
+// #179: ship Tova's container logs to Grafana Cloud (hosted Loki).
+//
+// Alloy tails every container in this compose project via the Docker socket,
+// keeps the app services, and pushes over the Loki push API with Grafana Cloud
+// basic auth. Credentials come from the environment (see docker-compose.live.yml,
+// fed by .env):
+//   LOKI_URL      full Loki push URL, e.g.
+//                 https://logs-prod-xxx.grafana.net/loki/api/v1/push
+//   LOKI_USERNAME Grafana Cloud Loki instance ID
+//   LOKI_PASSWORD API key / access policy token
+//
+// Note: the future admin query proxy needs the base URL, not this push URL —
+// derive it by stripping the /loki/api/v1/push suffix, or add a separate var.
+
 discovery.docker "tova" {
   host             = "unix:///var/run/docker.sock"
   refresh_interval = "5s"
@@ -46,6 +60,10 @@ loki.source.docker "tova" {
 
 loki.write "tova" {
   endpoint {
-    url = "http://loki:3100/loki/api/v1/push"
+    url = sys.env("LOKI_URL")
+    basic_auth {
+      username = sys.env("LOKI_USERNAME")
+      password = sys.env("LOKI_PASSWORD")
+    }
   }
 }

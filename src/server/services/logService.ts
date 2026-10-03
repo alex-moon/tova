@@ -1,34 +1,24 @@
-// Issue #76: in-memory structured log ring buffer. The admin logs view
-// reads from this buffer; console.* call sites keep working because
-// attachConsoleCapture() mirrors every console invocation into the buffer
-// while preserving original stdout behaviour.
+// #179: the in-memory ring buffer was removed — retained logs now come from
+// Grafana Cloud (see services/lokiLogs.ts). What remains is the logging
+// backbone: console.* capture (so output stays structured) and durable
+// error-log persistence to MongoDB (issue #175), neither of which depends on
+// a buffer.
 
 import { format } from 'util';
 import { ErrorLog } from '../models/ErrorLog';
 
 export type LogLevel = 'info' | 'warn' | 'error';
 
-export interface LogEntry {
-  id: number;
-  ts: string;
-  level: LogLevel;
-  msg: string;
-}
-
-const CAP = 1000;
 const MAX_MSG_LENGTH = 2000;
 
 // Issue #175: mirror error entries into MongoDB as they are emitted so
 // diagnostics survive a restart. Fire-and-forget: failures are swallowed
 // (never re-logged through console, which would recurse into the capture).
-const persistErrorEntry = (entry: Pick<LogEntry, 'id' | 'ts' | 'msg'>) => {
+const persistErrorEntry = (ts: string, msg: string) => {
   if (process.env.NODE_ENV === 'test') return;
-  ErrorLog.create({ bufferId: entry.id, ts: entry.ts, msg: entry.msg }).catch(() => {});
+  ErrorLog.create({ bufferId: null, ts, msg }).catch(() => {});
 };
 
-const buffer: LogEntry[] = [];
-// ids start at 1 so a default cursor of 0 in getLogs means "everything"
-let nextId = 1;
 let captureAttached = false;
 
 const originalConsole: Partial<
@@ -37,54 +27,16 @@ const originalConsole: Partial<
 
 const normalize = (msg: string) => msg.replace(/\s*\n\s*/g, ' ').slice(0, MAX_MSG_LENGTH);
 
-export const pushLog = (level: LogLevel, msg: string) => {
-  const entry: LogEntry = {
-    id: nextId++,
-    ts: new Date().toISOString(),
-    level,
-    msg: normalize(msg),
-  };
-  buffer.push(entry);
-  if (buffer.length > CAP) buffer.splice(0, buffer.length - CAP);
-  if (level === 'error') persistErrorEntry(entry);
-  return entry;
-};
-
 export const logger = {
   info: (msg: string) => {
-    pushLog('info', msg);
+    console.info(msg);
   },
   warn: (msg: string) => {
-    pushLog('warn', msg);
+    console.warn(msg);
   },
   error: (msg: string) => {
-    pushLog('error', msg);
+    console.error(msg);
   },
-};
-
-export interface GetLogsParams {
-  level?: LogLevel;
-  q?: string;
-  cursor?: number;
-  limit?: number;
-}
-
-export const getLogs = (params: GetLogsParams = {}): { logs: LogEntry[]; nextCursor: number } => {
-  const { level, q, cursor = 0, limit = 200 } = params;
-  const needle = q?.toLowerCase();
-  const matches = buffer.filter(
-    (entry) =>
-      entry.id > cursor &&
-      (!level || entry.level === level) &&
-      (!needle || entry.msg.toLowerCase().includes(needle)),
-  );
-  const logs = matches.slice(0, limit);
-  return { logs, nextCursor: logs.length > 0 ? logs[logs.length - 1].id : cursor };
-};
-
-export const clearLogs = () => {
-  buffer.length = 0;
-  nextId = 1;
 };
 
 const noop = () => {};
@@ -94,8 +46,8 @@ const record =
   (...args: unknown[]) => {
     (originalConsole[method] ?? noop)(...args);
     // util.format handles printf-style placeholders and object inspection,
-    // matching what the original call put on stdout
-    pushLog(level, format(...args));
+    // matching what the original call put on stdout.
+    if (level === 'error') persistErrorEntry(new Date().toISOString(), normalize(format(...args)));
   };
 
 export const attachConsoleCapture = () => {
@@ -103,9 +55,9 @@ export const attachConsoleCapture = () => {
   captureAttached = true;
   for (const method of ['log', 'info', 'warn', 'error'] as const) {
     originalConsole[method] = console[method];
-    // log and info both land in the buffer as 'info'
-    const bufferLevel: LogLevel = method === 'log' || method === 'info' ? 'info' : method;
-    console[method] = record(method, bufferLevel);
+    // log and info both map to 'info'
+    const level: LogLevel = method === 'log' || method === 'info' ? 'info' : method;
+    console[method] = record(method, level);
   }
 };
 

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import AdminService, {
   AdminError,
   AdminModelsService,
@@ -22,7 +22,8 @@ const KNOWN_PERMISSIONS = ['routing'];
 
 const LOG_LEVELS = ['all', 'info', 'warn', 'error'] as const;
 
-const POLL_INTERVAL_MS = 3000;
+// #179: retained logs are a 24h window, not a live tail — refresh slowly.
+const LOGS_REFRESH_MS = 30000;
 
 /*
  * #168 cool-off badge: approximate remaining hours, computed client-side —
@@ -57,7 +58,10 @@ const AdminView = () => {
   const [logLevel, setLogLevel] = useState<(typeof LOG_LEVELS)[number]>('all');
   const [logQuery, setLogQuery] = useState('');
   const [logs, setLogs] = useState<AdminLogEntry[]>([]);
-  const cursorRef = useRef(0);
+  // #179: retained logs come from Grafana Cloud Loki; `configured`/`error`
+  // describe graceful degradation (Loki env absent or unreachable).
+  const [logsConfigured, setLogsConfigured] = useState(true);
+  const [logsError, setLogsError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [activeSection, setActiveSection] = useState<
     'users' | 'models' | 'logs' | 'compare' | 'graph' | 'traces' | 'access'
@@ -70,28 +74,21 @@ const AdminView = () => {
   const [newPatToken, setNewPatToken] = useState<string | null>(null);
   const [patCopied, setPatCopied] = useState(false);
 
-  // Issue #76: incremental polling via the monotonic log cursor. A filter
-  // change resets the cursor because the server filters by level/text, so
-  // previous ids must be re-fetched under the new filter.
+  // #179: retained logs are one time-window page from Loki (default last
+  // 24h), newest first. A filter change re-queries the window; there is no
+  // incremental cursor (Loki is queried by time, not id).
   const loadLogs = useCallback(
-    async (params: { level?: 'info' | 'warn' | 'error'; q?: string; reset?: boolean }) => {
-      const { level, q, reset } = params;
-      if (reset) cursorRef.current = 0;
+    async (params: { level?: 'info' | 'warn' | 'error'; q?: string }) => {
       try {
-        const res = await AdminLogsService.listLogs({
-          level,
-          q,
-          cursor: cursorRef.current,
-        });
-        cursorRef.current = res.nextCursor;
-        setLogs((prev) => {
-          const next = reset ? res.logs : [...prev, ...res.logs];
-          return next.slice(-300);
-        });
-      } catch {
-        // Polling failure is non-fatal: the next tick or manual refresh
-        // retries. Suppressing the error avoids flashing the inline banner
-        // every poll when the admin page is left open in a background tab.
+        const res = await AdminLogsService.listLogs({ level: params.level, q: params.q });
+        setLogs(res.logs);
+        setLogsConfigured(res.configured);
+        setLogsError(res.error ?? null);
+      } catch (err) {
+        // A failed fetch is non-fatal for the rest of the view, but surface it
+        // inline so the admin knows the log pane is stale rather than empty.
+        setLogs([]);
+        setLogsError(err instanceof Error ? err.message : 'Failed to load logs.');
       }
     },
     [],
@@ -292,19 +289,20 @@ const AdminView = () => {
     loadModels();
   }, [loadUsers, loadModels]);
 
-  // Issue #91: logs fetches and the poll timer only run while the Logs
-  // section is visible — an every-3s poll against a hidden tab wastes API
-  // calls and eventually trips rate limiting.
+  // #179: retained logs fetch only while the Logs section is visible (issue
+  // #91). A 30s refresh keeps the window current without hammering Loki with
+  // an incremental 3s poll — the window is 24h, not a live tail.
   useEffect(() => {
     if (activeSection !== 'logs') return;
-    loadLogs({ level: logLevel === 'all' ? undefined : logLevel, q: logQuery, reset: true });
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    loadLogs({ level: logLevel === 'all' ? undefined : logLevel, q: logQuery });
   }, [loadLogs, logLevel, logQuery, activeSection]);
 
   useEffect(() => {
     if (activeSection !== 'logs') return;
     const timer = setInterval(() => {
       loadLogs({ level: logLevel === 'all' ? undefined : logLevel, q: logQuery });
-    }, POLL_INTERVAL_MS);
+    }, LOGS_REFRESH_MS);
     return () => clearInterval(timer);
   }, [loadLogs, logLevel, logQuery, activeSection]);
 
@@ -1100,7 +1098,8 @@ const AdminView = () => {
             <section data-testid="admin-logs-section">
               <h3 className="font-heading text-lg font-semibold">Logs</h3>
               <p className="text-xs text-muted-foreground">
-                Live server log tail (issue #76) — filters the admin API's in-memory buffer.
+                Retained server logs (#179) — last 24 hours from Grafana Cloud, newest first. These
+                survive deploys, unlike the old in-memory buffer.
               </p>
               <div className="mt-4 flex flex-wrap items-center gap-3">
                 {LOG_LEVELS.map((level) => (
@@ -1127,7 +1126,15 @@ const AdminView = () => {
                 data-testid="admin-logs"
                 className="mt-4 max-h-80 overflow-y-auto rounded-xl border border-border bg-card"
               >
-                {logs.length === 0 && (
+                {!logsConfigured && (
+                  <p className="px-4 py-3 text-sm text-muted-foreground">
+                    Retained logs are not configured (Loki env absent).
+                  </p>
+                )}
+                {logsConfigured && logsError && (
+                  <p className="px-4 py-3 text-sm text-destructive">{logsError}</p>
+                )}
+                {logsConfigured && !logsError && logs.length === 0 && (
                   <p className="px-4 py-3 text-sm text-muted-foreground">No log entries.</p>
                 )}
                 {logs.map((log) => (

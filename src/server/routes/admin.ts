@@ -6,7 +6,8 @@ import { AdminUser } from '../../shared/contracts';
 import { ProviderRouting } from '../models/ProviderRouting';
 import { ModelMetricStat } from '../models/ModelMetricStat';
 import { ModelRouteError } from '../models/ModelRouteError';
-import { getLogs, LogLevel } from '../services/logService';
+import { LogLevel } from '../services/logService';
+import { queryRetainedLogs } from '../services/lokiLogs';
 import {
   MAX_COMPARE_MODELS,
   runModelComparison,
@@ -480,21 +481,21 @@ router.get(
   },
 );
 
-// Issue #76: read-only tail of the in-memory log buffer for the admin
-// logs view / API consumers. Supports incremental polling via cursor.
-router.get('/logs', ...adminGuard, (req, res) => {
+// #179: retained logs from Grafana Cloud (hosted Loki), replacing the old
+// in-memory buffer tail. One time-window page, newest first; filters are
+// applied server-side after fetch (see services/lokiLogs.ts).
+router.get('/logs', ...adminGuard, async (req, res) => {
   const level = req.query.level as LogLevel | undefined;
   if (level !== undefined && !['info', 'warn', 'error'].includes(level)) {
     return res.status(400).json({ message: "level must be 'info', 'warn' or 'error'" });
   }
+  const rawHours = Number(req.query.hours);
+  const hours = Number.isFinite(rawHours) && rawHours > 0 ? rawHours : undefined;
   const rawLimit = Number(req.query.limit);
-  const limit =
-    Number.isInteger(rawLimit) && rawLimit > 0 && rawLimit <= 1000 ? rawLimit : undefined;
-  const rawCursor = Number(req.query.cursor);
-  const cursor = Number.isInteger(rawCursor) && rawCursor >= 0 ? rawCursor : undefined;
+  const limit = Number.isInteger(rawLimit) && rawLimit > 0 ? rawLimit : undefined;
   const q = typeof req.query.q === 'string' ? req.query.q : undefined;
-  const { logs, nextCursor } = getLogs({ level, q, cursor, limit });
-  res.json({ logs, nextCursor });
+  const { logs, configured, error } = await queryRetainedLogs({ level, q, hours, limit });
+  res.json({ logs, configured, ...(error ? { error } : {}) });
 });
 
 router.put('/users/:id/permissions', ...adminGuard, async (req, res) => {
