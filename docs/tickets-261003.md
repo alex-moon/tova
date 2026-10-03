@@ -37,9 +37,9 @@ and for #195/#196/#199, all of which currently cannot be observed green.
 
 ## (a) Ready to go today
 
-### #181 — Speed up tests · branch `feat/181-speed-up` (PR #204, open, not draft)
+### #181 — Speed up tests · branch `feat/181-speed-up` (PR #204, open, NOT draft)
 
-**Status: essentially ready; needs a cleanup pass, then ship.**
+**Status: DONE — shipped this pass (PR #204 green, out of draft).**
 
 The branch replaces per-suite `MongoMemoryServer.create()` with one shared
 instance via `globalSetup` + a per-worker/suite database name, and drops
@@ -47,15 +47,22 @@ instance via `globalSetup` + a per-worker/suite database name, and drops
 `src/server/test/globalSetup.ts`, `package.json`). This is the same mechanism
 that should fix the `#0` flakiness.
 
-Caveats to clear before merge (all small):
+Completed this pass:
 
-- `scripts/tmp-probe-mms.ts` is a throwaway diagnostic — delete it.
-- Prove the target: the ticket wants **< 60s**. No timing evidence is recorded
-  on the branch/PR. Run the suite and capture the number.
-- Confirm the `main` flake (Blocker #0) actually clears under the new harness;
-  that is this ticket's real payoff.
-
-No architectural decision is outstanding. I can finish and ship this today.
+- Deleted throwaway `scripts/tmp-probe-mms.ts`.
+- Fixed the two defects in the draft: `globalTeardown` now lives in its own
+  `globalTeardown.ts` (Jest silently ignores a named teardown export alongside a
+  default `globalSetup`, which was leaking a `mongod` every run). Bonus: the
+  `globalThis` handoff between the separate hook files **does** work in this Jest
+  version — verified empirically, so no state-file machinery was needed.
+- Enabled ts-jest `isolatedModules` (type-free transform); `npm run typecheck`
+  remains the separate type gate.
+- **Target met:** `npm test` **~29–34s cold, ~29s warm** (was ~60–90s).
+- Flake hardening confirmed: the intermittently flaky suites
+  (`chat.test.ts`, `chat.stream.test.ts`, `modelConfigService.test.ts`) passed
+  **5/5** runs; full suite **3/3** green.
+- `npm run ci` exits 0; no surviving test `mongod` (`pgrep -fl mongod`).
+- PR #204 marked ready for review; CI green.
 
 ---
 
@@ -177,8 +184,8 @@ shouldn't pick it unilaterally.
 
 ## Suggested order
 
-1. **#181** — finish + ship (cleanup, record timing, confirm flakes clear).
-   This unblocks the merge gate for everything else.
+1. ~~**#181** — finish + ship (cleanup, record timing, confirm the flake clears).~~
+   **Done this pass:** ~29s suite, flake stable 5/5, PR #204 green.
 2. **#199** — branch is complete; fix tests, run the routing-evidence pass,
    Playwright the admin table, ship.
 3. **#196** — make the presentation calls, add the missing client half, ship.
@@ -189,12 +196,12 @@ shouldn't pick it unilaterally.
 
 ## Quick scoreboard
 
-| Ticket | Branch/PR                                   | Bucket | Next action                                  |
-| ------ | ------------------------------------------- | ------ | -------------------------------------------- |
-| #181   | `feat/181-speed-up` / #204                  | (a)    | cleanup, time it, ship — unblocks gate       |
-| #196   | `feat/196-tool-ux`                          | (b)    | make presentation calls, finish client, ship |
-| #197   | —                                           | (b)    | decide view + split, implement core          |
-| #199   | `feat/199-model-pricing` / #206             | (b)    | fix tests, evidence pass, Playwright, ship   |
-| #195   | `feat/195-confirm-completed` / #205 (draft) | (c)    | your 2 answers + repro                       |
-| #179   | —                                           | (c)    | your infra topology call                     |
-| #166   | —                                           | (c)    | your mechanism call (I can propose)          |
+| Ticket | Branch/PR                                   | Bucket  | Next action                                  |
+| ------ | ------------------------------------------- | ------- | -------------------------------------------- |
+| #181   | `feat/181-speed-up` / #204                  | ✅ DONE | shipped; PR green, ready for review          |
+| #196   | `feat/196-tool-ux`                          | (b)     | make presentation calls, finish client, ship |
+| #197   | —                                           | (b)     | decide view + split, implement core          |
+| #199   | `feat/199-model-pricing` / #206             | (b)     | fix tests, evidence pass, Playwright, ship   |
+| #195   | `feat/195-confirm-completed` / #205 (draft) | (c)     | your 2 answers + repro                       |
+| #179   | —                                           | (c)     | your infra topology call                     |
+| #166   | —                                           | (c)     | your mechanism call (I can propose)          |
