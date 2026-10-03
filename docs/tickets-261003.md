@@ -90,24 +90,31 @@ tests cover reconciliation, the summary box, and the richer detail; live
 Playwright check confirmed one resolved chip, persisted `Message.tools`, and
 survival across reload.
 
-### #197 — In-app asset viewer · no branch
+### #197 — In-app asset viewer · branch `feat/197-asset-viewer`
 
-**Status: blocked on a scope/architecture question — but it is mine to call.**
+**Status: DONE — implemented, verified, `npm run ci` green.**
 
-Two decisions are open (triage flagged them as owner-only): (a) keep the
-Markdown preview in the existing assets modal vs. move assets to a separate
-URL-backed view; (b) whether to split image preview + OCR into new tickets.
+Both owner-only scope calls were made and recorded in
+`docs/plan-197-asset-viewer.md`:
 
-I can make both confidently:
+- **(a) Separate URL-backed view.** Assets moved to `/assets` (a la
+  profile/admin) as a master/detail: the file list on the left, the rendered
+  preview on the right.
+- **(b) Split image preview + OCR.** Filed as new tickets **#208** (image
+  preview, after thumbnailing) and **#209** (OCR ingest); both removed from
+  #197, which keeps the Markdown/text preview core.
 
-- **(a) Separate view.** The ticket's own gut leans that way, it mirrors the
-  existing profile/admin pattern, and previews need real estate a modal can't
-  give. This is a reversible routing choice, not a data-model one.
-- **(b) Split.** Image preview depends on thumbnailing (not built), and OCR is
-  its own ingest concern — file them as separate tickets and trim #197 to the
-  Markdown/text preview core, as the ticket invites.
+What shipped: a new authenticated, ownership-scoped
+`GET /api/assets/:id/content` (returns `textExtracted ?? markdownExtracted` with
+a `format` of `markdown`/`text`); a shared `MarkdownContent` renderer extracted
+from `ChatWindow` so previews and chat messages render identically; the
+`/assets` view wired into `App.tsx` with a "View all files" sidebar link. A
+`.md` upload and a converted pdf/docx/html render as Markdown; other text as
+plain text; a textless file shows `(no extracted text)`. Deep-linking a single
+asset (`/assets/:id`) was deliberately deferred.
 
-I can create the split tickets, update #197, and implement the core today.
+Verified: server + client tests (981 / 215), `npm run ci` exits 0, and a
+Playwright check against a live local stack rendered all four states.
 
 ### #199 — Model pricing · branch `feat/199-model-pricing` (PR #206, **MERGED**)
 
@@ -203,19 +210,23 @@ shouldn't pick it unilaterally.
 3. ~~**#196** — make the presentation calls, add the missing client half, ship.~~
    **Done:** all four UX items implemented + verified; `npm run ci` green; plan
    doc `docs/plan-196-tool-ux.md` recorded.
-4. **#197** — I make the scope call, split the tickets, implement the core.
+4. ~~**#197** — I make the scope call, split the tickets, implement the core.~~
+   **Done:** separate `/assets` view implemented; #208/#209 split out; tests
+   green; plan doc `docs/plan-197-asset-viewer.md` recorded.
 5. **#195** — needs your two answers + repro before it leaves draft.
 6. **#179**, **#166** — need owner decisions; #166 also welcomes a proposal
    from me to react to.
 
 ## Quick scoreboard
 
-| Ticket | Branch/PR                                   | Bucket  | Next action                                  |
-| ------ | ------------------------------------------- | ------- | -------------------------------------------- |
-| #181   | `feat/181-speed-up` / #204                  | ✅ DONE | merged to `main`                             |
-| #199   | `feat/199-model-pricing` / #206             | ✅ DONE | merged to `main` (`c199f60`)                 |
-| #196   | `feat/196-tool-ux`                          | ✅ DONE | all four UX items done; ci green             |
-| #197   | —                                           | (b)     | decide view + split, implement core          |
-| #195   | `feat/195-confirm-completed` / #205 (draft) | (c)     | your 2 answers + repro                       |
-| #179   | —                                           | (c)     | your infra topology call                     |
-| #166   | —                                           | (c)     | your mechanism call (I can propose)          |
+| Ticket | Branch/PR                                   | Bucket  | Next action                         |
+| ------ | ------------------------------------------- | ------- | ----------------------------------- |
+| #181   | `feat/181-speed-up` / #204                  | ✅ DONE | merged to `main`                    |
+| #199   | `feat/199-model-pricing` / #206             | ✅ DONE | merged to `main` (`c199f60`)        |
+| #196   | `feat/196-tool-ux`                          | ✅ DONE | all four UX items done; ci green    |
+| #197   | `feat/197-asset-viewer`                     | ✅ DONE | `/assets` view + content endpoint   |
+| #208   | —                                           | (b) new | image preview (after thumbnailing)  |
+| #209   | —                                           | (b) new | OCR ingest                          |
+| #195   | `feat/195-confirm-completed` / #205 (draft) | (c)     | your 2 answers + repro              |
+| #179   | —                                           | (c)     | your infra topology call            |
+| #166   | —                                           | (c)     | your mechanism call (I can propose) |
