@@ -7,6 +7,7 @@ import rehypeSanitize from 'rehype-sanitize';
 import {
   Check,
   ChevronDown,
+  Copy,
   ExternalLink,
   Eye,
   EyeOff,
@@ -319,6 +320,35 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
   // scrolling up releases the pin, sending/deltas restore it (#33 item 3).
   const pinnedRef = React.useRef(true);
   const [pendingFeedbackId, setPendingFeedbackId] = useState<string | null>(null);
+  // Issue #200: raw Markdown copy. The transient "copied" state is keyed by
+  // message id; one timer ref so a rapid re-copy can't leave a stale timer.
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+  const copyTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const handleCopyMessage = async (msg: Message) => {
+    // Copy the raw Markdown source; never the rendered HTML or the
+    // empty-response placeholder.
+    if (!msg.content) return;
+    if (!navigator.clipboard?.writeText) {
+      toast.error('Copy not supported');
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(msg.content);
+      setCopiedId(msg._id);
+      if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
+      copyTimerRef.current = setTimeout(() => setCopiedId(null), 1500);
+    } catch {
+      toast.error('Could not copy');
+    }
+  };
+
+  React.useEffect(
+    () => () => {
+      if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
+    },
+    [],
+  );
 
   // Issue #51: byte-identical toast for both attach paths (fresh upload and
   // library pick) — a shared helper so the copy can't drift.
@@ -527,6 +557,16 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
                   <div className="max-w-[92%] min-w-0 rounded-lg rounded-br-sm border border-primary/25 bg-msg-user px-4 py-3 break-words md:max-w-[85%] md:px-5 md:py-4">
                     <MessageContent content={msg.content} markdown={false} />
                   </div>
+                  <div className="mt-1 flex justify-end px-1">
+                    <button
+                      type="button"
+                      aria-label="Copy message as Markdown"
+                      onClick={() => void handleCopyMessage(msg)}
+                      className="rounded p-1 transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-2 focus-visible:outline-primary"
+                    >
+                      {copiedId === msg._id ? <Check size={13} /> : <Copy size={13} />}
+                    </button>
+                  </div>
                 </div>
               ) : (
                 <div className="mb-6 min-w-0 max-w-[92%] md:mb-8 md:max-w-[85%]">
@@ -541,14 +581,26 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
                     <MessageContent content={msg.content || EMPTY_RESPONSE_PLACEHOLDER} markdown />
                   </div>
                   {msg.sources && msg.sources.length > 0 && <SourcesBlock message={msg} />}
-                  {msg.modelName && (
+                  {(msg.modelName || msg.content) && (
                     <div className="mt-1 flex items-center gap-3 px-4 text-xs text-muted-foreground md:px-5">
-                      <span>
-                        {msg.provider && msg.modelName
-                          ? `${msg.provider} · ${msg.modelName}`
-                          : msg.modelName}
-                      </span>
-                      {onFeedback && (
+                      {msg.modelName && (
+                        <span>
+                          {msg.provider && msg.modelName
+                            ? `${msg.provider} · ${msg.modelName}`
+                            : msg.modelName}
+                        </span>
+                      )}
+                      {msg.content && (
+                        <button
+                          type="button"
+                          aria-label="Copy message as Markdown"
+                          onClick={() => void handleCopyMessage(msg)}
+                          className="rounded p-1 transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-2 focus-visible:outline-primary"
+                        >
+                          {copiedId === msg._id ? <Check size={13} /> : <Copy size={13} />}
+                        </button>
+                      )}
+                      {onFeedback && msg.modelName && (
                         <span className="flex items-center gap-1">
                           <button
                             type="button"

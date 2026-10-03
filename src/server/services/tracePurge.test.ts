@@ -22,7 +22,7 @@ describe('purgeUserTraces', () => {
   beforeEach(() => {
     process.env.LANGSMITH_API_KEY = 'ls-key';
     process.env.LANGSMITH_PROJECT = 'tova-dev';
-    fetchSpy = mockFetch(() => Promise.resolve(jsonResponse(200, [])));
+    fetchSpy = mockFetch(() => Promise.resolve(jsonResponse(200, { runs: [] })));
   });
 
   afterEach(() => {
@@ -49,12 +49,14 @@ describe('purgeUserTraces', () => {
       }
       if (typeof url === 'string' && url.includes('/api/v1/runs/query')) {
         return Promise.resolve(
-          jsonResponse(200, [
-            { trace_id: 'trace-1' },
-            { trace_id: 'trace-2' },
-            // no trace_id: tolerated
-            {},
-          ]),
+          jsonResponse(200, {
+            runs: [
+              { trace_id: 'trace-1' },
+              { trace_id: 'trace-2' },
+              // no trace_id: tolerated
+              {},
+            ],
+          }),
         );
       }
       expect(String(url)).toContain('/api/v1/runs/delete');
@@ -104,7 +106,7 @@ describe('purgeUserTraces', () => {
       }
       if (String(url).includes('/api/v1/runs/query')) {
         const offset = JSON.parse(init?.body ?? '{}').offset as number;
-        return Promise.resolve(jsonResponse(200, offset === 0 ? fullPages : []));
+        return Promise.resolve(jsonResponse(200, { runs: offset === 0 ? fullPages : [] }));
       }
       deleteBodies.push(JSON.parse(init?.body ?? '{}'));
       return Promise.resolve(jsonResponse(202, {}));
@@ -117,6 +119,106 @@ describe('purgeUserTraces', () => {
     // 100 trace ids in exactly one delete batch of 100.
     expect(deleteBodies).toEqual([{ session_id: 'proj-1', trace_ids: expect.anything() }]);
     expect((deleteBodies[0] as { trace_ids: string[] }).trace_ids).toHaveLength(100);
+  });
+
+  it('splits ids from multiple full pages into delete batches of at most 100', async () => {
+    const pageOne = Array.from({ length: 100 }, (_, i) => ({ trace_id: `p1-${i}` }));
+    const pageTwo = Array.from({ length: 50 }, (_, i) => ({ trace_id: `p2-${i}` }));
+    const deleteBodies: unknown[] = [];
+    fetchSpy.mockImplementation((url: string, init?: { body?: string }) => {
+      if (String(url).includes('/api/v1/sessions')) {
+        return Promise.resolve(jsonResponse(200, [{ id: 'proj-1', name: 'tova-dev' }]));
+      }
+      if (String(url).includes('/api/v1/runs/query')) {
+        const offset = JSON.parse(init?.body ?? '{}').offset as number;
+        return Promise.resolve(
+          jsonResponse(200, { runs: offset === 0 ? pageOne : offset === 100 ? pageTwo : [] }),
+        );
+      }
+      deleteBodies.push(JSON.parse(init?.body ?? '{}'));
+      return Promise.resolve(jsonResponse(202, {}));
+    });
+
+    await purgeUserTraces(['sess-1']);
+
+    // 150 ids → one batch of 100, then a remainder batch of 50.
+    expect(deleteBodies).toHaveLength(2);
+    expect((deleteBodies[0] as { trace_ids: string[] }).trace_ids).toHaveLength(100);
+    expect((deleteBodies[1] as { trace_ids: string[] }).trace_ids).toHaveLength(50);
+    const all = deleteBodies.flatMap((b) => (b as { trace_ids: string[] }).trace_ids);
+    expect(new Set(all).size).toBe(150);
+  });
+
+  it('treats a non-array `runs` as malformed: logs, deletes nothing, never throws', async () => {
+    const errorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+    fetchSpy.mockImplementation((url: string) => {
+      if (String(url).includes('/api/v1/sessions')) {
+        return Promise.resolve(jsonResponse(200, [{ id: 'proj-1', name: 'tova-dev' }]));
+      }
+      return Promise.resolve(jsonResponse(200, { runs: 'nope' }));
+    });
+
+    await expect(purgeUserTraces(['sess-1'])).resolves.toBeUndefined();
+
+    expect(errorSpy).toHaveBeenCalled();
+    expect(fetchSpy.mock.calls.filter(([u]) => String(u).includes('/runs/delete'))).toHaveLength(0);
+    errorSpy.mockRestore();
+  });
+
+  it('treats an absent `runs` key as malformed (not an empty page): logs and deletes nothing', async () => {
+    const errorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+    fetchSpy.mockImplementation((url: string) => {
+      if (String(url).includes('/api/v1/sessions')) {
+        return Promise.resolve(jsonResponse(200, [{ id: 'proj-1', name: 'tova-dev' }]));
+      }
+      return Promise.resolve(jsonResponse(200, { cursors: [] }));
+    });
+
+    await expect(purgeUserTraces(['sess-1'])).resolves.toBeUndefined();
+
+    expect(errorSpy).toHaveBeenCalled();
+    expect(fetchSpy.mock.calls.filter(([u]) => String(u).includes('/runs/delete'))).toHaveLength(0);
+    errorSpy.mockRestore();
+  });
+
+  it('rejects the legacy array-shaped body (the #187 regression): logs, deletes nothing', async () => {
+    // Before #187 the response body was cast as an array. Guard against a
+    // silent revert to that assumption: an array body has no `runs` key, so it
+    // must be treated as malformed rather than read as a page of runs.
+    const errorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+    fetchSpy.mockImplementation((url: string) => {
+      if (String(url).includes('/api/v1/sessions')) {
+        return Promise.resolve(jsonResponse(200, [{ id: 'proj-1', name: 'tova-dev' }]));
+      }
+      return Promise.resolve(jsonResponse(200, [{ trace_id: 'trace-1' }]));
+    });
+
+    await expect(purgeUserTraces(['sess-1'])).resolves.toBeUndefined();
+
+    expect(errorSpy).toHaveBeenCalled();
+    expect(fetchSpy.mock.calls.filter(([u]) => String(u).includes('/runs/delete'))).toHaveLength(0);
+    errorSpy.mockRestore();
+  });
+
+  it('advances pagination on an all-blank page without deleting', async () => {
+    const blankPage = Array.from({ length: 100 }, () => ({}));
+    fetchSpy.mockImplementation((url: string, init?: { body?: string }) => {
+      if (String(url).includes('/api/v1/sessions')) {
+        return Promise.resolve(jsonResponse(200, [{ id: 'proj-1', name: 'tova-dev' }]));
+      }
+      if (String(url).includes('/api/v1/runs/query')) {
+        const offset = JSON.parse(init?.body ?? '{}').offset as number;
+        return Promise.resolve(jsonResponse(200, { runs: offset === 0 ? blankPage : [] }));
+      }
+      expect(String(url)).toContain('/api/v1/runs/delete');
+      return Promise.resolve(jsonResponse(202, {}));
+    });
+
+    await expect(purgeUserTraces(['sess-1'])).resolves.toBeUndefined();
+
+    // Full blank page → a second page is queried; no ids were ever collected.
+    expect(fetchSpy.mock.calls.filter(([u]) => String(u).includes('/runs/query')).length).toBe(2);
+    expect(fetchSpy.mock.calls.filter(([u]) => String(u).includes('/runs/delete'))).toHaveLength(0);
   });
 
   it('degrades every API failure to a log, never a throw', async () => {
@@ -138,7 +240,7 @@ describe('purgeUserTraces', () => {
         queryCalls += 1;
         return queryCalls === 2
           ? Promise.resolve(jsonResponse(429, { detail: 'rate limited' }))
-          : Promise.resolve(jsonResponse(200, [{ trace_id: `t-${queryCalls}` }]));
+          : Promise.resolve(jsonResponse(200, { runs: [{ trace_id: `t-${queryCalls}` }] }));
       }
       deleteCalls.push(JSON.parse(init?.body ?? '{}'));
       return Promise.resolve(jsonResponse(202, {}));

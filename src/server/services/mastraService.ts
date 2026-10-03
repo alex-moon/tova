@@ -201,11 +201,19 @@ const mcpToolsetsFrom = async (options: CompletionOptions) => {
   return Object.keys(toolsets).length ? { toolsets } : {};
 };
 
-const callOptionsFrom = (options: CompletionOptions, mode: ToolsMode = 'full') => {
+const callOptionsFrom = (
+  options: CompletionOptions,
+  mode: ToolsMode = 'full',
+  instructions?: string,
+) => {
   const requestContext = new RequestContext();
   if (options.userId !== undefined) requestContext.set('userId', options.userId);
   return {
     ...(options.abortSignal ? { abortSignal: options.abortSignal } : {}),
+    // #198: the merged single system message rides in as a per-call override
+    // (superseding the agent's default `instructions`, which Mastra would
+    // otherwise inject as a second leading system message).
+    ...(instructions ? { instructions } : {}),
     maxSteps: mode === 'full' ? 12 : 1,
     modelSettings: modelSettingsFrom(options),
     ...traceOptionsFrom(options.trace),
@@ -751,16 +759,67 @@ export const mastraMessagesFor = (
   ) as unknown as Parameters<Agent['generate']>[0];
 };
 
+/*
+ * #198 single-system-message invariant. Qwen3.5 on DeepInfra (and other
+ * strict OpenAI-compatible servers) reject any `role: 'system'` message that
+ * is not at index 0 — including a second one at index 1 with the provider
+ * error "System message must be at the beginning.". Mastra injects the
+ * agent's own `instructions` (TOOL_INSTRUCTIONS on the full-tools path) as a
+ * leading system message, and the caller's `buildSystemContent(...)` system
+ * message rode in right after it, producing exactly that rejected shape.
+ *
+ * `splitLeadingSystem` pulls the caller's leading system message(s) out of the
+ * array so the connector can merge them with the agent's tool instructions
+ * into one per-call `instructions` override (D4). Only *leading* system
+ * messages are extracted; a system message after a non-system message is a
+ * contract violation surfaced loudly rather than silently reordered into a
+ * second leading system message (T5).
+ */
+const splitLeadingSystem = (
+  messages: CompletionOptions['messages'],
+): { system: string | undefined; rest: CompletionOptions['messages'] } => {
+  let index = 0;
+  while (index < messages.length && messages[index].role === 'system') index += 1;
+  const leading = messages.slice(0, index);
+  const rest = messages.slice(index);
+  if (rest.some((message) => message.role === 'system')) {
+    throw new Error(
+      'Non-leading system message in completion request (#198): system messages must ' +
+        'come before any user/assistant message so they can be collapsed into a single ' +
+        'leading system message.',
+    );
+  }
+  const system = leading
+    .map((message) =>
+      typeof message.content === 'string'
+        ? message.content
+        : message.content.map((part) => (part.type === 'text' ? part.text : '')).join(''),
+    )
+    .filter((text) => text.length > 0)
+    .join('\n\n');
+  return { system: system.length > 0 ? system : undefined, rest };
+};
+
+/*
+ * Merged per-call system prompt (#198): the agent's tool instructions first,
+ * mirroring today's index-0 order, then the caller's system content, joined by
+ * a blank line (D4/OQ1). A caller with no system message still gets the tool
+ * guidance, so the collapse never silently drops it (D3).
+ */
+const mergedInstructions = (toolInstructions: string, callerSystem: string | undefined): string =>
+  [toolInstructions, callerSystem].filter((part): part is string => Boolean(part)).join('\n\n');
+
 const buildConnector = (provider: LlmProvider): LlmConnector => {
   // #52: the default main-chat path always carries built-in tools now.
   const defaultMode: ToolsMode = 'full';
 
   return {
     createCompletion: async (options: CompletionOptions): Promise<NeutralCompletion> => {
+      const { system, rest } = splitLeadingSystem(options.messages);
       const result = await agentFor(provider, options.model).generate(
-        mastraMessagesFor(provider, options.messages),
+        mastraMessagesFor(provider, rest),
         {
-          ...callOptionsFrom(options, defaultMode),
+          ...callOptionsFrom(options, defaultMode, mergedInstructions(TOOL_INSTRUCTIONS, system)),
           ...(await mcpToolsetsFrom(options)),
         },
       );
@@ -777,10 +836,11 @@ const buildConnector = (provider: LlmProvider): LlmConnector => {
       };
     },
     createStreamingCompletion: async (options: CompletionOptions): Promise<NeutralChunkStream> => {
+      const { system, rest } = splitLeadingSystem(options.messages);
       const result = await agentFor(provider, options.model).stream(
-        mastraMessagesFor(provider, options.messages),
+        mastraMessagesFor(provider, rest),
         {
-          ...callOptionsFrom(options, defaultMode),
+          ...callOptionsFrom(options, defaultMode, mergedInstructions(TOOL_INSTRUCTIONS, system)),
           ...(await mcpToolsetsFrom(options)),
         },
       );
@@ -794,9 +854,10 @@ const buildConnector = (provider: LlmProvider): LlmConnector => {
      * tool transport.
      */
     createToolFreeCompletion: async (options: CompletionOptions): Promise<NeutralCompletion> => {
+      const { system, rest } = splitLeadingSystem(options.messages);
       const result = await agentFor(provider, options.model, false).generate(
-        mastraMessagesFor(provider, options.messages),
-        { ...callOptionsFrom(options), maxSteps: 1 },
+        mastraMessagesFor(provider, rest),
+        { ...callOptionsFrom(options, 'plain', mergedInstructions('', system)), maxSteps: 1 },
       );
       return { choices: [{ message: { content: result.text ?? null } }] };
     },
