@@ -524,6 +524,65 @@ describe('Router Service', () => {
       expect(result.model).toBe('gemma-test');
       expect(result.provider).toBe('deepinfra');
     });
+
+    /*
+     * #199: the explore draw is price-weighted — a cheaper model draws a
+     * higher probability. Weights are 1/price; unknown price is neutral
+     * (weight 1). Pool: `cheap` ($0.5) vs `pricey` ($2.0) → weights 2 vs
+     * 0.5, total 2.5, normalized buckets [0, 0.2) pricey and [0.2, 1) cheap.
+     */
+    const cheap: ModelRef = {
+      provider: 'deepinfra',
+      model: 'cheap',
+      inputPrice: 0.2,
+      outputPrice: 0.3,
+    };
+    const pricey: ModelRef = {
+      provider: 'deepinfra',
+      model: 'pricey',
+      inputPrice: 1,
+      outputPrice: 1,
+    };
+
+    it('weights a cheaper model to a higher selection probability', () => {
+      const models = [pricey, cheap];
+      // Draw 0.1 lands in the small pricey bucket even though `cheap` is the
+      // more likely pick overall.
+      expect(pickModelRef(models, 'large', 1, () => 0.1)).toBe(pricey);
+      // Draw 0.5 lands in the wide cheap bucket.
+      expect(pickModelRef(models, 'large', 1, () => 0.5)).toBe(cheap);
+    });
+
+    it('treats an unknown-price row as neutral, not free', () => {
+      const unknown: ModelRef = { provider: 'deepinfra', model: 'unknown' };
+      // unknown weight 1, cheap weight 2 → total 3, buckets [0,1/3),[1/3,1).
+      expect(pickModelRef([unknown, cheap], 'large', 1, () => 0.2)).toBe(unknown);
+      expect(pickModelRef([unknown, cheap], 'large', 1, () => 0.5)).toBe(cheap);
+    });
+
+    it('preserves uniform selection when no row has a price', () => {
+      const models = [groqSmall, groqLarge];
+      expect(pickModelRef(models, 'small', 1, () => 0)).toBe(groqSmall);
+      expect(pickModelRef(models, 'small', 1, () => 0.49)).toBe(groqSmall);
+      expect(pickModelRef(models, 'small', 1, () => 0.51)).toBe(groqLarge);
+    });
+
+    it('makes a free model the most probable without dividing by zero', () => {
+      const free: ModelRef = {
+        provider: 'deepinfra',
+        model: 'free',
+        inputPrice: 0,
+        outputPrice: 0,
+      };
+      const paid: ModelRef = {
+        provider: 'deepinfra',
+        model: 'paid',
+        inputPrice: 1,
+        outputPrice: 1,
+      };
+      // Weight 10000 vs 1/2; essentially any draw above ~0 picks `free`.
+      expect(pickModelRef([paid, free], 'large', 1, () => 0.99)).toBe(free);
+    });
   });
 
   describe('Vision-aware routing (#115)', () => {
