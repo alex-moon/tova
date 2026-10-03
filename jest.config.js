@@ -2,7 +2,7 @@ module.exports = {
   // tsconfig without rootDir so suites may import the scripts/ harness directly.
   preset: 'ts-jest',
   transform: {
-    '^.+\\.tsx?$': ['ts-jest', { tsconfig: 'tsconfig.test.json' }],
+    '^.+\\.tsx?$': ['ts-jest', { tsconfig: 'tsconfig.test.json', isolatedModules: true }],
   },
   testEnvironment: 'node',
   // Silence all console output from tests: suites intentionally exercise
@@ -12,7 +12,7 @@ module.exports = {
   roots: ['<rootDir>/src/server'],
   testMatch: ['**/*.test.ts'],
   globalSetup: '<rootDir>/src/server/test/globalSetup.ts',
-  globalTeardown: '<rootDir>/src/server/test/globalSetup.ts',
+  globalTeardown: '<rootDir>/src/server/test/globalTeardown.ts',
   setupFilesAfterEnv: ['<rootDir>/src/server/test/setup.ts'],
   modulePathIgnorePatterns: ['<rootDir>/dist/'],
   // `@mastra/core`'s CJS build requires ESM-only transitive deps (e.g.
