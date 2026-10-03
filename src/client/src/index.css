@@ -349,7 +349,6 @@ h6 {
   border-collapse: collapse;
   border: 1px solid var(--c-border);
   border-radius: 8px;
-  overflow: hidden;
   font-size: 0.925em;
 }
 

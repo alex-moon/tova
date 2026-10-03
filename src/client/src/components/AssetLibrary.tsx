@@ -5,10 +5,8 @@ import {
   FileSpreadsheet,
   FileText,
   Loader2,
-  Paperclip,
   Trash2,
   Upload,
-  X,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
@@ -41,26 +39,14 @@ const IconFor: React.FC<{ contentType: string; filename: string }> = ({
 };
 
 interface AssetLibraryProps {
-  // Omitted when `embedded` (issue #197): a full view has no overlay to close.
-  onClose?: () => void;
-  // Issue #51: hands a library asset back to the composer without re-uploading
-  // bytes. Optional so the library works standalone (Sidebar render).
-  onPickAsset?: (asset: AssetSummary) => void;
-  // Issue #197: render as a plain pane (no modal overlay/backdrop) so the
-  // separate `/assets` view can host it beside a preview. When embedded,
-  // `onSelect` reports the clicked asset.
-  embedded?: boolean;
+  // Issue #197: the library is always the embedded pane now — the separate
+  // `/files` view hosts it beside a preview. `onSelect` reports a clicked
+  // asset; `selectedId` highlights the current one.
   onSelect?: (asset: AssetSummary) => void;
   selectedId?: string | null;
 }
 
-const AssetLibrary: React.FC<AssetLibraryProps> = ({
-  onClose,
-  onPickAsset,
-  embedded = false,
-  onSelect,
-  selectedId = null,
-}) => {
+const AssetLibrary: React.FC<AssetLibraryProps> = ({ onSelect, selectedId = null }) => {
   const [assets, setAssets] = useState<AssetSummary[]>([]);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -231,17 +217,6 @@ const AssetLibrary: React.FC<AssetLibraryProps> = ({
     <>
       <div className="flex h-14 shrink-0 items-center justify-between border-b border-border px-4">
         <h2 className="font-heading text-lg font-semibold">Files</h2>
-        {!embedded && (
-          <Button
-            variant="ghost"
-            size="icon"
-            aria-label="Close files"
-            onClick={onClose}
-            className="text-muted-foreground"
-          >
-            <X />
-          </Button>
-        )}
       </div>
       <div className="flex-1 overflow-y-auto p-4">
         {loading ? (
@@ -333,9 +308,7 @@ const AssetLibrary: React.FC<AssetLibraryProps> = ({
                   </div>
                 </div>
               ))}
-            <ul
-              className={cn('grid grid-cols-1 gap-2', embedded ? 'grid-cols-1' : 'sm:grid-cols-2')}
-            >
+            <ul className="grid grid-cols-1 gap-2">
               {assets.map((asset) =>
                 armedId === asset.id ? (
                   <li
@@ -381,7 +354,7 @@ const AssetLibrary: React.FC<AssetLibraryProps> = ({
                     key={asset.id}
                     className={cn(
                       'flex items-center gap-3 rounded-lg border border-border bg-msg-assistant px-3 py-2.5',
-                      embedded && selectedId === asset.id && 'border-primary bg-accent',
+                      selectedId === asset.id && 'border-primary bg-accent',
                     )}
                   >
                     <input
@@ -396,11 +369,10 @@ const AssetLibrary: React.FC<AssetLibraryProps> = ({
                     <IconFor contentType={asset.contentType} filename={asset.filename} />
                     <button
                       type="button"
-                      disabled={!embedded}
                       aria-label={`Preview ${asset.filename}`}
-                      data-testid={embedded ? `asset-preview-${asset.id}` : undefined}
-                      onClick={embedded ? () => onSelect?.(asset) : undefined}
-                      className={cn('min-w-0 flex-1 text-left', embedded && 'cursor-pointer')}
+                      data-testid={`asset-preview-${asset.id}`}
+                      onClick={() => onSelect?.(asset)}
+                      className="min-w-0 flex-1 cursor-pointer text-left"
                     >
                       <span className="block truncate text-sm">{asset.filename}</span>
                       <span className="block text-xs text-muted-foreground">
@@ -427,23 +399,6 @@ const AssetLibrary: React.FC<AssetLibraryProps> = ({
                         )}
                       </span>
                     </button>
-                    {onPickAsset && (
-                      <button
-                        type="button"
-                        title={
-                          asset.status === 'ready'
-                            ? 'Attach to chat'
-                            : 'This file is not ready to attach'
-                        }
-                        aria-label={`Attach ${asset.filename} to chat`}
-                        disabled={asset.status !== 'ready' || deletingId === asset.id}
-                        data-testid="asset-attach"
-                        onClick={() => onPickAsset(asset)}
-                        className="shrink-0 rounded p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
-                      >
-                        <Paperclip className="size-4" />
-                      </button>
-                    )}
                     <button
                       type="button"
                       title="Download"
@@ -548,33 +503,14 @@ const AssetLibrary: React.FC<AssetLibraryProps> = ({
     </>
   );
 
-  // Issue #197: the `/assets` view hosts the same list without the modal
-  // overlay; the chat surface keeps the overlay unchanged.
-  if (embedded) {
-    return (
-      <div
-        className="flex h-full min-h-0 flex-col border-r border-border panel-surface"
-        data-testid="asset-library"
-      >
-        {body}
-      </div>
-    );
-  }
-
+  // Issue #197: the `/files` view hosts this list as a plain pane (no modal
+  // overlay) beside the preview.
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
-      onClick={onClose}
+      className="flex h-full min-h-0 flex-col border-r border-border panel-surface"
+      data-testid="asset-library"
     >
-      <div
-        className="flex max-h-[85dvh] w-full max-w-2xl flex-col rounded-xl border border-border shadow-lg panel-surface"
-        onClick={(e) => e.stopPropagation()}
-        role="dialog"
-        aria-label="Asset library"
-        data-testid="asset-library"
-      >
-        {body}
-      </div>
+      {body}
     </div>
   );
 };

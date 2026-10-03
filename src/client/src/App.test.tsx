@@ -90,9 +90,9 @@ describe('App', () => {
     window.history.pushState({}, '', '/');
   });
 
-  it('renders the assets view at the /assets route (issue #197)', async () => {
+  it('renders the files view at the /files route (issue #197)', async () => {
     mockMe('user');
-    window.history.pushState({}, '', '/assets');
+    window.history.pushState({}, '', '/files');
     renderApp();
     expect(await screen.findByTestId('assets-view')).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Back to chat' }).getAttribute('href')).toBe('/');

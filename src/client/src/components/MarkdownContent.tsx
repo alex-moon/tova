@@ -26,6 +26,14 @@ const MarkdownLink = ({ href, children }: { href?: string; children?: React.Reac
   );
 };
 
+// Wide GFM tables must scroll on their own, not widen the chat column. A
+// wrapper carries the horizontal overflow; the table keeps its own styling.
+const MarkdownTable = ({ children }: { children?: React.ReactNode }) => (
+  <div className="max-w-full overflow-x-auto">
+    <table>{children}</table>
+  </div>
+);
+
 // Shared markdown renderer: assistant messages in the chat and the in-app
 // asset preview (issue #197) must render identically. Stored markdown can
 // contain raw HTML, so rehype-raw is paired with rehype-sanitize.
@@ -41,7 +49,7 @@ const MarkdownContent: React.FC<{ content: string; markdown: boolean }> = ({
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         rehypePlugins={[rehypeRaw, rehypeSanitize]}
-        components={{ a: MarkdownLink }}
+        components={{ a: MarkdownLink, table: MarkdownTable }}
       >
         {content}
       </ReactMarkdown>

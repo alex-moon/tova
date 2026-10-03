@@ -38,14 +38,6 @@ interface ChatWindowProps {
   incognito?: boolean;
   onToggleIncognito?: (value: boolean) => void;
   onFeedback?: (messageId: string, value: 'up' | 'down' | null) => void;
-  incomingAsset?: {
-    id: string;
-    filename: string;
-    contentType?: string;
-    hasText: boolean;
-    markdownStatus?: string;
-  } | null;
-  onPickedConsumed?: () => void;
 }
 
 const PLACEHOLDERS = [
@@ -292,8 +284,6 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
   incognito: incognitoProp,
   onToggleIncognito,
   onFeedback,
-  incomingAsset,
-  onPickedConsumed,
 }) => {
   const auth = useContext(AuthContext);
   // Per-chat incognito (#144): a controlled value from App when present,
@@ -459,26 +449,6 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
       setUploading(false);
     }
   };
-
-  // Library pick (issue #51): the pick carries { id, filename, hasText }; it
-  // becomes the same in-memory attachment shape as a fresh upload. The pick is
-  // consumed exactly once (so re-picking the same asset re-triggers later). If
-  // an upload is in flight, the pick is consumed without applying — the
-  // in-flight upload wins and would otherwise silently overwrite the pick.
-  React.useEffect(() => {
-    if (!incomingAsset) return;
-    if (!uploading) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setAttachment({
-        id: incomingAsset.id,
-        filename: incomingAsset.filename,
-        contentType: incomingAsset.contentType,
-      });
-      if (!incomingAsset.hasText) toastForAsset(incomingAsset);
-    }
-    onPickedConsumed?.();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [incomingAsset]);
 
   return (
     <section className="flex min-w-0 flex-1 flex-col overflow-hidden">

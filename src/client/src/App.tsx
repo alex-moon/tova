@@ -80,32 +80,23 @@ export function isProfileRoute() {
   return typeof window !== 'undefined' && window.location.pathname.startsWith('/profile');
 }
 
-// Issue #197: the assets view gets its own URL alongside profile/admin.
-export function isAssetsRoute() {
-  return typeof window !== 'undefined' && window.location.pathname.startsWith('/assets');
+// Issue #197: the files view gets its own URL alongside profile/admin. It is
+// `/files`, not `/assets` — the latter collides with Vite's static build
+// directory, which nginx serves ahead of the SPA fallback.
+export function isFilesRoute() {
+  return typeof window !== 'undefined' && window.location.pathname.startsWith('/files');
 }
 
 function App() {
   const { user, loading } = useAuth();
   const showAdminView = isAdminRoute();
   const showProfileView = isProfileRoute();
-  const showAssetsView = isAssetsRoute();
+  const showFilesView = isFilesRoute();
   const [sessions, setSessions] = useState<Session[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [isChatLoading, setIsChatLoading] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  // Files overlay + asset pick (issue #51): App owns both ends of the
-  // handoff so the library (in the Sidebar) can close itself and the
-  // composer (ChatWindow) can consume the pick.
-  const [showFiles, setShowFiles] = useState(false);
-  const [pickedAsset, setPickedAsset] = useState<{
-    id: string;
-    filename: string;
-    contentType?: string;
-    hasText: boolean;
-    markdownStatus?: string;
-  } | null>(null);
   const streamingRef = useRef(false);
   // Per-chat incognito (#144): the composer toggle's state. `null` means "no
   // manual choice yet — follow the profile's 'incognito by default'";
@@ -420,7 +411,7 @@ function App() {
           <BackToChatLink />
           <ProfileView />
         </>
-      ) : showAssetsView ? (
+      ) : showFilesView ? (
         <AssetsView />
       ) : showAdminView && user.role === 'admin' ? (
         <>
@@ -448,19 +439,6 @@ function App() {
             onNewChat={handleNewChat}
             onDeleteSession={handleDeleteSession}
             onClose={() => setSidebarOpen(false)}
-            showFiles={showFiles}
-            onToggleFiles={setShowFiles}
-            onPickAsset={(asset) => {
-              setPickedAsset({
-                id: asset.id,
-                filename: asset.filename,
-                contentType: asset.contentType,
-                hasText: asset.hasText,
-                markdownStatus: asset.markdownStatus,
-              });
-              setShowFiles(false);
-              setSidebarOpen(false);
-            }}
           />
           <ChatWindow
             messages={messages}
@@ -471,8 +449,6 @@ function App() {
             sessionId={activeSessionId}
             incognito={incognitoChoice ?? Boolean(user?.incognitoByDefault ?? user?.zdr)}
             onToggleIncognito={setIncognitoChoice}
-            incomingAsset={pickedAsset}
-            onPickedConsumed={() => setPickedAsset(null)}
           />
         </>
       )}

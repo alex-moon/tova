@@ -360,9 +360,9 @@ const assetFileFrom = (asset: {
 export const listFilesTool = createTool({
   id: 'list_files',
   description:
-    'List the files in the calling user’s asset library (uploaded documents/text ' +
+    'List the files in the calling user’s file library (uploaded documents/text ' +
     'files), newest first, with metadata (filename, type, size, upload date). ' +
-    'Call it when the user refers to their files, assets, or library; call it ' +
+    'Call it when the user refers to their files or library; call it ' +
     'first whenever the user wants anything from the library.',
   inputSchema: z.object({}),
   outputSchema: z.object({
@@ -408,7 +408,7 @@ export const listFilesTool = createTool({
 export const readFileTool = createTool({
   id: 'read_file',
   description:
-    'Read a file from the calling user’s asset library by its id (from `list_files`), ' +
+    'Read a file from the calling user’s file library by its id (from `list_files`), ' +
     'returning its metadata (filename, type, size, upload date) and extracted text ' +
     'content when any exists. For long documents call with `unitsOnly: true` first ' +
     'to list the document’s units (pages/sections) with a short preview each, then ' +
@@ -568,7 +568,7 @@ export const readFileTool = createTool({
 export const generateFileTool = createTool({
   id: 'generate_file',
   description:
-    'Create a NEW markdown file in the calling user’s asset library, saved from your ' +
+    'Create a NEW markdown file in the calling user’s file library, saved from your ' +
     'own output (notes, summaries, drafts). Use it when the user asks to save, ' +
     'generate or create a file/note/document. Content must be markdown text.',
   inputSchema: z.object({
@@ -656,8 +656,8 @@ const TOOL_INSTRUCTIONS =
   'tool instead of guessing; it reports UTC only, do not convert to local time. ' +
   'Write the query as focused keywords. When search results arrive, answer with ' +
   'terse markdown links ([title](url)) for the claims you used; answer from your ' +
-  'own knowledge when no search is needed. When the user refers to their files, ' +
-  'assets, or library, call the `list_files` tool to see what they have; call ' +
+  'own knowledge when no search is needed. When the user refers to their files ' +
+  'or library, call the `list_files` tool to see what they have; call ' +
   '`read_file` with a file id from that list before quoting any file contents, ' +
   'and never invent file contents you have not read. For a long multi-unit ' +
   'document, call `read_file` with `unitsOnly: true` first to see the unit ' +

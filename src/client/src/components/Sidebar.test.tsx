@@ -32,8 +32,6 @@ const renderSidebar = (
         onNewChat={vi.fn()}
         onDeleteSession={onDeleteSession}
         onClose={onClose}
-        showFiles={false}
-        onToggleFiles={vi.fn()}
       />
     </AuthContext.Provider>,
   );
@@ -74,6 +72,16 @@ describe('Sidebar footer avatar (issue #35)', () => {
     const link = screen.getByRole('link', { name: 'Open profile' });
     expect(link.getAttribute('href')).toBe('/profile');
     expect(screen.queryByTestId('profile-modal')).not.toBeInTheDocument();
+  });
+
+  // Issue #197: the old in-app Files overlay is gone — the sidebar links to
+  // the standalone /files view instead (it must not be /assets, which nginx
+  // serves ahead of the SPA fallback).
+  it('links the files view at /files and renders no files modal (issue #197)', () => {
+    renderSidebar(user);
+    const link = screen.getByRole('link', { name: 'Files' });
+    expect(link.getAttribute('href')).toBe('/files');
+    expect(screen.queryByTestId('asset-library')).not.toBeInTheDocument();
   });
 });
 

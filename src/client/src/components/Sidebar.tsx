@@ -1,8 +1,6 @@
 import React from 'react';
 import { Files, LogOut, Plus, Trash2, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import AssetLibrary from './AssetLibrary';
-import type { AssetSummary } from '@/services/assets';
 import { cn } from '@/lib/utils';
 import { useAuth } from '../hooks/useAuth';
 import { useConfirmDelete } from '../hooks/useConfirmDelete';
@@ -30,12 +28,6 @@ interface SidebarProps {
   onNewChat: () => void;
   onDeleteSession: (id: string) => void;
   onClose: () => void;
-  // Files overlay state is owned by App (issue #51): picking an asset from
-  // the library has to close the overlay and reach the composer, both of
-  // which live above this component.
-  showFiles: boolean;
-  onToggleFiles: (open: boolean) => void;
-  onPickAsset?: (asset: AssetSummary) => void;
 }
 
 const Sidebar: React.FC<SidebarProps> = ({
@@ -46,9 +38,6 @@ const Sidebar: React.FC<SidebarProps> = ({
   onNewChat,
   onDeleteSession,
   onClose,
-  showFiles,
-  onToggleFiles,
-  onPickAsset,
 }) => {
   const { user, logout } = useAuth();
   const { armedId, arm, onYes, onAlways, onNo } = useConfirmDelete('chat', onDeleteSession);
@@ -56,7 +45,6 @@ const Sidebar: React.FC<SidebarProps> = ({
   return (
     <>
       {open && <div className="fixed inset-0 z-30 bg-black/50 md:hidden" onClick={onClose} />}
-      {showFiles && <AssetLibrary onClose={() => onToggleFiles(false)} onPickAsset={onPickAsset} />}
       <nav
         className={cn(
           'fixed inset-y-0 left-0 z-40 flex h-full w-(--sidebar-width) shrink-0 flex-col border-r border-border bg-sidebar panel-surface transition-transform md:static md:translate-x-0',
@@ -83,16 +71,13 @@ const Sidebar: React.FC<SidebarProps> = ({
             <Plus />
             New Chat
           </Button>
-          <Button variant="ghost" className="mt-1 w-full" onClick={() => onToggleFiles(true)}>
-            <Files />
-            Files
-          </Button>
-          {/* Issue #197: the full assets view (with previews) lives at /assets. */}
+          {/* Issue #197: the files view (list + preview) lives at /files. */}
           <a
-            href="/assets"
-            className="mt-1 flex w-full items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+            href="/files"
+            className="mt-1 flex h-9 w-full items-center justify-center gap-2 rounded-lg px-4 text-sm font-medium transition-colors hover:bg-accent"
           >
-            View all files
+            <Files className="size-4 shrink-0" />
+            Files
           </a>
         </div>
         <div className="flex-1 overflow-y-auto px-4">

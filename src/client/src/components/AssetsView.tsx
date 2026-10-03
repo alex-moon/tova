@@ -5,8 +5,8 @@ import MarkdownContent from './MarkdownContent';
 import BackToChatLink from './BackToChatLink';
 import AssetService, { type AssetContent, type AssetSummary } from '@/services/assets';
 
-// Issue #197: the assets view moves out of the chat modal to its own URL
-// (/assets), mirroring /profile and /admin. It is a master/detail: the
+// Issue #197: the files view moves out of the chat modal to its own URL
+// (/files), mirroring /profile and /admin. It is a master/detail: the
 // existing library list on the left, a rendered preview of the selected file
 // on the right. Text/markdown renders via MarkdownContent; images render a
 // derived thumbnail (#208) so the original is never pulled into the pane;
@@ -121,7 +121,6 @@ const AssetsView: React.FC = () => {
       <div className="flex min-h-0 flex-1 gap-4 px-6 pb-6">
         <div className="w-96 min-w-0 shrink-0 overflow-hidden rounded-xl border border-border">
           <AssetLibrary
-            embedded
             selectedId={selected?.id ?? null}
             onSelect={(asset) => setSelected(asset)}
           />
