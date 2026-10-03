@@ -90,9 +90,47 @@ tests cover reconciliation, the summary box, and the richer detail; live
 Playwright check confirmed one resolved chip, persisted `Message.tools`, and
 survival across reload.
 
-### #197 — In-app asset viewer · branch `feat/197-asset-viewer`
+### #208 — Asset viewer: image preview (after thumbnailing) · branch `feat/tv/208-image-preview` (PR #211)
 
 **Status: DONE — implemented, verified, `npm run ci` green.**
+
+Follow-up split out of #197. The `/assets` detail pane now renders a derived
+image thumbnail so the original is never loaded into the viewer. Both calls
+implied by the ticket were made and recorded in `docs/plan-208-image-preview.md`:
+
+- **Thumbnailing engine.** `@napi-rs/canvas` (already in the tree via
+  `pdf-parse`, promoted to a direct dependency) — no new native toolchain
+  (`sharp`/`jimp` rejected). Bounded to a 512px long edge, white-mat, PNG.
+- **Pipeline.** Generated on the existing asset-job worker (not a second
+  queue): `Asset.thumbnailStatus/thumbnailKey`, one shared `AssetJob` for
+  conversion and/or thumbnail, stored alongside the original under
+  `<userId>/<assetId>/`.
+
+What shipped: `GET /api/assets/:id/thumbnail-url` returning `{ url, status }`
+(ownership-scoped, null url until ready); the `AssetsView` image branch with a
+pending poll; `AssetLibrary` polling while any thumbnail is pending; terminal
+job failure now fails whichever lifecycle is pending without clobbering the
+other.
+
+Verified: server + client tests (994 / 218), `npm run ci` exits 0, and a
+Playwright check against a live local stack (uploaded an 800×500 PNG; the
+worker derived the thumbnail; the pane rendered it — asset and objects removed
+afterwards).
+
+### #209 — Asset ingest: OCR for images (and scanned PDFs) · no branch
+
+**Status: blocked on an engine decision.** No OCR capability exists in the
+repo or the environment (no `tesseract` binary, no OCR library), and the
+ticket leaves open whether OCR output feeds the existing
+`textExtracted`/`markdownExtracted` path or a dedicated field. The two viable
+engines carry real trade-offs that are a call for the owner: `tesseract.js`
+(pure WASM, no system binary, but a large runtime model download per deploy)
+vs. a native `tesseract` binary (fast, but new deploy/runtime provisioning).
+I can build either once the engine and target field are chosen.
+
+### #197 — In-app asset viewer · branch `feat/197-asset-viewer` (PR #210, **MERGED**)
+
+**Status: DONE — merged to `main` (PR #210, commit `8a68b0d`).**
 
 Both owner-only scope calls were made and recorded in
 `docs/plan-197-asset-viewer.md`:
@@ -211,10 +249,14 @@ shouldn't pick it unilaterally.
    **Done:** all four UX items implemented + verified; `npm run ci` green; plan
    doc `docs/plan-196-tool-ux.md` recorded.
 4. ~~**#197** — I make the scope call, split the tickets, implement the core.~~
-   **Done:** separate `/assets` view implemented; #208/#209 split out; tests
-   green; plan doc `docs/plan-197-asset-viewer.md` recorded.
-5. **#195** — needs your two answers + repro before it leaves draft.
-6. **#179**, **#166** — need owner decisions; #166 also welcomes a proposal
+   **Done:** PR #210 **merged**; separate `/assets` view implemented; #208/#209
+   split out; plan doc `docs/plan-197-asset-viewer.md` recorded.
+5. ~~**#208** — design the thumbnail pipeline, add the image preview, ship.~~
+   **Done:** worker-derived thumbnails + `AssetsView` image branch; `npm run ci`
+   green; plan doc `docs/plan-208-image-preview.md` recorded; PR #211 open.
+6. **#209** — needs an OCR-engine call (WASM vs. native binary) + target field.
+7. **#195** — needs your two answers + repro before it leaves draft.
+8. **#179**, **#166** — need owner decisions; #166 also welcomes a proposal
    from me to react to.
 
 ## Quick scoreboard
@@ -223,10 +265,10 @@ shouldn't pick it unilaterally.
 | ------ | ------------------------------------------- | ------- | ----------------------------------- |
 | #181   | `feat/181-speed-up` / #204                  | ✅ DONE | merged to `main`                    |
 | #199   | `feat/199-model-pricing` / #206             | ✅ DONE | merged to `main` (`c199f60`)        |
-| #196   | `feat/196-tool-ux`                          | ✅ DONE | all four UX items done; ci green    |
-| #197   | `feat/197-asset-viewer`                     | ✅ DONE | `/assets` view + content endpoint   |
-| #208   | —                                           | (b) new | image preview (after thumbnailing)  |
-| #209   | —                                           | (b) new | OCR ingest                          |
+| #196   | `feat/196-tool-ux`                          | ✅ DONE | merged (`plan-196` archived)        |
+| #197   | `feat/197-asset-viewer` / #210              | ✅ DONE | merged to `main` (`8a68b0d`)        |
+| #208   | `feat/tv/208-image-preview` / #211          | ✅ DONE | PR open, ci green                   |
+| #209   | —                                           | (c)     | OCR-engine call + target field      |
 | #195   | `feat/195-confirm-completed` / #205 (draft) | (c)     | your 2 answers + repro              |
 | #179   | —                                           | (c)     | your infra topology call            |
 | #166   | —                                           | (c)     | your mechanism call (I can propose) |
