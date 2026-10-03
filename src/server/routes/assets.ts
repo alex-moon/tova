@@ -361,6 +361,28 @@ router.get('/:id/content', authenticate, async (req: AuthRequest, res) => {
   }
 });
 
+// GET /api/assets/:id/thumbnail-url — presigned GET for the derived image
+// thumbnail (issue #208), so the viewer never loads the original. Ownership-
+// scoped like /:id/url. Always 200 for an owned asset, returning the current
+// `thumbnailStatus` and a `url` only once ready, so the client can poll the
+// in-flight state instead of guessing from a status code.
+router.get('/:id/thumbnail-url', authenticate, async (req: AuthRequest, res) => {
+  try {
+    const asset = await ownedAsset(req);
+    if (!asset) {
+      return res.status(404).json({ message: 'Asset not found' });
+    }
+    if (asset.thumbnailStatus !== 'ready' || !asset.thumbnailKey) {
+      return res.json({ url: null, status: asset.thumbnailStatus });
+    }
+    const url = await spacesWorkspaceStorage.presignGetByKey(asset.thumbnailKey, 300);
+    return res.json({ url, status: 'ready' });
+  } catch (err) {
+    console.error('Asset thumbnail url error:', err);
+    return res.status(500).json({ message: 'Error signing thumbnail URL' });
+  }
+});
+
 // GET /api/assets/:id/url — short-expiry presigned GET; objects stay private.
 router.get('/:id/url', authenticate, async (req: AuthRequest, res) => {
   try {

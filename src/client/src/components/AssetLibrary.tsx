@@ -101,7 +101,11 @@ const AssetLibrary: React.FC<AssetLibraryProps> = ({
 
   // Issue #83: while any listed asset is still converting, poll the list
   // silently (no loading flash) so pending cards turn ready/failed in place.
-  const anyPending = assets.some((a) => a.markdownStatus === 'pending');
+  // Issue #208: an image's thumbnail is a second async lifecycle, so poll
+  // while either is pending.
+  const anyPending = assets.some(
+    (a) => a.markdownStatus === 'pending' || a.thumbnailStatus === 'pending',
+  );
   useEffect(() => {
     if (!anyPending) return;
     const timer = setInterval(() => void load({ silent: true }), 3000);

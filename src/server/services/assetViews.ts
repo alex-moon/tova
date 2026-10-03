@@ -19,6 +19,10 @@ const safeAsset = (asset: AssetDocument): unknown => ({
   // Issue #83: surface the worker's last failure reason for the failed-card
   // tooltip (metadata only — no markdown text content).
   markdownFailureReason: asset.markdownFailureReason ?? null,
+  // Issue #208: thumbnail lifecycle so the library/viewer can wait for the
+  // derived preview instead of loading the original. The key itself stays
+  // server-side (only the presigned URL route reveals it).
+  thumbnailStatus: asset.thumbnailStatus,
   createdAt: asset.createdAt,
 });
 
@@ -51,6 +55,9 @@ const previewAsset = (asset: AssetDocument): unknown => {
     format,
     markdownStatus: asset.markdownStatus,
     markdownFailureReason: asset.markdownFailureReason ?? null,
+    // Issue #208: the viewer renders an image thumbnail, not the original;
+    // this tells it whether that thumbnail exists yet.
+    thumbnailStatus: asset.thumbnailStatus,
     createdAt: asset.createdAt,
   };
 };

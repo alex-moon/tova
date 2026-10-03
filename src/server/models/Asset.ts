@@ -50,6 +50,20 @@ const assetSchema = new mongoose.Schema(
       type: String,
       default: null,
     },
+    // Image thumbnail (issue #208): the /assets viewer must not load a large
+    // original into the detail pane, so the asset-job worker derives one
+    // bounded thumbnail object and stores it under `thumbnailKey` alongside
+    // the original. Mirrors the markdown lifecycle (`thumbnailStatus`) and it
+    // is never user-visible text.
+    thumbnailKey: {
+      type: String,
+      default: null,
+    },
+    thumbnailStatus: {
+      type: String,
+      enum: ['none', 'pending', 'ready', 'failed'],
+      default: 'none',
+    },
     // Issue #159: per-unit extracted text (one unit per PDF page, per
     // top-level section for md/html, whole doc otherwise) so the agent can
     // walk long documents unit by unit. Additive to `markdownExtracted`

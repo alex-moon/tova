@@ -17,6 +17,9 @@ export interface AssetSummary {
   markdownStatus?: string;
   // Issue #83: worker's last failure reason for the failed-card tooltip.
   markdownFailureReason?: string | null;
+  // Issue #208: derived-thumbnail lifecycle ('none'|'pending'|'ready'|'failed');
+  // the viewer waits for 'ready' before rendering an image preview.
+  thumbnailStatus?: string;
   createdAt: string;
 }
 
@@ -38,7 +41,16 @@ export interface AssetContent {
   format: 'text' | 'markdown';
   markdownStatus?: string;
   markdownFailureReason?: string | null;
+  thumbnailStatus?: string;
   createdAt: string;
+}
+
+// Issue #208: the derived-thumbnail state for an image asset. `url` is null
+// until the worker has produced the thumbnail; `status` mirrors the server
+// lifecycle so the viewer can keep polling while it is 'pending'.
+export interface AssetThumbnail {
+  url: string | null;
+  status: string;
 }
 
 export class AssetError extends Error {
@@ -222,6 +234,18 @@ const AssetService = {
   async downloadUrl(assetId: string): Promise<string> {
     const res = await axios.get<{ url: string }>(`/api/assets/${assetId}/url`);
     return res.data.url;
+  },
+
+  // Issue #208: presigned URL for the derived image thumbnail, plus the
+  // current lifecycle status. `url` is null while the thumbnail is still
+  // pending or if it failed.
+  async thumbnailUrl(assetId: string): Promise<AssetThumbnail> {
+    try {
+      const res = await axios.get<AssetThumbnail>(`/api/assets/${assetId}/thumbnail-url`);
+      return res.data;
+    } catch (err) {
+      throw toAssetError(err);
+    }
   },
 
   // Issue #69: bulk download is a plain GET with a repeatable `id` query
