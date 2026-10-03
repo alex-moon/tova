@@ -1,14 +1,9 @@
 import { useContext } from 'react';
 import React, { useState } from 'react';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
-import rehypeRaw from 'rehype-raw';
-import rehypeSanitize from 'rehype-sanitize';
 import {
   Check,
   ChevronDown,
   Copy,
-  ExternalLink,
   Eye,
   EyeOff,
   FileImage,
@@ -20,6 +15,7 @@ import {
   ThumbsUp,
   X,
 } from 'lucide-react';
+import MarkdownContent from './MarkdownContent';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import AssetService from '@/services/assets';
@@ -77,33 +73,12 @@ const pickPlaceholder = () => PLACEHOLDERS[Math.floor(Math.random() * PLACEHOLDE
 // show a placeholder in the UI instead of dropping the turn (#4 J).
 const EMPTY_RESPONSE_PLACEHOLDER = '(no content returned)';
 
-const isExternalHttp = (href?: string): href is string =>
-  typeof href === 'string' && /^https?:\/\//i.test(href);
-
 const hostOf = (url: string): string => {
   try {
     return new URL(url).host;
   } catch {
     return url;
   }
-};
-
-// Outgoing link override (issue #33): https/email targets open in a new tab
-// with noopener; the schema stays the default rehype-sanitize one because
-// the override runs post-sanitize.
-const MarkdownLink = ({ href, children }: { href?: string; children?: React.ReactNode }) => {
-  if (!isExternalHttp(href)) return <a href={href}>{children}</a>;
-  return (
-    <a
-      href={href}
-      target="_blank"
-      rel="noopener noreferrer"
-      className="text-primary underline underline-offset-2 hover:text-primary-hover"
-    >
-      {children}
-      <ExternalLink size={12} className="ml-0.5 inline-block align-baseline" aria-hidden />
-    </a>
-  );
 };
 
 // Sources footer block (#33): compact list of the URLs the search returned,
@@ -265,26 +240,6 @@ const FollowupChips: React.FC<{ suggestions: string[]; onPick: (value: string) =
       ))}
     </div>
   ) : null;
-
-const MessageContent: React.FC<{ content: string; markdown: boolean }> = ({
-  content,
-  markdown,
-}) => {
-  if (!markdown) {
-    return <div className="min-w-0 break-words">{content}</div>;
-  }
-  return (
-    <div className="markdown-body min-w-0 break-words [&_pre]:max-w-full [&_pre]:overflow-x-auto">
-      <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
-        rehypePlugins={[rehypeRaw, rehypeSanitize]}
-        components={{ a: MarkdownLink }}
-      >
-        {content}
-      </ReactMarkdown>
-    </div>
-  );
-};
 
 const ChatWindow: React.FC<ChatWindowProps> = ({
   messages,
@@ -555,7 +510,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
                     </span>
                   )}
                   <div className="max-w-[92%] min-w-0 rounded-lg rounded-br-sm border border-primary/25 bg-msg-user px-4 py-3 break-words md:max-w-[85%] md:px-5 md:py-4">
-                    <MessageContent content={msg.content} markdown={false} />
+                    <MarkdownContent content={msg.content} markdown={false} />
                   </div>
                   <div className="mt-1 flex justify-end px-1">
                     <button
@@ -578,7 +533,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
                   </div>
                   <div className="px-4 py-3 md:px-5">
                     <ToolChips message={msg} />
-                    <MessageContent content={msg.content || EMPTY_RESPONSE_PLACEHOLDER} markdown />
+                    <MarkdownContent content={msg.content || EMPTY_RESPONSE_PLACEHOLDER} markdown />
                   </div>
                   {msg.sources && msg.sources.length > 0 && <SourcesBlock message={msg} />}
                   {(msg.modelName || msg.content) && (

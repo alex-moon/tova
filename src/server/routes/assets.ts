@@ -18,7 +18,7 @@ import { spacesWorkspaceStorage } from '../services/workspaceStorage';
 // helpers in services/assetZip.ts; shared caps in services/assetLimits.ts.
 import { presignItemForUser } from '../services/assetPresign';
 import { confirmAsset } from '../services/assetConfirm';
-import { safeAsset } from '../services/assetViews';
+import { previewAsset, safeAsset } from '../services/assetViews';
 import { dedupeEntryNames } from '../services/assetZip';
 import { BULK_MAX_TOTAL_SIZE, MAX_BULK_TOTAL_SIZE } from '../services/assetLimits';
 
@@ -341,6 +341,23 @@ router.get('/bulk-download', authenticate, async (req: AuthRequest, res) => {
     }
     // Headers already sent mid-stream: browsers will see a truncated zip.
     res.destroy();
+  }
+});
+
+// GET /api/assets/:id/content — in-app viewer payload (issue #197): the
+// extracted body (`textExtracted ?? markdownExtracted`), ownership-scoped.
+// Registered after `/bulk-download` per the ordering note above; uses the
+// `/content` suffix so it cannot shadow `/:id/url`.
+router.get('/:id/content', authenticate, async (req: AuthRequest, res) => {
+  try {
+    const asset = await ownedAsset(req);
+    if (!asset) {
+      return res.status(404).json({ message: 'Asset not found' });
+    }
+    return res.json({ asset: previewAsset(asset) });
+  } catch (err) {
+    console.error('Asset content error:', err);
+    return res.status(500).json({ message: 'Error loading asset content' });
   }
 });
 
