@@ -10,6 +10,16 @@ import { redactForLog } from './logRedaction';
 import { FitWeight, getFitWeight } from './modelMetricsStatsService';
 
 /*
+ * #216: thrown when a tier's ELIGIBLE pool is empty after capability
+ * filtering (e.g. a tier with only `vision: true` rows cannot serve a text
+ * turn). It must escape `routeQuery`'s classifier try/catch rather than being
+ * mistaken for a classifier outage and silently rerouted to the other tier —
+ * "this tier has no usable model" is a config failure, not a classifier
+ * failure. Mirrors AllModelsDisabledError's re-throw treatment.
+ */
+export class NoEligibleModelsError extends Error {}
+
+/*
  * Routing tiers resolve to an ELIGIBLE pool of models (MongoDB-backed,
  * `modelConfigService`) instead of a single env-config model. When exactly
  * one model qualifies for a tier, that model always runs (deterministic).
@@ -190,7 +200,7 @@ export const pickModelRef = (
   random: () => number,
 ): ModelRef => {
   if (pool.length === 0) {
-    throw new Error(`No eligible models configured for tier: ${tier}`);
+    throw new NoEligibleModelsError(`No eligible models configured for tier: ${tier}`);
   }
   if (pool.length === 1 || random() >= epsilon) {
     return pool[0];
@@ -453,6 +463,20 @@ export const routeQuery = async (
     };
   }
 
+  /*
+   * #216: a text turn must NOT use a visual model. The image branch above
+   * already restricts IMAGE turns to `vision: true` large rows; the gap is
+   * the reverse direction — nothing stopped a text-only turn from landing on
+   * a VLM via the tier pools. Exclude explicit `vision: true` rows from BOTH
+   * text pools here, after the image branch (which returns for image turns)
+   * so the two paths cannot disagree. `vision` unset/false stays eligible;
+   * only an explicit `true` is a VLM. If filtering empties a tier, the pick
+   * throws the existing loud empty-pool error — silently ignoring the rule
+   * would be worse.
+   */
+  const smallPool = smallPoolRaw.filter((ref) => ref.vision !== true);
+  const textLargePool = largePool.filter((ref) => ref.vision !== true);
+
   // Tier 2: Guard model classification — the ONLY text routing path. The
   // deterministic key-phrase rules that used to short-circuit here are gone
   // (#169 phase 2): every text turn, greetings included, pays one guard
@@ -493,7 +517,7 @@ export const routeQuery = async (
     const filesField = filesLikely ? { filesLikely: true } : {};
 
     if (verdict === 'complex') {
-      const { pool, forced, reasonSuffix } = await orderPoolByFit(largePool, band, readWeight);
+      const { pool, forced, reasonSuffix } = await orderPoolByFit(textLargePool, band, readWeight);
       const modelRef = forced ?? pickFromTier(pool, 'large', largeCoolingOff);
       return {
         model: modelRef.model,
@@ -503,7 +527,7 @@ export const routeQuery = async (
       };
     }
     if (verdict === 'simple') {
-      const { pool, forced, reasonSuffix } = await orderPoolByFit(smallPoolRaw, band, readWeight);
+      const { pool, forced, reasonSuffix } = await orderPoolByFit(smallPool, band, readWeight);
       const modelRef = forced ?? pickFromTier(pool, 'small', smallCoolingOff);
       return {
         model: modelRef.model,
@@ -516,7 +540,7 @@ export const routeQuery = async (
     // the safe default — defaulting verdict-less replies to small is what
     // pushed the Ad Gefrin conversation to the small tier (issue #129).
     console.error('Classifier unparseable reply:', redactForLog(content || '(empty)'));
-    const { pool, forced, reasonSuffix } = await orderPoolByFit(largePool, band, readWeight);
+    const { pool, forced, reasonSuffix } = await orderPoolByFit(textLargePool, band, readWeight);
     const modelRef = forced ?? pickFromTier(pool, 'large', largeCoolingOff);
     return {
       model: modelRef.model,
@@ -525,11 +549,11 @@ export const routeQuery = async (
       ...filesField,
     };
   } catch (err) {
-    if (err instanceof AllModelsDisabledError) throw err;
+    if (err instanceof AllModelsDisabledError || err instanceof NoEligibleModelsError) throw err;
     console.error('Classifier error:', redactForLog(err));
     // Fallback to large model on error for safety (raw pool order — the
     // classifier is down, so its feedback weighting waits for a retry).
-    const modelRef = pickFromTier(largePool, 'large', largeCoolingOff);
+    const modelRef = pickFromTier(textLargePool, 'large', largeCoolingOff);
     return { model: modelRef.model, reason: 'classifier-error', ...spreadRef(modelRef) };
   }
 };
