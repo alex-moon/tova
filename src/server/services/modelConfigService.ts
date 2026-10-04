@@ -534,11 +534,33 @@ const coolOffHours = (): number => {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : 6;
 };
 
-export const disableModel = async (provider: ProviderName, model: string): Promise<boolean> => {
+/*
+ * #213: endpoint overload ("Model busy, retry later" / `engine_overloaded`) is a
+ * per-endpoint saturation that clears in seconds-to-minutes, unlike the 6h
+ * cool-off for a genuinely broken endpoint. Overload uses its own short TTL
+ * (env-tunable, default 5 minutes) so a healthy backend returns to the pool
+ * quickly. Same fallback discipline as the other env knobs.
+ */
+export const overloadCoolOffMinutes = (): number => {
+  const raw = process.env.MODEL_OVERLOAD_COOL_OFF_MINUTES;
+  const parsed = raw === undefined || raw === '' ? NaN : Number(raw);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 5;
+};
+
+/*
+ * `ttlMs` (optional) overrides the default 6h cool-off — #213 uses a short TTL
+ * for endpoint overload. Callers that omit it keep the pre-#213 behaviour.
+ */
+export const disableModel = async (
+  provider: ProviderName,
+  model: string,
+  ttlMs?: number,
+): Promise<boolean> => {
   try {
+    const duration = ttlMs ?? coolOffHours() * 60 * 60 * 1000;
     await ProviderRouting.updateMany(
       { provider, model },
-      { disabledUntil: new Date(Date.now() + coolOffHours() * 60 * 60 * 1000) },
+      { disabledUntil: new Date(Date.now() + duration) },
     );
     return true;
   } catch (err) {

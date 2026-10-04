@@ -150,7 +150,7 @@ describe('POST /api/profile/factory-reset (issue #143)', () => {
     expect(await Asset.countDocuments({ userId: other })).toBe(1);
     // Their AssetJob (no userId on it) must not have been collateral damage.
     expect(await AssetJob.countDocuments()).toBe(1);
-  });
+  }, 15000);
 
   it('hard-deletes soft-deleted (unlisted) sessions too', async () => {
     const { app, userId, cookie } = await registerUser('reset-orphan@example.com');

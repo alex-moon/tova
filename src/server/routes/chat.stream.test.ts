@@ -1055,7 +1055,40 @@ describe('Chat streaming route — #168 endpoint failures', () => {
         .join(''),
     ).toBe('recovered.');
     expect(mockDisableModel).toHaveBeenCalledTimes(1);
-    expect(mockDisableModel).toHaveBeenCalledWith('deepinfra', 'first-model');
+    expect(mockDisableModel).toHaveBeenCalledWith('deepinfra', 'first-model', undefined);
+  });
+
+  it('re-routes an engine_overloaded stream failure with the short overload cool-off (#213)', async () => {
+    mockRouteQuery
+      .mockResolvedValueOnce({ model: 'first-model', provider: 'deepinfra', reason: 'test' })
+      .mockResolvedValueOnce({ model: 'second-model', provider: 'deepinfra', reason: 'test' });
+    let call = 0;
+    mockAgentStream.mockImplementation(async () => {
+      call += 1;
+      if (call === 1) {
+        return {
+          fullStream: (async function* () {
+            yield { type: 'error', payload: { error: { message: 'Model busy, retry later' } } };
+          })(),
+        };
+      }
+      return {
+        fullStream: (async function* () {
+          yield { type: 'text-delta', textDelta: 'recovered.' };
+        })(),
+      };
+    });
+
+    const cookies = await registerUser('stream-overload@example.com');
+    const app = createApp();
+    const response = await request(app)
+      .post('/api/chat/stream')
+      .set('Cookie', cookies)
+      .send({ content: 'hello there' });
+
+    expect(response.status).toBe(200);
+    expect(response.text.split('\n\n').some((p) => p.includes('event: error'))).toBe(false);
+    expect(mockDisableModel).toHaveBeenCalledWith('deepinfra', 'first-model', 5 * 60 * 1000);
   });
 
   it('a rate-limit stream failure surfaces the retry hint without disabling the model', async () => {
@@ -1090,7 +1123,7 @@ describe('Chat streaming route — #168 endpoint failures', () => {
     const errorEvent = response.text.split('\n\n').find((part) => part.includes('event: error'));
     expect(errorEvent).toContain('Error streaming from model');
     expect(mockDisableModel).toHaveBeenCalledTimes(1);
-    expect(mockDisableModel).toHaveBeenCalledWith('deepinfra', 'mock-small-model');
+    expect(mockDisableModel).toHaveBeenCalledWith('deepinfra', 'mock-small-model', undefined);
     expect(mockRouteQuery).toHaveBeenCalledTimes(1); // no re-route happened
   });
 

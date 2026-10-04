@@ -2,6 +2,7 @@ import type { RoutingResult } from './routerService';
 import {
   AllModelsDisabledError,
   ALL_MODELS_DISABLED_MESSAGE,
+  isOverloadError,
   isRateLimitError,
   withModelFailover,
 } from './modelFailover';
@@ -47,7 +48,7 @@ describe('withModelFailover (#168)', () => {
     );
     expect(outcome.routing.model).toBe('m-b');
     expect(mockDisableModel).toHaveBeenCalledTimes(1);
-    expect(mockDisableModel).toHaveBeenCalledWith('deepinfra', 'm-a');
+    expect(mockDisableModel).toHaveBeenCalledWith('deepinfra', 'm-a', undefined);
   });
 
   it('rethrows the original route error when no model was disabled yet', async () => {
@@ -160,6 +161,74 @@ describe('withModelFailover (#168)', () => {
     );
   });
 
+  // #213: endpoint overload (`engine_overloaded`, HTTP 429) is a per-endpoint
+  // transient — cool off briefly and re-route, unlike a genuine account 429.
+  it('re-routes on an engine_overloaded 429 with the short overload cool-off', async () => {
+    const routes = [ROUTE_A, ROUTE_B];
+    const overload = Object.assign(new Error('Model busy, retry later'), {
+      statusCode: 429,
+      data: { error: { code: 'engine_overloaded' } },
+    });
+    const outcome = await withModelFailover(
+      async () => routes.shift()!,
+      async (routing) => {
+        if (routing.model === 'm-a') throw overload;
+        return 'ok-b';
+      },
+    );
+    expect(outcome.routing.model).toBe('m-b');
+    expect(mockDisableModel).toHaveBeenCalledTimes(1);
+    // Overload passes a short TTL (default 5 min) rather than the 6h default.
+    expect(mockDisableModel).toHaveBeenCalledWith('deepinfra', 'm-a', 5 * 60 * 1000);
+  });
+
+  it('re-routes on an overload message even without the body code', async () => {
+    const routes = [ROUTE_A, ROUTE_B];
+    const outcome = await withModelFailover(
+      async () => routes.shift()!,
+      async (routing) => {
+        if (routing.model === 'm-a') {
+          throw new Error('Streaming error: Error: Model busy, retry later');
+        }
+        return 'ok-b';
+      },
+    );
+    expect(outcome.routing.model).toBe('m-b');
+    expect(mockDisableModel).toHaveBeenCalledWith('deepinfra', 'm-a', 5 * 60 * 1000);
+  });
+
+  it('isOverloadError distinguishes overload from a genuine rate limit', () => {
+    expect(
+      isOverloadError(
+        Object.assign(new Error('busy'), {
+          statusCode: 429,
+          data: { error: { code: 'engine_overloaded' } },
+        }),
+      ),
+    ).toBe(true);
+    expect(isOverloadError(new Error('Model busy, retry later'))).toBe(true);
+    expect(
+      isOverloadError(Object.assign(new Error('rate_limit_exceeded'), { statusCode: 429 })),
+    ).toBe(false);
+    expect(isOverloadError(new Error('Rate limit reached for model m-a'))).toBe(false);
+    expect(isOverloadError(new Error('upstream 500'))).toBe(false);
+  });
+
+  it('a genuine 429 rate limit still fails immediately without disabling', async () => {
+    let invokes = 0;
+    await expect(
+      withModelFailover(
+        async () => ROUTE_A,
+        async () => {
+          invokes += 1;
+          throw Object.assign(new Error('quota exceeded'), { statusCode: 429 });
+        },
+      ),
+    ).rejects.toThrow('quota exceeded');
+    expect(mockDisableModel).not.toHaveBeenCalled();
+    expect(invokes).toBe(1);
+  });
+
   it('an AllModelsDisabledError escaping route passes through untouched', async () => {
     const poolDrained = new AllModelsDisabledError();
     await expect(
@@ -192,7 +261,7 @@ describe('withModelFailover (#168)', () => {
         },
       ),
     ).rejects.toBe(err);
-    expect(mockDisableModel).toHaveBeenCalledWith('deepinfra', 'm-a');
+    expect(mockDisableModel).toHaveBeenCalledWith('deepinfra', 'm-a', undefined);
     expect(routeCalls).toBe(1);
     expect(invokes).toBe(1);
   });

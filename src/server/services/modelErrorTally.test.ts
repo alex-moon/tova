@@ -37,6 +37,27 @@ describe('modelErrorTally', () => {
       expect(categorize(errWith('not found'), 404)).toBe('not_found');
     });
 
+    it('classifies an overload-shaped 429 as overloaded (#213)', () => {
+      expect(
+        categorize(
+          errWith('Model busy, retry later', {
+            statusCode: 429,
+            data: { error: { code: 'engine_overloaded' } },
+          }),
+          429,
+        ),
+      ).toBe('overloaded');
+      // A body code alone (no recognisable message) is enough.
+      expect(
+        categorize(
+          errWith('busy', { statusCode: 429, data: { error: { code: 'engine_overloaded' } } }),
+          429,
+        ),
+      ).toBe('overloaded');
+      // A genuine rate-limit 429 is untouched.
+      expect(categorize(errWith('rate_limit_exceeded'), 429)).toBe('rate_limit');
+    });
+
     it('fails closed on ambiguous texts', () => {
       expect(categorize(errWith('denied routing permission'), 403)).toBe('forbidden');
       expect(categorize(new Error('Unknown LLM provider: xyz'), null)).toBe('unknown_provider');

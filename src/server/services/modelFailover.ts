@@ -1,7 +1,16 @@
 import type { RoutingResult } from './routerService';
-import { AllModelsDisabledError, disableModel } from './modelConfigService';
+import { AllModelsDisabledError, disableModel, overloadCoolOffMinutes } from './modelConfigService';
+import { isOverloadError } from './providerErrors';
 
 export { ALL_MODELS_DISABLED_MESSAGE, AllModelsDisabledError } from './modelConfigService';
+/*
+ * #213: endpoint overload is a *per-endpoint transient* failure, distinct from
+ * an account rate limit even though both can arrive as HTTP 429. It is exactly
+ * what cool-off + re-route is for, so it is checked BEFORE `isRateLimitError`
+ * (which classifies on the bare 429 status). Classification lives in a leaf
+ * module so the diagnostics tally can share it without an import cycle.
+ */
+export { isOverloadError } from './providerErrors';
 
 /*
  * Model-failure cool-off (#168): when a routed completion endpoint fails, the
@@ -90,9 +99,16 @@ export const withModelFailover = async <T>(
     } catch (err) {
       if (isClientAbort(err)) throw err;
       if (isPromptSizeError(err)) throw err;
-      if (isRateLimitError(err)) throw err;
+      // #213: endpoint overload re-routes on a short cool-off; a genuine
+      // account rate limit still fails loudly (back-off stays deferred).
+      const overload = isOverloadError(err);
+      if (!overload && isRateLimitError(err)) throw err;
       lastError = err;
-      const disabled = await disableModel(routing.provider, routing.model);
+      const disabled = await disableModel(
+        routing.provider,
+        routing.model,
+        overload ? overloadCoolOffMinutes() * 60 * 1000 : undefined,
+      );
       if (!disabled) {
         // Cool-off write failed: the pool is unchanged, so a re-route would
         // re-pick the same broken endpoint — surface the original error.

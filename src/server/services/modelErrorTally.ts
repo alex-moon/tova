@@ -1,5 +1,6 @@
 import { redactForLog } from './logRedaction';
 import { ModelRouteError } from '../models/ModelRouteError';
+import { isOverloadError } from './providerErrors';
 
 /*
  * Issue #175: per-provider-route error tally. Every completion call through
@@ -86,6 +87,10 @@ export const categorize = (err: unknown, status: number | null): ModelErrorCateg
     return status === 401 ? 'invalid_or_expired_key' : 'forbidden';
   }
   if (status === 404) return 'not_found';
+  // #213: endpoint overload can arrive as 429 (`engine_overloaded` / "Model
+  // busy, retry later"). Distinguish it from an account rate limit so the
+  // tally matches the failover classifier in modelFailover.ts.
+  if (status === 429 && isOverloadError(err)) return 'overloaded';
   if (status === 429) return 'rate_limit';
   if (status === 413 || /context length|maximum context|too long/i.test(text))
     return 'context_length';

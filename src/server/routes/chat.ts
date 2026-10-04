@@ -30,10 +30,11 @@ import {
 import { zdrHistorySchema } from '../validation';
 import { redactForLog } from '../services/logRedaction';
 import { decideTurn } from '../services/zdrTurn';
-import { disableModel } from '../services/modelConfigService';
+import { disableModel, overloadCoolOffMinutes } from '../services/modelConfigService';
 import {
   AllModelsDisabledError,
   isClientAbort,
+  isOverloadError,
   isPromptSizeError,
   isRateLimitError,
   MAX_ATTEMPTS,
@@ -1108,17 +1109,24 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
           }
           break;
         } catch (err) {
+          // #213: endpoint overload is a per-endpoint transient — cool off
+          // briefly and re-route. A genuine account rate limit still fails
+          // loudly (#168 decision 2026-09-26: 429 back-off is a separate,
+          // deferred mechanism — never a pool-draining retry).
+          const overload = isOverloadError(err);
           if (
             // no deltas yet — mid-stream failures are reported, not retried
             assistantContent === '' &&
             !isClientAbort(err) &&
             !isPromptSizeError(err) &&
-            // #168 (decision 2026-09-26): 429 is back-off territory, a
-            // separate mechanism — never a cool-off or a pool-draining retry.
-            !isRateLimitError(err) &&
+            (overload || !isRateLimitError(err)) &&
             attempt < MAX_ATTEMPTS
           ) {
-            const disabled = await disableModel(routingResult.provider, routingResult.model);
+            const disabled = await disableModel(
+              routingResult.provider,
+              routingResult.model,
+              overload ? overloadCoolOffMinutes() * 60 * 1000 : undefined,
+            );
             if (!disabled) {
               // Cool-off write failed: the pool is unchanged, so re-routing
               // would re-pick the same broken endpoint — fail the turn with
