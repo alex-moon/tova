@@ -48,6 +48,15 @@ Do cleanup-as-we-go, but only with explicit confirmation:
 - Do not silently expand scope by default. If you notice a neighbouring issue worth fixing, raise it as a suggestion in your report/PR comment and wait for the user to confirm.
 - Never use a ticket as cover for drive-by refactors of untouched subsystems.
 
+### Client UI work
+
+When changing the React client (`src/client`), the end user is assumed to be on a phone, not a desktop:
+
+- **Mobile-first.** Design and verify for narrow viewports first; treat desktop as the enhancement, not the baseline. When a layout works on desktop but not mobile, it is broken.
+- **Always use the `playwright-cli` skill** to render and inspect UI changes in a real browser before calling the work done. Do not judge visual/UX work from code alone.
+
+These rules are behavioral policy, so they apply to every client change regardless of size; they do not replace the "Code quality gate" below.
+
 ### Model routing decisions
 
 Any change to routing policy (tier boundaries, guard classification, pool defaults) must be evidence-first, not instinct:
