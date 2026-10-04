@@ -704,6 +704,47 @@ describe('Router Service', () => {
       expect(result.model).toBe(groqSmall.model);
       expect(result.reason).toBe('classifier-simple');
     });
+
+    // #216: a text turn must NOT use a visual model, in either tier.
+    it('never picks a vision row for a text turn routed to the small tier', async () => {
+      classifyAs('simple');
+      // Draw high so the price-weighted explore branch could reach the end of
+      // the pool; the filter must keep the vision row out of it regardless.
+      const result = await routeQuery('Hello', vlConfig, () => 0.99);
+      expect(result.model).toBe(groqSmall.model);
+      expect(result.model).not.toBe(vlSmall.model);
+    });
+
+    it('never picks a vision row for a text turn routed to the large tier', async () => {
+      classifyAs('complex');
+      const result = await routeQuery('Explain this at length', vlConfig, () => 0.99);
+      expect(result.model).toBe(groqLarge.model);
+      expect(result.model).not.toBe(vlLarge.model);
+    });
+
+    it('never picks a vision row on the classifier-error fallback', async () => {
+      // No classifyAs stub → the mocked generate returns undefined and the
+      // classifier throws, taking the error fallback into the large pool.
+      const result = await routeQuery('whatever', vlConfig, () => 0.99);
+      expect(result.reason).toBe('classifier-error');
+      expect(result.model).toBe(groqLarge.model);
+    });
+
+    it('fails loudly when a tier has only vision rows (no text model anywhere)', async () => {
+      const visionOnly = { small: [vlSmall], large: [vlLarge], guardModel: 'x' };
+      classifyAs('simple');
+      await expect(routeQuery('Hello', visionOnly, () => 0.1)).rejects.toThrow(
+        'No eligible models configured for tier: small',
+      );
+    });
+
+    it('fails loudly on a vision-only large tier when routed large', async () => {
+      const visionOnly = { small: [groqSmall], large: [vlLarge], guardModel: 'x' };
+      classifyAs('complex');
+      await expect(routeQuery('Explain this at length', visionOnly, () => 0.1)).rejects.toThrow(
+        'No eligible models configured for tier: large',
+      );
+    });
   });
 
   describe('contextLength propagation (#104)', () => {
@@ -987,11 +1028,11 @@ describe('Router Service', () => {
       // pin that anything else (defensive) never masquerades as cool-off.
       poolsWith(Promise.reject(new Error('pool read exploded')), Promise.resolve([]));
       classifyAs('simple');
-      // Small pick throws the generic empty-pool error inside the classifier
-      // try → the classifier-error fallback picks large, which is empty too
-      // → the generic error escapes. Never the all-disabled message.
+      // #216: the empty-pool error is no longer swallowed by the classifier
+      // catch and rerouted (that masked a config gap as a classifier outage).
+      // It escapes for the tier the verdict selected — here small.
       await expect(routeQuery('Hello', null, () => 0)).rejects.toThrow(
-        'No eligible models configured for tier: large',
+        'No eligible models configured for tier: small',
       );
     });
   });
