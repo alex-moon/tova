@@ -406,8 +406,14 @@ describe('AdminView cool-off badge and error diagnostics (#168)', () => {
     expect(table).toHaveTextContent('deepinfra/Qwen/Qwen3-14B');
     expect(table).toHaveTextContent('429 · rate_limit');
     expect(table).toHaveTextContent('network');
-    expect(table).toHaveTextContent('connection reset');
     expect(table).toHaveTextContent('7');
+    // #219: the long error message is collapsed by default and only revealed
+    // in its own row when the toggle is clicked.
+    expect(table).not.toHaveTextContent('connection reset');
+    fireEvent.click(
+      await screen.findByTestId('admin-model-error-toggle-deepinfra-other-model-none'),
+    );
+    expect(table).toHaveTextContent('connection reset');
   });
 
   it('hides the errors table when no diagnostics are recorded', async () => {

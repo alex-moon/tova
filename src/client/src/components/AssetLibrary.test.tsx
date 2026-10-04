@@ -186,6 +186,31 @@ describe('AssetLibrary — bulk upload (issue #68)', () => {
     expect(screen.getByTestId('asset-input')).toHaveAttribute('multiple');
   });
 
+  it('opens the file picker when the whole dropzone is clicked (#219)', async () => {
+    renderLibrary();
+    const input = screen.getByTestId('asset-input');
+    const clickSpy = vi.spyOn(input, 'click').mockImplementation(() => undefined);
+    fireEvent.click(screen.getByTestId('asset-dropzone'));
+    expect(clickSpy).toHaveBeenCalled();
+  });
+
+  it('keeps the dropzone clickable after an upload completes (#219)', async () => {
+    vi.mocked(AssetService.uploadMany).mockImplementation(
+      uploadBy([row({ asset: asset({ id: 'a-ok', filename: 'ok.txt' }) }, 'ok.txt')]),
+    );
+    renderLibrary();
+    fireEvent.change(screen.getByTestId('asset-input'), {
+      target: { files: [fileByName('ok.txt')] },
+    });
+    await screen.findByTestId('upload-rows');
+    const dropzone = screen.getByTestId('asset-dropzone');
+    expect(dropzone).toBeInTheDocument();
+    const input = screen.getByTestId('asset-input');
+    const clickSpy = vi.spyOn(input, 'click').mockImplementation(() => undefined);
+    fireEvent.click(dropzone);
+    expect(clickSpy).toHaveBeenCalled();
+  });
+
   it('shows per-file rows: successes list in the grid, errors keep their message', async () => {
     vi.mocked(AssetService.uploadMany).mockImplementation(
       uploadBy([

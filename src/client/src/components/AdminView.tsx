@@ -1,4 +1,5 @@
-import { useState, useEffect, useCallback } from 'react';
+import { Fragment, useState, useEffect, useCallback } from 'react';
+import { ChevronDown, ChevronRight } from 'lucide-react';
 import AdminService, {
   AdminError,
   AdminModelsService,
@@ -55,6 +56,9 @@ const AdminView = () => {
   // #168 diagnostics: per-model error shapes, rendered as their own table
   // under the models inventory.
   const [modelErrors, setModelErrors] = useState<AdminModelError[]>([]);
+  // #219: long error messages are collapsed by default so rows stay a single
+  // line; the key is provider/model/status/category.
+  const [expandedErrors, setExpandedErrors] = useState<Set<string>>(new Set());
   const [logLevel, setLogLevel] = useState<(typeof LOG_LEVELS)[number]>('all');
   const [logQuery, setLogQuery] = useState('');
   const [logs, setLogs] = useState<AdminLogEntry[]>([]);
@@ -798,7 +802,7 @@ const AdminView = () => {
                           <th className="px-4 py-3 font-medium">Error</th>
                           <th className="px-4 py-3 font-medium">Count</th>
                           <th className="px-4 py-3 font-medium">Last seen</th>
-                          <th className="px-4 py-3 font-medium">Last message</th>
+                          <th className="px-4 py-3 font-medium">Message</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -809,29 +813,66 @@ const AdminView = () => {
                               m.model === e.model &&
                               coolOffHoursLeft(m.disabledUntil) !== null,
                           );
+                          const rowKey = `${e.provider}/${e.model}/${e.status ?? 'none'}/${e.category}`;
+                          const expanded = expandedErrors.has(rowKey);
                           return (
-                            <tr
-                              key={`${e.provider}/${e.model}/${e.status ?? 'none'}/${e.category}`}
-                              data-testid={`admin-model-error-${e.provider}-${e.model}-${e.status ?? 'none'}`}
-                              className="border-b border-border last:border-b-0"
-                            >
-                              <td
-                                className={`px-4 py-3 ${cooling ? 'text-warning' : 'text-muted-foreground'}`}
+                            <Fragment key={rowKey}>
+                              <tr
+                                data-testid={`admin-model-error-${e.provider}-${e.model}-${e.status ?? 'none'}`}
+                                className="border-b border-border"
                               >
-                                {e.provider}/{e.model}
-                              </td>
-                              <td className="px-4 py-3">
-                                {e.status !== null ? `${e.status} · ` : ''}
-                                {e.category}
-                              </td>
-                              <td className="px-4 py-3 text-muted-foreground">{e.count}</td>
-                              <td className="px-4 py-3 text-muted-foreground">
-                                {new Date(e.lastSeenAt).toLocaleString()}
-                              </td>
-                              <td className="max-w-md break-all px-4 py-3 text-muted-foreground">
-                                {e.lastMessage}
-                              </td>
-                            </tr>
+                                <td
+                                  className={`px-4 py-3 ${cooling ? 'text-warning' : 'text-muted-foreground'}`}
+                                >
+                                  {e.provider}/{e.model}
+                                </td>
+                                <td className="px-4 py-3">
+                                  {e.status !== null ? `${e.status} · ` : ''}
+                                  {e.category}
+                                </td>
+                                <td className="px-4 py-3 text-muted-foreground">{e.count}</td>
+                                <td className="px-4 py-3 text-muted-foreground">
+                                  {new Date(e.lastSeenAt).toLocaleString()}
+                                </td>
+                                <td className="px-4 py-3">
+                                  <button
+                                    type="button"
+                                    aria-expanded={expanded}
+                                    data-testid={`admin-model-error-toggle-${e.provider}-${e.model}-${e.status ?? 'none'}`}
+                                    onClick={() =>
+                                      setExpandedErrors((prev) => {
+                                        const next = new Set(prev);
+                                        if (next.has(rowKey)) next.delete(rowKey);
+                                        else next.add(rowKey);
+                                        return next;
+                                      })
+                                    }
+                                    className="flex items-center gap-1 text-muted-foreground hover:text-foreground"
+                                  >
+                                    {expanded ? (
+                                      <ChevronDown className="size-4 shrink-0" />
+                                    ) : (
+                                      <ChevronRight className="size-4 shrink-0" />
+                                    )}
+                                    <span className="truncate">
+                                      {expanded ? 'Hide error' : 'Show error'}
+                                    </span>
+                                  </button>
+                                </td>
+                              </tr>
+                              {expanded && (
+                                <tr
+                                  className="border-b border-border last:border-b-0"
+                                  data-testid={`admin-model-error-message-${e.provider}-${e.model}-${e.status ?? 'none'}`}
+                                >
+                                  <td colSpan={5} className="px-4 py-3">
+                                    <pre className="max-h-60 overflow-y-auto whitespace-pre-wrap break-all rounded-lg bg-muted p-3 text-xs text-muted-foreground">
+                                      {e.lastMessage}
+                                    </pre>
+                                  </td>
+                                </tr>
+                              )}
+                            </Fragment>
                           );
                         })}
                       </tbody>

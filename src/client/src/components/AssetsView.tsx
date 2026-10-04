@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { FileText, ImageOff, Loader2 } from 'lucide-react';
+import { ChevronLeft, FileText, ImageOff, Loader2 } from 'lucide-react';
 import AssetLibrary from './AssetLibrary';
 import MarkdownContent from './MarkdownContent';
 import BackToChatLink from './BackToChatLink';
@@ -119,13 +119,21 @@ const AssetsView: React.FC = () => {
         </div>
       </div>
       <div className="flex min-h-0 flex-1 gap-4 px-6 pb-6">
-        <div className="w-96 min-w-0 shrink-0 overflow-hidden rounded-xl border border-border">
+        <div
+          className={`min-w-0 shrink-0 overflow-hidden rounded-xl border border-border md:w-96 ${
+            selected ? 'hidden md:block' : 'w-full'
+          }`}
+        >
           <AssetLibrary
             selectedId={selected?.id ?? null}
             onSelect={(asset) => setSelected(asset)}
           />
         </div>
-        <div className="flex min-w-0 flex-1 flex-col overflow-hidden rounded-xl border border-border panel-surface">
+        <div
+          className={`min-w-0 flex-1 flex-col overflow-hidden rounded-xl border border-border panel-surface ${
+            selected ? 'flex' : 'hidden md:flex'
+          }`}
+        >
           {!selected ? (
             <div className="flex flex-1 flex-col items-center justify-center gap-2 p-6 text-center text-muted-foreground">
               <FileText className="size-6" />
@@ -134,8 +142,18 @@ const AssetsView: React.FC = () => {
           ) : (
             <>
               <div className="flex shrink-0 items-center justify-between gap-3 border-b border-border px-4 py-3">
+                <button
+                  type="button"
+                  data-testid="assets-preview-back"
+                  aria-label="Back to file list"
+                  onClick={() => setSelected(null)}
+                  className="flex shrink-0 items-center gap-1 text-sm text-muted-foreground hover:text-foreground md:hidden"
+                >
+                  <ChevronLeft className="size-4" />
+                  Back
+                </button>
                 <span
-                  className="min-w-0 truncate text-sm font-medium"
+                  className="min-w-0 flex-1 truncate text-sm font-medium"
                   data-testid="assets-preview-title"
                 >
                   {selected.filename}

@@ -442,63 +442,60 @@ const AssetLibrary: React.FC<AssetLibraryProps> = ({ onSelect, selectedId = null
         )}
       </div>
       <div className="shrink-0 border-t border-border p-4">
-        <div
+        <button
+          type="button"
+          data-testid="asset-dropzone"
+          aria-label="Upload files: drop them here or tap to choose"
           onDrop={onDrop}
           onDragOver={(e) => e.preventDefault()}
-          className="flex flex-col items-center gap-1.5 rounded-lg border border-dashed border-border px-4 py-4 text-center text-sm text-muted-foreground transition-colors hover:border-primary hover:text-accent-foreground"
+          onClick={() => inputRef.current?.click()}
+          className="flex w-full cursor-pointer flex-col items-center gap-1.5 rounded-lg border border-dashed border-border px-4 py-4 text-center text-sm text-muted-foreground transition-colors hover:border-primary hover:text-accent-foreground"
         >
           <Upload className="size-4" />
-          {uploadRows.length > 0 ? (
-            <ul className="w-full space-y-1" data-testid="upload-rows">
-              {uploadRows.map((row, i) => (
-                <li key={`${row.name}-${i}`} className="flex flex-col gap-0.5 text-left">
-                  <span
-                    className="flex items-center justify-between gap-2 truncate text-xs"
-                    data-testid={`upload-row-${i}`}
-                  >
-                    <span className="truncate">{row.name}</span>
-                    <span
-                      className={
-                        row.status === 'error' ? 'text-destructive' : 'text-muted-foreground'
-                      }
-                    >
-                      {row.status === 'uploading' && `Uploading ${row.progress}%`}
-                      {row.status === 'done' && 'Uploaded'}
-                      {row.status === 'error' && (row.message ?? 'Upload failed')}
-                    </span>
-                  </span>
-                  {row.status === 'uploading' && (
-                    <progress max={100} value={row.progress} className="h-1 w-full" />
-                  )}
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <p>
-              Drag files here, or{' '}
-              <button
-                type="button"
-                className="text-primary underline underline-offset-2 hover:text-primary-hover"
-                onClick={() => inputRef.current?.click()}
-              >
-                choose files
-              </button>
-            </p>
-          )}
+          <span>
+            Drag files here, or{' '}
+            <span className="text-primary underline underline-offset-2">choose files</span>
+          </span>
           <span className="text-xs">Up to 15 MB each · txt, md, csv, json, pdf, images</span>
-          <input
-            ref={inputRef}
-            type="file"
-            className="hidden"
-            aria-hidden
-            multiple
-            data-testid="asset-input"
-            onChange={(e) => {
-              void handleFiles(e.target.files);
-              e.target.value = '';
-            }}
-          />
-        </div>
+        </button>
+        {uploadRows.length > 0 && (
+          <ul className="mt-2 space-y-1" data-testid="upload-rows">
+            {uploadRows.map((row, i) => (
+              <li key={`${row.name}-${i}`} className="flex flex-col gap-0.5 text-left">
+                <span
+                  className="flex items-center justify-between gap-2 truncate text-xs"
+                  data-testid={`upload-row-${i}`}
+                >
+                  <span className="truncate">{row.name}</span>
+                  <span
+                    className={
+                      row.status === 'error' ? 'text-destructive' : 'text-muted-foreground'
+                    }
+                  >
+                    {row.status === 'uploading' && `Uploading ${row.progress}%`}
+                    {row.status === 'done' && 'Uploaded'}
+                    {row.status === 'error' && (row.message ?? 'Upload failed')}
+                  </span>
+                </span>
+                {row.status === 'uploading' && (
+                  <progress max={100} value={row.progress} className="h-1 w-full" />
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+        <input
+          ref={inputRef}
+          type="file"
+          className="hidden"
+          aria-hidden
+          multiple
+          data-testid="asset-input"
+          onChange={(e) => {
+            void handleFiles(e.target.files);
+            e.target.value = '';
+          }}
+        />
       </div>
     </>
   );

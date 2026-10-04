@@ -141,6 +141,17 @@ describe('AssetsView (issue #197)', () => {
     );
   });
 
+  it('exposes a back control that clears the selection (#219)', async () => {
+    vi.mocked(AssetService.list).mockResolvedValue({ assets: [asset()], nextCursor: null });
+    vi.mocked(AssetService.content).mockResolvedValue(content({ content: '# Hello' }));
+    renderView();
+    fireEvent.click(await screen.findByTestId('asset-preview-a1'));
+    await screen.findByTestId('assets-preview-title');
+    fireEvent.click(screen.getByTestId('assets-preview-back'));
+    expect(screen.queryByTestId('assets-preview-title')).not.toBeInTheDocument();
+    expect(screen.getByText(/select a file to preview/i)).toBeInTheDocument();
+  });
+
   it('renders the thumbnail for a ready image asset (#208)', async () => {
     vi.mocked(AssetService.list).mockResolvedValue({
       assets: [
