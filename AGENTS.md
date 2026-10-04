@@ -53,9 +53,21 @@ Do cleanup-as-we-go, but only with explicit confirmation:
 When changing the React client (`src/client`), the end user is assumed to be on a phone, not a desktop:
 
 - **Mobile-first.** Design and verify for narrow viewports first; treat desktop as the enhancement, not the baseline. When a layout works on desktop but not mobile, it is broken.
+- **Every route is a phone surface — including `/admin`.** The owner uses the admin view on mobile as a deliberate quick-view for the desktop-first tools it fronts (LangSmith traces, Grafana logs); that is why those tabs live inside Tova at all. There is no desktop-only exemption. Density is fine, horizontal overflow without an affordance is not.
 - **Always use the `playwright-cli` skill** to render and inspect UI changes in a real browser before calling the work done. Do not judge visual/UX work from code alone.
+- **Verify at a phone viewport, not the default.** Render at ~375–390px wide. Playwright's default (1280×720) is a desktop lie: it will happily show a table that is clipped to three columns on a phone. Check the responsive `e2e/` suite (below) as the mechanical backstop.
 
 These rules are behavioral policy, so they apply to every client change regardless of size; they do not replace the "Code quality gate" below.
+
+#### Running the client locally
+
+- Start the stack (Mongo + dev server + Vite): `npm run stack:up` then `npm run dev`; the client is at `http://localhost:5173`.
+- **Reset to a known login any time with `npm run db:password`**, then sign in as any seeded user with the password `password`. This is the owner's local workflow and the intended fixture path — do not register-and-promote accounts instead (that is what PATs replaced, #184).
+- The responsive end-to-end suite is `npm run test:e2e` (`e2e/playwright.config.ts`). It already runs every spec in both a `mobile` (375×667, touch) and a `desktop` project. It is **not** part of `npm run ci` yet (aspirational — tracked in the ticket below); until it is, run it by hand for UI changes and treat failures as real.
+
+#### Known client drift (as of the UI section's writing)
+
+- The `e2e/` suite has stale assertions against UI that has since moved (e.g. `profile.spec.ts` expects "Zero-data retention is on", the app now says "Incognito…"; `assets.spec.ts` expects a per-row `asset-attach` button that the #197 master/detail view removed). Passing the suite requires the DB be reset via `db:password` **and** these specs updated — see the ticket.
 
 ### Model routing decisions
 
