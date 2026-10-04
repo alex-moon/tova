@@ -6,12 +6,14 @@ import AdminService, {
   AdminLogsService,
   AdminGraphService,
   AdminPatsService,
+  type ModelInput,
 } from '../services/admin';
 import AdminLangsmithView from './AdminLangsmithView';
 import type {
   AdminLogEntry,
   AdminModelError,
   AdminModel,
+  AdminModelLookup,
   AdminPat,
   AdminUser,
   ModelComparisonRun,
@@ -152,82 +154,84 @@ const AdminView = () => {
     }
   };
 
-  // CRUD for routing rows (issue #104). Mutations refetch the authoritative
-  // list rather than trusting the (id-only) response bodies.
-  const [editingModelId, setEditingModelId] = useState<string | null>(null);
-  const [form, setForm] = useState<{
-    provider: string;
-    model: string;
-    tier: string;
-    contextLength: string;
-    inputPrice: string;
-    outputPrice: string;
-    tools: boolean;
-    vision: boolean;
-  }>({
-    provider: 'deepinfra',
-    model: '',
-    tier: 'small',
-    contextLength: '',
-    inputPrice: '',
-    outputPrice: '',
-    tools: true,
-    vision: false,
-  });
+  // Add-a-model flow (#217): the provider catalog supplies context/prices/
+  // capabilities, so there is no manual stats form. The admin types a model
+  // name, searches, reviews the summary, picks a tier and adds. Provider is
+  // fixed to DeepInfra (the dropdown was removed — see
+  // docs/plan-217-provider-model-lookup.md, Groq investigation).
+  const [lookupModelName, setLookupModelName] = useState('');
+  const [lookupTier, setLookupTier] = useState<'small' | 'large'>('small');
+  const [lookupResult, setLookupResult] = useState<AdminModelLookup | null>(null);
+  const [looking, setLooking] = useState(false);
+  const [lookupError, setLookupError] = useState<string | null>(null);
+  // #217: which row's Refresh is in flight, so its button can show a throbber.
+  const [refreshingId, setRefreshingId] = useState<string | null>(null);
 
-  const formDataFor = (m: AdminModel) => ({
-    provider: m.provider,
-    model: m.model,
-    tier: m.tier as string,
-    contextLength: m.contextLength === undefined ? '' : String(m.contextLength),
-    inputPrice: m.inputPrice === undefined ? '' : String(m.inputPrice),
-    outputPrice: m.outputPrice === undefined ? '' : String(m.outputPrice),
-    tools: m.tools,
-    vision: m.vision,
-  });
-
-  const startEdit = (m: AdminModel) => {
-    setEditingModelId(m.id);
-    setForm(formDataFor(m));
+  const resetLookup = () => {
+    setLookupResult(null);
+    setLookupError(null);
   };
 
-  const submitForm = async () => {
-    const payload = {
-      provider: form.provider,
-      model: form.model,
-      tier: form.tier as AdminModel['tier'],
-      ...(form.contextLength ? { contextLength: Number(form.contextLength) } : {}),
-      ...(form.inputPrice ? { inputPrice: Number(form.inputPrice) } : {}),
-      ...(form.outputPrice ? { outputPrice: Number(form.outputPrice) } : {}),
-      tools: form.tools,
-      vision: form.vision,
+  const runLookup = async () => {
+    const name = lookupModelName.trim();
+    if (!name) return;
+    setLooking(true);
+    resetLookup();
+    try {
+      setLookupResult(await AdminModelsService.lookupModel(name));
+    } catch (err) {
+      setLookupError(err instanceof AdminError ? err.message : 'Something went wrong.');
+    } finally {
+      setLooking(false);
+    }
+  };
+
+  const addLookedUpModel = async () => {
+    if (!lookupResult?.found || !lookupResult.model) return;
+    const payload: ModelInput = {
+      provider: 'deepinfra',
+      model: lookupResult.model,
+      tier: lookupTier,
+      ...(lookupResult.contextLength !== undefined
+        ? { contextLength: lookupResult.contextLength }
+        : {}),
+      ...(lookupResult.inputPrice !== undefined ? { inputPrice: lookupResult.inputPrice } : {}),
+      ...(lookupResult.outputPrice !== undefined ? { outputPrice: lookupResult.outputPrice } : {}),
+      ...(lookupResult.vision !== undefined ? { vision: lookupResult.vision } : {}),
     };
     try {
-      if (editingModelId) {
-        // Blank price/context fields clear the value on the existing row.
-        await AdminModelsService.updateModel(editingModelId, {
-          ...payload,
-          contextLength: form.contextLength ? Number(form.contextLength) : null,
-          inputPrice: form.inputPrice ? Number(form.inputPrice) : null,
-          outputPrice: form.outputPrice ? Number(form.outputPrice) : null,
-        });
-      } else {
-        await AdminModelsService.createModel(payload);
+      await AdminModelsService.createModel(payload);
+      setLookupModelName('');
+      resetLookup();
+      await loadModels();
+    } catch (err) {
+      setError(err instanceof AdminError ? err.message : 'Something went wrong.');
+    }
+  };
+
+  // #217: Refresh re-pulls the provider's current values for an existing row
+  // and updates it in place. Only provider-owned fields are overwritten —
+  // tier/provider/model/eligible are left alone. Vision is only ever set to
+  // true (a catalog that omits the tag must not clobber an admin correction).
+  const refreshModel = async (m: AdminModel) => {
+    setRefreshingId(m.id);
+    try {
+      const details = await AdminModelsService.lookupModel(m.model);
+      if (!details.found) {
+        setError(`Model not found in the ${m.provider} catalog.`);
+        return;
       }
-      setEditingModelId(null);
-      setForm({
-        provider: 'deepinfra',
-        model: '',
-        tier: 'small',
-        contextLength: '',
-        inputPrice: '',
-        outputPrice: '',
-        tools: true,
-        vision: false,
+      await AdminModelsService.updateModel(m.id, {
+        contextLength: details.contextLength ?? null,
+        inputPrice: details.inputPrice ?? null,
+        outputPrice: details.outputPrice ?? null,
+        ...(details.vision ? { vision: true } : {}),
       });
       await loadModels();
     } catch (err) {
       setError(err instanceof AdminError ? err.message : 'Something went wrong.');
+    } finally {
+      setRefreshingId(null);
     }
   };
 
@@ -529,113 +533,115 @@ const AdminView = () => {
             <section data-testid="admin-models-section">
               <h3 className="font-heading text-lg font-semibold">Models</h3>
               <p className="text-xs text-muted-foreground">
-                Routing rows (issue #33/#104) — disable, edit, add or delete; feedback tallies per
-                band.
+                Routing rows (issue #33/#104) — disable, refresh, add or delete; feedback tallies
+                per band. Model details are pulled from the DeepInfra catalog (#217).
               </p>
-              <div className="mt-4 flex flex-wrap items-end gap-3 rounded-xl border border-border bg-card p-4">
-                <label className="text-sm">
-                  <span className="mr-2 text-muted-foreground">Provider</span>
-                  <select
-                    data-testid="model-form-provider"
-                    value={form.provider}
-                    onChange={(e) => setForm((f) => ({ ...f, provider: e.target.value }))}
-                    className="rounded-lg border border-border bg-background px-2 py-1"
-                  >
-                    <option value="groq">groq</option>
-                    <option value="deepinfra">deepinfra</option>
-                    <option value="typesafe">typesafe</option>
-                  </select>
-                </label>
-                <label className="text-sm">
-                  <span className="mr-2 text-muted-foreground">Model</span>
-                  <input
-                    data-testid="model-form-model"
-                    value={form.model}
-                    onChange={(e) => setForm((f) => ({ ...f, model: e.target.value }))}
-                    placeholder="org/model-name"
-                    className="w-64 rounded-lg border border-border bg-background px-2 py-1"
-                  />
-                </label>
-                <label className="text-sm">
-                  <span className="mr-2 text-muted-foreground">Tier</span>
-                  <select
-                    data-testid="model-form-tier"
-                    value={form.tier}
-                    onChange={(e) => setForm((f) => ({ ...f, tier: e.target.value }))}
-                    className="rounded-lg border border-border bg-background px-2 py-1"
-                  >
-                    <option value="small">small</option>
-                    <option value="large">large</option>
-                    <option value="guard">guard</option>
-                  </select>
-                </label>
-                <label className="text-sm">
-                  <span className="mr-2 text-muted-foreground">Context</span>
-                  <input
-                    data-testid="model-form-context"
-                    value={form.contextLength}
-                    onChange={(e) => setForm((f) => ({ ...f, contextLength: e.target.value }))}
-                    inputMode="numeric"
-                    placeholder="e.g. 131072"
-                    className="w-28 rounded-lg border border-border bg-background px-2 py-1"
-                  />
-                </label>
-                <label className="text-sm">
-                  <span className="mr-2 text-muted-foreground">In $/M</span>
-                  <input
-                    data-testid="model-form-input-price"
-                    value={form.inputPrice}
-                    onChange={(e) => setForm((f) => ({ ...f, inputPrice: e.target.value }))}
-                    inputMode="decimal"
-                    placeholder="e.g. 0.15"
-                    className="w-24 rounded-lg border border-border bg-background px-2 py-1"
-                  />
-                </label>
-                <label className="text-sm">
-                  <span className="mr-2 text-muted-foreground">Out $/M</span>
-                  <input
-                    data-testid="model-form-output-price"
-                    value={form.outputPrice}
-                    onChange={(e) => setForm((f) => ({ ...f, outputPrice: e.target.value }))}
-                    inputMode="decimal"
-                    placeholder="e.g. 0.5"
-                    className="w-24 rounded-lg border border-border bg-background px-2 py-1"
-                  />
-                </label>
-                <label className="inline-flex items-center gap-1.5 text-sm">
-                  <input
-                    type="checkbox"
-                    data-testid="model-form-tools"
-                    checked={form.tools}
-                    onChange={(e) => setForm((f) => ({ ...f, tools: e.target.checked }))}
-                  />
-                  tools
-                </label>
-                <label className="inline-flex items-center gap-1.5 text-sm">
-                  <input
-                    type="checkbox"
-                    data-testid="model-form-vision"
-                    checked={form.vision}
-                    onChange={(e) => setForm((f) => ({ ...f, vision: e.target.checked }))}
-                  />
-                  vision
-                </label>
-                <button
-                  data-testid="model-form-submit"
-                  onClick={submitForm}
-                  disabled={!form.model.trim()}
-                  className="rounded-lg border border-primary bg-primary px-3 py-1.5 text-sm text-primary-foreground transition-colors disabled:opacity-50"
-                >
-                  {editingModelId ? 'Save' : 'Add model'}
-                </button>
-                {editingModelId && (
+              <div className="mt-4 rounded-xl border border-border bg-card p-4">
+                <div className="flex flex-wrap items-end gap-3">
+                  <label className="text-sm">
+                    <span className="mr-2 text-muted-foreground">Model</span>
+                    <input
+                      data-testid="model-form-model"
+                      value={lookupModelName}
+                      onChange={(e) => {
+                        setLookupModelName(e.target.value);
+                        resetLookup();
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') void runLookup();
+                      }}
+                      placeholder="org/model-name"
+                      className="w-full rounded-lg border border-border bg-background px-2 py-1 sm:w-64"
+                    />
+                  </label>
                   <button
-                    data-testid="model-form-cancel"
-                    onClick={() => setEditingModelId(null)}
-                    className="rounded-lg border border-border px-3 py-1.5 text-sm transition-colors hover:bg-accent"
+                    data-testid="model-form-search"
+                    onClick={() => void runLookup()}
+                    disabled={!lookupModelName.trim() || looking}
+                    className="inline-flex items-center gap-2 rounded-lg border border-border px-3 py-1.5 text-sm transition-colors hover:bg-accent disabled:opacity-50"
                   >
-                    Cancel
+                    {looking && (
+                      <span
+                        data-testid="model-form-search-throbber"
+                        className="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-current border-t-transparent"
+                        aria-hidden="true"
+                      />
+                    )}
+                    {looking ? 'Searching…' : 'Search'}
                   </button>
+                  <label className="text-sm">
+                    <span className="mr-2 text-muted-foreground">Tier</span>
+                    <select
+                      data-testid="model-form-tier"
+                      value={lookupTier}
+                      onChange={(e) => setLookupTier(e.target.value as 'small' | 'large')}
+                      className="rounded-lg border border-border bg-background px-2 py-1"
+                    >
+                      <option value="small">small</option>
+                      <option value="large">large</option>
+                    </select>
+                  </label>
+                  {lookupResult?.found && (
+                    <button
+                      data-testid="model-form-submit"
+                      onClick={() => void addLookedUpModel()}
+                      className="rounded-lg border border-primary bg-primary px-3 py-1.5 text-sm text-primary-foreground transition-colors"
+                    >
+                      Add model
+                    </button>
+                  )}
+                </div>
+                {lookupError && (
+                  <p data-testid="model-form-error" className="mt-3 text-sm text-destructive">
+                    {lookupError}
+                  </p>
+                )}
+                {lookupResult && !lookupResult.found && (
+                  <p
+                    data-testid="model-form-not-found"
+                    className="mt-3 text-sm text-muted-foreground"
+                  >
+                    Model not found
+                  </p>
+                )}
+                {lookupResult?.found && (
+                  <dl
+                    data-testid="model-form-result"
+                    className="mt-3 grid grid-cols-2 gap-x-6 gap-y-1 text-sm sm:grid-cols-4"
+                  >
+                    <div>
+                      <dt className="text-xs text-muted-foreground">Model</dt>
+                      <dd data-testid="model-form-result-model">{lookupResult.model}</dd>
+                    </div>
+                    <div>
+                      <dt className="text-xs text-muted-foreground">Context</dt>
+                      <dd data-testid="model-form-result-context">
+                        {lookupResult.contextLength?.toLocaleString() ?? '—'}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt className="text-xs text-muted-foreground">In $/M</dt>
+                      <dd data-testid="model-form-result-input-price">
+                        {lookupResult.inputPrice !== undefined
+                          ? `$${lookupResult.inputPrice.toFixed(3)}`
+                          : '—'}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt className="text-xs text-muted-foreground">Out $/M</dt>
+                      <dd data-testid="model-form-result-output-price">
+                        {lookupResult.outputPrice !== undefined
+                          ? `$${lookupResult.outputPrice.toFixed(3)}`
+                          : '—'}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt className="text-xs text-muted-foreground">Capabilities</dt>
+                      <dd data-testid="model-form-result-caps">
+                        {lookupResult.vision ? 'vision' : 'text'}
+                      </dd>
+                    </div>
+                  </dl>
                 )}
               </div>
               <div
@@ -756,11 +762,19 @@ const AdminView = () => {
                           </td>
                           <td className="px-4 py-3">
                             <button
-                              data-testid={`model-edit-${model.id}`}
-                              onClick={() => startEdit(model)}
-                              className="mr-2 rounded-lg border border-border px-2 py-1 text-xs transition-colors hover:bg-accent"
+                              data-testid={`model-refresh-${model.id}`}
+                              onClick={() => void refreshModel(model)}
+                              disabled={refreshingId === model.id}
+                              className="mr-2 inline-flex items-center gap-1.5 rounded-lg border border-border px-2 py-1 text-xs transition-colors hover:bg-accent disabled:opacity-50"
                             >
-                              Edit
+                              {refreshingId === model.id && (
+                                <span
+                                  data-testid={`model-refresh-throbber-${model.id}`}
+                                  className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent"
+                                  aria-hidden="true"
+                                />
+                              )}
+                              Refresh
                             </button>
                             <button
                               data-testid={`model-delete-${model.id}`}

@@ -70,6 +70,23 @@ export interface AdminModelsPayload {
   errors: AdminModelError[];
 }
 
+// #217: provider catalog lookup, GET /api/admin/model-lookup. `found: false`
+// is a successful "the provider does not host this model" answer; a thrown
+// provider/network failure surfaces as a non-200 instead. `contextLength` and
+// prices are omitted when the provider does not report them (prices are USD
+// per 1M tokens, matching AdminModel); `vision` is present only when the
+// catalog tags the model multimodal.
+export interface AdminModelLookup {
+  found: boolean;
+  provider?: string;
+  model?: string;
+  contextLength?: number;
+  inputPrice?: number;
+  outputPrice?: number;
+  vision?: boolean;
+  description?: string;
+}
+
 // One retained log row, GET /api/admin/logs (#179). Sourced from Grafana Cloud
 // Loki (which survives deploys) rather than the old in-memory ring buffer.
 // `level` is a best-effort classification of the raw line; `id` is derived from

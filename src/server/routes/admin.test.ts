@@ -13,6 +13,12 @@ jest.mock('../services/lokiLogs', () => ({
   queryRetainedLogs: jest.fn(),
 }));
 
+// #217: the provider catalog call is mocked — the route suite pins the guard,
+// validation and found/miss/failure mapping, never a live provider request.
+jest.mock('../services/providerModelLookup', () => ({
+  lookupProviderModel: jest.fn(),
+}));
+
 const mockedQueryRetainedLogs = queryRetainedLogs as jest.MockedFunction<typeof queryRetainedLogs>;
 
 const cookieOf = (res: request.Response) => {
@@ -714,6 +720,100 @@ describe('POST /api/admin/model-compare (issue #129)', () => {
       models: Array.from({ length: 7 }, () => ({ provider: 'groq', model: 'x' })),
     });
     expect(tooManyRows.status).toBe(400);
+  });
+});
+
+/*
+ * GET /api/admin/model-lookup (#217): resolves provider-owned model details
+ * behind the admin guard. The service is mocked — the contract under test here
+ * is the route (guard, validation, found/miss/failure mapping, key isolation).
+ */
+describe('GET /api/admin/model-lookup (#217)', () => {
+  const lookupProviderModel = jest.requireMock('../services/providerModelLookup')
+    .lookupProviderModel as jest.Mock;
+
+  beforeEach(() => {
+    lookupProviderModel.mockReset();
+    lookupProviderModel.mockResolvedValue(null);
+  });
+
+  it('rejects the unauthenticated and non-admin', async () => {
+    const app = createApp();
+    const user = await registerUser(app, 'nolookup@example.com');
+    expect(
+      (await request(app).get('/api/admin/model-lookup?provider=deepinfra&model=x')).status,
+    ).toBe(401);
+    const res = await request(app)
+      .get('/api/admin/model-lookup?provider=deepinfra&model=x')
+      .set('Cookie', user);
+    expect(res.status).toBe(403);
+  });
+
+  it('validates the provider and model params', async () => {
+    const app = createApp();
+    const cookie = await registerAdmin(app, 'lookupadmin@example.com');
+
+    const badProvider = await request(app)
+      .get('/api/admin/model-lookup?provider=openai&model=x')
+      .set('Cookie', cookie);
+    expect(badProvider.status).toBe(400);
+    expect(badProvider.body.message).toMatch(/deepinfra/);
+
+    const missingModel = await request(app)
+      .get('/api/admin/model-lookup?provider=deepinfra&model=')
+      .set('Cookie', cookie);
+    expect(missingModel.status).toBe(400);
+
+    expect(lookupProviderModel).not.toHaveBeenCalled();
+  });
+
+  it('returns found details and a not-found miss as 200s', async () => {
+    const app = createApp();
+    const cookie = await registerAdmin(app, 'lookupfound@example.com');
+
+    lookupProviderModel.mockResolvedValueOnce({
+      provider: 'deepinfra',
+      model: 'XiaomiMiMo/MiMo-V2.6-Flash',
+      contextLength: 1048576,
+      inputPrice: 0.14,
+      outputPrice: 0.28,
+      vision: true,
+    });
+    const found = await request(app)
+      .get('/api/admin/model-lookup?provider=deepinfra&model=XiaomiMiMo%2FMiMo-V2.6-Flash')
+      .set('Cookie', cookie);
+    expect(found.status).toBe(200);
+    expect(found.body).toMatchObject({
+      found: true,
+      provider: 'deepinfra',
+      model: 'XiaomiMiMo/MiMo-V2.6-Flash',
+      contextLength: 1048576,
+      inputPrice: 0.14,
+      outputPrice: 0.28,
+      vision: true,
+    });
+    expect(lookupProviderModel).toHaveBeenCalledWith('deepinfra', 'XiaomiMiMo/MiMo-V2.6-Flash');
+
+    lookupProviderModel.mockResolvedValueOnce(null);
+    const miss = await request(app)
+      .get('/api/admin/model-lookup?provider=deepinfra&model=org/absent')
+      .set('Cookie', cookie);
+    expect(miss.status).toBe(200);
+    expect(miss.body).toEqual({ found: false });
+  });
+
+  it('maps a provider failure to 502 with the message surfaced', async () => {
+    const app = createApp();
+    const cookie = await registerAdmin(app, 'lookupfail@example.com');
+    lookupProviderModel.mockRejectedValueOnce(new Error('DeepInfra catalog returned HTTP 503'));
+
+    const res = await request(app)
+      .get('/api/admin/model-lookup?provider=deepinfra&model=x')
+      .set('Cookie', cookie);
+    expect(res.status).toBe(502);
+    expect(res.body.message).toMatch(/HTTP 503/);
+    // The API key must never appear in an error body.
+    expect(JSON.stringify(res.body)).not.toMatch(/Bearer|API_KEY/);
   });
 });
 

@@ -15,12 +15,14 @@ import {
 } from '../services/modelCompare';
 import { Entity, LOW_CONFIDENCE } from '../models/Entity';
 import { EntityEdge } from '../models/EntityEdge';
+import { lookupProviderModel, type LookupProvider } from '../services/providerModelLookup';
 import type {
   AdminGraphEdge,
   AdminGraphEntity,
   AdminGraphEntityDetail,
   AdminGraphEntitiesPayload,
   AdminGraphSourceRef,
+  AdminModelLookup,
 } from '../../shared/contracts';
 
 const router = express.Router();
@@ -261,6 +263,38 @@ router.get('/models', ...adminGuard, async (_req, res) => {
     });
   } catch (_err) {
     res.status(500).json({ message: 'Error listing models' });
+  }
+});
+
+/*
+ * #217: resolve a model's provider-owned details from the provider catalog so
+ * the admin can add a row without hand-entering context/prices. DeepInfra only
+ * for now (Groq's catalog carries no pricing). `found: false` with HTTP 200 is
+ * a normal answer; a provider/network failure is a 502 so the client can tell
+ * "not hosted" from "could not check".
+ */
+const LOOKUP_PROVIDERS = ['deepinfra'] as const;
+
+const isLookupProvider = (value: string): value is LookupProvider =>
+  (LOOKUP_PROVIDERS as readonly string[]).includes(value);
+
+router.get('/model-lookup', ...adminGuard, async (req, res) => {
+  const provider = typeof req.query.provider === 'string' ? req.query.provider : '';
+  const model = typeof req.query.model === 'string' ? req.query.model.trim() : '';
+  if (!isLookupProvider(provider)) {
+    return res.status(400).json({ message: 'provider must be one of: deepinfra' });
+  }
+  if (!model) {
+    return res.status(400).json({ message: 'model is required' });
+  }
+  try {
+    const details = await lookupProviderModel(provider, model);
+    const payload: AdminModelLookup = details ? { found: true, ...details } : { found: false };
+    res.json(payload);
+  } catch (err) {
+    res.status(502).json({
+      message: err instanceof Error ? err.message : 'Provider lookup failed',
+    });
   }
 });
 

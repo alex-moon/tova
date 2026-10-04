@@ -8,6 +8,8 @@ export type { AdminUser } from '@shared/contracts';
 export type { AdminModel } from '@shared/contracts';
 // #168: per-model error diagnostics rows and the full models payload.
 export type { AdminModelError, AdminModelsPayload } from '@shared/contracts';
+// #217: provider catalog lookup response (GET /api/admin/model-lookup).
+export type { AdminModelLookup } from '@shared/contracts';
 // Public shape of a log buffer row and the logs response, as returned by
 // GET /api/admin/logs (issue #76). Re-exported from the shared contract.
 export type { AdminLogEntry, AdminLogsPayload } from '@shared/contracts';

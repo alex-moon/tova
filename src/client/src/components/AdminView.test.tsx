@@ -11,6 +11,7 @@ const listModels = vi.fn();
 const createModel = vi.fn();
 const updateModel = vi.fn();
 const deleteModel = vi.fn();
+const lookupModel = vi.fn();
 const listLogs = vi.fn();
 const compareModels = vi.fn();
 const listGraphEntities = vi.fn();
@@ -34,6 +35,7 @@ vi.mock('../services/admin', async (importOriginal) => {
       updateModel: (...args: unknown[]) => updateModel(...args),
       deleteModel: (...args: unknown[]) => deleteModel(...args),
       compareModels: (...args: unknown[]) => compareModels(...args),
+      lookupModel: (...args: unknown[]) => lookupModel(...args),
     },
     AdminLogsService: { listLogs: (...args: unknown[]) => listLogs(...args) },
     AdminGraphService: {
@@ -227,43 +229,106 @@ describe('AdminView models table (issue #33/#104)', () => {
     await waitFor(() => expect(listModels).toHaveBeenCalledTimes(2));
   });
 
-  it('edits an existing model through the inline form', async () => {
+  // #217: the manual form is gone. Add = search the provider catalog, review
+  // the summary, pick a tier and post the looked-up values.
+  it('searches the provider catalog and adds a found model with the tier', async () => {
     setup();
-    fireEvent.click(await screen.findByTestId('admin-tab-models'));
-    fireEvent.click(await screen.findByTestId('model-edit-r1'));
-    fireEvent.change(screen.getByTestId('model-form-model'), {
-      target: { value: 'renamed-model' },
+    lookupModel.mockResolvedValue({
+      found: true,
+      provider: 'deepinfra',
+      model: 'XiaomiMiMo/MiMo-V2.6-Flash',
+      contextLength: 1048576,
+      inputPrice: 0.14,
+      outputPrice: 0.28,
+      vision: true,
     });
-    fireEvent.click(screen.getByTestId('model-form-submit'));
-    await waitFor(() =>
-      expect(updateModel).toHaveBeenCalledWith(
-        'r1',
-        expect.objectContaining({ model: 'renamed-model', tier: 'large' }),
-      ),
-    );
-    expect(createModel).not.toHaveBeenCalled();
-  });
+    fireEvent.click(await screen.findByTestId('admin-tab-models'));
+    fireEvent.change(screen.getByTestId('model-form-model'), {
+      target: { value: 'XiaomiMiMo/MiMo-V2.6-Flash' },
+    });
+    fireEvent.click(screen.getByTestId('model-form-search'));
+    await waitFor(() => expect(lookupModel).toHaveBeenCalledWith('XiaomiMiMo/MiMo-V2.6-Flash'));
 
-  it('adds a new model through the inline form', async () => {
-    setup();
-    fireEvent.click(await screen.findByTestId('admin-tab-models'));
-    fireEvent.change(screen.getByTestId('model-form-model'), {
-      target: { value: 'org/new-model' },
-    });
-    fireEvent.change(screen.getByTestId('model-form-tier'), { target: { value: 'guard' } });
-    fireEvent.change(screen.getByTestId('model-form-context'), { target: { value: '131072' } });
+    const summary = await screen.findByTestId('model-form-result');
+    expect(summary).toHaveTextContent('XiaomiMiMo/MiMo-V2.6-Flash');
+    expect(screen.getByTestId('model-form-result-context')).toHaveTextContent('1,048,576');
+    expect(screen.getByTestId('model-form-result-input-price')).toHaveTextContent('$0.140');
+    expect(screen.getByTestId('model-form-result-output-price')).toHaveTextContent('$0.280');
+    expect(screen.getByTestId('model-form-result-caps')).toHaveTextContent('vision');
+
+    fireEvent.change(screen.getByTestId('model-form-tier'), { target: { value: 'large' } });
     fireEvent.click(screen.getByTestId('model-form-submit'));
     await waitFor(() =>
       expect(createModel).toHaveBeenCalledWith({
         provider: 'deepinfra',
-        model: 'org/new-model',
-        tier: 'guard',
-        contextLength: 131072,
-        tools: true,
-        vision: false,
+        model: 'XiaomiMiMo/MiMo-V2.6-Flash',
+        tier: 'large',
+        contextLength: 1048576,
+        inputPrice: 0.14,
+        outputPrice: 0.28,
+        vision: true,
       }),
     );
     await waitFor(() => expect(listModels).toHaveBeenCalledTimes(2));
+  });
+
+  it('shows "Model not found" and does not offer Add on a miss', async () => {
+    setup();
+    lookupModel.mockResolvedValue({ found: false });
+    fireEvent.click(await screen.findByTestId('admin-tab-models'));
+    fireEvent.change(screen.getByTestId('model-form-model'), { target: { value: 'org/absent' } });
+    fireEvent.click(screen.getByTestId('model-form-search'));
+    expect(await screen.findByTestId('model-form-not-found')).toHaveTextContent('Model not found');
+    expect(screen.queryByTestId('model-form-submit')).not.toBeInTheDocument();
+    expect(createModel).not.toHaveBeenCalled();
+  });
+
+  it('shows a lookup error inline when the provider call fails', async () => {
+    setup();
+    lookupModel.mockRejectedValue(new AdminError('Failed to look up model.'));
+    fireEvent.click(await screen.findByTestId('admin-tab-models'));
+    fireEvent.change(screen.getByTestId('model-form-model'), { target: { value: 'org/x' } });
+    fireEvent.click(screen.getByTestId('model-form-search'));
+    expect(await screen.findByTestId('model-form-error')).toHaveTextContent(
+      'Failed to look up model.',
+    );
+  });
+
+  // #217: Refresh replaces the old Edit button — re-pull provider-owned values
+  // and update the row in place (tier/provider/model/eligible untouched).
+  it('refreshes a row from the provider catalog', async () => {
+    setup();
+    lookupModel.mockResolvedValue({
+      found: true,
+      provider: 'deepinfra',
+      model: 'test-large',
+      contextLength: 262144,
+      inputPrice: 0.2,
+      outputPrice: 0.6,
+      vision: true,
+    });
+    fireEvent.click(await screen.findByTestId('admin-tab-models'));
+    fireEvent.click(await screen.findByTestId('model-refresh-r1'));
+    await waitFor(() => expect(lookupModel).toHaveBeenCalledWith('test-large'));
+    await waitFor(() =>
+      expect(updateModel).toHaveBeenCalledWith('r1', {
+        contextLength: 262144,
+        inputPrice: 0.2,
+        outputPrice: 0.6,
+        vision: true,
+      }),
+    );
+    await waitFor(() => expect(listModels).toHaveBeenCalledTimes(2));
+  });
+
+  it('does not clobber a row when Refresh finds no catalog entry', async () => {
+    setup();
+    lookupModel.mockResolvedValue({ found: false });
+    fireEvent.click(await screen.findByTestId('admin-tab-models'));
+    fireEvent.click(screen.getByTestId('model-refresh-r1'));
+    expect(await screen.findByTestId('admin-error')).toHaveTextContent(
+      /not found in the \w+ catalog/,
+    );
     expect(updateModel).not.toHaveBeenCalled();
   });
 
@@ -299,21 +364,6 @@ describe('AdminView models table (issue #33/#104)', () => {
     // Unpriced rows show a dash, not $0.000, and are not flagged.
     expect(screen.getByTestId('admin-model-price-unpriced')).toHaveTextContent('—');
     expect(screen.queryByTestId('admin-model-overcap-unpriced')).not.toBeInTheDocument();
-  });
-
-  it('round-trips prices through the inline form', async () => {
-    setup();
-    fireEvent.click(await screen.findByTestId('admin-tab-models'));
-    fireEvent.click(await screen.findByTestId('model-edit-r1'));
-    fireEvent.change(screen.getByTestId('model-form-input-price'), { target: { value: '0.15' } });
-    fireEvent.change(screen.getByTestId('model-form-output-price'), { target: { value: '0.5' } });
-    fireEvent.click(screen.getByTestId('model-form-submit'));
-    await waitFor(() =>
-      expect(updateModel).toHaveBeenCalledWith(
-        'r1',
-        expect.objectContaining({ inputPrice: 0.15, outputPrice: 0.5 }),
-      ),
-    );
   });
 });
 

@@ -63,6 +63,15 @@ export const config = {
     },
   },
 
+  // Provider API keys. Mastra reads these implicitly for inference; the
+  // model-lookup service (#217) reads DeepInfra's catalog directly, so the
+  // key is surfaced here rather than reached for ad hoc.
+  providers: {
+    get deepinfraApiKey(): string | undefined {
+      return process.env.DEEPINFRA_API_KEY;
+    },
+  },
+
   // #179: Grafana Cloud (hosted Loki) for retained logs. `url` is the full
   // push URL (as supplied by Grafana Cloud); the read side strips the
   // /loki/api/v1/push suffix to reach the query API on the same host.

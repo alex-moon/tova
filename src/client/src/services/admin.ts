@@ -2,6 +2,7 @@ import axios from 'axios';
 import type {
   AdminModel,
   AdminModelsPayload,
+  AdminModelLookup,
   AdminUser,
   AdminLogsPayload,
   AdminPatCreated,
@@ -70,7 +71,7 @@ export default AdminService;
 // nothing (DELETE); callers refetch for the authoritative list. #168: the
 // list also carries per-model error diagnostics (deploy wipes logs, so the
 // shapes accumulate in Mongo instead).
-type ModelInput = Partial<
+export type ModelInput = Partial<
   Omit<AdminModel, 'id' | 'stats' | 'contextLength' | 'inputPrice' | 'outputPrice'>
 > & {
   contextLength?: number | null;
@@ -113,6 +114,20 @@ const deleteModel = async (id: string): Promise<void> => {
   }
 };
 
+// #217: provider catalog lookup. The provider is fixed to DeepInfra (the
+// dropdown was removed — see docs/plan-217-provider-model-lookup.md); the
+// response's `found: false` is a normal miss, not an error.
+const lookupModel = async (model: string): Promise<AdminModelLookup> => {
+  try {
+    const res = await axios.get<AdminModelLookup>('/api/admin/model-lookup', {
+      params: { provider: 'deepinfra', model },
+    });
+    return res.data;
+  } catch (err) {
+    throw toAdminError(err, 'Failed to look up model.');
+  }
+};
+
 // Direct model comparison (issue #129): one prompt through the existing
 // agent on chosen model rows. Row shape mirrors the models payload so the
 // view can forward selections straight from the inventory table.
@@ -131,7 +146,14 @@ const compareModels = async (
   }
 };
 
-const AdminModelsService = { listModels, createModel, updateModel, deleteModel, compareModels };
+const AdminModelsService = {
+  listModels,
+  createModel,
+  updateModel,
+  deleteModel,
+  compareModels,
+  lookupModel,
+};
 
 export interface ListLogsParams {
   level?: 'info' | 'warn' | 'error';
