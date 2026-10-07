@@ -3,23 +3,33 @@
 Branch: `feat/224-traces-cache`
 GitHub issue: alex-moon/tova#224
 
-**Status (2026-10-07 logging pass):**
+**Status (2026-10-07 per-message admin pass):**
 
-- **T1–T6, T8 are implemented and verified on the branch** (`npm run ci` green at
-  the time; Traces tab rendered at 390px and 1280px). The model-level cache +
-  estimated cost are live.
-- **T9–T11 are now implemented and verified** (this pass): token usage is
-  threaded through the neutral LLM boundary, chat turns carry a `sessionId`
-  trace, and the assistant `Message` persists the turn's token usage. This is
-  the "logging" half of the owner's 2026-10-07 directive. See "To do" below.
-- **T12 (the per-message admin surface) is the remaining deliverable.** Its
-  data source is now in place; the UI shape is OQ-10 (still open, owner
-  preference). Counts (T12.1) already have a source and could ship next.
+- **T1–T6, T8 are implemented and verified on the branch** (`npm run ci` green;
+  Traces tab rendered at 390px and 1280px). The model-level cache + estimated
+  cost are live.
+- **T9–T11 are implemented and verified** (prior pass): token usage is threaded
+  through the neutral LLM boundary, chat turns carry a `sessionId` trace, and
+  the assistant `Message` persists the turn's token usage. This was the
+  "logging" half of the owner's 2026-10-07 directive.
+- **T12 is now implemented and verified** (this pass): a per-session cost
+  breakdown served from Mongo at `GET /api/admin/langsmith/sessions`, rendered as
+  the "Session cost · last 7 days" table under the model stats — session title,
+  messages in/out, tokens in/out, estimated cost, last activity, plus a totals
+  footer. OQ-10/11/12 are closed (see below). The owner's directive is fully
+  delivered.
+- **CI is green on PR #228.** The one earlier Actions failure (run
+  37598695293) was the pre-existing order-dependent
+  `modelConfigService.test.ts` flake (`capability matching (#94)`); the current
+  head passes the full `ci` + `ci-gate` jobs. See Verification.
 - **Honesty note on the branch:** the earlier T7 wording ("no data source,
   blocked") was correct only for *LangSmith-derived* data. Mongo `Message` stored
   no token counts *today*, but the chat path received the provider's usage on
   every turn — it was simply never read from the connector result. That wiring
-  gap is now closed (T9–T11).
+  gap is closed by T9–T11; a live local-DB sample (2026-10-07) confirms the
+  resulting skew is real: 362 messages / 68 sessions, **0** with `usage` yet, so
+  counts render while tokens/cost read `—` until logging has run for a while
+  (exactly the skew the owner accepted).
 
 ## Motivation
 
@@ -272,24 +282,44 @@ Grounding. Each is intended to be one safe commit, ordered by dependency.
       (turn total per OQ-8 lean) to the assistant message only. Tests:
       `chat.test.ts` / `chat.stream.test.ts` assert persistence and clean
       omission when the provider reports nothing.
-- [ ] **T12 — Per-message / per-session admin breakdown.** *(Data source now in
-      place after T9–T11; T12.1/T12.2 are unblocked, T12.3 waits on OQ-10.)*
-  - Sub-tasks depend on the shape chosen for the admin surface, which is **OQ-10**
-    (extend the existing Traces tab vs a new admin tab). The parts that do **not**
-    depend on that choice, and can be built regardless:
-  1. **Counts from Mongo** (decision 11): a route method returning, for a window,
-     session count, message-in count (`role:'user'`), message-out count
-     (`role:'assistant'`), and the summed `inputTokens`/`outputTokens` from
-     assistant `Message.usage`. Explicitly note the skew: only turns after T11
-     shipped carry `usage`; count totals and token totals cover different rows
-     for a while.
-  2. **Cost join**: reuse `estimateCostUsd` keyed on `Message.modelName`
-     (same model-only tie-break as `traceStatsCost.ts`).
-  3. **UI**: render alongside/under the model summary. Mobile-first, Playwright
-     verified at ~375–390px. Whether it is a per-session table, a per-message
-     list, or a second cost row under the model table is OQ-10.
-  4. Tests: route contract test + client render test; a mixed-usage fixture
-     (some messages with usage, some without) to prove `—` handling.
+- [x] **T12 — Per-message / per-session admin breakdown. DONE.** OQ-10 was
+      resolved in favour of option (a) — extend the existing Traces tab — so T12
+      did not need a new admin surface.
+  - Sub-tasks depend on the shape chosen for the admin surface, which was **OQ-10**
+    (extend the existing Traces tab vs a new admin tab). **Resolved to (a):
+    extend the existing Traces tab** (the session breakdown is a second section
+    under the model stats, matching the owner's "cost breakdown per session"
+    value and avoiding a new tab). The parts that did **not** depend on that
+    choice were built as planned:
+  1. **Counts from Mongo** (decision 11): `sessionCostBreakdown`
+     (`src/server/services/sessionCostService.ts`) aggregates `Message` rows in
+     the window by `(sessionId, modelName)` — session count, message-in
+     (`role:'user'`), message-out (`role:'assistant'`), and summed
+     `usage.inputTokens`/`outputTokens`/`totalTokens` from assistant messages.
+     Session titles are joined from `Session`. The skew is explicit: token/cost
+     totals cover only usage-bearing rows, while counts cover all rows.
+  2. **Cost join**: reuses `estimateCostUsd` + `pickPriceRow` from
+     `traceStatsCost.ts`, keyed on `Message.modelName` (same model-only
+     tie-break). A (session, model) group with no logged usage contributes no
+     cost (`null`, not `$0`) — unknown ≠ free. The total-only fallback from
+     OC-7 applies per group (a total with no split is treated as input).
+  3. **UI**: `SessionCostRow` + a "Session cost · last 7 days" `<table>` in
+     `AdminLangsmithView.tsx` (session, in, out, tokens in, tokens out, est.
+     cost, last activity) with a totals footer; a caption states the logging
+     skew. Mobile-first, `overflow-x-auto`. Verified at 390px and 1280px.
+  4. Tests: `sessionCostService.test.ts` (3: usage-less not priced at $0,
+     total-only fallback, mixed priced/unpriced session total);
+     `adminLangsmith.test.ts` route cases (guard, per-session breakdown without
+     LangSmith, window exclusion); `AdminLangsmithView.test.tsx` render cases
+     (priced + unpriced session, totals).
+  - Route: `GET /api/admin/langsmith/sessions?days=` (`adminLangsmith.ts:123`),
+    same `adminGuard`, clamped 1–30 days, 500 on read failure. Never touches
+    LangSmith, so it needs no cache/poller.
+  - **Deliberate limitation:** the per-session view is from our own `Message`
+    rows, so it does not include auxiliary LLM spend (title, guard, follow-ups,
+    entity extraction, metrics); the model-level cache covers those via LangSmith
+    llm runs. The two views will not sum to the same figure — documented, not a
+    bug.
 
 ## Verification
 
@@ -302,10 +332,16 @@ Grounding. Each is intended to be one safe commit, ordered by dependency.
   treat those as #224 regressions, but **do** re-run the specific #224 suites and
   the full gate after T9–T12 land.
 - **CI Actions:** the owner asked to check CI runs against the PR and fix
-  them. Before finalising, fetch the PR's check runs (when writing back is
-  allowed) and confirm the `ci` workflow is green, or fix the cause. The workflow
-  detects changed areas (`.github/workflows/ci.yml`) so server + client steps run
-  for these changes.
+  them. **Done (2026-10-07):** the one failing run on this branch (37598695293)
+  failed only on the pre-existing order-dependent `modelConfigService.test.ts`
+  flake (`capability matching (#94)` expected `openai/gpt-oss-20b` to be
+  excluded but got it in the pool) — the same failure recorded above as
+  environment flakiness, not a #224 regression. The current head passes the
+  full `ci` job (3m44s) and `ci-gate` (run 37622208360); `changed` passes and the
+  security jobs are skipped by the workflow's path filters. Local `npm run ci`
+  is also green (81 suites / 1100 tests, exit 0). The `ci` workflow detects
+  changed areas (`.github/workflows/ci.yml`), so server + client steps ran for
+  these changes.
 - **UI:** every new surface renders at a phone viewport (390px) with the
   `playwright-cli` skill, not code inspection.
 - **Live probes:** for anything touching LangSmith tokens or Mastra usage, prefer
@@ -314,8 +350,9 @@ Grounding. Each is intended to be one safe commit, ordered by dependency.
 ## Open questions
 
 Only genuine doubts that block or shape a task appear here. Resolved items
-(OQ-1, OQ-3, OQ-6, OQ-7, and OQ-2's "which option") have been promoted into
-Grounding and Decisions above.
+(OQ-1, OQ-2's "which option", OQ-3, OQ-6, OQ-7, OQ-8, OQ-9, OQ-10, OQ-11, and
+OQ-12) have been promoted into Grounding/Decisions or marked resolved inline
+below. **OQ-5 is the only item still open** and it blocks no task.
 
 - **OQ-2 (source for session / message counts) — RESOLVED to option (a) by the
   owner (2026-10-07).** Per-message token usage will be logged on the chat path
@@ -337,26 +374,28 @@ Grounding and Decisions above.
   `toNeutralStream` stays pure and `totalUsage` (a promise on the stream output)
   settles once the stream drains, so awaiting after the loop cannot race the end.
   Pinned by `mastraUsage.test.ts`.
-- **OQ-10 (admin surface shape for the breakdown).** Per OQ-2 being resolved,
-  per-message cost is now deliverable, but the ticket's UI ask is ambiguous:
-  a per-session table, a per-message list, or extra cost rows in the existing
-  model table. Lean: a per-session summary (session → messages in/out, tokens,
-  est. cost) as a second collapsible section under the model stats, since the
-  owner's stated value is "cost breakdown per session". Confirm before T12's UI
-  sub-task. *To close: owner preference.* Still open — blocks only T12.3.
-- **OQ-11 (does `Message.modelName` reliably identify the priced model?).**
-  `Message.modelName` is set from `routingResult.model` on both routes, which is
-  the same string space as `ProviderRouting.model`. But historical messages may
-  have `modelName` in an alias form or empty. The per-message cost join will
-  render `—` for those; confirm that is acceptable rather than falling back to a
-  provider-level default. *To close: sample the local/dev DB for distinct
-  `modelName` values before T12.*
-- **OQ-12 (usage availability across clients/providers).** `LanguageModelUsage`
-  fields are `number | undefined`; a provider version that omits them yields
-  absent usage, rendering `—`. Unknown how often Groq vs DeepInfra populate the
-  split. This does not block T9–T12 (absent is handled) but bounds the value of
-  the per-message view; a live sample after T9 ships would quantify it. *To
-  close: post-T9 probe.*
+- **OQ-10 (admin surface shape for the breakdown) — RESOLVED to option (a),
+  extend the existing Traces tab.** The per-session breakdown is a second
+  section under the model stats ("Session cost · last 7 days"), not a new tab.
+  This matches the owner's stated value ("cost breakdown per session") without
+  adding a navigation surface; the model stats answer "which model costs most"
+  and the session table answers "which conversation costs most". *Closed by
+  T12.*
+- **OQ-11 (does `Message.modelName` reliably identify the priced model?) —
+  RESOLVED, `—` is acceptable.** A local-DB sample (2026-10-07) found 15
+  distinct `modelName` values across existing messages; 13 match a
+  `providerroutings` row, 2 do not (`google/gemma-3-4b-it`, `Qwen/Qwen3-14B`).
+  Those render `—` rather than falling back to a provider default — the correct
+  unknown ≠ free behaviour. No duplicate model strings exist in
+  `providerroutings`, so the model-only join is unambiguous today. *Closed by
+  T12; the tie-break remains a future-collision guard.*
+- **OQ-12 (usage availability across clients/providers) — bounded, not
+  blocking.** `LanguageModelUsage` fields are `number | undefined`; absent
+  fields are normalised to absent (never 0) and render `—`. A live local-DB
+  sample showed 0 messages with usage yet (logging is new), so the per-message
+  view is intentionally skewed toward counts until usage builds up. The exact
+  Groq/DeepInfra populate-rate is a post-deploy observation, not a design
+  blocker; T9–T12 handle absence by construction. *Closed as a monitor item.*
 
 ## Follow-ups (deferred)
 
