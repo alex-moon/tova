@@ -91,7 +91,7 @@ test('ZDR on: privacy note shows and the outgoing stream body replays history wi
   const stream = installChatStreamMock(page);
   await gotoChat(page);
 
-  await expect(page.getByTestId('privacy-note')).toContainText('Zero-data retention is on');
+  await expect(page.getByTestId('privacy-note')).toContainText('Incognito is on for this chat');
 
   await page.getByTestId('chat-input').fill('ZDR question');
   await page.getByTestId('chat-input').press('Enter');
