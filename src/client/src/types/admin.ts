@@ -40,3 +40,12 @@ export type {
   AdminSessionCostRow,
   AdminSessionsCostPayload,
 } from '@shared/contracts';
+// Eval rollup shapes (#225), as returned by GET /api/admin/evals/runs and
+// GET /api/admin/evals/runs/:id.
+export type {
+  AdminEvalScoreCounts,
+  AdminEvalRunSummary,
+  AdminEvalRunsPayload,
+  AdminEvalCaseResult,
+  AdminEvalRunDetail,
+} from '@shared/contracts';

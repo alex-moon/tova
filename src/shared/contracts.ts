@@ -327,6 +327,47 @@ export interface AdminSessionsCostPayload {
   };
 }
 
+// #225: admin Evals view. One `AdminEvalRunSummary` per suite execution
+// (newest first in the list), with per-score counts so the tab renders a row
+// without fetching the per-case breakdown. `status` mirrors the rollup's
+// `running|done|error`; `total` is the number of graded cases.
+export interface AdminEvalScoreCounts {
+  pass: number;
+  partial: number;
+  fail: number;
+  error: number;
+}
+
+export interface AdminEvalRunSummary {
+  id: string;
+  startedAt: string;
+  finishedAt: string | null;
+  status: 'running' | 'done' | 'error';
+  models: string[];
+  counts: AdminEvalScoreCounts;
+  total: number;
+  error: string | null;
+}
+
+export interface AdminEvalRunsPayload {
+  runs: AdminEvalRunSummary[];
+}
+
+// One graded case row in a run's breakdown. `score` is stringly typed as the
+// runner always produced it: `error` is a run-level crash recorded in sweep
+// mode, distinct from a genuine graded `fail`.
+export interface AdminEvalCaseResult {
+  caseId: string;
+  model: string;
+  provider: string;
+  score: 'pass' | 'partial' | 'fail' | 'error';
+  report: string;
+}
+
+export interface AdminEvalRunDetail extends AdminEvalRunSummary {
+  results: AdminEvalCaseResult[];
+}
+
 // `location` is the coarse country-level geolocation (issue #50): only the
 // country name and 2-letter code are exposed, and only once resolved.
 export interface AuthUserLocation {
