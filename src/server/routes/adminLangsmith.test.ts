@@ -490,6 +490,70 @@ describe('admin langsmith (#186)', () => {
     });
   });
 
+  it('treats an absent or non-numeric token split as 0 without disturbing totals (#224)', async () => {
+    const app = createApp();
+    const cookie = await registerAdmin(app, 'ls-split-edge@example.com');
+
+    fetchSpy.mockImplementation((url: string) => {
+      if (String(url).includes('/api/v1/sessions')) {
+        return Promise.resolve(jsonResponse(200, [{ id: 'proj-1', name: 'tova-dev' }]));
+      }
+      return Promise.resolve(
+        jsonResponse(200, {
+          runs: [
+            // A newer/older run shape with no split at all: total must still
+            // count, the split contributes 0 (never NaN/undefined).
+            {
+              name: "llm: 'openai/gpt-oss-20b'",
+              run_type: 'llm',
+              status: 'success',
+              total_tokens: 500,
+            },
+            // Defensive: a zeroed-by-select split must not fabricate tokens.
+            {
+              name: "llm: 'openai/gpt-oss-20b'",
+              run_type: 'llm',
+              status: 'success',
+              total_tokens: 20,
+              prompt_tokens: 0,
+              completion_tokens: 0,
+            },
+            // Defensive: a null (not absent) split field must count as 0.
+            {
+              name: "llm: 'openai/gpt-oss-20b'",
+              run_type: 'llm',
+              status: 'success',
+              total_tokens: 10,
+              prompt_tokens: null,
+              completion_tokens: null,
+            },
+          ],
+        }),
+      );
+    });
+
+    const res = await request(app).get('/api/admin/langsmith/stats?days=7').set('Cookie', cookie);
+    expect(res.status).toBe(200);
+    expect(res.body.models).toEqual([
+      {
+        model: 'openai/gpt-oss-20b',
+        calls: 3,
+        errors: 0,
+        avgDurationMs: null,
+        totalTokens: 530,
+        inputTokens: 0,
+        outputTokens: 0,
+      },
+    ]);
+    expect(res.body.totals).toEqual({
+      calls: 3,
+      errors: 0,
+      totalTokens: 530,
+      inputTokens: 0,
+      outputTokens: 0,
+    });
+  });
+
   it('authorizes over a PAT bearer like the other admin routes (#184)', async () => {
     const app = createApp();
     const cookie = await registerAdmin(app, 'ls-bearer@example.com');
