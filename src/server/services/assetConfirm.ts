@@ -72,10 +72,15 @@ const confirmAsset = async (asset: AssetDocument): Promise<ConfirmResult> => {
   // the asset (the binary is fine).
   // Issue #208: images additionally queue a thumbnail job so the /assets
   // viewer never loads the original; the two pending lifecycles share one job.
+  // Issue #209: images also queue OCR, so they now drive the markdown
+  // lifecycle too (the processor branches on image content type before the
+  // convertible guard).
+  const isImage = isImageContentType(asset.contentType);
   const needsConversion = text === null && isConvertible(asset.filename);
-  const needsThumbnail = isImageContentType(asset.contentType);
-  if ((needsConversion || needsThumbnail) && !asset.ephemeral) {
-    if (needsConversion) {
+  const needsOcr = isImage;
+  const needsThumbnail = isImage;
+  if ((needsConversion || needsOcr || needsThumbnail) && !asset.ephemeral) {
+    if (needsConversion || needsOcr) {
       asset.markdownStatus = 'pending';
       asset.markdownFailureReason = null;
     }
@@ -93,10 +98,10 @@ const confirmAsset = async (asset: AssetDocument): Promise<ConfirmResult> => {
     } catch (enqueueErr) {
       console.error('Asset job enqueue error:', enqueueErr);
       const revert: Record<string, string> = {};
-      if (needsConversion) revert.markdownStatus = 'none';
+      if (needsConversion || needsOcr) revert.markdownStatus = 'none';
       if (needsThumbnail) revert.thumbnailStatus = 'none';
       await Asset.updateOne({ _id: asset._id }, { $set: revert });
-      if (needsConversion) asset.markdownStatus = 'none';
+      if (needsConversion || needsOcr) asset.markdownStatus = 'none';
       if (needsThumbnail) asset.thumbnailStatus = 'none';
     }
     return { status: 'ok', asset: safeAsset(asset) };
