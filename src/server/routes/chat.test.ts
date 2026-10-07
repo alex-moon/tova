@@ -2,6 +2,7 @@ import request from 'supertest';
 import { confirmationForToolResults, streamingErrorMessage } from './chat';
 import { createApp } from '../index';
 import { Message } from '../models/Message';
+import { Session } from '../models/Session';
 import { User } from '../models/User';
 import { AllModelsDisabledError } from '../services/modelConfigService';
 
@@ -74,6 +75,42 @@ describe('Chat route routing metadata', () => {
     // "Hello there" is a short prose prompt → short|prose band
     expect(assistantMessage?.routingBand).toBe('short|prose');
     expect(assistantMessage?.feedback).toMatchObject({ value: null, updatedAt: null });
+  });
+
+  it('persists the turn token usage on the assistant message (#224)', async () => {
+    mockGenerate.mockResolvedValue({
+      text: 'e2e-ok',
+      totalUsage: { inputTokens: 5, outputTokens: 6, totalTokens: 11 },
+    });
+    const app = createApp();
+    const cookies = await registerUser(app, 'usage-meta-1@example.com');
+
+    const response = await request(app)
+      .post('/api/chat')
+      .set('Cookie', Array.isArray(cookies) ? cookies : [cookies])
+      .send({ content: 'Hello there' });
+
+    expect(response.status).toBe(200);
+    const assistantMessage = await Message.findOne({ role: 'assistant' });
+    expect(assistantMessage?.usage).toMatchObject({
+      inputTokens: 5,
+      outputTokens: 6,
+      totalTokens: 11,
+    });
+  });
+
+  it('omits usage on the assistant message when the provider reports none (#224)', async () => {
+    const app = createApp();
+    const cookies = await registerUser(app, 'usage-meta-none@example.com');
+
+    const response = await request(app)
+      .post('/api/chat')
+      .set('Cookie', Array.isArray(cookies) ? cookies : [cookies])
+      .send({ content: 'Hello there' });
+
+    expect(response.status).toBe(200);
+    const assistantMessage = await Message.findOne({ role: 'assistant' });
+    expect(assistantMessage?.usage).toBeUndefined();
   });
 
   it('dispatches a DeepInfra-routed turn to the DeepInfra provider end-to-end', async () => {
@@ -753,5 +790,98 @@ describe('non-streaming tool-only confirmation (#195)', () => {
 
     expect(response.status).toBe(200);
     expect(response.body.message.content).toBe('');
+  });
+});
+
+describe('#226 sessions ordered by most recent message', () => {
+  beforeEach(() => {
+    mockGenerate.mockReset().mockResolvedValue({ text: 'e2e-ok' });
+    mockRouteQuery.mockReset().mockResolvedValue(MOCK_ROUTING);
+  });
+
+  const listSessionIds = async (
+    app: ReturnType<typeof createApp>,
+    cookies: string | string[],
+  ): Promise<string[]> => {
+    const res = await request(app)
+      .get('/api/chat/sessions')
+      .set('Cookie', Array.isArray(cookies) ? cookies : [cookies]);
+    expect(res.status).toBe(200);
+    return (res.body as { _id: string }[]).map((s) => s._id);
+  };
+
+  it('moves a messaged older session above a newer, never-messaged one', async () => {
+    const app = createApp();
+    const cookies = await registerUser(app, 'order-older-messaged@example.com');
+    const cookieHeader = Array.isArray(cookies) ? cookies : [cookies];
+
+    // First session created first, then messaged.
+    const first = await request(app)
+      .post('/api/chat')
+      .set('Cookie', cookieHeader)
+      .send({ content: 'first session turn' });
+    const firstId: string = first.body.sessionId;
+
+    // Second session created later but never receives a message.
+    const user = await User.findOne({ email: 'order-older-messaged@example.com' });
+    const laterEmpty = await Session.create({ userId: user?._id });
+
+    const ids = await listSessionIds(app, cookies);
+    // The messaged session (created first) precedes the newer empty one.
+    expect(ids[0]).toBe(firstId);
+    expect(ids).toContain(String(laterEmpty._id));
+    expect(ids.indexOf(firstId)).toBeLessThan(ids.indexOf(String(laterEmpty._id)));
+  });
+
+  it('reorders a reply to an older chat above a newer chat once it is messaged last', async () => {
+    const app = createApp();
+    const cookies = await registerUser(app, 'order-reorder@example.com');
+    const cookieHeader = Array.isArray(cookies) ? cookies : [cookies];
+
+    const older = await request(app)
+      .post('/api/chat')
+      .set('Cookie', cookieHeader)
+      .send({ content: 'older chat first turn' });
+    const olderId: string = older.body.sessionId;
+
+    // Newer chat, messaged after the older one's first turn.
+    await new Promise((r) => setTimeout(r, 5));
+    const newer = await request(app)
+      .post('/api/chat')
+      .set('Cookie', cookieHeader)
+      .send({ content: 'newer chat turn' });
+    const newerId: string = newer.body.sessionId;
+
+    // Before the second turn on the older chat, the newer chat is on top.
+    let ids = await listSessionIds(app, cookies);
+    expect(ids.indexOf(newerId)).toBeLessThan(ids.indexOf(olderId));
+
+    // Message the older chat last; it must jump to the top.
+    await new Promise((r) => setTimeout(r, 5));
+    await request(app)
+      .post('/api/chat')
+      .set('Cookie', cookieHeader)
+      .send({ sessionId: olderId, content: 'older chat second turn' });
+
+    ids = await listSessionIds(app, cookies);
+    expect(ids[0]).toBe(olderId);
+    expect(ids.indexOf(olderId)).toBeLessThan(ids.indexOf(newerId));
+  });
+
+  it('stamps lastMessageAt with the user message timestamp on a turn', async () => {
+    const app = createApp();
+    const cookies = await registerUser(app, 'order-stamp@example.com');
+    const res = await request(app)
+      .post('/api/chat')
+      .set('Cookie', cookies)
+      .send({ content: 'stamp the session' });
+    const sessionId: string = res.body.sessionId;
+
+    const session = await Session.findById(sessionId);
+    const userMessage = await Message.findOne({ sessionId, role: 'user' });
+    expect(session?.lastMessageAt).toBeTruthy();
+    expect(new Date(session!.lastMessageAt as Date).getTime()).toBe(
+      new Date(userMessage!.timestamp as Date).getTime(),
+    );
   });
 });

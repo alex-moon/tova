@@ -20,6 +20,7 @@ import { getJwtSecret } from './config/jwt';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import { startAssetJobPoller } from './services/assetJobService';
+import { startTraceStatsPoller } from './services/traceStatsCacheService';
 import { processAssetConversionJob } from './services/assetJobProcessor';
 import { startEvalScheduler } from './services/evalScheduler';
 import {
@@ -159,6 +160,8 @@ export const startServer = async (): Promise<Server> => {
         hourUtc: config.evals.hourUtc ? Number(config.evals.hourUtc) : undefined,
       },
     );
+    // #224: keep the admin Traces summary warm so the tab loads from Mongo.
+    startTraceStatsPoller();
   }
 
   return app.listen(port, () => {

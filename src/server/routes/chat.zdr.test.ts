@@ -145,6 +145,11 @@ describe('Zero-data retention chats (issue #116)', () => {
 
     expect(await Session.countDocuments()).toBe(0);
     expect(await Message.countDocuments()).toBe(0);
+
+    // #224: a ZDR turn carries no trace session id — there is nothing durable
+    // to attribute the turn to.
+    const [callOptions] = mockAgentStream.mock.calls[0] as unknown as [{ trace?: unknown }];
+    expect(callOptions.trace).toBeUndefined();
   });
 
   it('ends a tool-only ZDR stream with a synthesized confirmation (#195)', async () => {
@@ -269,6 +274,43 @@ describe('Zero-data retention chats (issue #116)', () => {
     expect(response.body.message.content).toBe('Created agi-final.md.');
     expect(await Session.countDocuments()).toBe(0);
     expect(await Message.countDocuments()).toBe(0);
+    // #224: no session id is attached to a ZDR turn's trace.
+    expect(
+      (mockPlainGenerate.mock.calls[0] as unknown as [{ trace?: unknown }])[0].trace,
+    ).toBeUndefined();
+  });
+
+  it('attaches the chat session as trace metadata on a persisted stream (#224)', async () => {
+    const email = 'trace-session-stream@example.com';
+    const cookies = await registerUser(email);
+
+    const response = await streamMessage(cookies, { content: 'hello there' });
+    expect(response.status).toBe(200);
+
+    const meta = eventsFrom(response.text).find((e) => e.event === 'meta')?.data as
+      { sessionId?: string } | undefined;
+    const [callOptions] = mockAgentStream.mock.calls[0] as unknown as [
+      { trace?: { sessionId?: string } },
+    ];
+    expect(callOptions.trace).toEqual({ sessionId: meta?.sessionId });
+    expect(String(callOptions.trace?.sessionId)).toMatch(/^[a-f0-9]{24}$/);
+  });
+
+  it('attaches the chat session as trace metadata on a persisted plain turn (#224)', async () => {
+    mockPlainGenerate.mockResolvedValue({
+      choices: [{ message: { content: 'plain answer' } }],
+    });
+    const email = 'trace-session-plain@example.com';
+    const cookies = await registerUser(email);
+
+    const response = await plainMessage(cookies, { content: 'hello there' });
+    expect(response.status).toBe(200);
+
+    const [callOptions] = mockPlainGenerate.mock.calls[0] as unknown as [
+      { trace?: { sessionId?: string } },
+    ];
+    const session = await Session.findOne({ userId: (await User.findOne({ email }))?._id });
+    expect(String(callOptions.trace?.sessionId)).toBe(String(session?._id));
   });
 
   it('refuses to write into an already-persisted session', async () => {

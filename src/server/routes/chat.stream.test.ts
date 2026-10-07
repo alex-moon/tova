@@ -142,6 +142,60 @@ describe('Chat streaming route', () => {
     expect(session).not.toBeNull();
   });
 
+  it('persists the turn token usage on the assistant message (#224)', async () => {
+    const cookies = await registerUser('stream-usage@example.com');
+    // The connector surfaces usage as a single trailing chunk (#224): the
+    // agent result exposes `totalUsage`, which mastraService maps after the
+    // real stream chunks.
+    mockAgentStream.mockImplementation(async () => ({
+      fullStream: (async function* () {
+        yield { type: 'text-delta', payload: { text: 'hi' } };
+      })(),
+      totalUsage: Promise.resolve({ inputTokens: 11, outputTokens: 22, totalTokens: 33 }),
+    }));
+
+    const app = createApp();
+    const response = await request(app)
+      .post('/api/chat/stream')
+      .set('Cookie', cookies)
+      .send({ content: 'hello there' });
+    expect(response.status).toBe(200);
+
+    const meta = response.text
+      .split('\n\n')
+      .map((part) => part.split('\n').find((l) => l.startsWith('data: ')))
+      .find((l) => l?.includes('"sessionId"'));
+    const { sessionId } = JSON.parse((meta as string).slice(6));
+
+    const assistant = await Message.findOne({ sessionId, role: 'assistant' });
+    expect(assistant?.usage).toMatchObject({
+      inputTokens: 11,
+      outputTokens: 22,
+      totalTokens: 33,
+    });
+  });
+
+  it('omits usage on the assistant message when the provider reports none (#224)', async () => {
+    const cookies = await registerUser('stream-no-usage@example.com');
+    await mockStream(['ok']);
+
+    const app = createApp();
+    const response = await request(app)
+      .post('/api/chat/stream')
+      .set('Cookie', cookies)
+      .send({ content: 'hello there' });
+    expect(response.status).toBe(200);
+
+    const meta = response.text
+      .split('\n\n')
+      .map((part) => part.split('\n').find((l) => l.startsWith('data: ')))
+      .find((l) => l?.includes('"sessionId"'));
+    const { sessionId } = JSON.parse((meta as string).slice(6));
+
+    const assistant = await Message.findOne({ sessionId, role: 'assistant' });
+    expect(assistant?.usage).toBeUndefined();
+  });
+
   it('passes prior turns, oldest first, to the guard classifier — never the current turn (#169 phase 2)', async () => {
     const cookies = await registerUser('stream-guard-history@example.com');
     const app = createApp();
