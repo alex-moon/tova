@@ -441,35 +441,49 @@ const AdminView = () => {
         )}
       </div>
       <div className="flex min-h-0 flex-1 flex-col gap-4 px-6 py-6 lg:flex-row">
-        <nav
-          data-testid="admin-nav"
-          className="flex shrink-0 gap-2 overflow-x-auto rounded-xl p-2 lg:flex-col lg:overflow-x-visible panel-surface"
-          aria-label="Admin sections"
-        >
-          {sectionContent.map((section) => (
-            <button
-              key={section.id}
-              data-testid={`admin-tab-${section.id}`}
-              onClick={() => {
-                // Leaving Access hides the one-time token box for good —
-                // the plaintext is unrecoverable after this point.
-                if (activeSection === 'access' && section.id !== 'access') {
-                  setNewPatToken(null);
-                  setPatCopied(false);
-                }
-                setActiveSection(section.id);
-              }}
-              aria-current={activeSection === section.id ? 'page' : undefined}
-              className={`shrink-0 whitespace-nowrap rounded-lg border px-3 py-1.5 text-sm transition-colors ${
-                activeSection === section.id
-                  ? 'border-primary bg-primary text-primary-foreground'
-                  : 'border-border hover:bg-accent hover:text-accent-foreground'
-              }`}
-            >
-              {section.label}
-            </button>
-          ))}
-        </nav>
+        {/*
+          #220: the tab strip is a horizontal scroller on phones. Without an
+          affordance the last tabs look clipped mid-word ("Compare" -> "pare"),
+          so a right-edge fade sits over the scroller (pointer-events-none) to
+          signal there is more to scroll to. At lg+ the nav stacks vertically
+          and the fade is hidden.
+        */}
+        <div className="relative shrink-0 lg:contents">
+          <nav
+            data-testid="admin-nav"
+            className="flex gap-2 overflow-x-auto rounded-xl p-2 lg:flex-col lg:overflow-x-visible panel-surface"
+            aria-label="Admin sections"
+          >
+            {sectionContent.map((section) => (
+              <button
+                key={section.id}
+                data-testid={`admin-tab-${section.id}`}
+                onClick={() => {
+                  // Leaving Access hides the one-time token box for good —
+                  // the plaintext is unrecoverable after this point.
+                  if (activeSection === 'access' && section.id !== 'access') {
+                    setNewPatToken(null);
+                    setPatCopied(false);
+                  }
+                  setActiveSection(section.id);
+                }}
+                aria-current={activeSection === section.id ? 'page' : undefined}
+                className={`shrink-0 whitespace-nowrap rounded-lg border px-3 py-1.5 text-sm transition-colors ${
+                  activeSection === section.id
+                    ? 'border-primary bg-primary text-primary-foreground'
+                    : 'border-border hover:bg-accent hover:text-accent-foreground'
+                }`}
+              >
+                {section.label}
+              </button>
+            ))}
+          </nav>
+          <div
+            data-testid="admin-nav-fade"
+            aria-hidden="true"
+            className="pointer-events-none absolute inset-y-0 right-0 w-8 rounded-r-xl bg-gradient-to-l from-background to-transparent lg:hidden"
+          />
+        </div>
         <div
           data-testid="admin-scroller"
           className="min-h-0 flex-1 overflow-y-auto rounded-xl px-4 py-4 ambient-wash"
@@ -477,7 +491,7 @@ const AdminView = () => {
           {activeSection === 'users' && (
             <section data-testid="admin-users-section">
               <div className="overflow-x-auto rounded-xl border border-border bg-card">
-                <table className="w-full text-sm">
+                <table className="responsive-table w-full text-sm">
                   <thead>
                     <tr className="border-b border-border text-left text-muted-foreground">
                       <th className="px-4 py-3 font-medium">Email</th>
@@ -490,14 +504,20 @@ const AdminView = () => {
                   <tbody>
                     {users?.map((user) => (
                       <tr key={user.id} className="border-b border-border last:border-b-0">
-                        <td className="px-4 py-3">{user.email}</td>
-                        <td className="px-4 py-3" data-testid={`role-${user.email}`}>
+                        <td className="px-4 py-3" data-label="Email">
+                          {user.email}
+                        </td>
+                        <td
+                          className="px-4 py-3"
+                          data-label="Role"
+                          data-testid={`role-${user.email}`}
+                        >
                           {user.role}
                         </td>
-                        <td className="px-4 py-3 text-muted-foreground">
+                        <td className="px-4 py-3 text-muted-foreground" data-label="Google">
                           {user.hasGoogle ? 'yes' : 'no'}
                         </td>
-                        <td className="px-4 py-3">
+                        <td className="px-4 py-3" data-label="Permissions">
                           {KNOWN_PERMISSIONS.map((permission) => (
                             <label
                               key={permission}
@@ -648,7 +668,7 @@ const AdminView = () => {
                 data-testid="admin-models"
                 className="mt-4 overflow-x-auto rounded-xl border border-border bg-card"
               >
-                <table className="w-full text-sm">
+                <table className="responsive-table w-full text-sm">
                   <thead>
                     <tr className="border-b border-border text-left text-muted-foreground">
                       <th className="px-4 py-3 font-medium">Model</th>
@@ -671,7 +691,11 @@ const AdminView = () => {
                       const overCap = price !== undefined && price > MAX_MODEL_PRICE_USD_PER_MTOK;
                       return (
                         <tr key={model.id} className="border-b border-border last:border-b-0">
-                          <td className="px-4 py-3" data-testid={`admin-model-${model.id}`}>
+                          <td
+                            className="px-4 py-3"
+                            data-label="Model"
+                            data-testid={`admin-model-${model.id}`}
+                          >
                             {model.model}
                             {coolOff !== null && (
                               <span
@@ -690,13 +714,18 @@ const AdminView = () => {
                               </span>
                             )}
                           </td>
-                          <td className="px-4 py-3 text-muted-foreground">{model.provider}</td>
-                          <td className="px-4 py-3">{model.tier}</td>
-                          <td className="px-4 py-3 text-muted-foreground">
+                          <td className="px-4 py-3 text-muted-foreground" data-label="Provider">
+                            {model.provider}
+                          </td>
+                          <td className="px-4 py-3" data-label="Tier">
+                            {model.tier}
+                          </td>
+                          <td className="px-4 py-3 text-muted-foreground" data-label="Context">
                             {model.contextLength?.toLocaleString() ?? '—'}
                           </td>
                           <td
                             className="px-4 py-3 text-muted-foreground"
+                            data-label="In $/M"
                             data-testid={`admin-model-input-price-${model.id}`}
                           >
                             {model.inputPrice !== undefined
@@ -705,6 +734,7 @@ const AdminView = () => {
                           </td>
                           <td
                             className="px-4 py-3 text-muted-foreground"
+                            data-label="Out $/M"
                             data-testid={`admin-model-output-price-${model.id}`}
                           >
                             {model.outputPrice !== undefined
@@ -715,11 +745,12 @@ const AdminView = () => {
                             className={`px-4 py-3 ${
                               overCap ? 'font-medium text-destructive' : 'text-muted-foreground'
                             }`}
+                            data-label="In+Out"
                             data-testid={`admin-model-price-${model.id}`}
                           >
                             {price !== undefined ? `$${price.toFixed(3)}` : '—'}
                           </td>
-                          <td className="px-4 py-3">
+                          <td className="px-4 py-3" data-label="Eligible">
                             <input
                               type="checkbox"
                               data-testid={`model-eligible-${model.id}`}
@@ -727,7 +758,11 @@ const AdminView = () => {
                               onChange={() => toggleModelEligible(model)}
                             />
                           </td>
-                          <td className="px-4 py-3" data-testid={`admin-model-caps-${model.id}`}>
+                          <td
+                            className="px-4 py-3"
+                            data-label="Capabilities"
+                            data-testid={`admin-model-caps-${model.id}`}
+                          >
                             <span
                               className={`mr-1.5 inline-block rounded-full border px-2 py-0.5 text-xs ${
                                 model.vision
@@ -753,7 +788,7 @@ const AdminView = () => {
                                 : ''}
                             </span>
                           </td>
-                          <td className="px-4 py-3 text-muted-foreground">
+                          <td className="px-4 py-3 text-muted-foreground" data-label="Feedback">
                             {model.stats.length === 0
                               ? '—'
                               : model.stats
@@ -809,7 +844,7 @@ const AdminView = () => {
                     data-testid="admin-model-errors"
                     className="mt-2 overflow-x-auto rounded-xl border border-border bg-card"
                   >
-                    <table className="w-full text-sm">
+                    <table className="responsive-table w-full text-sm">
                       <thead>
                         <tr className="border-b border-border text-left text-muted-foreground">
                           <th className="px-4 py-3 font-medium">Model</th>
@@ -837,15 +872,21 @@ const AdminView = () => {
                               >
                                 <td
                                   className={`px-4 py-3 ${cooling ? 'text-warning' : 'text-muted-foreground'}`}
+                                  data-label="Model"
                                 >
                                   {e.provider}/{e.model}
                                 </td>
-                                <td className="px-4 py-3">
+                                <td className="px-4 py-3" data-label="Error">
                                   {e.status !== null ? `${e.status} · ` : ''}
                                   {e.category}
                                 </td>
-                                <td className="px-4 py-3 text-muted-foreground">{e.count}</td>
-                                <td className="px-4 py-3 text-muted-foreground">
+                                <td className="px-4 py-3 text-muted-foreground" data-label="Count">
+                                  {e.count}
+                                </td>
+                                <td
+                                  className="px-4 py-3 text-muted-foreground"
+                                  data-label="Last seen"
+                                >
                                   {new Date(e.lastSeenAt).toLocaleString()}
                                 </td>
                                 <td className="px-4 py-3">
@@ -1012,7 +1053,7 @@ const AdminView = () => {
                   data-testid="admin-graph-entities"
                   className="mt-4 overflow-x-auto rounded-xl border border-border bg-card"
                 >
-                  <table className="w-full text-sm">
+                  <table className="responsive-table w-full text-sm">
                     <thead>
                       <tr className="border-b border-border text-left text-muted-foreground">
                         <th className="px-4 py-3 font-medium">Name</th>
@@ -1033,16 +1074,24 @@ const AdminView = () => {
                     <tbody>
                       {graphEntities.entities.map((entity) => (
                         <tr key={entity.id} className="border-b border-border last:border-b-0">
-                          <td className="px-4 py-3" data-testid={`graph-entity-${entity.id}`}>
+                          <td
+                            className="px-4 py-3"
+                            data-label="Name"
+                            data-testid={`graph-entity-${entity.id}`}
+                          >
                             {entity.name}
                           </td>
-                          <td className="px-4 py-3 text-muted-foreground">{entity.kind}</td>
-                          <td className="px-4 py-3">{entity.mentionCount}</td>
-                          <td className="px-4 py-3 text-muted-foreground">
+                          <td className="px-4 py-3 text-muted-foreground" data-label="Kind">
+                            {entity.kind}
+                          </td>
+                          <td className="px-4 py-3" data-label="Mentions">
+                            {entity.mentionCount}
+                          </td>
+                          <td className="px-4 py-3 text-muted-foreground" data-label="Confidence">
                             {entity.confidence.toFixed(2)}
                             {entity.salience === 'high' ? ' · salient' : ''}
                           </td>
-                          <td className="px-4 py-3 text-muted-foreground">
+                          <td className="px-4 py-3 text-muted-foreground" data-label="Sources">
                             {entity.sourceRefs.length}
                           </td>
                           <td className="px-4 py-3">
@@ -1265,7 +1314,7 @@ const AdminView = () => {
                 </div>
               )}
               <div className="mt-4 overflow-x-auto rounded-xl border border-border bg-card">
-                <table data-testid="admin-pats" className="w-full text-sm">
+                <table data-testid="admin-pats" className="responsive-table w-full text-sm">
                   <thead>
                     <tr className="border-b border-border text-left text-muted-foreground">
                       <th className="px-4 py-3 font-medium">Name</th>
@@ -1279,17 +1328,21 @@ const AdminView = () => {
                   <tbody>
                     {(pats ?? []).map((pat) => (
                       <tr key={pat.id} className="border-b border-border last:border-b-0">
-                        <td className="px-4 py-3">{pat.name}</td>
-                        <td className="px-4 py-3 text-muted-foreground">
+                        <td className="px-4 py-3" data-label="Name">
+                          {pat.name}
+                        </td>
+                        <td className="px-4 py-3 text-muted-foreground" data-label="Created">
                           {new Date(pat.createdAt).toLocaleString()}
                         </td>
-                        <td className="px-4 py-3 text-muted-foreground">
+                        <td className="px-4 py-3 text-muted-foreground" data-label="Last used">
                           {pat.lastUsedAt ? new Date(pat.lastUsedAt).toLocaleString() : 'never'}
                         </td>
-                        <td className="px-4 py-3 text-muted-foreground">
+                        <td className="px-4 py-3 text-muted-foreground" data-label="Expires">
                           {pat.expiresAt ? new Date(pat.expiresAt).toLocaleString() : 'never'}
                         </td>
-                        <td className="px-4 py-3 text-muted-foreground">{pat.creatorEmail}</td>
+                        <td className="px-4 py-3 text-muted-foreground" data-label="Created by">
+                          {pat.creatorEmail}
+                        </td>
                         <td className="px-4 py-3">
                           <button
                             data-testid={`pat-revoke-${pat.name}`}

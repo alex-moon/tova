@@ -9,7 +9,7 @@ import { installChatStreamMock } from './helpers/chatMock';
  */
 
 const email = process.env.E2E_EMAIL ?? 'formsatz@gmail.com';
-const password = process.env.E2E_PASSWORD ?? 'admin';
+const password = process.env.E2E_PASSWORD ?? 'password';
 
 test.beforeEach(async ({ page }) => {
   await page.request.post('/api/auth/login', {

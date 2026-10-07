@@ -4,7 +4,11 @@ import { defineConfig } from '@playwright/test';
 
 process.env.E2E_BASE_URL ??= 'http://localhost:5173';
 process.env.E2E_EMAIL ??= process.env.ADMIN_EMAIL ?? 'formsatz@gmail.com';
-process.env.E2E_PASSWORD ??= process.env.ADMIN_PASSWORD ?? 'admin';
+// The e2e fixture password is the shared literal `password` set by
+// `npm run db:password` (AGENTS.md). Deliberately NOT read from
+// ADMIN_PASSWORD: that is the real account credential in `.env`, and letting
+// it shadow the fixture made every auth-dependent spec fail after a reset.
+process.env.E2E_PASSWORD ??= 'password';
 
 export default defineConfig({
   testDir: '.',

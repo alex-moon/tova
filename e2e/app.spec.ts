@@ -2,7 +2,7 @@ import { expect, test, type Page } from '@playwright/test';
 import { installChatStreamMock } from './helpers/chatMock';
 
 const email = process.env.E2E_EMAIL ?? 'formsatz@gmail.com';
-const password = process.env.E2E_PASSWORD ?? 'admin';
+const password = process.env.E2E_PASSWORD ?? 'password';
 
 const isMobileViewport = (page: Page) => (page.viewportSize()?.width ?? 1280) <= 500;
 

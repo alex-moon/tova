@@ -8,7 +8,7 @@ import { expect, test, type Page } from '@playwright/test';
  */
 
 const email = process.env.E2E_EMAIL ?? 'formsatz@gmail.com';
-const password = process.env.E2E_PASSWORD ?? 'admin';
+const password = process.env.E2E_PASSWORD ?? 'password';
 
 const openDrawer = async (page: Page) => {
   await page.getByRole('button', { name: 'Open menu' }).click();

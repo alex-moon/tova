@@ -200,7 +200,7 @@ const AdminLangsmithView = () => {
             <h3 className="mb-3 font-heading text-base font-semibold">Model stats · last 7 days</h3>
             {stats && stats.models.length > 0 ? (
               <div className="overflow-x-auto">
-                <table className="w-full text-sm">
+                <table className="responsive-table w-full text-sm">
                   <thead>
                     <tr className="border-b border-border text-left text-muted-foreground">
                       <th className="px-3 py-2 font-medium">Model</th>
@@ -213,15 +213,24 @@ const AdminLangsmithView = () => {
                   <tbody>
                     {stats.models.map((row) => (
                       <tr key={row.model} className="border-b border-border last:border-b-0">
-                        <td className="px-3 py-2">{row.model}</td>
-                        <td className="px-3 py-2">{row.calls}</td>
+                        <td className="px-3 py-2" data-label="Model">
+                          {row.model}
+                        </td>
+                        <td className="px-3 py-2" data-label="Calls">
+                          {row.calls}
+                        </td>
                         <td
                           className={`px-3 py-2 ${row.errors > 0 ? 'text-destructive' : 'text-muted-foreground'}`}
+                          data-label="Errors"
                         >
                           {row.errors}
                         </td>
-                        <td className="px-3 py-2">{formatDuration(row.avgDurationMs)}</td>
-                        <td className="px-3 py-2">{formatTokens(row.totalTokens)}</td>
+                        <td className="px-3 py-2" data-label="Avg latency">
+                          {formatDuration(row.avgDurationMs)}
+                        </td>
+                        <td className="px-3 py-2" data-label="Tokens">
+                          {formatTokens(row.totalTokens)}
+                        </td>
                       </tr>
                     ))}
                   </tbody>
@@ -275,7 +284,7 @@ const AdminLangsmithView = () => {
           </div>
 
           <div className="overflow-x-auto rounded-xl border border-border bg-card">
-            <table data-testid="langsmith-traces" className="w-full text-sm">
+            <table data-testid="langsmith-traces" className="responsive-table w-full text-sm">
               <thead>
                 <tr className="border-b border-border text-left text-muted-foreground">
                   <th className="px-4 py-3 font-medium">Started</th>
@@ -293,17 +302,24 @@ const AdminLangsmithView = () => {
                     data-testid={`langsmith-trace-${trace.traceId}`}
                     className="border-b border-border last:border-b-0"
                   >
-                    <td className="px-4 py-3 text-muted-foreground">
+                    <td className="px-4 py-3 text-muted-foreground" data-label="Started">
                       {formatTime(trace.startedAt)}
                     </td>
                     <td
                       className={`px-4 py-3 ${trace.status === 'error' ? 'text-destructive' : ''}`}
+                      data-label="Status"
                     >
                       {trace.status}
                     </td>
-                    <td className="px-4 py-3">{trace.model ?? '—'}</td>
-                    <td className="px-4 py-3">{formatDuration(trace.durationMs)}</td>
-                    <td className="px-4 py-3">{formatTokens(trace.totalTokens)}</td>
+                    <td className="px-4 py-3" data-label="Model">
+                      {trace.model ?? '—'}
+                    </td>
+                    <td className="px-4 py-3" data-label="Duration">
+                      {formatDuration(trace.durationMs)}
+                    </td>
+                    <td className="px-4 py-3" data-label="Tokens">
+                      {formatTokens(trace.totalTokens)}
+                    </td>
                     <td className="px-4 py-3 text-right">
                       {trace.error && (
                         <span className="mr-3 text-xs text-destructive" title={trace.error}>
