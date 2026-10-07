@@ -435,8 +435,11 @@ export const traceStats = async (days = 7): Promise<AdminLangsmithStatsPayload |
     .map(({ durationSum, durationCount, ...stats }) => ({
       ...stats,
       avgDurationMs: durationCount > 0 ? Math.round(durationSum / durationCount) : null,
+      // Cost is joined at read time from the in-DB price (#224); the raw
+      // aggregator never prices.
+      estimatedCostUsd: null,
     }))
     .sort((a, b) => b.calls - a.calls);
 
-  return { since, models, totals };
+  return { since, models, totals: { ...totals, estimatedCostUsd: null } };
 };

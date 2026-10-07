@@ -60,6 +60,7 @@ const statsPayload = (): AdminLangsmithStatsPayload => ({
       totalTokens: 4000,
       inputTokens: 3000,
       outputTokens: 1000,
+      estimatedCostUsd: 0.0042,
     },
     {
       model: 'qwen/qwen3-14b',
@@ -69,9 +70,19 @@ const statsPayload = (): AdminLangsmithStatsPayload => ({
       totalTokens: 900,
       inputTokens: 700,
       outputTokens: 200,
+      estimatedCostUsd: null,
     },
   ],
-  totals: { calls: 14, errors: 2, totalTokens: 4900, inputTokens: 3700, outputTokens: 1200 },
+  totals: {
+    calls: 14,
+    errors: 2,
+    totalTokens: 4900,
+    inputTokens: 3700,
+    outputTokens: 1200,
+    estimatedCostUsd: 0.0042,
+  },
+  computedAt: '2026-09-27T10:00:00.000Z',
+  stale: false,
 });
 
 const traceDetail = (): AdminTraceDetail => ({
@@ -134,6 +145,23 @@ describe('AdminLangsmithView (#186)', () => {
     expect(stats).toHaveTextContent('openai/gpt-oss-20b');
     expect(stats).toHaveTextContent('10');
     expect(stats).toHaveTextContent('2');
+  });
+
+  it('renders the cost-breakdown row per model, with — for unknown price (#224)', async () => {
+    render(<AdminLangsmithView />);
+    const stats = await screen.findByTestId('langsmith-stats');
+
+    const priced = screen.getByTestId('langsmith-cost-openai/gpt-oss-20b');
+    expect(priced).toHaveTextContent('in 3,000');
+    expect(priced).toHaveTextContent('out 1,000');
+    expect(priced).toHaveTextContent('$0.0042');
+
+    const unpriced = screen.getByTestId('langsmith-cost-qwen/qwen3-14b');
+    expect(unpriced).toHaveTextContent('—');
+
+    expect(stats).toHaveTextContent('updated');
+    const total = screen.getByTestId('langsmith-cost-total');
+    expect(total).toHaveTextContent('$0.0042');
   });
 
   it('shows an empty state when the project has no traces', async () => {

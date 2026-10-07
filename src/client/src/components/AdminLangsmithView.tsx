@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { AdminError, AdminLangsmithService } from '../services/admin';
 import type {
+  AdminLangsmithModelStats,
   AdminLangsmithStatsPayload,
   AdminTraceDetail,
   AdminTraceRun,
@@ -20,6 +21,15 @@ const formatDuration = (ms: number | null): string =>
 
 const formatTokens = (tokens: number | null): string =>
   tokens === null ? '—' : tokens.toLocaleString();
+
+// Estimated cost is null when a price is unknown (#199 unknown ≠ free), so
+// render `—` rather than $0. Sub-cent spend keeps more precision than 2dp.
+const formatCost = (usd: number | null): string => {
+  if (usd === null) return '—';
+  if (usd === 0) return '$0.00';
+  if (usd < 0.01) return `$${usd.toFixed(4)}`;
+  return `$${usd.toFixed(2)}`;
+};
 
 const formatTime = (iso: string): string => {
   const date = new Date(iso);
@@ -88,6 +98,35 @@ const RunBlock = ({ run, depth }: { run: AdminTraceRun; depth: number }) => (
       </details>
     </div>
   </div>
+);
+
+// One model's stats: a primary row (traffic + latency + tokens) and a paired
+// cost-breakdown row with the in/out split and the estimated spend (#224).
+// Rendered as two sibling <tr> inside a fragment so the table body stays a
+// real table; the cost row is muted and visually bound to its model.
+const ModelStatsRow = ({ row }: { row: AdminLangsmithModelStats }) => (
+  <>
+    <tr data-testid={`langsmith-model-${row.model}`} className="border-b border-border">
+      <td className="px-3 py-2">{row.model}</td>
+      <td className="px-3 py-2">{row.calls}</td>
+      <td className={`px-3 py-2 ${row.errors > 0 ? 'text-destructive' : 'text-muted-foreground'}`}>
+        {row.errors}
+      </td>
+      <td className="px-3 py-2">{formatDuration(row.avgDurationMs)}</td>
+      <td className="px-3 py-2">{formatTokens(row.totalTokens)}</td>
+    </tr>
+    <tr
+      data-testid={`langsmith-cost-${row.model}`}
+      className="border-b border-border last:border-b-0 text-xs text-muted-foreground"
+    >
+      <td colSpan={5} className="px-3 py-1.5">
+        <span className="pl-3">
+          in {formatTokens(row.inputTokens)} · out {formatTokens(row.outputTokens)} · est.{' '}
+          {formatCost(row.estimatedCostUsd)}
+        </span>
+      </td>
+    </tr>
+  </>
 );
 
 const AdminLangsmithView = () => {
@@ -197,7 +236,15 @@ const AdminLangsmithView = () => {
             className="rounded-xl border border-border bg-card p-4"
             data-testid="langsmith-stats"
           >
-            <h3 className="mb-3 font-heading text-base font-semibold">Model stats · last 7 days</h3>
+            <h3 className="mb-3 font-heading text-base font-semibold">
+              Model stats · last 7 days
+              {stats?.computedAt && (
+                <span className="ml-2 text-xs font-normal text-muted-foreground">
+                  updated {formatTime(stats.computedAt)}
+                  {stats.stale ? ' · updating…' : ''}
+                </span>
+              )}
+            </h3>
             {stats && stats.models.length > 0 ? (
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
@@ -212,19 +259,23 @@ const AdminLangsmithView = () => {
                   </thead>
                   <tbody>
                     {stats.models.map((row) => (
-                      <tr key={row.model} className="border-b border-border last:border-b-0">
-                        <td className="px-3 py-2">{row.model}</td>
-                        <td className="px-3 py-2">{row.calls}</td>
-                        <td
-                          className={`px-3 py-2 ${row.errors > 0 ? 'text-destructive' : 'text-muted-foreground'}`}
-                        >
-                          {row.errors}
-                        </td>
-                        <td className="px-3 py-2">{formatDuration(row.avgDurationMs)}</td>
-                        <td className="px-3 py-2">{formatTokens(row.totalTokens)}</td>
-                      </tr>
+                      <ModelStatsRow key={row.model} row={row} />
                     ))}
                   </tbody>
+                  <tfoot>
+                    <tr
+                      data-testid="langsmith-cost-total"
+                      className="border-t border-border text-sm"
+                    >
+                      <td className="px-3 py-2 font-medium">Total</td>
+                      <td className="px-3 py-2">{stats.totals.calls}</td>
+                      <td className="px-3 py-2" />
+                      <td className="px-3 py-2">
+                        est. {formatCost(stats.totals.estimatedCostUsd)}
+                      </td>
+                      <td className="px-3 py-2">{formatTokens(stats.totals.totalTokens)}</td>
+                    </tr>
+                  </tfoot>
                 </table>
               </div>
             ) : (

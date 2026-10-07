@@ -1,6 +1,8 @@
 import request from 'supertest';
 import { createApp } from '../index';
 import { User } from '../models/User';
+import { TraceStatsCache } from '../models/TraceStatsCache';
+import { ProviderRouting } from '../models/ProviderRouting';
 import { listTraces, RETRY_WAIT_MS } from '../services/langsmithTracesService';
 
 /*
@@ -470,6 +472,7 @@ describe('admin langsmith (#186)', () => {
         totalTokens: 110,
         inputTokens: 78,
         outputTokens: 32,
+        estimatedCostUsd: null,
       },
       {
         model: 'qwen/qwen3-14b',
@@ -479,6 +482,7 @@ describe('admin langsmith (#186)', () => {
         totalTokens: 50,
         inputTokens: 40,
         outputTokens: 10,
+        estimatedCostUsd: null,
       },
     ]);
     expect(res.body.totals).toEqual({
@@ -487,7 +491,10 @@ describe('admin langsmith (#186)', () => {
       totalTokens: 160,
       inputTokens: 118,
       outputTokens: 42,
+      estimatedCostUsd: null,
     });
+    // Cold cache: this sweep is the live fallback.
+    expect(res.body.stale).toBe(true);
   });
 
   it('treats an absent or non-numeric token split as 0 without disturbing totals (#224)', async () => {
@@ -543,6 +550,7 @@ describe('admin langsmith (#186)', () => {
         totalTokens: 530,
         inputTokens: 0,
         outputTokens: 0,
+        estimatedCostUsd: null,
       },
     ]);
     expect(res.body.totals).toEqual({
@@ -551,6 +559,7 @@ describe('admin langsmith (#186)', () => {
       totalTokens: 530,
       inputTokens: 0,
       outputTokens: 0,
+      estimatedCostUsd: null,
     });
   });
 
@@ -580,7 +589,156 @@ describe('admin langsmith (#186)', () => {
       totalTokens: 0,
       inputTokens: 0,
       outputTokens: 0,
+      estimatedCostUsd: null,
     });
     expect(res.body.models).toEqual([]);
+  });
+
+  it('serves a warm cache without touching LangSmith (#224)', async () => {
+    const app = createApp();
+    const cookie = await registerAdmin(app, 'ls-cache-hit@example.com');
+    await TraceStatsCache.create({
+      windowKey: 'days=7',
+      days: 7,
+      since: '2026-09-20T00:00:00.000Z',
+      computedAt: new Date(),
+      models: [
+        {
+          model: 'cached/model',
+          calls: 4,
+          errors: 0,
+          avgDurationMs: 1000,
+          totalTokens: 200,
+          inputTokens: 150,
+          outputTokens: 50,
+        },
+      ],
+      totals: { calls: 4, errors: 0, totalTokens: 200, inputTokens: 150, outputTokens: 50 },
+    });
+
+    const res = await request(app).get('/api/admin/langsmith/stats?days=7').set('Cookie', cookie);
+    expect(res.status).toBe(200);
+    expect(res.body.stale).toBe(false);
+    expect(typeof res.body.computedAt).toBe('string');
+    expect(res.body.models[0].model).toBe('cached/model');
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it('prices a cached model from the in-DB price (#224)', async () => {
+    const app = createApp();
+    const cookie = await registerAdmin(app, 'ls-cache-cost@example.com');
+    await ProviderRouting.create({
+      provider: 'deepinfra',
+      model: 'priced/cached',
+      tier: 'large',
+      inputPrice: 2,
+      outputPrice: 4,
+    });
+    await TraceStatsCache.create({
+      windowKey: 'days=7',
+      days: 7,
+      since: '2026-09-20T00:00:00.000Z',
+      computedAt: new Date(),
+      models: [
+        {
+          model: 'priced/cached',
+          calls: 1,
+          errors: 0,
+          avgDurationMs: null,
+          totalTokens: 3_000_000,
+          inputTokens: 1_000_000,
+          outputTokens: 2_000_000,
+        },
+      ],
+      totals: {
+        calls: 1,
+        errors: 0,
+        totalTokens: 3_000_000,
+        inputTokens: 1_000_000,
+        outputTokens: 2_000_000,
+      },
+    });
+
+    const res = await request(app).get('/api/admin/langsmith/stats?days=7').set('Cookie', cookie);
+    expect(res.status).toBe(200);
+    // 1M in @ $2 + 2M out @ $4 = $10.
+    expect(res.body.models[0].estimatedCostUsd).toBe(10);
+    expect(res.body.totals.estimatedCostUsd).toBe(10);
+  });
+
+  it('falls back live with stale:true when the cache is stale (#224)', async () => {
+    const app = createApp();
+    const cookie = await registerAdmin(app, 'ls-cache-stale@example.com');
+    await TraceStatsCache.create({
+      windowKey: 'days=7',
+      days: 7,
+      since: '2026-09-20T00:00:00.000Z',
+      // Older than the staleness threshold (2 intervals).
+      computedAt: new Date(Date.now() - 10 * 60 * 1000),
+      models: [],
+      totals: { calls: 0, errors: 0, totalTokens: 0, inputTokens: 0, outputTokens: 0 },
+    });
+
+    fetchSpy.mockImplementation((url: string) => {
+      if (String(url).includes('/api/v1/sessions')) {
+        return Promise.resolve(jsonResponse(200, [{ id: 'proj-1', name: 'tova-dev' }]));
+      }
+      return Promise.resolve(
+        jsonResponse(200, {
+          runs: [
+            {
+              name: "llm: 'openai/gpt-oss-20b'",
+              run_type: 'llm',
+              status: 'success',
+              total_tokens: 100,
+              prompt_tokens: 70,
+              completion_tokens: 30,
+            },
+          ],
+        }),
+      );
+    });
+
+    const res = await request(app).get('/api/admin/langsmith/stats?days=7').set('Cookie', cookie);
+    expect(res.status).toBe(200);
+    expect(res.body.stale).toBe(true);
+    expect(res.body.models[0].model).toBe('openai/gpt-oss-20b');
+    expect(fetchSpy).toHaveBeenCalled();
+  });
+
+  it('does not use the cache for a non-default window (#224)', async () => {
+    const app = createApp();
+    const cookie = await registerAdmin(app, 'ls-cache-window@example.com');
+    await TraceStatsCache.create({
+      windowKey: 'days=7',
+      days: 7,
+      since: '2026-09-20T00:00:00.000Z',
+      computedAt: new Date(),
+      models: [
+        {
+          model: 'cached/model',
+          calls: 1,
+          errors: 0,
+          avgDurationMs: null,
+          totalTokens: 1,
+          inputTokens: 1,
+          outputTokens: 0,
+        },
+      ],
+      totals: { calls: 1, errors: 0, totalTokens: 1, inputTokens: 1, outputTokens: 0 },
+    });
+
+    fetchSpy.mockImplementation((url: string) => {
+      if (String(url).includes('/api/v1/sessions')) {
+        return Promise.resolve(jsonResponse(200, [{ id: 'proj-1', name: 'tova-dev' }]));
+      }
+      return Promise.resolve(jsonResponse(200, { runs: [] }));
+    });
+
+    const res = await request(app).get('/api/admin/langsmith/stats?days=30').set('Cookie', cookie);
+    expect(res.status).toBe(200);
+    expect(res.body.stale).toBe(true);
+    expect(res.body.models).toEqual([]);
+    expect(fetchSpy).toHaveBeenCalled();
   });
 });

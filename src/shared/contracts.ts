@@ -266,6 +266,10 @@ export interface AdminLangsmithModelStats {
   totalTokens: number;
   inputTokens: number;
   outputTokens: number;
+  // #224: estimated USD spend for this model, joined from the in-DB price at
+  // read time (`null` = either side's price is unknown, distinct from $0 —
+  // #199 semantics). The UI renders null as `—`.
+  estimatedCostUsd: number | null;
 }
 
 export interface AdminLangsmithStatsPayload {
@@ -277,7 +281,16 @@ export interface AdminLangsmithStatsPayload {
     totalTokens: number;
     inputTokens: number;
     outputTokens: number;
+    // Sum of the priced models' costs; null when no model in the window has a
+    // known price.
+    estimatedCostUsd: number | null;
   };
+  // When the rollup was computed. Present on a cache hit; absent on a live
+  // fallback (which is freshly computed).
+  computedAt?: string;
+  // True when the payload came from a live sweep (no cache yet, or the cache
+  // is older than the staleness threshold).
+  stale?: boolean;
 }
 
 // `location` is the coarse country-level geolocation (issue #50): only the

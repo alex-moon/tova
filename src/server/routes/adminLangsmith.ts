@@ -6,6 +6,9 @@ import {
   traceStats,
   LangsmithError,
 } from '../services/langsmithTracesService';
+import { TraceStatsCache, windowKeyFor } from '../models/TraceStatsCache';
+import { TRACE_STATS_STALE_MS, TRACE_STATS_WINDOW_DAYS } from '../services/traceStatsCacheService';
+import { applyCostToStats } from '../services/traceStatsCost';
 
 const router = express.Router();
 
@@ -60,9 +63,53 @@ router.get('/langsmith/stats', ...adminGuard, async (req, res) => {
   const rawDays = Number(req.query.days);
   const days = Number.isInteger(rawDays) ? Math.min(30, Math.max(1, rawDays)) : 7;
 
+  // #224: only the poller's default window is cached; any other window is a
+  // live sweep (the summary is the expensive part, so keep the cached path the
+  // common one). The route can therefore serve the cache with no LangSmith
+  // round trip on a warm window.
+  if (days === TRACE_STATS_WINDOW_DAYS) {
+    try {
+      const cached = await TraceStatsCache.findOne({ windowKey: windowKeyFor(days) }).lean<{
+        since: string;
+        computedAt: Date;
+        models: {
+          model: string;
+          calls: number;
+          errors: number;
+          avgDurationMs: number | null;
+          totalTokens: number;
+          inputTokens: number;
+          outputTokens: number;
+        }[];
+        totals: {
+          calls: number;
+          errors: number;
+          totalTokens: number;
+          inputTokens: number;
+          outputTokens: number;
+        };
+      } | null>();
+      const fresh =
+        cached && Date.now() - new Date(cached.computedAt).getTime() <= TRACE_STATS_STALE_MS;
+      if (cached && fresh) {
+        const payload = await applyCostToStats({
+          since: cached.since,
+          models: cached.models.map((m) => ({ ...m, estimatedCostUsd: null })),
+          totals: { ...cached.totals, estimatedCostUsd: null },
+          computedAt: new Date(cached.computedAt).toISOString(),
+          stale: false,
+        });
+        return res.json(payload);
+      }
+    } catch (_err) {
+      // A cache read failure is not fatal: fall through to the live sweep.
+    }
+  }
+
   try {
-    const payload = await traceStats(days);
-    if (!payload) return res.status(503).json({ message: 'LangSmith tracing is not configured' });
+    const live = await traceStats(days);
+    if (!live) return res.status(503).json({ message: 'LangSmith tracing is not configured' });
+    const payload = await applyCostToStats({ ...live, stale: true });
     res.json(payload);
   } catch (_err) {
     res.status(502).json({ message: 'Error reading LangSmith stats' });
