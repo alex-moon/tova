@@ -26,6 +26,17 @@ const sessionSchema = new mongoose.Schema(
       type: Boolean,
       default: false,
     },
+    /*
+     * #226: timestamp of the session's most recent persisted message. Bumped
+     * on each persisted user turn in saveUserMessageWithMetrics. Drives the
+     * sidebar order (and therefore "open the most recent chat on load").
+     * Defaults to null for sessions that predate #226; the listing sort
+     * places nulls last. No index here — the migration owns it.
+     */
+    lastMessageAt: {
+      type: Date,
+      default: null,
+    },
   },
   {
     timestamps: true,
