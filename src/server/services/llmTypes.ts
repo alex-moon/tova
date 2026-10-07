@@ -60,6 +60,19 @@ export interface CompletionOptions {
   trace?: TraceContext;
 }
 
+/*
+ * Token usage for a turn (issue #224), normalised across providers. Every
+ * field is optional and left **absent** when the provider reported nothing —
+ * `undefined` means unknown, deliberately distinct from `0` (mirrors the
+ * #199 "unknown price ≠ free" stance). `totalTokens` is the turn's real spend
+ * across all tool steps; in/out are the provider's prompt/completion split.
+ */
+export interface TokenUsage {
+  inputTokens?: number;
+  outputTokens?: number;
+  totalTokens?: number;
+}
+
 export interface NeutralCompletion {
   choices: Array<{
     message?: {
@@ -72,6 +85,11 @@ export interface NeutralCompletion {
    * the `web_search` tool returns `{ results: { title, snippet, url }[] }`.
    */
   toolResults?: Array<{ name: string; result: unknown }>;
+  /**
+   * Token usage for the turn (issue #224). Absent when the provider reported
+   * nothing; callers persist it for the per-message cost view.
+   */
+  usage?: TokenUsage;
 }
 
 export interface NeutralStreamChunk {
@@ -84,6 +102,12 @@ export interface NeutralStreamChunk {
   };
   /** Emitted when a tool finishes executing, carrying its structured result. */
   toolResult?: { name: string; result: unknown };
+  /**
+   * Emitted once, after the stream drains, carrying the turn's token usage
+   * (issue #224). Mirrors `NeutralCompletion.usage`; absence means the
+   * provider reported nothing.
+   */
+  usage?: TokenUsage;
 }
 
 export type NeutralChunkStream = AsyncIterable<NeutralStreamChunk>;
