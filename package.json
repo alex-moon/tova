@@ -70,6 +70,7 @@
     "mongo-migrate-ts": "^2.0.0",
     "mongoose": "^8.18.0",
     "pdf-parse": "^2.4.5",
+    "tesseract.js": "^7.0.0",
     "turndown": "^7.2.4",
     "zod": "^4.6.4"
   },
