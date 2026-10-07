@@ -293,6 +293,40 @@ export interface AdminLangsmithStatsPayload {
   stale?: boolean;
 }
 
+// Per-session cost breakdown for the admin Traces tab (#224). Unlike the model
+// rollup (which comes from LangSmith llm runs), this is computed from our own
+// `Message` rows: message-in = `role:'user'`, message-out = `role:'assistant'`.
+// Token totals and cost cover only assistant messages that carry `usage`
+// (logged from #224 onward), so the counts and the token/cost totals describe
+// different rows for a while — the UI labels this as a known skew.
+export interface AdminSessionCostRow {
+  sessionId: string;
+  title: string;
+  messagesIn: number;
+  messagesOut: number;
+  inputTokens: number;
+  outputTokens: number;
+  // Estimated USD spend for the session, joined from the in-DB price of each
+  // message's model at read time; `null` when no assistant message in the
+  // session has a known price (distinct from $0 — #199). UI renders `—`.
+  estimatedCostUsd: number | null;
+  // Latest message timestamp in the session, used for ordering/display.
+  lastActivityAt: string;
+}
+
+export interface AdminSessionsCostPayload {
+  since: string;
+  sessions: AdminSessionCostRow[];
+  totals: {
+    sessions: number;
+    messagesIn: number;
+    messagesOut: number;
+    inputTokens: number;
+    outputTokens: number;
+    estimatedCostUsd: number | null;
+  };
+}
+
 // `location` is the coarse country-level geolocation (issue #50): only the
 // country name and 2-letter code are exposed, and only once resolved.
 export interface AuthUserLocation {

@@ -13,6 +13,7 @@ import type {
   AdminTracesPayload,
   AdminTraceDetail,
   AdminLangsmithStatsPayload,
+  AdminSessionsCostPayload,
 } from '../types/admin';
 
 // Normalised admin failure: message comes from the server response when one
@@ -275,7 +276,19 @@ const listStats = async (days = 7): Promise<AdminLangsmithStatsPayload> => {
   }
 };
 
-const AdminLangsmithService = { listTraces, getTrace, listStats };
+// #224: per-session cost breakdown from our own Message rows (no LangSmith).
+const listSessionCosts = async (days = 7): Promise<AdminSessionsCostPayload> => {
+  try {
+    const res = await axios.get<AdminSessionsCostPayload>('/api/admin/langsmith/sessions', {
+      params: { days },
+    });
+    return res.data;
+  } catch (err) {
+    throw toAdminError(err, 'Failed to load session costs.');
+  }
+};
+
+const AdminLangsmithService = { listTraces, getTrace, listStats, listSessionCosts };
 
 export {
   AdminModelsService,

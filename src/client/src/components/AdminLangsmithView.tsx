@@ -3,6 +3,8 @@ import { AdminError, AdminLangsmithService } from '../services/admin';
 import type {
   AdminLangsmithModelStats,
   AdminLangsmithStatsPayload,
+  AdminSessionCostRow,
+  AdminSessionsCostPayload,
   AdminTraceDetail,
   AdminTraceRun,
   AdminTracesPayload,
@@ -129,9 +131,33 @@ const ModelStatsRow = ({ row }: { row: AdminLangsmithModelStats }) => (
   </>
 );
 
+/*
+ * Per-session cost breakdown (#224). Message counts and token/cost totals are
+ * deliberately separate columns: only assistant turns logged after #224 carry
+ * usage, so a session's counts can be non-zero while its tokens/cost are `—`
+ * until usage builds up. Keeping them side by side makes that skew legible.
+ */
+const SessionCostRow = ({ row }: { row: AdminSessionCostRow }) => (
+  <tr
+    data-testid={`langsmith-session-${row.sessionId}`}
+    className="border-b border-border last:border-b-0"
+  >
+    <td className="max-w-[12rem] truncate px-3 py-2" title={row.title}>
+      {row.title}
+    </td>
+    <td className="px-3 py-2">{row.messagesIn}</td>
+    <td className="px-3 py-2">{row.messagesOut}</td>
+    <td className="px-3 py-2">{formatTokens(row.inputTokens)}</td>
+    <td className="px-3 py-2">{formatTokens(row.outputTokens)}</td>
+    <td className="px-3 py-2">{formatCost(row.estimatedCostUsd)}</td>
+    <td className="px-3 py-2 text-xs text-muted-foreground">{formatTime(row.lastActivityAt)}</td>
+  </tr>
+);
+
 const AdminLangsmithView = () => {
   const [traces, setTraces] = useState<AdminTracesPayload | null>(null);
   const [stats, setStats] = useState<AdminLangsmithStatsPayload | null>(null);
+  const [sessionCosts, setSessionCosts] = useState<AdminSessionsCostPayload | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [errorsOnly, setErrorsOnly] = useState(false);
@@ -161,12 +187,18 @@ const AdminLangsmithView = () => {
     AdminLangsmithService.listStats()
       .then(setStats)
       .catch(() => {});
+    AdminLangsmithService.listSessionCosts()
+      .then(setSessionCosts)
+      .catch(() => {});
   }, [load]);
 
   const refresh = () => {
     void load({ errorsOnly, ...(modelFilter ? { model: modelFilter } : {}) });
     AdminLangsmithService.listStats()
       .then(setStats)
+      .catch(() => {});
+    AdminLangsmithService.listSessionCosts()
+      .then(setSessionCosts)
       .catch(() => {});
   };
 
@@ -280,6 +312,61 @@ const AdminLangsmithView = () => {
               </div>
             ) : (
               <p className="text-sm text-muted-foreground">No traced runs in the window.</p>
+            )}
+          </div>
+
+          <div
+            className="rounded-xl border border-border bg-card p-4"
+            data-testid="langsmith-session-costs"
+          >
+            <h3 className="mb-1 font-heading text-base font-semibold">
+              Session cost · last 7 days
+            </h3>
+            <p className="mb-3 text-xs text-muted-foreground">
+              From our own messages. Token and cost totals count only turns logged after the
+              per-message usage change, so they lag the message counts while usage builds up.
+            </p>
+            {sessionCosts && sessionCosts.sessions.length > 0 ? (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-border text-left text-muted-foreground">
+                      <th className="px-3 py-2 font-medium">Session</th>
+                      <th className="px-3 py-2 font-medium">In</th>
+                      <th className="px-3 py-2 font-medium">Out</th>
+                      <th className="px-3 py-2 font-medium">Tokens in</th>
+                      <th className="px-3 py-2 font-medium">Tokens out</th>
+                      <th className="px-3 py-2 font-medium">Est. cost</th>
+                      <th className="px-3 py-2 font-medium">Last activity</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {sessionCosts.sessions.map((row) => (
+                      <SessionCostRow key={row.sessionId} row={row} />
+                    ))}
+                  </tbody>
+                  <tfoot>
+                    <tr data-testid="langsmith-session-total" className="border-t border-border">
+                      <td className="px-3 py-2 font-medium">
+                        {sessionCosts.totals.sessions} session
+                        {sessionCosts.totals.sessions === 1 ? '' : 's'}
+                      </td>
+                      <td className="px-3 py-2">{sessionCosts.totals.messagesIn}</td>
+                      <td className="px-3 py-2">{sessionCosts.totals.messagesOut}</td>
+                      <td className="px-3 py-2">{formatTokens(sessionCosts.totals.inputTokens)}</td>
+                      <td className="px-3 py-2">
+                        {formatTokens(sessionCosts.totals.outputTokens)}
+                      </td>
+                      <td className="px-3 py-2">
+                        {formatCost(sessionCosts.totals.estimatedCostUsd)}
+                      </td>
+                      <td className="px-3 py-2" />
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+            ) : (
+              <p className="text-sm text-muted-foreground">No sessions in the window.</p>
             )}
           </div>
 

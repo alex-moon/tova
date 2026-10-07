@@ -5,6 +5,7 @@ import { AdminError } from '../services/admin';
 import type {
   AdminTracesPayload,
   AdminLangsmithStatsPayload,
+  AdminSessionsCostPayload,
   AdminTraceDetail,
 } from '../types/admin';
 
@@ -17,6 +18,7 @@ import type {
 const listTraces = vi.fn();
 const getTrace = vi.fn();
 const listStats = vi.fn();
+const listSessionCosts = vi.fn();
 
 vi.mock('../services/admin', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../services/admin')>();
@@ -26,6 +28,7 @@ vi.mock('../services/admin', async (importOriginal) => {
       listTraces: (...args: unknown[]) => listTraces(...args),
       getTrace: (...args: unknown[]) => getTrace(...args),
       listStats: (...args: unknown[]) => listStats(...args),
+      listSessionCosts: (...args: unknown[]) => listSessionCosts(...args),
     },
   };
 });
@@ -85,6 +88,40 @@ const statsPayload = (): AdminLangsmithStatsPayload => ({
   stale: false,
 });
 
+const sessionCostsPayload = (): AdminSessionsCostPayload => ({
+  since: '2026-09-20T00:00:00.000Z',
+  sessions: [
+    {
+      sessionId: 'sess-1',
+      title: 'Chat A',
+      messagesIn: 3,
+      messagesOut: 3,
+      inputTokens: 1200,
+      outputTokens: 400,
+      estimatedCostUsd: 0.0032,
+      lastActivityAt: '2026-09-27T10:00:00.000Z',
+    },
+    {
+      sessionId: 'sess-2',
+      title: 'Chat B',
+      messagesIn: 1,
+      messagesOut: 1,
+      inputTokens: 0,
+      outputTokens: 0,
+      estimatedCostUsd: null,
+      lastActivityAt: '2026-09-26T10:00:00.000Z',
+    },
+  ],
+  totals: {
+    sessions: 2,
+    messagesIn: 4,
+    messagesOut: 4,
+    inputTokens: 1200,
+    outputTokens: 400,
+    estimatedCostUsd: 0.0032,
+  },
+});
+
 const traceDetail = (): AdminTraceDetail => ({
   traceId: 'trace-1',
   runs: [
@@ -128,6 +165,7 @@ describe('AdminLangsmithView (#186)', () => {
     listTraces.mockReset().mockResolvedValue(tracesPayload());
     getTrace.mockReset().mockResolvedValue(traceDetail());
     listStats.mockReset().mockResolvedValue(statsPayload());
+    listSessionCosts.mockReset().mockResolvedValue(sessionCostsPayload());
   });
 
   it('loads traces and stats on mount and renders both tables', async () => {
@@ -162,6 +200,25 @@ describe('AdminLangsmithView (#186)', () => {
     expect(stats).toHaveTextContent('updated');
     const total = screen.getByTestId('langsmith-cost-total');
     expect(total).toHaveTextContent('$0.0042');
+  });
+
+  it('renders the per-session cost breakdown with — for an unpriced session (#224)', async () => {
+    render(<AdminLangsmithView />);
+    const section = await screen.findByTestId('langsmith-session-costs');
+    expect(listSessionCosts).toHaveBeenCalledWith();
+
+    const priced = screen.getByTestId('langsmith-session-sess-1');
+    expect(priced).toHaveTextContent('Chat A');
+    expect(priced).toHaveTextContent('1,200');
+    expect(priced).toHaveTextContent('$0.0032');
+
+    const unpriced = screen.getByTestId('langsmith-session-sess-2');
+    expect(unpriced).toHaveTextContent('—');
+
+    expect(section).toHaveTextContent('usage builds up');
+    const total = screen.getByTestId('langsmith-session-total');
+    expect(total).toHaveTextContent('2 sessions');
+    expect(total).toHaveTextContent('$0.0032');
   });
 
   it('shows an empty state when the project has no traces', async () => {

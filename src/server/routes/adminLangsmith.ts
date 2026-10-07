@@ -9,6 +9,7 @@ import {
 import { TraceStatsCache, windowKeyFor } from '../models/TraceStatsCache';
 import { TRACE_STATS_STALE_MS, TRACE_STATS_WINDOW_DAYS } from '../services/traceStatsCacheService';
 import { applyCostToStats } from '../services/traceStatsCost';
+import { sessionCostBreakdown } from '../services/sessionCostService';
 
 const router = express.Router();
 
@@ -113,6 +114,21 @@ router.get('/langsmith/stats', ...adminGuard, async (req, res) => {
     res.json(payload);
   } catch (_err) {
     res.status(502).json({ message: 'Error reading LangSmith stats' });
+  }
+});
+
+// #224: per-session cost breakdown from our own Message rows. Unlike /stats
+// this never touches LangSmith — the data is in Mongo — so it needs no cache
+// and no poller. `days` (clamped 1–30) bounds the message window.
+router.get('/langsmith/sessions', ...adminGuard, async (req, res) => {
+  const rawDays = Number(req.query.days);
+  const days = Number.isInteger(rawDays) ? Math.min(30, Math.max(1, rawDays)) : 7;
+  const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+
+  try {
+    res.json(await sessionCostBreakdown({ since }));
+  } catch (_err) {
+    res.status(500).json({ message: 'Error reading session costs' });
   }
 });
 
