@@ -409,6 +409,8 @@ describe('admin langsmith (#186)', () => {
               start_time: '2026-09-27T10:00:00.000000',
               end_time: '2026-09-27T10:00:02.000000',
               total_tokens: 100,
+              prompt_tokens: 70,
+              completion_tokens: 30,
             },
             {
               // Defensive: a non-llm-shaped name must not fabricate a row.
@@ -426,6 +428,8 @@ describe('admin langsmith (#186)', () => {
               start_time: '2026-09-27T10:00:01.000000',
               end_time: '2026-09-27T10:00:04.000000',
               total_tokens: 10,
+              prompt_tokens: 8,
+              completion_tokens: 2,
             },
             {
               name: "llm: 'qwen/qwen3-14b'",
@@ -434,6 +438,8 @@ describe('admin langsmith (#186)', () => {
               start_time: '2026-09-27T10:00:00.000000',
               end_time: '2026-09-27T10:00:02.000000',
               total_tokens: 50,
+              prompt_tokens: 40,
+              completion_tokens: 10,
             },
           ],
         }),
@@ -450,12 +456,38 @@ describe('admin langsmith (#186)', () => {
     const filter = (sweepQueries[0] as { filter: string }).filter;
     expect(filter).toContain('eq(run_type, "llm")');
     expect(filter).toContain('gte(start_time,');
+    // #224: the sweep must ask for the input/output split that prices a model.
+    expect((sweepQueries[0] as { select: string[] }).select).toEqual(
+      expect.arrayContaining(['prompt_tokens', 'completion_tokens']),
+    );
 
     expect(res.body.models).toEqual([
-      { model: 'openai/gpt-oss-20b', calls: 2, errors: 1, avgDurationMs: 2500, totalTokens: 110 },
-      { model: 'qwen/qwen3-14b', calls: 1, errors: 0, avgDurationMs: 2000, totalTokens: 50 },
+      {
+        model: 'openai/gpt-oss-20b',
+        calls: 2,
+        errors: 1,
+        avgDurationMs: 2500,
+        totalTokens: 110,
+        inputTokens: 78,
+        outputTokens: 32,
+      },
+      {
+        model: 'qwen/qwen3-14b',
+        calls: 1,
+        errors: 0,
+        avgDurationMs: 2000,
+        totalTokens: 50,
+        inputTokens: 40,
+        outputTokens: 10,
+      },
     ]);
-    expect(res.body.totals).toEqual({ calls: 3, errors: 1, totalTokens: 160 });
+    expect(res.body.totals).toEqual({
+      calls: 3,
+      errors: 1,
+      totalTokens: 160,
+      inputTokens: 118,
+      outputTokens: 42,
+    });
   });
 
   it('authorizes over a PAT bearer like the other admin routes (#184)', async () => {
@@ -478,7 +510,13 @@ describe('admin langsmith (#186)', () => {
       .get('/api/admin/langsmith/stats')
       .set('Authorization', `Bearer ${token}`);
     expect(res.status).toBe(200);
-    expect(res.body.totals).toEqual({ calls: 0, errors: 0, totalTokens: 0 });
+    expect(res.body.totals).toEqual({
+      calls: 0,
+      errors: 0,
+      totalTokens: 0,
+      inputTokens: 0,
+      outputTokens: 0,
+    });
     expect(res.body.models).toEqual([]);
   });
 });

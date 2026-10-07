@@ -52,10 +52,26 @@ const tracesPayload = (traces = [traceRow()]): AdminTracesPayload => ({
 const statsPayload = (): AdminLangsmithStatsPayload => ({
   since: '2026-09-20T00:00:00.000Z',
   models: [
-    { model: 'openai/gpt-oss-20b', calls: 10, errors: 2, avgDurationMs: 1500, totalTokens: 4000 },
-    { model: 'qwen/qwen3-14b', calls: 4, errors: 0, avgDurationMs: 3000, totalTokens: 900 },
+    {
+      model: 'openai/gpt-oss-20b',
+      calls: 10,
+      errors: 2,
+      avgDurationMs: 1500,
+      totalTokens: 4000,
+      inputTokens: 3000,
+      outputTokens: 1000,
+    },
+    {
+      model: 'qwen/qwen3-14b',
+      calls: 4,
+      errors: 0,
+      avgDurationMs: 3000,
+      totalTokens: 900,
+      inputTokens: 700,
+      outputTokens: 200,
+    },
   ],
-  totals: { calls: 14, errors: 2, totalTokens: 4900 },
+  totals: { calls: 14, errors: 2, totalTokens: 4900, inputTokens: 3700, outputTokens: 1200 },
 });
 
 const traceDetail = (): AdminTraceDetail => ({

@@ -255,18 +255,29 @@ export interface AdminTraceDetail {
 // the calls (null when none finished); `totalTokens` sums the runs' token
 // counts. Turns that failed before any llm call do not appear here — the
 // traces list's errors-only filter covers turn-level failures.
+// `inputTokens`/`outputTokens` are the prompt/completion split (#224) used to
+// price a model; a run that reported no split contributes 0 to both, while
+// `totalTokens` still holds whatever the run itself reported.
 export interface AdminLangsmithModelStats {
   model: string;
   calls: number;
   errors: number;
   avgDurationMs: number | null;
   totalTokens: number;
+  inputTokens: number;
+  outputTokens: number;
 }
 
 export interface AdminLangsmithStatsPayload {
   since: string;
   models: AdminLangsmithModelStats[];
-  totals: { calls: number; errors: number; totalTokens: number };
+  totals: {
+    calls: number;
+    errors: number;
+    totalTokens: number;
+    inputTokens: number;
+    outputTokens: number;
+  };
 }
 
 // `location` is the coarse country-level geolocation (issue #50): only the
