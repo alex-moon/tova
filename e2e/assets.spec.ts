@@ -5,7 +5,8 @@ import { expect, test, type Page } from '@playwright/test';
  * mocked at the network layer (presign returns a mock URL fulfilled by
  * Playwright), so this never touches real storage: it exercises
  * presign → PUT → confirm, the exact pipeline the live CORS bug breaks,
- * plus library attach-enablement (the "File is not ready to attach" path).
+ * plus the library selection/preview contract (#197 master/detail replaced
+ * the old per-row attach button).
  */
 
 const email = process.env.E2E_EMAIL ?? 'formsatz@gmail.com';
@@ -37,7 +38,8 @@ const mockAssetApi = async (page: Page, assets: Array<typeof pendingAsset>) => {
 
 const openFiles = async (page: Page) => {
   if (isMobileViewport(page)) await page.getByRole('button', { name: 'Open menu' }).click();
-  await page.getByRole('button', { name: 'Files' }).click();
+  // #197 made /files a sidebar link, not a modal-opening button.
+  await page.getByRole('link', { name: 'Files' }).click();
   await expect(page.locator('[data-testid="asset-library"]')).toBeVisible();
 };
 
@@ -137,19 +139,32 @@ test('library: failed upload shows an error and never enables attach', async ({ 
   await expect(page.locator('[data-testid="attachment-chip"]')).toBeHidden();
 });
 
-test('library: ready assets enable attach and hand off to the composer', async ({ page }) => {
+test('library: selecting a ready asset opens its preview', async ({ page }) => {
   await mockAssetApi(page, [readyAsset]);
+  // The #197 master/detail view loads the extracted body through the content
+  // endpoint when a row is selected; there is no per-row attach control any
+  // more (attaching happens only from the composer, covered above).
+  await page.route('**/api/assets/e2e-asset-1/content', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        asset: { ...readyAsset, content: 'hello world', format: 'text' },
+      }),
+    }),
+  );
   await openFiles(page);
 
-  const attach = page.locator('[data-testid="asset-attach"]').first();
-  await expect(attach).toBeEnabled();
-  await attach.click();
-  await expect(page.locator('[data-testid="attachment-chip"]')).toContainText('notes.txt');
+  await page.locator('[data-testid="asset-preview-e2e-asset-1"]').click();
+  await expect(page.locator('[data-testid="assets-preview-title"]')).toContainText('notes.txt');
+  await expect(page.locator('[data-testid="assets-preview-body"]')).toContainText('hello world');
 });
 
-test('library: pending assets keep attach disabled', async ({ page }) => {
+test('library: pending assets cannot be selected', async ({ page }) => {
   await mockAssetApi(page, [pendingAsset]);
   await openFiles(page);
 
-  await expect(page.locator('[data-testid="asset-attach"]').first()).toBeDisabled();
+  // The readiness gate moved from the removed attach button to the row's
+  // selection checkbox: a not-ready asset cannot be multi-selected.
+  await expect(page.locator('[data-testid="asset-select"]').first()).toBeDisabled();
 });

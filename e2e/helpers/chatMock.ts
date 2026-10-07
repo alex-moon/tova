@@ -41,8 +41,15 @@ export function installChatStreamMock(
     if (req.method() === 'POST') bodies.push(body);
     // A new incognito chat carries zdr:true and no sessionId; the real server
     // returns no session for it.
-    const parsed = req.method() === 'POST' ? (JSON.parse(body || '{}') as { zdr?: boolean }) : {};
-    const sessionId = parsed.zdr ? undefined : 'e2e-mock-session';
+    let zdr = false;
+    if (req.method() === 'POST') {
+      try {
+        zdr = Boolean((JSON.parse(body || '{}') as { zdr?: boolean }).zdr);
+      } catch {
+        zdr = false;
+      }
+    }
+    const sessionId = zdr ? undefined : 'e2e-mock-session';
     await route.fulfill({
       status: 200,
       contentType: 'text/event-stream',

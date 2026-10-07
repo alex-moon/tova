@@ -38,6 +38,45 @@ const mockAuth = async (page: Page) => {
 const documentOverflows = (page: Page) =>
   page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth);
 
+/*
+ * A "clipped" element is one whose content extends past the viewport's right
+ * edge and has no horizontally scrollable ancestor to reach it. This is the
+ * "unaffordable overflow" the ticket describes: unlike the document-level
+ * assertion above, it is not masked by an inner `overflow-x-auto` wrapper, so
+ * it catches the case where content is cut off with no way to scroll to it.
+ */
+const clippedElements = (page: Page) =>
+  page.evaluate(() => {
+    const viewport = document.documentElement.clientWidth;
+    const overflowX = (el: Element) => getComputedStyle(el).overflowX;
+    const scrollable = (el: Element) => {
+      const v = overflowX(el);
+      return v === 'auto' || v === 'scroll';
+    };
+    const offenders: Array<{ tag: string; testid: string | null; right: number }> = [];
+    for (const el of Array.from(document.querySelectorAll<HTMLElement>('body *'))) {
+      const rect = el.getBoundingClientRect();
+      if (rect.width === 0 || rect.height === 0) continue;
+      if (rect.right <= viewport + 1) continue;
+      // Walk ancestors: any horizontally scrollable one makes this reachable.
+      let reachable = false;
+      for (let p = el.parentElement; p; p = p.parentElement) {
+        if (scrollable(p)) {
+          reachable = true;
+          break;
+        }
+      }
+      if (reachable) continue;
+      offenders.push({
+        tag: el.tagName.toLowerCase(),
+        testid: el.getAttribute('data-testid'),
+        right: Math.round(rect.right),
+      });
+      if (offenders.length >= 10) break;
+    }
+    return offenders;
+  });
+
 const routes: Array<{ path: string; ready: string }> = [
   { path: '/', ready: '[data-testid="chat-input"]' },
   { path: '/profile', ready: '[data-testid="profile-view"]' },
@@ -52,5 +91,6 @@ for (const { path, ready } of routes) {
     await expect(page.locator(ready)).toBeVisible();
 
     expect(await documentOverflows(page)).toBe(false);
+    expect(await clippedElements(page)).toEqual([]);
   });
 }
