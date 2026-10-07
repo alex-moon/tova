@@ -52,6 +52,28 @@ This ticket makes the aspirational parts real, per GitHub issue [alex-moon/tova#
 - [x] Visually verify `/admin` at 375px with `playwright-cli` (and at 320px).
 - [x] `npm run db:password && npm run test:e2e` green; `npm run ci` green.
 
+## CI-red resolution (post-closeout)
+
+PR #229's first post-closeout run reported `ci` FAILURE (and `ci-gate` FAILURE by
+dependency). Reproduced from the run log: `modelConfigService.test.ts` ›
+`capability matching (#94)` › `rules out models flagged tools:false from the
+completions pool`. This was called a "pre-existing flake", but it is deterministic
+in cause:
+
+- `openai/gpt-oss-20b` is the small/deepinfra seed **and** the guard/groq seed
+  (`DEFAULT_MODEL_ENV.small` and `GUARD_ENV` share that fallback).
+- The test's `findOneAndUpdate({ model: 'openai/gpt-oss-20b' }, …)` omitted
+  `tier`/`provider`, so Mongo updated one of the two matching docs arbitrarily.
+- `ensureSeed` inserts concurrently (`Promise.all`), so natural insertion order —
+  and therefore which doc the unscoped match hit — is nondeterministic. When it hit
+  the guard row, the small pool still held a `tools:true` gpt-oss-20b and the
+  assertion failed exactly as CI showed.
+- Fix: scope both the flip and its `finally` restore to
+  `{ provider: 'deepinfra', model: 'openai/gpt-oss-20b', tier: 'small' }`.
+- Verified: probe confirms two docs match the old filter; full server suite
+  1060/1060, `npm run ci` exit 0. This touches server test code only; the client
+  branch's diff to `src/server/**` remains empty.
+
 ## Follow-ups
 
 - The `ScrollablePanel` primitive's mobile behaviour is deferred (out of scope; to be
