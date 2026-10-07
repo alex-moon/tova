@@ -629,7 +629,7 @@ describe('Assets confirm markdown conversion queue (#67)', () => {
     expect(await AssetJob.countDocuments({ assetId })).toBe(0);
   });
 
-  it('image uploads queue a thumbnail job and leave markdownStatus none (#208)', async () => {
+  it('image uploads queue thumbnail and OCR jobs (#208, #209)', async () => {
     const cookie = await registerUser('assets-image@example.com');
     const assetId = await presignOk(cookie, 'picture.png', 'image/png', 100);
 
@@ -638,7 +638,9 @@ describe('Assets confirm markdown conversion queue (#67)', () => {
 
     expect(confirm.status).toBe(200);
     const stored = await Asset.findById(assetId);
-    expect(stored?.markdownStatus).toBe('none');
+    // #209: images now drive the markdown lifecycle via OCR, alongside the
+    // #208 thumbnail. One asset job covers both pending lifecycles.
+    expect(stored?.markdownStatus).toBe('pending');
     expect(stored?.thumbnailStatus).toBe('pending');
     expect(await AssetJob.countDocuments({ assetId })).toBe(1);
   });
@@ -671,6 +673,8 @@ describe('Assets confirm markdown conversion queue (#67)', () => {
     expect(stored?.status).toBe('ready');
     expect(stored?.thumbnailStatus).toBe('none');
     expect(stored?.thumbnailKey).toBeNull();
+    // #209: the same job carries OCR, so the markdown lifecycle must revert too.
+    expect(stored?.markdownStatus).toBe('none');
     expect(await AssetJob.countDocuments({ assetId })).toBe(0);
   });
 });
