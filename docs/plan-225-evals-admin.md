@@ -5,7 +5,11 @@ GitHub issue: alex-moon/tova#225
 
 Status: implemented on the branch (T1–T7); verification recorded below. Open
 questions resolved by their flagged fallbacks this pass (see "Resolved open
-questions").
+questions"). A critic pass (see "Critic pass (this pass)") found and fixed two
+defects: the rollup model wrote to the wrong collection (`evalrunrecords`
+instead of the migrated `evalruns`), and the scheduled/manual rollup path never
+exported to LangSmith; both fixed, and the `TOVA_EVAL_MODEL`/`TOVA_EVAL_PROVIDER`
+reads moved behind `config.evals` (#142).
 
 ## Motivation
 
@@ -346,6 +350,26 @@ as blocked (OQ7). Each has a flagged fallback so implementation can proceed.
   add a stale-lease sweep at scheduler start, mirroring the asset poller.
   Confirm the staleness threshold (e.g. 2× the observed suite duration).
 
+### New questions raised by the critic pass
+
+- **OQ8 (stale-lease reclaim timing).** `reclaimStaleEvalRuns` runs **only once at
+  scheduler start**, not per tick. `STALE_EVAL_RUNNING_MS` is 2h. A run that
+  strands inside a running process (e.g. `executeEvalRun` hangs on a provider
+  after the finally-cleared lease) blocks the manual button for the process's
+  whole life, and blocks the daily job until the next restart. Should the reclaim
+  move into the tick (like `requeueStaleAssetJobs` is polled) and/or should a
+  manual "Run now" offer a force-reclaim? Threshold (2h) still unconfirmed.
+- **OQ9 (per-model view).** The list row shows aggregate counts across all
+  models; the ticket asks for outcomes "per case and model, over time". The
+  drill-down shows per-case rows with model, but there is no per-model rollup
+  or trend in the tab. Is a per-model/trend view wanted in the first tab, or is
+  the drill-down sufficient (as Decision 8 assumes)?
+- **OQ10 (LangSmith example growth).** `pushToLangSmith` creates a fresh example
+  per case per run, so the `tova-evals` dataset grows one example per case per
+  run (≈10/day). The original CLI had the same behaviour, but now it runs daily
+  unattended. Should re-runs reference existing examples instead of appending?
+  (Pre-existing behaviour, inherited by the scheduled path.)
+
 ## Follow-ups (deferred)
 
 - Retention/pruning of old `evalruns` documents (pending OQ3).
@@ -371,6 +395,57 @@ against the local stack (the written `evalruns` doc and its rendered row).
   Full `npm run ci` and the Playwright/phone render are deferred to the next
   iteration (need the local stack and a real run).
 
+### Critic pass (this pass) — evidence and fixes
+
+Defects found and fixed:
+
+1. **Wrong collection (correctness).** `EvalRunRecord` had no explicit
+   collection, so Mongoose pluralised it to `evalrunrecords` while the migration
+   `20261007000000-create-eval-runs` pre-creates `evalruns`. The migration was
+   dead and the intended indexes sat on an unused collection; a real "Run now"
+   wrote to `evalrunrecords`. Fixed with an explicit `{ collection: 'evalruns' }`
+   on `mongoose.model`, plus a model test pinning `EvalRunRecord.collection.name`.
+2. **Scheduled/manual runs never reached LangSmith (missed requirement).** Only
+   `scripts/run-evals.ts` resolved a client; `executeEvalRun`/`startEvalRun` called
+   `runEvalSuite` with no `langsmithClient`, so neither the daily job nor the
+   admin "Run now" exported to the `tova-evals` dataset — the ticket's
+   "in LangSmith" intent. Fixed by resolving `langsmithClientFromEnv(config.langsmith.apiKey)`
+   at the two composition roots (the `POST /api/admin/evals/run` route and the
+   scheduler closure in `startServer()`), forwarded into `executeEvalRun`.
+3. **#142 drift.** The route and `startServer()` read `process.env.TOVA_EVAL_MODEL`/
+   `TOVA_EVAL_PROVIDER` directly. Added `config.evals.model`/`config.evals.provider`
+   accessors and switched both call sites to config.
+4. **Defensive hardening.** `countScores` used `result.score in counts`, which
+   walks the prototype chain (a corrupt score `"constructor"` would match);
+   switched to `Object.hasOwn`, with a regression test.
+
+Verification performed this pass:
+
+- `npx tsc --noEmit` green; `npm run lint` and `npm run format` green.
+- **`npm run ci` exits 0** (client lint/format/test/build, then server
+  lint/format/typecheck/test): 81 server suites / 1102 tests, 18 client suites /
+  230 tests, all green.
+- New/updated tests green: `evalRunsAdminService.test.ts` (6, new),
+  `evalRunService.test.ts` (+4), `adminEvals.test.ts` (+1),
+  `config/index.test.ts` (+2), `EvalRunRecord.test.ts` (+1),
+  `AdminEvalsView.test.tsx` (6).
+- Playwright render at **375×667** (mobile context) of the live admin Evals tab:
+  empty state, a populated run row (`1p 1~ 1f done`) with no horizontal overflow
+  (`documentElement.scrollWidth === 375`), and the per-case drill-down. Screenshots
+  at `/tmp/opencode/evals-empty.png`, `/tmp/opencode/evals-row.png`,
+  `/tmp/opencode/evals-detail.png`.
+- **Real manual "Run now"** against the local stack: created rollup
+  `_id 6ac65adbedf491e4d8e484a1`, `status: done`, `startedAt 14:44:43.051Z`,
+  `finishedAt 14:46:07.872Z` (~84s), 10 graded case results, rendered as a row.
+
+Pre-existing, **out of scope**: `src/server/services/modelConfigService.test.ts`
+("rules out models flagged tools:false from the completions pool") **flakes** —
+it failed in one full `npm test` run and passed in another (`npm run ci` above),
+while passing in isolation. It also failed identically on `origin/main` in a
+detached worktree, so it is an order/isolation flake unrelated to #225 (the
+branch does not touch that file or model logic). Per the cleanup-scope policy
+this is raised, not fixed here.
+
 ## Done
 
 - [x] T1 `EvalRunRecord` model + `20261007000000-create-eval-runs` migration + test.
@@ -380,8 +455,9 @@ against the local stack (the written `evalruns` doc and its rendered row).
       reclaim, busy guard) + `config.evals` + started in `startServer()`.
 - [x] T4 `adminEvals` routes + `AdminEval*` shared contracts + tests.
 - [x] T5 `AdminEvalsService` + `AdminEvalsView` + Evals tab registration + tests.
-- [ ] T6 full `npm run ci` + Playwright phone/desktop render + real manual run
-      evidence — deferred (next iteration).
+- [x] T6 full `npm run ci` (exit 0) + Playwright mobile render + real manual run
+      evidence (rollup `6ac65adbedf491e4d8e484a1`, done, 10 cases) — see
+      "Critic pass (this pass)".
 - [x] T7 `.env.example` schedule vars; plan archived to `docs/` on merge.
 
 ## Resolved open questions (fallbacks taken)

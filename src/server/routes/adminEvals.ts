@@ -5,6 +5,7 @@ import {
   beginEvalRun,
   EvalRunBusyError,
   executeEvalRun,
+  langsmithClientFromEnv,
   resolveScheduledModels,
 } from '../services/evalRunService';
 import { config } from '../config';
@@ -22,8 +23,8 @@ const OBJECT_ID_PATTERN = /^[a-f0-9]{24}$/i;
 const evalModels = () =>
   resolveScheduledModels({
     models: config.evals.models,
-    model: process.env.TOVA_EVAL_MODEL,
-    provider: process.env.TOVA_EVAL_PROVIDER,
+    model: config.evals.model,
+    provider: config.evals.provider,
   });
 
 // Recent runs, newest first. `limit` is clamped server-side.
@@ -52,7 +53,11 @@ router.post('/evals/run', ...adminGuard, async (_req, res) => {
   const options = { models: evalModels(), trigger: 'manual' as const };
   try {
     const id = await beginEvalRun(options);
-    void executeEvalRun(id, options).catch(() => {
+    // Best-effort LangSmith export (Decision 4): resolve the client lazily so a
+    // keyless deploy records the rollup without an export. Never awaited here —
+    // the suite runs in the background.
+    const langsmithClient = await langsmithClientFromEnv(config.langsmith.apiKey);
+    void executeEvalRun(id, options, { langsmithClient }).catch(() => {
       // The run settles its own `error` row; nothing to surface post-202.
     });
     return res.status(202).json({ id });

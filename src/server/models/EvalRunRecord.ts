@@ -55,4 +55,7 @@ export type EvalRunRecordDocument = mongoose.HydratedDocument<
   mongoose.InferSchemaType<typeof evalRunRecordSchema>
 >;
 
-export const EvalRunRecord = mongoose.model('EvalRunRecord', evalRunRecordSchema);
+// Explicit collection name: the migration (`create-eval-runs`) and the
+// documented rollup name is `evalruns`; Mongoose would otherwise pluralise the
+// model to `evalrunrecords` and leave the pre-created collection/index unused.
+export const EvalRunRecord = mongoose.model('EvalRunRecord', evalRunRecordSchema, 'evalruns');

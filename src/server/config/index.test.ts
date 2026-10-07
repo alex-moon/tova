@@ -30,6 +30,11 @@ const keys = [
   'MONGODB_URL',
   'MONGODB_HOST',
   'MONGODB_PASSWORD',
+  'TOVA_EVAL_SCHEDULE',
+  'TOVA_EVAL_HOUR_UTC',
+  'TOVA_EVAL_MODELS',
+  'TOVA_EVAL_MODEL',
+  'TOVA_EVAL_PROVIDER',
 ] as const;
 
 const backup: Record<string, string | undefined> = {};
@@ -76,6 +81,11 @@ describe('config/index', () => {
       process.env.MONGODB_URL = 'mongodb://example/tova';
       process.env.MONGODB_HOST = 'example';
       process.env.MONGODB_PASSWORD = 'pw';
+      process.env.TOVA_EVAL_SCHEDULE = 'daily';
+      process.env.TOVA_EVAL_HOUR_UTC = '3';
+      process.env.TOVA_EVAL_MODELS = 'groq:openai/gpt-oss-20b';
+      process.env.TOVA_EVAL_MODEL = 'openai/gpt-oss-20b';
+      process.env.TOVA_EVAL_PROVIDER = 'groq';
     });
 
     it('returns every set value as consumed today (||/?? chains absent)', () => {
@@ -104,6 +114,11 @@ describe('config/index', () => {
       expect(config.runtime.mongodbUrl).toBe('mongodb://example/tova');
       expect(config.runtime.mongodbHost).toBe('example');
       expect(config.runtime.mongodbPassword).toBe('pw');
+      expect(config.evals.schedule).toBe('daily');
+      expect(config.evals.hourUtc).toBe('3');
+      expect(config.evals.models).toBe('groq:openai/gpt-oss-20b');
+      expect(config.evals.model).toBe('openai/gpt-oss-20b');
+      expect(config.evals.provider).toBe('groq');
     });
   });
 
@@ -151,6 +166,14 @@ describe('config/index', () => {
       expect(isStorageConfigured()).toBe(false);
       process.env.DO_SPACES_BUCKET = 'b';
       expect(isStorageConfigured()).toBe(true);
+    });
+
+    it('evals schedule defaults to off and the model pair stays undefined (||)', () => {
+      expect(config.evals.schedule).toBe('off');
+      expect(config.evals.hourUtc).toBeUndefined();
+      expect(config.evals.models).toBeUndefined();
+      expect(config.evals.model).toBeUndefined();
+      expect(config.evals.provider).toBeUndefined();
     });
 
     it('raw string accessors stay raw (no parsing in the module)', () => {

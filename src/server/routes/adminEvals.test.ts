@@ -6,6 +6,7 @@ import {
   beginEvalRun,
   EvalRunBusyError,
   executeEvalRun,
+  langsmithClientFromEnv,
   resolveScheduledModels,
 } from '../services/evalRunService';
 
@@ -21,12 +22,16 @@ jest.mock('../services/evalRunService', () => {
     beginEvalRun: jest.fn(),
     executeEvalRun: jest.fn(),
     resolveScheduledModels: jest.fn(),
+    langsmithClientFromEnv: jest.fn(),
   };
 });
 
 const mockedBegin = beginEvalRun as jest.MockedFunction<typeof beginEvalRun>;
 const mockedExecute = executeEvalRun as jest.MockedFunction<typeof executeEvalRun>;
 const mockedModels = resolveScheduledModels as jest.MockedFunction<typeof resolveScheduledModels>;
+const mockedLangsmith = langsmithClientFromEnv as jest.MockedFunction<
+  typeof langsmithClientFromEnv
+>;
 
 const cookieOf = (res: request.Response) => {
   const cookie = res.headers['set-cookie'];
@@ -65,6 +70,8 @@ beforeEach(() => {
   mockedExecute.mockReset();
   mockedModels.mockReset();
   mockedModels.mockReturnValue([{ provider: 'deepinfra', model: 'openai/gpt-oss-20b' }]);
+  mockedLangsmith.mockReset();
+  mockedLangsmith.mockResolvedValue(null);
   mockedExecute.mockResolvedValue([]);
 });
 
@@ -135,7 +142,11 @@ describe('admin evals (#225)', () => {
     expect(res.status).toBe(202);
     expect(res.body.id).toBe('64b7f9f2a1c3d4e5f6a7b8c9');
     expect(mockedBegin).toHaveBeenCalledTimes(1);
-    expect(mockedExecute).toHaveBeenCalledWith('64b7f9f2a1c3d4e5f6a7b8c9', expect.anything());
+    expect(mockedLangsmith).toHaveBeenCalledTimes(1);
+    // Best-effort export client (null when keyless) is forwarded to the run.
+    expect(mockedExecute).toHaveBeenCalledWith('64b7f9f2a1c3d4e5f6a7b8c9', expect.anything(), {
+      langsmithClient: null,
+    });
   });
 
   it('409s a manual run while one is already live', async () => {

@@ -22,10 +22,16 @@ export const clampLimit = (value: number | undefined): number => {
 
 const emptyCounts = (): AdminEvalScoreCounts => ({ pass: 0, partial: 0, fail: 0, error: 0 });
 
+// Membership via a Set, not `score in counts`: `in` walks the prototype chain,
+// so a corrupt stored score like "constructor" would match and add to a
+// function instead of falling through to `error`.
+const KNOWN_SCORES = new Set<keyof AdminEvalScoreCounts>(['pass', 'partial', 'fail', 'error']);
+
 const countScores = (results: EvalRunRecordDocument['results']): AdminEvalScoreCounts => {
   const counts = emptyCounts();
   for (const result of results) {
-    if (result.score in counts) counts[result.score as keyof AdminEvalScoreCounts] += 1;
+    const score = result.score as keyof AdminEvalScoreCounts;
+    if (KNOWN_SCORES.has(score)) counts[score] += 1;
     else counts.error += 1;
   }
   return counts;

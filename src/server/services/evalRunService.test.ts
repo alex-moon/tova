@@ -3,6 +3,7 @@ import { EvalRunRecord } from '../models/EvalRunRecord';
 import {
   EvalRunBusyError,
   parseModelsFlag,
+  resolveScheduledModels,
   runEvalSuite,
   startEvalRun,
   type EvalSuiteDeps,
@@ -57,6 +58,37 @@ describe('parseModelsFlag (#225)', () => {
     const models = parseModelsFlag('all', (m) => messages.push(m));
     expect(models && models.length).toBeGreaterThan(0);
     expect(messages[0]).toMatch(/wired providers/);
+  });
+});
+
+describe('resolveScheduledModels (#225)', () => {
+  it('prefers the models csv when set', () => {
+    expect(
+      resolveScheduledModels({
+        models: 'groq:openai/gpt-oss-20b,Qwen/Qwen3-14B',
+        model: 'ignored',
+        provider: 'groq',
+      }),
+    ).toEqual([
+      { provider: 'groq', model: 'openai/gpt-oss-20b' },
+      { provider: 'deepinfra', model: 'Qwen/Qwen3-14B' },
+    ]);
+  });
+
+  it('falls back to the single model/provider pair, defaulting to deepinfra', () => {
+    expect(resolveScheduledModels({ model: 'Qwen/Qwen3-14B', provider: 'groq' })).toEqual([
+      { provider: 'groq', model: 'Qwen/Qwen3-14B' },
+    ]);
+    // Unknown provider coerces to deepinfra (the completions-pinned default).
+    expect(resolveScheduledModels({ model: 'x', provider: 'bogus' })).toEqual([
+      { provider: 'deepinfra', model: 'x' },
+    ]);
+  });
+
+  it('uses the runner default model when nothing is configured', () => {
+    expect(resolveScheduledModels({})).toEqual([
+      { provider: 'deepinfra', model: 'openai/gpt-oss-20b' },
+    ]);
   });
 });
 

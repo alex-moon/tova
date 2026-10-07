@@ -22,7 +22,11 @@ import rateLimit from 'express-rate-limit';
 import { startAssetJobPoller } from './services/assetJobService';
 import { processAssetConversionJob } from './services/assetJobProcessor';
 import { startEvalScheduler } from './services/evalScheduler';
-import { resolveScheduledModels, startEvalRun } from './services/evalRunService';
+import {
+  resolveScheduledModels,
+  startEvalRun,
+  langsmithClientFromEnv,
+} from './services/evalRunService';
 import { config } from './config';
 import { attachConsoleCapture } from './services/logService';
 import { requestLog } from './middleware/requestLog';
@@ -134,15 +138,22 @@ export const startServer = async (): Promise<Server> => {
     // #225: daily eval suite. Off unless TOVA_EVAL_SCHEDULE=daily; started in
     // the same non-test block so tests never inherit a live provider job.
     startEvalScheduler(
-      () =>
-        startEvalRun({
-          models: resolveScheduledModels({
-            models: config.evals.models,
-            model: process.env.TOVA_EVAL_MODEL,
-            provider: process.env.TOVA_EVAL_PROVIDER,
-          }),
-          trigger: 'scheduled',
-        }),
+      async () => {
+        // Best-effort LangSmith export (Decision 4), resolved from config so
+        // the service never reaches for env ad hoc (#142).
+        const langsmithClient = await langsmithClientFromEnv(config.langsmith.apiKey);
+        return startEvalRun(
+          {
+            models: resolveScheduledModels({
+              models: config.evals.models,
+              model: config.evals.model,
+              provider: config.evals.provider,
+            }),
+            trigger: 'scheduled',
+          },
+          { langsmithClient },
+        );
+      },
       {
         enabled: config.evals.schedule === 'daily',
         hourUtc: config.evals.hourUtc ? Number(config.evals.hourUtc) : undefined,

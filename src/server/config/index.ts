@@ -143,6 +143,14 @@ export const config = {
     get models(): string | undefined {
       return process.env.TOVA_EVAL_MODELS;
     },
+    // Single-model fallback when `models` is unset (the runner's existing
+    // `TOVA_EVAL_MODEL` / `TOVA_EVAL_PROVIDER` pair).
+    get model(): string | undefined {
+      return process.env.TOVA_EVAL_MODEL;
+    },
+    get provider(): string | undefined {
+      return process.env.TOVA_EVAL_PROVIDER;
+    },
   },
 
   runtime: {

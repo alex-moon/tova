@@ -43,4 +43,12 @@ describe('EvalRunRecord', () => {
     expect(keys).toContain(JSON.stringify({ startedAt: -1 }));
     expect(keys).toContain(JSON.stringify({ status: 1, startedAt: -1 }));
   });
+
+  // The migration `create-eval-runs` pre-creates `evalruns`. Without the
+  // explicit collection name Mongoose pluralises the model to
+  // `evalrunrecords`, so the migration would create a collection the service
+  // never writes and the intended indexes would never exist.
+  it('binds to the `evalruns` collection the migration creates', () => {
+    expect(EvalRunRecord.collection.name).toBe('evalruns');
+  });
 });
