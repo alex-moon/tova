@@ -212,6 +212,79 @@ body {
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--c-edge-glow) 55%, transparent);
 }
 
+/* Responsive table (#220): below the md breakpoint dense admin tables are
+ * illegible behind the horizontal scroller, so each row renders as a stacked
+ * label/value card. The header row is dropped and each cell shows its
+ * `data-label` as a small muted caption via the ::before pseudo-element.
+ * At md and up the normal table layout is restored untouched. */
+.responsive-table {
+  width: 100%;
+}
+
+@media (width < 48rem) {
+  .responsive-table thead {
+    display: none;
+  }
+
+  .responsive-table,
+  .responsive-table tbody,
+  .responsive-table tr,
+  .responsive-table td {
+    display: block;
+  }
+
+  .responsive-table tr {
+    padding: 0.75rem 1rem;
+    border-bottom: 1px solid var(--c-border);
+  }
+
+  .responsive-table tr:last-child {
+    border-bottom: 0;
+  }
+
+  .responsive-table td {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    column-gap: 1rem;
+    align-items: baseline;
+    min-width: 0;
+    padding: 0.125rem 0;
+    text-align: right;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+
+  .responsive-table td::before {
+    content: attr(data-label);
+    font-size: 0.75rem;
+    font-weight: 500;
+    color: var(--c-muted-foreground);
+    text-align: left;
+  }
+
+  /* Cells with no label (action buttons) span the full card width. */
+  .responsive-table td:not([data-label]) {
+    display: block;
+    text-align: left;
+    padding-top: 0.375rem;
+  }
+
+  .responsive-table td:not([data-label])::before {
+    content: none;
+  }
+
+  /* Full-width message row (e.g. "No models configured") has no cells to
+     label, so keep it as a simple block. */
+  .responsive-table td[colspan] {
+    display: block;
+    text-align: left;
+  }
+
+  .responsive-table td[colspan]::before {
+    content: none;
+  }
+}
+
 .edge-glow-strong {
   box-shadow:
     0 0 0 1px var(--c-edge-glow),

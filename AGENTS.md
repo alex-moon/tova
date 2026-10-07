@@ -63,11 +63,9 @@ These rules are behavioral policy, so they apply to every client change regardle
 
 - Start the stack (Mongo + dev server + Vite): `npm run stack:up` then `npm run dev`; the client is at `http://localhost:5173`.
 - **Reset to a known login any time with `npm run db:password`**, then sign in as any seeded user with the password `password`. This is the owner's local workflow and the intended fixture path — do not register-and-promote accounts instead (that is what PATs replaced, #184).
-- The responsive end-to-end suite is `npm run test:e2e` (`e2e/playwright.config.ts`). It already runs every spec in both a `mobile` (375×667, touch) and a `desktop` project. It is **not** part of `npm run ci` yet (aspirational — tracked in the ticket below); until it is, run it by hand for UI changes and treat failures as real.
+- The responsive end-to-end suite is `npm run test:e2e` (`e2e/playwright.config.ts`). It runs every spec in both a `mobile` (375×667, touch) and a `desktop` project. As of #220 it is gated by CI when `src/client/**` or `e2e/**` changes, and `e2e/responsive.spec.ts` asserts no route overflows horizontally at phone width. Locally, reset the DB first (`npm run db:password`) — the auth specs depend on the seeded fixture password `password`.
 
-#### Known client drift (as of the UI section's writing)
-
-- The `e2e/` suite has stale assertions against UI that has since moved (e.g. `profile.spec.ts` expects "Zero-data retention is on", the app now says "Incognito…"; `assets.spec.ts` expects a per-row `asset-attach` button that the #197 master/detail view removed). Passing the suite requires the DB be reset via `db:password` **and** these specs updated — see the ticket.
+_No known client drift as of #220; this section is a standing slot for the next drift found._
 
 ### Model routing decisions
 

@@ -9,12 +9,19 @@ import { installChatStreamMock } from './helpers/chatMock';
  */
 
 const email = process.env.E2E_EMAIL ?? 'formsatz@gmail.com';
-const password = process.env.E2E_PASSWORD ?? 'admin';
+const password = process.env.E2E_PASSWORD ?? 'password';
 
 test.beforeEach(async ({ page }) => {
   await page.request.post('/api/auth/login', {
     data: { email, password },
   });
+  // Isolate from seeded state: the client opens the newest saved session by
+  // default (`startupChat: 'recent'`), so without this the turn below lands in
+  // a seeded conversation and the fresh-chat assertions flake. Same isolation
+  // pattern as profile.spec.ts.
+  await page.route('**/api/chat/sessions', (route) =>
+    route.fulfill({ status: 200, contentType: 'application/json', body: '[]' }),
+  );
   await page.goto('/');
   await expect(page.getByTestId('chat-input')).toBeVisible();
 });

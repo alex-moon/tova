@@ -13,7 +13,12 @@ export interface ChatStreamCapture {
 }
 
 const buildSse = (opts: { sessionId?: string; deltas: string[] }) => {
-  const events = ['event: meta', 'data: {"sessionId":"e2e-mock-session"}', ''];
+  // Mirror the real server: an incognito (ZDR) turn persists nothing and
+  // returns no session, so a request with no sessionId and zdr:true must not
+  // be handed one back — otherwise the client adopts a session and the next
+  // turn stops replaying history (issue #116 contract, profile.spec.ts).
+  const meta = opts.sessionId ? `data: {"sessionId":"${opts.sessionId}"}` : 'data: {}';
+  const events = ['event: meta', meta, ''];
   for (const delta of opts.deltas) {
     events.push('event: delta', `data: ${JSON.stringify({ content: delta })}`, '');
   }
@@ -32,11 +37,23 @@ export function installChatStreamMock(
   const bodies: string[] = [];
   void page.route('**/api/chat/stream', async (route) => {
     const req = route.request();
-    if (req.method() === 'POST') bodies.push(req.postData() ?? '');
+    const body = req.postData() ?? '';
+    if (req.method() === 'POST') bodies.push(body);
+    // A new incognito chat carries zdr:true and no sessionId; the real server
+    // returns no session for it.
+    let zdr = false;
+    if (req.method() === 'POST') {
+      try {
+        zdr = Boolean((JSON.parse(body || '{}') as { zdr?: boolean }).zdr);
+      } catch {
+        zdr = false;
+      }
+    }
+    const sessionId = zdr ? undefined : 'e2e-mock-session';
     await route.fulfill({
       status: 200,
       contentType: 'text/event-stream',
-      body: buildSse({ sessionId: 'e2e-mock-session', deltas }),
+      body: buildSse({ sessionId, deltas }),
     });
   });
   return { bodies: () => bodies };
