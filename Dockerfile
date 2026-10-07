@@ -36,6 +36,12 @@ RUN npm install --omit=dev --ignore-scripts
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/src/client/dist ./src/client/dist
 
+# #209: vendored tesseract traineddata. The OCR service points tesseract.js at
+# assets/tessdata (langPath), so the live worker recognises images/PDFs with no
+# network egress. Without this the path is absent at runtime and tesseract.js
+# falls back to the jsdelivr CDN.
+COPY --from=builder /app/assets ./assets
+
 # Expose port
 EXPOSE 5000
 

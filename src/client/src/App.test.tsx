@@ -1,5 +1,5 @@
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, cleanup, waitFor } from '@testing-library/react';
+import { render, screen, cleanup, waitFor, fireEvent } from '@testing-library/react';
 import App, { reconcileToolEvents, type ToolEvent } from './App';
 import { AuthProvider } from './context/AuthContext';
 
@@ -190,6 +190,48 @@ describe('App startup chat (issue #96)', () => {
     mockStartup('recent');
     await axiosGet;
     renderApp();
+  });
+
+  it('refetches the session list after a turn completes (#226)', async () => {
+    mockStartup('recent');
+    // Minimal SSE stream: a single done event, then EOF. Enough to drive
+    // handleSendMessage to its `finally` block where the refetch lives.
+    const sse = [
+      'event: done',
+      'data: {"complete":true,"message":{"_id":"a1","role":"assistant","content":"ok"}}',
+      '',
+      '',
+    ].join('\n');
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      body: {
+        getReader: () => {
+          let sent = false;
+          return {
+            read: async () => {
+              if (sent) return { done: true, value: undefined };
+              sent = true;
+              return { done: false, value: new TextEncoder().encode(sse) };
+            },
+          };
+        },
+      },
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    renderApp();
+    await waitFor(() => expect(axiosGet).toHaveBeenCalledWith('/api/chat/sessions/recent'));
+
+    const callsBeforeSend = axiosGet.mock.calls.filter(([u]) => u === '/api/chat/sessions').length;
+    fireEvent.change(screen.getByTestId('chat-input'), { target: { value: 'hello' } });
+    fireEvent.click(screen.getByTestId('chat-send'));
+
+    await waitFor(() =>
+      expect(
+        axiosGet.mock.calls.filter(([u]) => u === '/api/chat/sessions').length,
+      ).toBeGreaterThan(callsBeforeSend),
+    );
+    vi.unstubAllGlobals();
   });
 });
 

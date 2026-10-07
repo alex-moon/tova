@@ -37,4 +37,6 @@ export type {
   AdminTraceDetail,
   AdminLangsmithModelStats,
   AdminLangsmithStatsPayload,
+  AdminSessionCostRow,
+  AdminSessionsCostPayload,
 } from '@shared/contracts';

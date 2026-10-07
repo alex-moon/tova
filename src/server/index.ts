@@ -19,6 +19,7 @@ import { getJwtSecret } from './config/jwt';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import { startAssetJobPoller } from './services/assetJobService';
+import { startTraceStatsPoller } from './services/traceStatsCacheService';
 import { processAssetConversionJob } from './services/assetJobProcessor';
 import { attachConsoleCapture } from './services/logService';
 import { requestLog } from './middleware/requestLog';
@@ -125,6 +126,8 @@ export const startServer = async (): Promise<Server> => {
   // don't inherit background polling.
   if (process.env.NODE_ENV !== 'test') {
     startAssetJobPoller(processAssetConversionJob);
+    // #224: keep the admin Traces summary warm so the tab loads from Mongo.
+    startTraceStatsPoller();
   }
 
   return app.listen(port, () => {

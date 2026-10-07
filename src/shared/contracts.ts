@@ -255,18 +255,76 @@ export interface AdminTraceDetail {
 // the calls (null when none finished); `totalTokens` sums the runs' token
 // counts. Turns that failed before any llm call do not appear here — the
 // traces list's errors-only filter covers turn-level failures.
+// `inputTokens`/`outputTokens` are the prompt/completion split (#224) used to
+// price a model; a run that reported no split contributes 0 to both, while
+// `totalTokens` still holds whatever the run itself reported.
 export interface AdminLangsmithModelStats {
   model: string;
   calls: number;
   errors: number;
   avgDurationMs: number | null;
   totalTokens: number;
+  inputTokens: number;
+  outputTokens: number;
+  // #224: estimated USD spend for this model, joined from the in-DB price at
+  // read time (`null` = either side's price is unknown, distinct from $0 —
+  // #199 semantics). The UI renders null as `—`.
+  estimatedCostUsd: number | null;
 }
 
 export interface AdminLangsmithStatsPayload {
   since: string;
   models: AdminLangsmithModelStats[];
-  totals: { calls: number; errors: number; totalTokens: number };
+  totals: {
+    calls: number;
+    errors: number;
+    totalTokens: number;
+    inputTokens: number;
+    outputTokens: number;
+    // Sum of the priced models' costs; null when no model in the window has a
+    // known price.
+    estimatedCostUsd: number | null;
+  };
+  // When the rollup was computed. Present on a cache hit; absent on a live
+  // fallback (which is freshly computed).
+  computedAt?: string;
+  // True when the payload came from a live sweep (no cache yet, or the cache
+  // is older than the staleness threshold).
+  stale?: boolean;
+}
+
+// Per-session cost breakdown for the admin Traces tab (#224). Unlike the model
+// rollup (which comes from LangSmith llm runs), this is computed from our own
+// `Message` rows: message-in = `role:'user'`, message-out = `role:'assistant'`.
+// Token totals and cost cover only assistant messages that carry `usage`
+// (logged from #224 onward), so the counts and the token/cost totals describe
+// different rows for a while — the UI labels this as a known skew.
+export interface AdminSessionCostRow {
+  sessionId: string;
+  title: string;
+  messagesIn: number;
+  messagesOut: number;
+  inputTokens: number;
+  outputTokens: number;
+  // Estimated USD spend for the session, joined from the in-DB price of each
+  // message's model at read time; `null` when no assistant message in the
+  // session has a known price (distinct from $0 — #199). UI renders `—`.
+  estimatedCostUsd: number | null;
+  // Latest message timestamp in the session, used for ordering/display.
+  lastActivityAt: string;
+}
+
+export interface AdminSessionsCostPayload {
+  since: string;
+  sessions: AdminSessionCostRow[];
+  totals: {
+    sessions: number;
+    messagesIn: number;
+    messagesOut: number;
+    inputTokens: number;
+    outputTokens: number;
+    estimatedCostUsd: number | null;
+  };
 }
 
 // `location` is the coarse country-level geolocation (issue #50): only the
