@@ -13,6 +13,8 @@ import type {
   AdminTracesPayload,
   AdminTraceDetail,
   AdminLangsmithStatsPayload,
+  AdminEvalRunsPayload,
+  AdminEvalRunDetail,
 } from '../types/admin';
 
 // Normalised admin failure: message comes from the server response when one
@@ -277,10 +279,47 @@ const listStats = async (days = 7): Promise<AdminLangsmithStatsPayload> => {
 
 const AdminLangsmithService = { listTraces, getTrace, listStats };
 
+// Eval rollup read view (#225): recent suite runs and one run's per-case
+// breakdown, plus the manual "Run now" trigger. The run starts in the
+// background server-side, so runNow resolves as soon as the lease exists.
+const listEvalRuns = async (limit?: number): Promise<AdminEvalRunsPayload> => {
+  try {
+    const res = await axios.get<AdminEvalRunsPayload>('/api/admin/evals/runs', {
+      params: limit ? { limit } : {},
+    });
+    return res.data;
+  } catch (err) {
+    throw toAdminError(err, 'Failed to load eval runs.');
+  }
+};
+
+const getEvalRun = async (id: string): Promise<AdminEvalRunDetail> => {
+  try {
+    const res = await axios.get<AdminEvalRunDetail>(
+      `/api/admin/evals/runs/${encodeURIComponent(id)}`,
+    );
+    return res.data;
+  } catch (err) {
+    throw toAdminError(err, 'Failed to load eval run.');
+  }
+};
+
+const runEvalsNow = async (): Promise<{ id: string }> => {
+  try {
+    const res = await axios.post<{ id: string }>('/api/admin/evals/run');
+    return res.data;
+  } catch (err) {
+    throw toAdminError(err, 'Failed to start eval run.');
+  }
+};
+
+const AdminEvalsService = { listEvalRuns, getEvalRun, runEvalsNow };
+
 export {
   AdminModelsService,
   AdminLogsService,
   AdminGraphService,
   AdminPatsService,
   AdminLangsmithService,
+  AdminEvalsService,
 };

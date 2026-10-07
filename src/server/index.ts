@@ -11,6 +11,7 @@ import feedbackRoutes from './routes/feedback';
 import adminRoutes from './routes/admin';
 import adminPatRoutes from './routes/adminPats';
 import adminLangsmithRoutes from './routes/adminLangsmith';
+import adminEvalsRoutes from './routes/adminEvals';
 import profileRoutes from './routes/profile';
 import assetRoutes from './routes/assets';
 import mcpServerRoutes from './routes/mcpServers';
@@ -20,6 +21,9 @@ import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import { startAssetJobPoller } from './services/assetJobService';
 import { processAssetConversionJob } from './services/assetJobProcessor';
+import { startEvalScheduler } from './services/evalScheduler';
+import { resolveScheduledModels, startEvalRun } from './services/evalRunService';
+import { config } from './config';
 import { attachConsoleCapture } from './services/logService';
 import { requestLog } from './middleware/requestLog';
 
@@ -84,6 +88,7 @@ export const createApp = (): Express => {
   app.use('/api/admin', adminRoutes);
   app.use('/api/admin', adminPatRoutes);
   app.use('/api/admin', adminLangsmithRoutes);
+  app.use('/api/admin', adminEvalsRoutes);
   app.use('/api/profile', profileRoutes);
   app.use('/api/assets', assetRoutes);
   app.use('/api/mcp-servers', mcpServerRoutes);
@@ -125,6 +130,24 @@ export const startServer = async (): Promise<Server> => {
   // don't inherit background polling.
   if (process.env.NODE_ENV !== 'test') {
     startAssetJobPoller(processAssetConversionJob);
+
+    // #225: daily eval suite. Off unless TOVA_EVAL_SCHEDULE=daily; started in
+    // the same non-test block so tests never inherit a live provider job.
+    startEvalScheduler(
+      () =>
+        startEvalRun({
+          models: resolveScheduledModels({
+            models: config.evals.models,
+            model: process.env.TOVA_EVAL_MODEL,
+            provider: process.env.TOVA_EVAL_PROVIDER,
+          }),
+          trigger: 'scheduled',
+        }),
+      {
+        enabled: config.evals.schedule === 'daily',
+        hourUtc: config.evals.hourUtc ? Number(config.evals.hourUtc) : undefined,
+      },
+    );
   }
 
   return app.listen(port, () => {
