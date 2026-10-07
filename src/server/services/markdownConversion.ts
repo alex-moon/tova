@@ -46,6 +46,18 @@ export const withTimeout = <T>(promise: Promise<T>, ms = CONVERSION_TIMEOUT_MS):
     }),
   ]);
 
+// Store-time normalisation shared by every producer of `markdownExtracted`
+// (issue #67 conversion, issue #209 OCR): normalise line endings, unify the
+// curly apostrophe, trim, and enforce the storage cap. Exported so the OCR
+// stage — which does not go through `convertToMarkdown` for images — applies
+// exactly the same cap rather than duplicating it.
+export const finalizeMarkdown = (raw: string): string =>
+  raw
+    .replace(/\r\n/g, '\n')
+    .replace(/\u2019/g, "'")
+    .trim()
+    .slice(0, MAX_MARKDOWN_CHARS);
+
 // Convert a document buffer to markdown. Throws on unsupported extension,
 // converter error, or empty conversion output.
 export const convertToMarkdown = async (
@@ -62,11 +74,7 @@ export const convertToMarkdown = async (
   if (raw == null) {
     throw new Error(`conversion produced no text for .${ext}`);
   }
-  const markdown = raw
-    .replace(/\r\n/g, '\n')
-    .replace(/\u2019/g, "'")
-    .trim()
-    .slice(0, MAX_MARKDOWN_CHARS);
+  const markdown = finalizeMarkdown(raw);
   if (markdown.length === 0) {
     throw new Error(`conversion produced empty markdown for .${ext}`);
   }

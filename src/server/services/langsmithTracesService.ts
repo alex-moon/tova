@@ -60,6 +60,8 @@ interface RawRun {
   start_time?: string | null;
   end_time?: string | null;
   total_tokens?: number | null;
+  prompt_tokens?: number | null;
+  completion_tokens?: number | null;
   app_path?: string | null;
   inputs?: unknown;
   outputs?: unknown;
@@ -336,6 +338,10 @@ export const getTrace = async (traceId: string): Promise<AdminTraceDetail | null
  * turn makes several to the same model), and turns that failed before any
  * llm call do not appear here — the traces list's errors-only filter covers
  * turn-level failures.
+ *
+ * #224: each row and the totals also carry the input/output token split
+ * (`prompt_tokens`/`completion_tokens`), so the cached rollup can price a
+ * model. `totalTokens` is kept as before.
  */
 export const traceStats = async (days = 7): Promise<AdminLangsmithStatsPayload | null> => {
   const apiKey = config.langsmith.apiKey;
@@ -356,18 +362,28 @@ export const traceStats = async (days = 7): Promise<AdminLangsmithStatsPayload |
       calls: number;
       errors: number;
       totalTokens: number;
+      inputTokens: number;
+      outputTokens: number;
       durationSum: number;
       durationCount: number;
     }
   >();
-  const totals = { calls: 0, errors: 0, totalTokens: 0 };
+  const totals = { calls: 0, errors: 0, totalTokens: 0, inputTokens: 0, outputTokens: 0 };
 
   for (let offset = 0; offset < STATS_MAX_RUNS; offset += PAGE_SIZE) {
     const res = await queryRuns(headers, resolved.id, {
       filter,
       limit: PAGE_SIZE,
       offset,
-      select: ['name', 'status', 'start_time', 'end_time', 'total_tokens'],
+      select: [
+        'name',
+        'status',
+        'start_time',
+        'end_time',
+        'total_tokens',
+        'prompt_tokens',
+        'completion_tokens',
+      ],
     });
     const llmRuns = res.runs ?? [];
     if (llmRuns.length === 0) break;
@@ -377,6 +393,11 @@ export const traceStats = async (days = 7): Promise<AdminLangsmithStatsPayload |
       if (!model) continue;
       const duration = durationMsOf(run);
       const tokens = typeof run.total_tokens === 'number' ? run.total_tokens : 0;
+      // Token split for cost (#224). Absent/non-numeric counts as 0, same as
+      // the total above; `totalTokens` stays the reported run total, not the
+      // sum of the split (a run can report a total without the breakdown).
+      const inputTokens = typeof run.prompt_tokens === 'number' ? run.prompt_tokens : 0;
+      const outputTokens = typeof run.completion_tokens === 'number' ? run.completion_tokens : 0;
       const isError = run.status === 'error';
 
       const entry = byModel.get(model) ?? {
@@ -384,12 +405,16 @@ export const traceStats = async (days = 7): Promise<AdminLangsmithStatsPayload |
         calls: 0,
         errors: 0,
         totalTokens: 0,
+        inputTokens: 0,
+        outputTokens: 0,
         durationSum: 0,
         durationCount: 0,
       };
       entry.calls += 1;
       if (isError) entry.errors += 1;
       entry.totalTokens += tokens;
+      entry.inputTokens += inputTokens;
+      entry.outputTokens += outputTokens;
       if (duration !== null) {
         entry.durationSum += duration;
         entry.durationCount += 1;
@@ -399,6 +424,8 @@ export const traceStats = async (days = 7): Promise<AdminLangsmithStatsPayload |
       totals.calls += 1;
       if (isError) totals.errors += 1;
       totals.totalTokens += tokens;
+      totals.inputTokens += inputTokens;
+      totals.outputTokens += outputTokens;
     }
 
     if (llmRuns.length < PAGE_SIZE) break;
@@ -408,8 +435,11 @@ export const traceStats = async (days = 7): Promise<AdminLangsmithStatsPayload |
     .map(({ durationSum, durationCount, ...stats }) => ({
       ...stats,
       avgDurationMs: durationCount > 0 ? Math.round(durationSum / durationCount) : null,
+      // Cost is joined at read time from the in-DB price (#224); the raw
+      // aggregator never prices.
+      estimatedCostUsd: null,
     }))
     .sort((a, b) => b.calls - a.calls);
 
-  return { since, models, totals };
+  return { since, models, totals: { ...totals, estimatedCostUsd: null } };
 };

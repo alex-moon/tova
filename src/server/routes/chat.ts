@@ -508,6 +508,12 @@ const saveUserMessageWithMetrics = async (
   });
   await userMessage.save();
 
+  // #226: record the session's most recent message time so the session list
+  // orders by activity, not creation. Using the message's own timestamp (not
+  // `new Date()`) keeps the stored value consistent with the message it
+  // represents. Awaited so the sidebar order cannot lag the turn.
+  await Session.updateOne({ _id: sessionId }, { $set: { lastMessageAt: userMessage.timestamp } });
+
   if (!triviallyNeutral) {
     classifyAndPersistPromptDimensions(String(userMessage._id), content).catch((err) =>
       console.error('Prompt classification error:', redactForLog(err)),
@@ -782,6 +788,10 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
           max_tokens: outputTokensFor(r.contextLength, promptCharsFrom(turnMessages)),
           userId,
           abortSignal: abortController.signal,
+          // #224: attach the chat session to this turn's trace so per-turn
+          // token usage is attributable to a session (only the persisted path
+          // has a session id).
+          trace: { sessionId: String(session!._id) },
         });
       },
     );
@@ -815,6 +825,7 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
       modelName: routingResult.model,
       provider: routingResult.provider,
       routingBand,
+      ...(chatCompletion.usage ? { usage: chatCompletion.usage } : {}),
       ...(sources.length > 0 ? { sources } : {}),
       ...(sourceTitles.length > 0 ? { sourceTitles } : {}),
       metrics: await buildMessageMetrics(String(session!._id), assistantContent),
@@ -1049,6 +1060,10 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
     // the 'done' message and a later refresh read from.
     const toolEvents: PersistedToolEvent[] = [];
 
+    // #224: token usage for the turn, surfaced by the connector as a single
+    // trailing `usage` chunk. Absent when the provider reported nothing.
+    let usage: { inputTokens?: number; outputTokens?: number; totalTokens?: number } | undefined;
+
     // Abort the provider call when the client disconnects mid-stream. 'close'
     // also fires after a normal end, so only abort when the response did not
     // finish cleanly.
@@ -1083,9 +1098,18 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
             max_tokens: outputTokensFor(routingResult.contextLength, promptCharsFrom(messages)),
             userId,
             abortSignal: abortController.signal,
+            // #224: attach the chat session to this turn's trace (ZDR turns
+            // have no session — nothing durable can be joined).
+            ...(zdr ? {} : { trace: { sessionId: String(session!._id) } }),
           });
 
           for await (const chunk of stream) {
+            // #224: the connector may emit one trailing usage chunk; capture
+            // it and continue without forwarding it as a delta/tool event.
+            if (chunk.usage) {
+              usage = chunk.usage;
+              continue;
+            }
             // Tool feedback (issue #33): structured events replace the single
             // prose status hint — the call event names the tool + query, the
             // result event carries a compact outcome summary.
@@ -1227,6 +1251,7 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
       content: assistantContent,
       modelName: routingResult.model,
       routingBand,
+      ...(usage ? { usage } : {}),
       ...(sources.length > 0 ? { sources } : {}),
       ...(sourceTitleList.length > 0 ? { sourceTitles: sourceTitleList } : {}),
       // #196: persist the reconciled tool summaries so chips survive a refresh.
@@ -1305,7 +1330,13 @@ router.delete('/sessions/:id', authenticate, async (req: AuthRequest, res) => {
 router.get('/sessions', authenticate, async (req: AuthRequest, res) => {
   try {
     const userId = req.user?.id;
-    const sessions = await Session.find({ userId, deletedAt: null }).sort({ updatedAt: -1 });
+    // #226: order by most recent message. Null lastMessageAt (never-messaged
+    // sessions) sorts last under a descending sort; createdAt breaks ties
+    // among those nulls (and among equal timestamps) by creation order.
+    const sessions = await Session.find({ userId, deletedAt: null }).sort({
+      lastMessageAt: -1,
+      createdAt: -1,
+    });
     res.json(sessions);
   } catch (_err) {
     res.status(500).json({ message: 'Error fetching sessions' });

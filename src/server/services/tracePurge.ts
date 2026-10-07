@@ -3,9 +3,11 @@ import { config } from '../config';
 /*
  * Best-effort LangSmith trace deletion (issue #143, factory reset scope).
  *
- * Every chat turn is traced into the configured LangSmith project with
- * `metadata.session_id = <chat session id>` (set via withLangsmithMetadata in
- * mastraService), so traces belonging to a chat are deletable by that id:
+ * Every persisted chat turn is traced into the configured LangSmith project
+ * with `metadata.session_id = <chat session id>` (set via withLangsmithMetadata
+ * in mastraService, attached by routes/chat.ts since #224), so traces belonging
+ * to a chat are deletable by that id. ZDR turns are not traced with a session
+ * id (nothing durable exists to join):
  *
  *  - resolve the project's LangSmith id from its name (GET /api/v1/sessions)
  *  - query the run ids (POST /api/v1/runs/query, which returns

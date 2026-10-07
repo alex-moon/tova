@@ -91,6 +91,22 @@ const messageSchema = new mongoose.Schema({
     type: String,
   },
   /*
+   * Token usage for the assistant turn (issue #224): the provider's
+   * prompt/completion split and the turn total (across tool steps). All
+   * optional — old turns have no usage and the per-message cost view renders
+   * '—'; a provider that reports nothing also leaves this absent (unknown,
+   * not 0). Additive/optional, no migration required.
+   */
+  usage: {
+    type: {
+      _id: false,
+      inputTokens: { type: Number },
+      outputTokens: { type: Number },
+      totalTokens: { type: Number },
+    },
+    default: undefined,
+  },
+  /*
    * Attached asset reference (issue #34): a single-file FK per the owner's
    * comment — a column, not an array, until multi-attach is asked for.
    */

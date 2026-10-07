@@ -2,6 +2,23 @@
 
 ## Status (current)
 
+#225 Evals admin (merged to `main` via PR #231, plan doc archived to
+`docs/done/plan-225-evals-admin.md`): scheduled daily eval runs plus a new
+"Evals" admin tab. The existing deterministic suite
+(`scripts/run-evals.ts`) is now driven from the server: `evalRunService.ts`
+runs the golden set through the real agent, persists a per-run rollup to the
+new `evalruns` collection (`migrations/20261007000000-create-eval-runs.ts`,
+model `EvalRunRecord.ts`), and best-effort exports to the LangSmith
+`tova-evals` dataset. `evalScheduler.ts` (started in the non-test bootstrap
+only, gated by `TOVA_EVAL_SCHEDULE=daily`, default-off) fires once a day at
+`TOVA_EVAL_HOUR_UTC`; `evalRunsAdminService.ts` + `routes/adminEvals.ts`
+expose run history and manual triggers behind the admin guard, rendered by
+the client `AdminEvalsView.tsx`. Eval model/provider selection moved behind
+`config.evals` (#142). Note: a full-suite `npm run ci` run showed a
+load-dependent flake in `modelConfigService.test.ts` (also a 5s timeout in
+`profile.purge.test.ts`) that passes in isolation and on re-run — pre-existing
+CI-runner contention, unrelated to this change.
+
 #182 branch-sweep rescue — database snapshot tooling: `scripts/db-sync.ts` and
 the `npm run db:dump` / `db:drop` / `db:restore` / `db:sync` scripts rescued
 from the superseded `feat/168-model-errors` branch (commit `e40b270`, PR #177).

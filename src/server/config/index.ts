@@ -129,6 +129,30 @@ export const config = {
     },
   },
 
+  // #225: scheduled eval suite. Off by default — a fresh deploy must not
+  // start live provider calls unattended (OQ4). `schedule` is `off|daily`;
+  // `hourUtc` is the earliest UTC hour a daily run may start. Names follow
+  // the runner's existing singular `TOVA_EVAL_*` family (TOVA_EVAL_MODEL).
+  evals: {
+    get schedule(): string {
+      return process.env.TOVA_EVAL_SCHEDULE || 'off';
+    },
+    get hourUtc(): string | undefined {
+      return process.env.TOVA_EVAL_HOUR_UTC;
+    },
+    get models(): string | undefined {
+      return process.env.TOVA_EVAL_MODELS;
+    },
+    // Single-model fallback when `models` is unset (the runner's existing
+    // `TOVA_EVAL_MODEL` / `TOVA_EVAL_PROVIDER` pair).
+    get model(): string | undefined {
+      return process.env.TOVA_EVAL_MODEL;
+    },
+    get provider(): string | undefined {
+      return process.env.TOVA_EVAL_PROVIDER;
+    },
+  },
+
   runtime: {
     get port(): string | undefined {
       return process.env.PORT;

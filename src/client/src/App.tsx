@@ -335,6 +335,9 @@ function App() {
     } finally {
       streamingRef.current = false;
       setIsChatLoading(false);
+      // #226: a turn bumps the session's last-message time, so refetch to let
+      // the sidebar (and any "recent chat" ordering) reflect the new order.
+      fetchSessions();
     }
   };
 

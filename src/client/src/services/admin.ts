@@ -13,6 +13,9 @@ import type {
   AdminTracesPayload,
   AdminTraceDetail,
   AdminLangsmithStatsPayload,
+  AdminEvalRunsPayload,
+  AdminEvalRunDetail,
+  AdminSessionsCostPayload,
 } from '../types/admin';
 
 // Normalised admin failure: message comes from the server response when one
@@ -275,7 +278,55 @@ const listStats = async (days = 7): Promise<AdminLangsmithStatsPayload> => {
   }
 };
 
-const AdminLangsmithService = { listTraces, getTrace, listStats };
+// #224: per-session cost breakdown from our own Message rows (no LangSmith).
+const listSessionCosts = async (days = 7): Promise<AdminSessionsCostPayload> => {
+  try {
+    const res = await axios.get<AdminSessionsCostPayload>('/api/admin/langsmith/sessions', {
+      params: { days },
+    });
+    return res.data;
+  } catch (err) {
+    throw toAdminError(err, 'Failed to load session costs.');
+  }
+};
+
+const AdminLangsmithService = { listTraces, getTrace, listStats, listSessionCosts };
+
+// Eval rollup read view (#225): recent suite runs and one run's per-case
+// breakdown, plus the manual "Run now" trigger. The run starts in the
+// background server-side, so runNow resolves as soon as the lease exists.
+const listEvalRuns = async (limit?: number): Promise<AdminEvalRunsPayload> => {
+  try {
+    const res = await axios.get<AdminEvalRunsPayload>('/api/admin/evals/runs', {
+      params: limit ? { limit } : {},
+    });
+    return res.data;
+  } catch (err) {
+    throw toAdminError(err, 'Failed to load eval runs.');
+  }
+};
+
+const getEvalRun = async (id: string): Promise<AdminEvalRunDetail> => {
+  try {
+    const res = await axios.get<AdminEvalRunDetail>(
+      `/api/admin/evals/runs/${encodeURIComponent(id)}`,
+    );
+    return res.data;
+  } catch (err) {
+    throw toAdminError(err, 'Failed to load eval run.');
+  }
+};
+
+const runEvalsNow = async (): Promise<{ id: string }> => {
+  try {
+    const res = await axios.post<{ id: string }>('/api/admin/evals/run');
+    return res.data;
+  } catch (err) {
+    throw toAdminError(err, 'Failed to start eval run.');
+  }
+};
+
+const AdminEvalsService = { listEvalRuns, getEvalRun, runEvalsNow };
 
 export {
   AdminModelsService,
@@ -283,4 +334,5 @@ export {
   AdminGraphService,
   AdminPatsService,
   AdminLangsmithService,
+  AdminEvalsService,
 };
