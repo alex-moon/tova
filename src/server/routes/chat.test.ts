@@ -76,6 +76,42 @@ describe('Chat route routing metadata', () => {
     expect(assistantMessage?.feedback).toMatchObject({ value: null, updatedAt: null });
   });
 
+  it('persists the turn token usage on the assistant message (#224)', async () => {
+    mockGenerate.mockResolvedValue({
+      text: 'e2e-ok',
+      totalUsage: { inputTokens: 5, outputTokens: 6, totalTokens: 11 },
+    });
+    const app = createApp();
+    const cookies = await registerUser(app, 'usage-meta-1@example.com');
+
+    const response = await request(app)
+      .post('/api/chat')
+      .set('Cookie', Array.isArray(cookies) ? cookies : [cookies])
+      .send({ content: 'Hello there' });
+
+    expect(response.status).toBe(200);
+    const assistantMessage = await Message.findOne({ role: 'assistant' });
+    expect(assistantMessage?.usage).toMatchObject({
+      inputTokens: 5,
+      outputTokens: 6,
+      totalTokens: 11,
+    });
+  });
+
+  it('omits usage on the assistant message when the provider reports none (#224)', async () => {
+    const app = createApp();
+    const cookies = await registerUser(app, 'usage-meta-none@example.com');
+
+    const response = await request(app)
+      .post('/api/chat')
+      .set('Cookie', Array.isArray(cookies) ? cookies : [cookies])
+      .send({ content: 'Hello there' });
+
+    expect(response.status).toBe(200);
+    const assistantMessage = await Message.findOne({ role: 'assistant' });
+    expect(assistantMessage?.usage).toBeUndefined();
+  });
+
   it('dispatches a DeepInfra-routed turn to the DeepInfra provider end-to-end', async () => {
     // Plan task-9 bullet: the DeepInfra path must be exercised at the route
     // level, not only in the connector unit tests. The mocked Agent ctor

@@ -782,6 +782,10 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
           max_tokens: outputTokensFor(r.contextLength, promptCharsFrom(turnMessages)),
           userId,
           abortSignal: abortController.signal,
+          // #224: attach the chat session to this turn's trace so per-turn
+          // token usage is attributable to a session (only the persisted path
+          // has a session id).
+          trace: { sessionId: String(session!._id) },
         });
       },
     );
@@ -815,6 +819,7 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
       modelName: routingResult.model,
       provider: routingResult.provider,
       routingBand,
+      ...(chatCompletion.usage ? { usage: chatCompletion.usage } : {}),
       ...(sources.length > 0 ? { sources } : {}),
       ...(sourceTitles.length > 0 ? { sourceTitles } : {}),
       metrics: await buildMessageMetrics(String(session!._id), assistantContent),
@@ -1049,6 +1054,10 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
     // the 'done' message and a later refresh read from.
     const toolEvents: PersistedToolEvent[] = [];
 
+    // #224: token usage for the turn, surfaced by the connector as a single
+    // trailing `usage` chunk. Absent when the provider reported nothing.
+    let usage: { inputTokens?: number; outputTokens?: number; totalTokens?: number } | undefined;
+
     // Abort the provider call when the client disconnects mid-stream. 'close'
     // also fires after a normal end, so only abort when the response did not
     // finish cleanly.
@@ -1083,9 +1092,18 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
             max_tokens: outputTokensFor(routingResult.contextLength, promptCharsFrom(messages)),
             userId,
             abortSignal: abortController.signal,
+            // #224: attach the chat session to this turn's trace (ZDR turns
+            // have no session — nothing durable can be joined).
+            ...(zdr ? {} : { trace: { sessionId: String(session!._id) } }),
           });
 
           for await (const chunk of stream) {
+            // #224: the connector may emit one trailing usage chunk; capture
+            // it and continue without forwarding it as a delta/tool event.
+            if (chunk.usage) {
+              usage = chunk.usage;
+              continue;
+            }
             // Tool feedback (issue #33): structured events replace the single
             // prose status hint — the call event names the tool + query, the
             // result event carries a compact outcome summary.
@@ -1227,6 +1245,7 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
       content: assistantContent,
       modelName: routingResult.model,
       routingBand,
+      ...(usage ? { usage } : {}),
       ...(sources.length > 0 ? { sources } : {}),
       ...(sourceTitleList.length > 0 ? { sourceTitles: sourceTitleList } : {}),
       // #196: persist the reconciled tool summaries so chips survive a refresh.

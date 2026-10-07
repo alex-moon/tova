@@ -25,6 +25,7 @@ import {
   LlmProvider,
   NeutralChunkStream,
   NeutralCompletion,
+  TokenUsage,
   TraceContext,
 } from './llmTypes';
 import { webSearch } from './webSearchService';
@@ -126,6 +127,30 @@ const errorTextFrom = (payload: FullStreamChunk['payload']): string => {
   if (typeof (err as { message?: unknown })?.message === 'string')
     return (err as { message: string }).message;
   return JSON.stringify(err);
+};
+
+/*
+ * Usage normalisation (issue #224): mastra's `LanguageModelUsage` fields are
+ * `number | undefined`; drop absent/NaN fields so the neutral boundary keeps
+ * "unknown" distinct from a real `0`. Returns undefined when nothing usable
+ * was reported, so callers can omit the field entirely.
+ */
+const normaliseUsage = (usage: unknown): TokenUsage | undefined => {
+  const u = usage as
+    { inputTokens?: unknown; outputTokens?: unknown; totalTokens?: unknown } | null | undefined;
+  if (!u) return undefined;
+  const pick = (value: unknown): number | undefined =>
+    typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+  const normalised: TokenUsage = {
+    inputTokens: pick(u.inputTokens),
+    outputTokens: pick(u.outputTokens),
+    totalTokens: pick(u.totalTokens),
+  };
+  return normalised.inputTokens !== undefined ||
+    normalised.outputTokens !== undefined ||
+    normalised.totalTokens !== undefined
+    ? normalised
+    : undefined;
 };
 
 const toNeutralStream = async (fullStream: AsyncIterable<unknown>): Promise<NeutralChunkStream> =>
@@ -830,9 +855,16 @@ const buildConnector = (provider: LlmProvider): LlmConnector => {
         const r = entry as { name?: string; result?: unknown };
         return { name: r.name ?? '', result: r.result };
       });
+      // Token usage (#224): the turn total across all tool steps, falling back
+      // to the last step's usage. Persisted on the assistant message.
+      const usage = normaliseUsage(
+        (result as { totalUsage?: unknown; usage?: unknown }).totalUsage ??
+          (result as { usage?: unknown }).usage,
+      );
       return {
         choices: [{ message: { content: result.text ?? null } }],
         ...(toolResults?.length ? { toolResults } : {}),
+        ...(usage ? { usage } : {}),
       };
     },
     createStreamingCompletion: async (options: CompletionOptions): Promise<NeutralChunkStream> => {
@@ -844,7 +876,16 @@ const buildConnector = (provider: LlmProvider): LlmConnector => {
           ...(await mcpToolsetsFrom(options)),
         },
       );
-      return toNeutralStream(result.fullStream);
+      // #224: resolve usage after the real chunks, as a final `usage` chunk
+      // (OQ-9 design a). `totalUsage` is a promise on the stream output; it
+      // settles once the stream drains, so awaiting after the loop cannot race.
+      const inner = await toNeutralStream(result.fullStream);
+      const streamResult = result as { totalUsage?: Promise<unknown> };
+      return (async function* () {
+        for await (const chunk of inner) yield chunk;
+        const usage = normaliseUsage(await streamResult.totalUsage);
+        if (usage) yield { usage };
+      })();
     },
     /**
      * One-off completion path for auxiliary generation (title, guard,
