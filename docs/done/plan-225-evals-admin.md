@@ -3,7 +3,8 @@
 Branch: `feat/225-evals-admin`
 GitHub issue: alex-moon/tova#225
 
-Status: implemented on the branch (T1–T7); verification recorded below. Open
+Status: shipped — merged to `main` in PR #231 (2026-10-07). Implemented on the
+branch (T1–T7); verification recorded below. Open
 questions resolved by their flagged fallbacks this pass (see "Resolved open
 questions"). A critic pass (see "Critic pass (this pass)") found and fixed two
 defects: the rollup model wrote to the wrong collection (`evalrunrecords`
