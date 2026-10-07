@@ -513,8 +513,11 @@ describe('Model Config Service', () => {
       // assertion below can only fail if the mutation itself was lost (an
       // infra-level stale-read/lost-write), not if updateOne silently
       // matched nothing.
+      // Scope to the small/deepinfra row: `openai/gpt-oss-20b` is also the
+      // guard/groq seed (GUARD_ENV), so an unscoped match flips a random row
+      // and the pool assertion races the selector (#220 CI flake).
       const flipped = (await ProviderRouting.findOneAndUpdate(
-        { model: 'openai/gpt-oss-20b' },
+        { provider: 'deepinfra', model: 'openai/gpt-oss-20b', tier: 'small' },
         { $set: { tools: false } },
         { new: true },
       ).lean<{ tools?: boolean }>()) as { tools?: boolean } | null;
@@ -526,7 +529,10 @@ describe('Model Config Service', () => {
         expect(models).not.toContain('google/gemma-3-4b-it');
         expect(models).toContain('Qwen/Qwen3-14B');
       } finally {
-        await ProviderRouting.updateOne({ model: 'openai/gpt-oss-20b' }, { tools: true });
+        await ProviderRouting.updateOne(
+          { provider: 'deepinfra', model: 'openai/gpt-oss-20b', tier: 'small' },
+          { tools: true },
+        );
       }
     });
 
