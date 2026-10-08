@@ -36,17 +36,52 @@ jest.mock('../services/storageService', () => ({
   deleteObject: (...args: unknown[]) => mockDeleteObject(...args),
 }));
 
-const mockRouteQuery = jest.fn();
+const MOCK_ROUTING = { model: 'mock-small-model', provider: 'deepinfra', reason: 'roster-pick' };
 
-jest.mock('../services/routerService', () => ({
-  routeQuery: (...args: unknown[]) => mockRouteQuery(...args),
-}));
+// #233: routing runs through the fixed-roster racing path. Drive it with
+// `mockRacingState`; the mock delegates back through the (mocked)
+// `inferenceService` so the existing completion/stream mocks stay the seam.
+const mockRacingState: {
+  routing: typeof MOCK_ROUTING | null;
+  error?: unknown;
+} = { routing: MOCK_ROUTING };
+
+jest.mock('../services/racingService', () => {
+  const { inferenceService } = jest.requireMock('../services/inferenceService');
+  const failIfSet = () => {
+    if (mockRacingState.error) throw mockRacingState.error;
+  };
+  return {
+    pickRosterRoute: async () => {
+      failIfSet();
+      return mockRacingState.routing;
+    },
+    routeAndComplete: async (opts: Record<string, unknown>) => {
+      failIfSet();
+      const routing = mockRacingState.routing;
+      const completion = await inferenceService.createCompletion({
+        ...opts,
+        model: routing?.model,
+        provider: routing?.provider,
+      });
+      return { routing, outcome: { result: { completion } } };
+    },
+    routeAndStream: async (opts: Record<string, unknown>) => {
+      failIfSet();
+      const routing = mockRacingState.routing;
+      const stream = await inferenceService.createStreamingCompletion({
+        ...opts,
+        model: routing?.model,
+        provider: routing?.provider,
+      });
+      return { routing, outcome: { result: { stream } } };
+    },
+  };
+});
 
 jest.mock('../services/titleService', () => ({
   generateChatTitle: jest.fn().mockResolvedValue('Hello'),
 }));
-
-const MOCK_ROUTING = { model: 'mock-small-model', reason: 'classifier-simple' };
 
 const fullStreamFrom = (chunks: string[]) =>
   (async function* () {
@@ -104,7 +139,8 @@ describe('Per-chat incognito flag (issue #144)', () => {
     mockPlainGenerate.mockReturnValue(
       Promise.resolve({ choices: [{ message: { content: 'Ephemeral answer' } }] }),
     );
-    mockRouteQuery.mockResolvedValue(MOCK_ROUTING);
+    mockRacingState.routing = MOCK_ROUTING;
+    mockRacingState.error = undefined;
     mockDeleteObject.mockResolvedValue(true);
   });
 

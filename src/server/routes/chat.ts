@@ -8,23 +8,20 @@ import { Asset } from '../models/Asset';
 import { buildAttachmentEnvelope } from '../services/attachmentEnvelope';
 import { isImageContentType } from '../services/assetLimits';
 import { spacesWorkspaceStorage } from '../services/workspaceStorage';
-import { routeQuery } from '../services/routerService';
-import type { RoutingResult } from '../services/routerService';
 import {
   pickRosterRoute,
-  rosterRacingEnabled,
   routeAndComplete,
   routeAndStream,
+  type RosterRoutingResult,
 } from '../services/racingService';
 import { generateChatTitle } from '../services/titleService';
 import { hasPermission, ROUTING_PERMISSION } from '../services/userService';
-import { buildSystemContent, fileLibraryIndex } from '../services/promptAssembly';
+import { buildSystemContent } from '../services/promptAssembly';
 import {
   isEntityInjectionEnabled,
   retrieveKnowledgeBlock,
 } from '../services/entityRetrievalService';
 import { ensureUserLocation } from '../services/geoLocationService';
-import { inferenceService } from '../services/inferenceService';
 import { outputTokensFor, promptCharsFrom } from '../services/outputTokenCap';
 import type { MessageContentPart, NeutralStreamChunk } from '../services/llmTypes';
 import { classifyAndPersistPromptDimensions, isTriviallyNeutral } from '../services/metricsService';
@@ -37,16 +34,7 @@ import {
 import { zdrHistorySchema } from '../validation';
 import { redactForLog } from '../services/logRedaction';
 import { decideTurn } from '../services/zdrTurn';
-import { disableModel, overloadCoolOffMinutes } from '../services/modelConfigService';
-import {
-  AllModelsDisabledError,
-  isClientAbort,
-  isOverloadError,
-  isPromptSizeError,
-  isRateLimitError,
-  MAX_ATTEMPTS,
-  withModelFailover,
-} from '../services/modelFailover';
+import { AllModelsDisabledError } from '../services/modelConfigService';
 
 const router = express.Router();
 
@@ -393,20 +381,6 @@ const toolResultEvent = (result: { name: string; result: unknown }) => {
   };
 };
 
-// Feedback aggregation key (issue #18): deterministic prompt features of the
-// user turn, captured at route time — not LLM flags, which are classified
-// fire-and-forget only after routing (plan decisions 4 and 6, Q2).
-const buildRoutingBand = (
-  metrics:
-    | {
-        lengthBucket?: 'short' | 'medium' | 'long' | null;
-        codeIndicators?: { fences?: number | null } | null;
-      }
-    | null
-    | undefined,
-): string =>
-  `${metrics?.lengthBucket ?? 'unknown'}|${(metrics?.codeIndicators?.fences ?? 0) > 0 ? 'code' : 'prose'}`;
-
 // Session indices count only prior messages (computed before .save()), so a
 // session's first message gets index 0. Count-based indices are racy under
 // concurrent turns in one session; accepted in the plan
@@ -454,23 +428,6 @@ const messagesFromPersistedHistory = (
     role: m.role as 'user' | 'assistant',
     content: m.content as string,
   }));
-
-/*
- * #169 phase 2: the guard classifier's conversation context — prior turns
- * only, oldest first, never the just-saved current message (it rides
- * separately as the query). The persisted find is newest-first and INCLUDES
- * the current turn, so it is dropped by id and the tail reversed. DB
- * `Message.content` is always a string, so the guard's text-only history
- * needs no part-flattening here.
- */
-const guardHistoryFromDocs = (
-  docs: { _id: unknown; role: string; content: string }[],
-  currentMessageId: unknown,
-): { role: 'user' | 'assistant'; content: string }[] =>
-  docs
-    .filter((m) => String(m._id) !== String(currentMessageId))
-    .reverse()
-    .map((m) => ({ role: m.role as 'user' | 'assistant', content: m.content as string }));
 
 // Throwaway chat attachments (#116): as soon as the turn that consumed them
 // completes, the row and its Spaces object go. Never throws — cleanup must
@@ -541,26 +498,6 @@ const knowledgeBlockFor = async (prompt: string, userId: string): Promise<string
     return await retrieveKnowledgeBlock(prompt, userId);
   } catch (err) {
     console.error('Entity graph retrieval error:', redactForLog(err));
-    return '';
-  }
-};
-
-/*
- * #214 preliminary: bounded library index for the system prompt, injected only
- * when the guard's AUX `files` vote fires. Mirrors `list_files` exactly —
- * newest first, 20 rows, the 21st only sets the truncation notice — so the
- * injected list and the tool agree. Never throws: a prompt-enrichment read must
- * not degrade a chat turn (same posture as the entity-graph block).
- */
-const libraryBlockFor = async (userId: string): Promise<string> => {
-  try {
-    const rows = await Asset.find({ userId, status: 'ready' })
-      .sort({ _id: -1 })
-      .limit(21)
-      .select('filename contentType createdAt');
-    return fileLibraryIndex(rows as unknown as Parameters<typeof fileLibraryIndex>[0]);
-  } catch (err) {
-    console.error('File library retrieval error:', redactForLog(err));
     return '';
   }
 };
@@ -671,79 +608,35 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
       // never runs for ZDR.
       const zdrEntityBlock = await knowledgeBlockFor(content, userId as string);
 
-      const zdrRoutingBand = buildRoutingBand(computeDeterministicMetrics(content));
       /*
-       * #232: ZDR turns can also ride the racing path. The tier path is kept
-       * for the fallback (racing disabled or an empty roster).
+       * ZDR continuity is the client replay; the prompt is assembled once and
+       * raced (#232). Racing never calls the guard, so there is no library
+       * index to inject on a raced turn.
        */
-      const zdrMessages = async (
-        filesLikely: boolean | undefined,
-      ): Promise<ReturnType<typeof buildZdrMessages>> => {
-        const libraryBlock = filesLikely ? await libraryBlockFor(userId as string) : '';
+      const zdrMessages = (): ReturnType<typeof buildZdrMessages> => {
         const turnMessages = buildZdrMessages(zdrHistory.value, content);
         turnMessages.unshift({
           role: 'system',
-          content: buildSystemContent(userDoc, zdrEntityBlock, libraryBlock),
+          content: buildSystemContent(userDoc, zdrEntityBlock, ''),
         });
         appendAssetBlock(turnMessages, attachedAsset);
         return turnMessages;
       };
-      let routingResult: RoutingResult;
-      let chatCompletion: Awaited<ReturnType<typeof inferenceService.createCompletion>>;
-      if (rosterRacingEnabled()) {
-        // ZDR turns never carry image parts (no buildImageTurn on this path),
-        // so image gating is moot: race the full text roster.
-        const prePick = await pickRosterRoute(false);
-        if (prePick) {
-          // Build the prompt from the pre-race pick (racing does not use the
-          // guard, so no files vote); the winner re-shapes routing below.
-          const turnMessages = await zdrMessages(undefined);
-          const raced = await routeAndComplete(
-            {
-              messages: turnMessages,
-              userId,
-              abortSignal: abortController.signal,
-            },
-            false,
-          );
-          routingResult = raced.routing;
-          chatCompletion = raced.outcome.result.completion;
-        } else {
-          ({ routing: routingResult, completion: chatCompletion } = await withModelFailover(
-            () =>
-              routeQuery(content, undefined, undefined, {
-                band: zdrRoutingBand,
-                history: zdrHistory.value,
-              }),
-            async (r) =>
-              inferenceService.createCompletion({
-                messages: await zdrMessages(r.filesLikely),
-                model: r.model,
-                provider: r.provider,
-                userId,
-                abortSignal: abortController.signal,
-              }),
-          ));
-        }
-      } else {
-        ({ routing: routingResult, completion: chatCompletion } = await withModelFailover(
-          // #169 phase 2: the guard classifies with the replayed context —
-          // prior-turns-only by construction of buildZdrMessages.
-          () =>
-            routeQuery(content, undefined, undefined, {
-              band: zdrRoutingBand,
-              history: zdrHistory.value,
-            }),
-          async (r) =>
-            inferenceService.createCompletion({
-              messages: await zdrMessages(r.filesLikely),
-              model: r.model,
-              provider: r.provider,
-              userId,
-              abortSignal: abortController.signal,
-            }),
-        ));
-      }
+      // ZDR turns never carry image parts (no buildImageTurn on this path), so
+      // image gating is moot: race the full text roster. An empty roster (no
+      // model could be picked) is surfaced as the all-disabled error.
+      const zdrPrePick = await pickRosterRoute(false);
+      if (!zdrPrePick) throw new AllModelsDisabledError();
+      const raced = await routeAndComplete(
+        {
+          messages: zdrMessages(),
+          userId,
+          abortSignal: abortController.signal,
+        },
+        false,
+      );
+      const routingResult: RosterRoutingResult = raced.routing;
+      const chatCompletion = raced.outcome.result.completion;
       const zdrAssistantContent = chatCompletion.choices[0]?.message?.content ?? '';
       // #195: a tool-only ZDR turn still ends with a short confirmation.
       const zdrConfirmation = zdrAssistantContent.trim()
@@ -775,41 +668,23 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
       });
     }
     // Save user message
-    const userMessage = await saveUserMessageWithMetrics(
-      String(session!._id),
-      content,
-      attachedAsset,
-    );
-
-    // Feedback aggregation happens under the band captured at route time, so
-    // it must be computed before the router sees the turn (decision 4).
-    const routingBand = buildRoutingBand(userMessage.metrics);
+    await saveUserMessageWithMetrics(String(session!._id), content, attachedAsset);
 
     // Image turns (#115) route vision-first only when the
     // presign path is actually available; otherwise the turn degrades to the
-    // legacy text envelope and normal routing applies. Routing happens inside
-    // the failover wrapper below so a failed endpoint can be disabled and
-    // re-routed against the fresh pools (#168).
+    // legacy text envelope and normal routing applies.
     const hasImage = turnsWithImage(attachedAsset);
 
-    // Get chat history for context. #169 phase 2: the guard classifies the
-    // turn with this context too — the window includes the just-saved
-    // current turn, which is dropped for the guard (it rides as the query).
+    // Get chat history for context — the window includes the just-saved
+    // current turn, reversing to oldest-first for the prompt.
     const history = await Message.find({ sessionId: session._id })
       .sort({ timestamp: -1 })
       .limit(10);
-    const guardHistory = guardHistoryFromDocs(
-      history as unknown as { _id: unknown; role: string; content: string }[],
-      userMessage._id,
-    );
     // Coarse geolocation (#50): awaited so this turn's prompt can include the
     // country; cheap when cached (fresh/cooldown returns immediately) and the
     // service itself never throws, so chat cannot block hard on it.
     await ensureUserLocation(userDoc, req.ip);
     const entityBlock = await knowledgeBlockFor(content, userId as string);
-    // #214: the library index is injected per-routing-decision, so the prompt
-    // is assembled inside the failover closure from a fresh message array
-    // (unshift/append must not accumulate across retry attempts).
     const withSystemAndAsset = async (systemContent: string) => {
       const next = messagesFromPersistedHistory(history as { role: string; content: string }[]);
       next.unshift({ role: 'system', content: systemContent });
@@ -821,60 +696,27 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
     };
 
     /*
-     * #232: persisted turns ride the racing path when enabled and a roster
-     * pick exists. Racing selects the model internally, so the prompt is
-     * assembled once from the pre-race pick (no guard files vote — racing does
-     * not call the guard) and the budget is sized against that pick's window.
-     * The winner re-shapes routing for persistence. The tier failover path
-     * remains the fallback.
+     * #232: the turn races the fixed roster. Racing selects the model
+     * internally, so the prompt is assembled once (no guard files vote — racing
+     * does not call the guard) and the budget is sized against the pre-race
+     * pick's window. The winner re-shapes routing for persistence. An empty
+     * roster (no model could be picked) is surfaced as the all-disabled error.
      */
-    let routingResult: RoutingResult;
-    let chatCompletion: Awaited<ReturnType<typeof inferenceService.createCompletion>>;
-    const rosterPrePick = rosterRacingEnabled() ? await pickRosterRoute(hasImage) : null;
-    if (rosterPrePick) {
-      const turnMessages = await withSystemAndAsset(buildSystemContent(userDoc, entityBlock, ''));
-      const raced = await routeAndComplete(
-        {
-          messages: turnMessages,
-          max_tokens: outputTokensFor(rosterPrePick.contextLength, promptCharsFrom(turnMessages)),
-          userId,
-          abortSignal: abortController.signal,
-          trace: { sessionId: String(session!._id) },
-        },
-        hasImage,
-      );
-      routingResult = raced.routing;
-      chatCompletion = raced.outcome.result.completion;
-    } else {
-      ({ routing: routingResult, completion: chatCompletion } = await withModelFailover(
-        () =>
-          routeQuery(content, undefined, undefined, {
-            band: routingBand,
-            hasImage,
-            history: guardHistory,
-          }),
-        async (r) => {
-          const libraryBlock = r.filesLikely ? await libraryBlockFor(userId as string) : '';
-          const turnMessages = await withSystemAndAsset(
-            buildSystemContent(userDoc, entityBlock, libraryBlock),
-          );
-          return inferenceService.createCompletion({
-            messages: turnMessages,
-            model: r.model,
-            provider: r.provider,
-            // #104: always send an output-token budget so the provider cannot
-            // default it to the model's whole context window.
-            max_tokens: outputTokensFor(r.contextLength, promptCharsFrom(turnMessages)),
-            userId,
-            abortSignal: abortController.signal,
-            // #224: attach the chat session to this turn's trace so per-turn
-            // token usage is attributable to a session (only the persisted path
-            // has a session id).
-            trace: { sessionId: String(session!._id) },
-          });
-        },
-      ));
-    }
+    const rosterPrePick = await pickRosterRoute(hasImage);
+    if (!rosterPrePick) throw new AllModelsDisabledError();
+    const turnMessages = await withSystemAndAsset(buildSystemContent(userDoc, entityBlock, ''));
+    const raced = await routeAndComplete(
+      {
+        messages: turnMessages,
+        max_tokens: outputTokensFor(rosterPrePick.contextLength, promptCharsFrom(turnMessages)),
+        userId,
+        abortSignal: abortController.signal,
+        trace: { sessionId: String(session!._id) },
+      },
+      hasImage,
+    );
+    const routingResult: RosterRoutingResult = raced.routing;
+    const chatCompletion = raced.outcome.result.completion;
 
     // Empty provider responses persist as '' (fail-visibility, #4 J); the
     // UI presents the '(no content returned)' placeholder.
@@ -904,7 +746,6 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
       content: assistantContent,
       modelName: routingResult.model,
       provider: routingResult.provider,
-      routingBand,
       ...(chatCompletion.usage ? { usage: chatCompletion.usage } : {}),
       ...(sources.length > 0 ? { sources } : {}),
       ...(sourceTitles.length > 0 ? { sourceTitles } : {}),
@@ -1039,92 +880,52 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
       session = await createSessionWithUser(userId as string, content, { incognito: false });
     }
 
-    let routingBand: string;
-    let routingResult;
+    let routingResult: RosterRoutingResult;
     let messages: {
       role: 'system' | 'user' | 'assistant';
       content: string | MessageContentPart[];
     }[];
-    // #169 phase 2: the guard classifier's conversation context — prior
-    // turns only, computed once per turn and reused by the failover
-    // re-route below so a retry never re-derives it.
-    let guardHistory: { role: 'user' | 'assistant'; content: string }[] = [];
 
     // Image turns (#115): gate on both the content type and a configured
     // presign path; the image part replaces the filename envelope this turn.
     const hasImage = turnsWithImage(attachedAsset);
 
     /*
-     * #232: when racing is enabled, the primary model comes from the weighted
-     * roster pick (no guard classifier). The actual race runs after the
-     * messages are assembled (the race needs the full prompt); this pick only
-     * supplies the `contextLength` for the output budget and the pre-race
-     * `meta` routing. Falls back to the tier router when the roster is empty.
+     * #232: the primary model comes from the weighted roster pick (no guard
+     * classifier). The actual race runs after the messages are assembled (the
+     * race needs the full prompt); this pick only supplies the `contextLength`
+     * for the output budget and the pre-race `meta` routing. An empty roster
+     * (no model could be picked) is surfaced as the all-disabled error.
      */
-    const racing = rosterRacingEnabled();
-    const rosterRoute = racing ? await pickRosterRoute(hasImage) : null;
-    const useRacing = racing && rosterRoute !== null;
+    const rosterRoute = await pickRosterRoute(hasImage);
+    if (!rosterRoute) throw new AllModelsDisabledError();
 
     await ensureUserLocation(streamUserDoc, req.ip);
     if (zdr) {
       // Continuity comes from the client replay (#116); nothing is read back.
-      routingBand = buildRoutingBand(computeDeterministicMetrics(content));
       messages = buildZdrMessages(zdrHistory, content);
-      // #169 phase 2: the replay is prior-turns-only by construction —
-      // exactly the guard's context contract.
-      guardHistory = zdrHistory;
-      routingResult =
-        rosterRoute ??
-        (await routeQuery(content, undefined, undefined, {
-          band: routingBand,
-          hasImage,
-          history: guardHistory,
-        }));
+      routingResult = rosterRoute;
     } else {
       // Save user message
-      const userMessage = await saveUserMessageWithMetrics(
-        String(session!._id),
-        content,
-        attachedAsset,
-      );
+      await saveUserMessageWithMetrics(String(session!._id), content, attachedAsset);
 
-      // Feedback aggregation happens under the band captured at route time,
-      // so it must be computed before the router sees the turn (decision 4).
-      routingBand = buildRoutingBand(userMessage.metrics);
-
-      // Get chat history BEFORE routing (#169 phase 2): the guard
-      // classifies the turn with this context — the window includes the
-      // just-saved current turn, which is dropped for the guard (it rides
-      // as the query).
+      // Get chat history — the window includes the just-saved current turn,
+      // reversing to oldest-first for the prompt.
       const history = await Message.find({ sessionId: session!._id })
         .sort({ timestamp: -1 })
         .limit(10);
-      guardHistory = guardHistoryFromDocs(
-        history as unknown as { _id: unknown; role: string; content: string }[],
-        userMessage._id,
-      );
 
-      // Determine model. Same image-turn gating as the non-streaming route (#115).
-      routingResult =
-        rosterRoute ??
-        (await routeQuery(content, undefined, undefined, {
-          band: routingBand,
-          hasImage,
-          history: guardHistory,
-        }));
+      // Same image-turn gating as the non-streaming route (#115).
+      routingResult = rosterRoute;
       messages = messagesFromPersistedHistory(history as { role: string; content: string }[]);
     }
 
     const streamEntityBlock = await knowledgeBlockFor(content, userId as string);
-    // #214: library index injected only on the guard's files vote. Built once
-    // from the initial routing — the system prompt is frozen across failover
-    // retries (the re-route below only swaps the model, not the messages).
-    const streamLibraryBlock = routingResult.filesLikely
-      ? await libraryBlockFor(userId as string)
-      : '';
+    // Racing does not call the guard classifier, so there is no files vote to
+    // inject a library index on a raced turn.
     messages.unshift({
       role: 'system',
-      content: buildSystemContent(streamUserDoc, streamEntityBlock, streamLibraryBlock),
+      content: buildSystemContent(streamUserDoc, streamEntityBlock, ''),
     });
     if (attachedAsset) {
       const imageAttached = hasImage ? await buildImageTurn(messages, attachedAsset) : false;
@@ -1168,125 +969,61 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
     });
 
     try {
-      // #168 failover loop: an endpoint failure (non-abort, non-prompt-size)
-      // with no streamed content yet disables the model, re-routes against
-      // the fresh pools and re-emits 'meta'. The attempts are naturally
-      // bounded — each failure removes the routed model from every pool, so
-      // the pool drains and routing eventually fails — but the explicit cap
-      // keeps pathological cases loud instead of putting an unbounded loop
-      // on the request path.
-      for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-        try {
-          sendEvent('meta', {
-            // ZDR (#116): no sessionId is minted — nothing the replay could
-            // point at exists.
-            ...(zdr ? {} : { sessionId: session!._id }),
-            routing: routingResult,
-          });
+      sendEvent('meta', {
+        // ZDR (#116): no sessionId is minted — nothing the replay could
+        // point at exists.
+        ...(zdr ? {} : { sessionId: session!._id }),
+        routing: routingResult,
+      });
 
-          /*
-           * #232: racing path. `routeAndStream` hedges the weighted primary's
-           * providers, aborts the loser, and does its own roster fallback — so
-           * the tier failover loop below is bypassed entirely. The winner's
-           * model/provider replace the pre-race pick for persistence.
-           */
-          let stream;
-          if (useRacing) {
-            const raced = await routeAndStream(
-              {
-                messages,
-                // #104: budget sized against the picked model's window.
-                max_tokens: outputTokensFor(routingResult.contextLength, promptCharsFrom(messages)),
-                userId,
-                abortSignal: abortController.signal,
-                ...(zdr ? {} : { trace: { sessionId: String(session!._id) } }),
-              },
-              hasImage,
-            );
-            stream = raced.outcome.result.stream;
-            routingResult = raced.routing;
-          } else {
-            stream = await inferenceService.createStreamingCompletion({
-              messages,
-              model: routingResult.model,
-              provider: routingResult.provider,
-              // #104: always send an output-token budget so the provider cannot
-              // default it to the model's whole context window.
-              max_tokens: outputTokensFor(routingResult.contextLength, promptCharsFrom(messages)),
-              userId,
-              abortSignal: abortController.signal,
-              // #224: attach the chat session to this turn's trace (ZDR turns
-              // have no session — nothing durable can be joined).
-              ...(zdr ? {} : { trace: { sessionId: String(session!._id) } }),
-            });
-          }
+      /*
+       * #232: `routeAndStream` hedges the weighted primary's providers, aborts
+       * the loser, and does its own roster fallback (retrying the next model
+       * on total failure). The winner's model/provider replace the pre-race
+       * pick for persistence.
+       */
+      const raced = await routeAndStream(
+        {
+          messages,
+          // #104: budget sized against the picked model's window.
+          max_tokens: outputTokensFor(routingResult.contextLength, promptCharsFrom(messages)),
+          userId,
+          abortSignal: abortController.signal,
+          // #224: attach the chat session to this turn's trace (ZDR turns have
+          // no session — nothing durable can be joined).
+          ...(zdr ? {} : { trace: { sessionId: String(session!._id) } }),
+        },
+        hasImage,
+      );
+      routingResult = raced.routing;
+      const stream = raced.outcome.result.stream;
 
-          for await (const chunk of stream) {
-            // #224: the connector may emit one trailing usage chunk; capture
-            // it and continue without forwarding it as a delta/tool event.
-            if (chunk.usage) {
-              usage = chunk.usage;
-              continue;
-            }
-            // Tool feedback (issue #33): structured events replace the single
-            // prose status hint — the call event names the tool + query, the
-            // result event carries a compact outcome summary.
-            if (chunk.toolCall) {
-              const ev = toolCallEvent(chunk.toolCall);
-              reconcileToolEvent(toolEvents, ev);
-              sendEvent('tool', ev);
-            }
-            if (chunk.toolResult) {
-              const ev = toolResultEvent(chunk.toolResult);
-              reconcileToolEvent(toolEvents, ev);
-              sendEvent('tool', ev);
-              collectSourcesInto(sources, chunk.toolResult.result, titles);
-              toolResults.push(chunk.toolResult);
-            }
-            const delta = chunk.delta;
-            if (delta) {
-              assistantContent += delta;
-              sendEvent('delta', { content: delta });
-            }
-          }
-          break;
-        } catch (err) {
-          // #213: endpoint overload is a per-endpoint transient — cool off
-          // briefly and re-route. A genuine account rate limit still fails
-          // loudly (#168 decision 2026-09-26: 429 back-off is a separate,
-          // deferred mechanism — never a pool-draining retry).
-          const overload = isOverloadError(err);
-          if (
-            // no deltas yet — mid-stream failures are reported, not retried
-            assistantContent === '' &&
-            !isClientAbort(err) &&
-            !isPromptSizeError(err) &&
-            (overload || !isRateLimitError(err)) &&
-            attempt < MAX_ATTEMPTS
-          ) {
-            const disabled = await disableModel(
-              routingResult.provider,
-              routingResult.model,
-              overload ? overloadCoolOffMinutes() * 60 * 1000 : undefined,
-            );
-            if (!disabled) {
-              // Cool-off write failed: the pool is unchanged, so re-routing
-              // would re-pick the same broken endpoint — fail the turn with
-              // the original error.
-              throw err;
-            }
-            try {
-              routingResult = await routeQuery(content, undefined, undefined, {
-                band: routingBand,
-                hasImage,
-                history: guardHistory,
-              });
-            } catch {
-              throw new AllModelsDisabledError();
-            }
-            continue;
-          }
-          throw err;
+      for await (const chunk of stream) {
+        // #224: the connector may emit one trailing usage chunk; capture it
+        // and continue without forwarding it as a delta/tool event.
+        if (chunk.usage) {
+          usage = chunk.usage;
+          continue;
+        }
+        // Tool feedback (issue #33): structured events replace the single
+        // prose status hint — the call event names the tool + query, the
+        // result event carries a compact outcome summary.
+        if (chunk.toolCall) {
+          const ev = toolCallEvent(chunk.toolCall);
+          reconcileToolEvent(toolEvents, ev);
+          sendEvent('tool', ev);
+        }
+        if (chunk.toolResult) {
+          const ev = toolResultEvent(chunk.toolResult);
+          reconcileToolEvent(toolEvents, ev);
+          sendEvent('tool', ev);
+          collectSourcesInto(sources, chunk.toolResult.result, titles);
+          toolResults.push(chunk.toolResult);
+        }
+        const delta = chunk.delta;
+        if (delta) {
+          assistantContent += delta;
+          sendEvent('delta', { content: delta });
         }
       }
     } catch (err) {
@@ -1338,7 +1075,6 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
             role: 'assistant',
             content: assistantContent,
             modelName: routingResult.model,
-            routingBand,
             ...(suggestions.length > 0 ? { suggestions } : {}),
           },
           ...(sourceTitleList.length > 0 ? { sourceTitles: sourceTitleList } : {}),
@@ -1353,7 +1089,6 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
           role: 'assistant',
           content: assistantContent,
           modelName: routingResult.model,
-          routingBand,
         },
         ...(sourceTitleList.length > 0 ? { sourceTitles: sourceTitleList } : {}),
       });
@@ -1368,7 +1103,6 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
       provider: routingResult.provider,
       content: assistantContent,
       modelName: routingResult.model,
-      routingBand,
       ...(usage ? { usage } : {}),
       ...(sources.length > 0 ? { sources } : {}),
       ...(sourceTitleList.length > 0 ? { sourceTitles: sourceTitleList } : {}),

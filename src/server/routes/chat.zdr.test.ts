@@ -39,17 +39,52 @@ jest.mock('../services/storageService', () => ({
   deleteObject: (...args: unknown[]) => mockDeleteObject(...args),
 }));
 
-const mockRouteQuery = jest.fn();
+const MOCK_ROUTING = { model: 'mock-small-model', provider: 'deepinfra', reason: 'roster-pick' };
 
-jest.mock('../services/routerService', () => ({
-  routeQuery: (...args: unknown[]) => mockRouteQuery(...args),
-}));
+// #233: routing runs through the fixed-roster racing path. Drive it with
+// `mockRacingState`; the mock delegates back through the (mocked)
+// `inferenceService` so the existing completion/stream mocks stay the seam.
+const mockRacingState: {
+  routing: typeof MOCK_ROUTING | null;
+  error?: unknown;
+} = { routing: MOCK_ROUTING };
+
+jest.mock('../services/racingService', () => {
+  const { inferenceService } = jest.requireMock('../services/inferenceService');
+  const failIfSet = () => {
+    if (mockRacingState.error) throw mockRacingState.error;
+  };
+  return {
+    pickRosterRoute: async () => {
+      failIfSet();
+      return mockRacingState.routing;
+    },
+    routeAndComplete: async (opts: Record<string, unknown>) => {
+      failIfSet();
+      const routing = mockRacingState.routing;
+      const completion = await inferenceService.createCompletion({
+        ...opts,
+        model: routing?.model,
+        provider: routing?.provider,
+      });
+      return { routing, outcome: { result: { completion } } };
+    },
+    routeAndStream: async (opts: Record<string, unknown>) => {
+      failIfSet();
+      const routing = mockRacingState.routing;
+      const stream = await inferenceService.createStreamingCompletion({
+        ...opts,
+        model: routing?.model,
+        provider: routing?.provider,
+      });
+      return { routing, outcome: { result: { stream } } };
+    },
+  };
+});
 
 jest.mock('../services/titleService', () => ({
   generateChatTitle: jest.fn().mockResolvedValue('Hello'),
 }));
-
-const MOCK_ROUTING = { model: 'mock-small-model', reason: 'classifier-simple' };
 
 const fullStreamFrom = (chunks: string[]) =>
   (async function* () {
@@ -106,7 +141,8 @@ describe('Zero-data retention chats (issue #116)', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     mockAgentStream.mockImplementation(async () => fullStreamFrom(['Ephemeral answer']));
-    mockRouteQuery.mockResolvedValue(MOCK_ROUTING);
+    mockRacingState.routing = MOCK_ROUTING;
+    mockRacingState.error = undefined;
     mockDeleteObject.mockResolvedValue(true);
   });
 
@@ -211,51 +247,6 @@ describe('Zero-data retention chats (issue #116)', () => {
     expect(assistantContents).toEqual(['older reply', 'newer reply']);
     expect(messages).toEqual(
       expect.arrayContaining([expect.objectContaining({ role: 'user', content: 'older turn' })]),
-    );
-
-    // #169 phase 2: the replayed history is also the guard classifier's
-    // context — prior-turns-only by construction, exactly the contract.
-    expect(mockRouteQuery).toHaveBeenCalledWith(
-      'and now?',
-      undefined,
-      undefined,
-      expect.objectContaining({
-        history: [
-          { role: 'user', content: 'older turn' },
-          { role: 'assistant', content: 'older reply' },
-          { role: 'user', content: 'newer turn' },
-          { role: 'assistant', content: 'newer reply' },
-        ],
-      }),
-    );
-  });
-
-  it('passes the replayed history to the guard classifier on the plain ZDR route (#169 phase 2)', async () => {
-    mockPlainGenerate.mockResolvedValue({
-      choices: [{ message: { content: 'Plain ephemeral answer' } }],
-    });
-    const email = 'zdr-guard-history-plain@example.com';
-    const cookies = await registerUser(email);
-    await enableZdr(email);
-
-    const response = await plainMessage(cookies, {
-      content: 'and now?',
-      history: [
-        { role: 'user', content: 'older turn' },
-        { role: 'assistant', content: 'older reply' },
-      ],
-    });
-    expect(response.status).toBe(200);
-    expect(mockRouteQuery).toHaveBeenCalledWith(
-      'and now?',
-      undefined,
-      undefined,
-      expect.objectContaining({
-        history: [
-          { role: 'user', content: 'older turn' },
-          { role: 'assistant', content: 'older reply' },
-        ],
-      }),
     );
   });
 
@@ -546,7 +537,7 @@ describe('Zero-data retention chats (issue #116)', () => {
       const cookies = await registerUser(email);
       await enableZdr(email);
       const asset = await ephemeralAssetFor(email, 'leakroute.csv');
-      mockRouteQuery.mockRejectedValueOnce(new Error('router down'));
+      mockRacingState.error = new Error('router down');
 
       const response = await streamMessage(cookies, {
         content: 'hello',
@@ -563,7 +554,7 @@ describe('Zero-data retention chats (issue #116)', () => {
       const cookies = await registerUser(email);
       await enableZdr(email);
       const asset = await ephemeralAssetFor(email, 'leakjson.csv');
-      mockRouteQuery.mockRejectedValueOnce(new Error('router down'));
+      mockRacingState.error = new Error('router down');
 
       const response = await request(app)
         .post('/api/chat')

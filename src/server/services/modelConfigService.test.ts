@@ -1,4 +1,9 @@
-import { AllModelsDisabledError, ALL_MODELS_DISABLED_MESSAGE, overloadCoolOffMinutes, sweepModels } from './modelConfigService';
+import {
+  AllModelsDisabledError,
+  ALL_MODELS_DISABLED_MESSAGE,
+  overloadCoolOffMinutes,
+  sweepModels,
+} from './modelConfigService';
 
 /*
  * #233: the tier machinery this suite used to cover (listByTier, the price cap,

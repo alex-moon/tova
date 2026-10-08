@@ -2,6 +2,25 @@
 
 ## Status (current)
 
+#232/#233 fixed model roster + hedged provider racing, then tier-era deletion
+(on the `epic/roster` epic branch, not yet merged to `main`). #232 replaced
+tier-based smart routing with a fixed three-model roster (`modelroster`
+collection, seeded by `migrations/20261008000000-seed-model-roster.ts`) served
+on two serverless providers (DeepInfra + Fireworks). A weighted primary pick
+(`score = TTFT × price penalty`), per-provider cool-off, and hedged racing
+(fire both providers, first token wins, loser aborted, roster fall-through)
+live in `rosterConfig.ts` / `racingService.ts`; both chat routes run on racing.
+#233 deleted the tier machinery that #232 left coexisting: `routerService.ts`,
+`modelMetricsStatsService.ts`, `models/ModelMetricStat.ts`, the tier/pool
+seeds, the `routingBand` field and its plumbing, and the tier/epsilon/guard
+routing env reads; `modelFailover.ts` reduced to its error-classification
+helpers; both chat routes rewired so racing is the only path (an empty roster
+surfaces the all-disabled error). `chat.ts` no longer calls the guard
+classifier, so raced turns inject no library index (aux/enrichment redesign is
+#238). Admin `/models` reads routing rows + the error tally only (the roster
+tab is #234). `npm run ci` green (86 suites, 1173 tests); the 8 migrations run
+clean on a fresh DB (roster seeded, no tier collections).
+
 #225 Evals admin (merged to `main` via PR #231, plan doc archived to
 `docs/done/plan-225-evals-admin.md`): scheduled daily eval runs plus a new
 "Evals" admin tab. The existing deterministic suite

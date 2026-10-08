@@ -1,10 +1,11 @@
 /*
- * #213: provider error classification shared by the failover loop
- * (`modelFailover.ts`) and the diagnostics tally (`modelErrorTally.ts`).
+ * #213: provider error classification shared by the racing runtime
+ * (`racingService.ts`, via `modelFailover.ts`) and the diagnostics tally
+ * (`modelErrorTally.ts`).
  *
  * Kept in a leaf module (no service imports) so both callers can use it
  * without an import cycle: `modelErrorTally` → `inferenceService` is already
- * reached from `modelFailover` via `routerService`.
+ * reached from `racingService` via `inferenceService`.
  */
 
 /*

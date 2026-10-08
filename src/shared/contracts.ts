@@ -22,8 +22,9 @@ export interface AdminUser {
 // Model inventory row, GET /api/admin/models (issues #33/#104). Each entry
 // is one `providerroutings` document — a provider/model pair can repeat
 // across tiers, so `id` is the Mongo _id and rows are per-tier. `stats`
-// carries the feedback tallies captured in ModelMetricStat (up/down), keyed
-// by model name. #115 badge fields: `tools` is schema-defaulted to true;
+// (#233) is always empty now that the tier-era (band, model) feedback tallies
+// are gone; it is retained until #234 reworks the Models tab onto the roster.
+// #115 badge fields: `tools` is schema-defaulted to true;
 // `vision` is only ever true when the row explicitly claims it;
 // `contextLength` is the advertised limit (omitted when none is known).
 // #168: `disabledUntil` is the system-owned cool-off expiry (ISO wire

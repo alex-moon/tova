@@ -70,8 +70,9 @@ router.get('/users', ...adminGuard, async (_req, res) => {
 
 /*
  * Model inventory with CRUD (issue #104). Each row is one `providerroutings`
- * document (a provider/model pair can repeat across tiers); `stats` carries
- * the feedback tallies captured in ModelMetricStat for the model name.
+ * document (a provider/model pair can repeat across tiers). `stats` (#233) is
+ * always empty now that the tier-era feedback tallies are gone; it is retained
+ * until #234 reworks the Models tab onto the roster.
  * Read errors degrade to empty lists; the view shows a 'no data' state.
  */
 // #151: 'typesafe' rides along now so admin CRUD can write rows for the
@@ -224,6 +225,10 @@ router.get('/models', ...adminGuard, async (_req, res) => {
         tools: route.tools !== false,
         vision: route.vision === true,
         contextLength: route.contextLength,
+        // #233: the tier-era (band, model) feedback tallies are gone, so the
+        // stats column is always empty until #234 reworks the Models tab onto
+        // the roster. Emitted as `[]` so the client contract stays satisfied.
+        stats: [],
         // #199 pricing (USD per 1M tokens); undefined on unpriced rows, which
         // JSON drops so the client only sees the key when a price is known.
         inputPrice: route.inputPrice,

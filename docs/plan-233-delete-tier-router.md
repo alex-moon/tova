@@ -83,27 +83,47 @@ bridge so the deletion does not strand a caller.
 
 ## Done
 
-- [ ] Delete `services/routerService.ts`, `services/routerService.test.ts`.
-- [ ] Delete `services/modelMetricsStatsService.ts` (+ test),
+- [x] Delete `services/routerService.ts`, `services/routerService.test.ts`.
+- [x] Delete `services/modelMetricsStatsService.ts` (+ test),
       `models/ModelMetricStat.ts`.
-- [ ] Trim `services/modelFailover.ts` to classification helpers (+ update
+- [x] Trim `services/modelFailover.ts` to classification helpers (+ update
       test); drop `withModelFailover`/`MAX_ATTEMPTS`/`FailoverOutcome`.
-- [ ] Reduce `services/modelConfigService.ts` to tier-free survivors (+ update
-      test); re-point `sweepModels` at the roster; keep `routingPrice`.
-- [ ] `feedback.ts`: keep route, drop `recordFeedback`/`clearFeedback`.
-- [ ] `chat.ts`: remove the tier fallback branch entirely; racing is the only
+- [x] Reduce `services/modelConfigService.ts` to tier-free survivors (+ update
+      test); re-point `sweepModels` at the roster; keep `routingPrice`
+      (moved to `rosterConfig.ts`).
+- [x] `feedback.ts`: keep route, drop `recordFeedback`/`clearFeedback`.
+- [x] `chat.ts`: remove the tier fallback branch entirely; racing is the only
       path. Remove `buildRoutingBand`, `guardHistoryFromDocs`,
       `routingBand` persistence, tier imports (`routeQuery`/`withModelFailover`
-      etc.). Keep error classification via `modelFailover` helpers.
-- [ ] `models/Message.ts`: remove the `routingBand` field.
-- [ ] `admin.ts`: drop `ModelMetricStat` read from `/models`.
-- [ ] `config/index.ts`: remove `routing.smallModel`/`guardModel`/
+      etc.), and the now-unused library-index injection. An empty roster
+      surfaces `AllModelsDisabledError`.
+- [x] `models/Message.ts`: remove the `routingBand` field.
+- [x] `admin.ts`: drop `ModelMetricStat` read from `/models` (emit `stats: []`
+      so the client contract/type still holds; the roster tab is #234).
+- [x] `config/index.ts`: remove `routing.smallModel`/`guardModel`/
       `guardMaxTokens`/`epsilon` and the `ROUTER_*` reads that die with them.
-- [ ] Delete tier/pool migrations + their tests; delete stale
+      (`ROUTER_SMALL_MODEL`/`ROUTER_GUARD_MODEL` inline reads survive in the
+      aux-call services; their redesign is #238.)
+- [x] Delete tier/pool migrations + their tests; delete stale
       `scripts/eval-classify-models.ts`.
-- [ ] Docs: update `README.md` Model Routing Contract, `docs/overview.md`,
+- [x] Rewrite the route test suites to drive routing through a mocked
+      `racingService` (chat, stream, zdr, incognito, entityFailure, assets).
+- [x] Docs: update `README.md` Routing & Inference, `docs/overview.md`,
       `docs/progress.md`; note the roster as the routing story.
-- [ ] `npm run ci` green; migrations run clean on a fresh DB.
+- [x] `npm run ci` green (86 suites, 1173 tests); migrations run clean on a
+      fresh DB (roster seeded, no tier collections).
+
+## Notes on delivery
+
+- The WIP commit left `chat.ts` importing deleted modules; this ticket finished
+  the rewiring (racing-only routes) and rewrote the six route suites to mock
+  `racingService` rather than the deleted `routerService`.
+- Route-level failover tests (disable-and-reroute, overload cool-off) were
+  deleted: that behaviour now lives inside `racingService` and is covered by
+  `racingService.test.ts`.
+- `scripts/mongo.ts` binds `db` to the literal `tova` database regardless of
+  the URL path, so a throwaway-database migration check must query via an
+  explicit client (noted, not changed here — out of scope).
 
 ## Follow-ups
 

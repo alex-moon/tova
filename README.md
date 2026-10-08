@@ -1,12 +1,12 @@
 # Tova
 
-Tova is a chat application with authenticated users, persistent MongoDB-backed chat sessions, and an intelligent router that picks the best model for each prompt from eligible multi-provider model pools — with a built-in tool-calling agent, an asset library, and per-user MCP extensions. Think of it as an application layer that puts model routing, tools, and storage behind a single chat product.
+Tova is a chat application with authenticated users, persistent MongoDB-backed chat sessions, and an intelligent router that races a fixed roster of models across multiple providers per turn — with a built-in tool-calling agent, an asset library, and per-user MCP extensions. Think of it as an application layer that puts model routing, tools, and storage behind a single chat product.
 
 ## Features
 
-- **Intelligent Routing**: Model pools (not fixed pairs) are resolved from MongoDB per tier (`small`, `large`, `guard`); a context-aware guard-model classifier picks the tier — large by default, small only for trivially conversational turns — and feedback weighting re-orders the pool.
+- **Intelligent Routing**: A fixed model roster (MongoDB `modelroster`) is ranked by measured TTFT and price; each turn hedges the chosen model across its serverless providers (DeepInfra + Fireworks) and keeps the first to respond.
 - **Tool-calling Agent**: Chat runs through a Mastra agent loop with optional `web_search` (Brave Search API), the current time (`current_datetime`), user-scoped MCP server tools, and asset tools (`list_files`, `read_file`, `generate_file`). The SSE stream emits structured `tool` call/result events.
-- **Persistent Chat**: Session-based chat history in MongoDB, with per-message routing `metrics` and feedback-driven model fit statistics, followup suggestions, and auto-generated session titles.
+- **Persistent Chat**: Session-based chat history in MongoDB, with per-message routing `metrics` and user thumbs up/down feedback, followup suggestions, and auto-generated session titles.
 - **Asset Library**: File uploads to DigitalOcean Spaces with presigned uploads/downloads, text extraction for documents, and per-message attachments.
 - **MCP Servers**: Per-user MCP server CRUD; auth tokens are encrypted at rest with AES-256-GCM (`MCP_ENCRYPTION_KEY`).
 - **Optional Observability**: LangSmith tracing of every LLM call (agent → step → inference → llm) when configured.
@@ -23,7 +23,7 @@ Backing services (MongoDB) run in Docker Compose; the backend and frontend run d
 
 - Node.js (v22+) and npm
 - Docker with the Compose plugin (for MongoDB only)
-- Provider API keys: Groq (routing/classifier) and the Google OAuth credentials described below
+- Provider API keys: DeepInfra + Fireworks (chat roster racing) and Groq (auxiliary calls: titles, followups, metrics classification, entity extraction), plus the Google OAuth credentials described below
 
 ### Setup
 
@@ -107,14 +107,14 @@ Required: set `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, and `GOOGLE_CALLBACK_U
 
 ## Routing & Inference
 
-Routing picks a tier, then a model:
+Routing runs a fixed, owner-locked **model roster** with per-turn **hedged provider racing** (#232). There is no tier classifier and no ε-exploration.
 
-1. **Guard classifier** — every text turn is classified by a guard-tier model call that sees the recent conversation and replies with JSON category votes (`reasoning`/`code`/`emotional`/`creative`); any "yes" routes large, all "no" routes small, and every failure mode (empty, unparseable, thrown) falls back to the large tier (#169). Image turns skip the classifier and route to the large vision pool (#115).
-2. **Pool pick** — each tier resolves to an eligible pool of models from the MongoDB `providerroutings` collection (managed via admin routes; env vars `ROUTER_SMALL_MODEL`/`ROUTER_LARGE_MODEL` are the fallback when the DB has no rows). A single-model pool is deterministic; a multi-model pool uses ε-random exploration (`ROUTER_EPSILON`) so per-model feedback can accrue.
+1. **Roster pick** — the roster lives in the MongoDB `modelroster` collection (one document per model, each carrying a nested `providers[]` list). Models are ranked by a weighted score `score = TTFT × price penalty` (lower is better): the rolling average time-to-first-token recorded per (model, provider) against a linear price multiplier, so price only breaks near-ties. The lowest-scoring eligible model is the primary. Image turns restrict the roster to `vision: true` models.
+2. **Hedged race** — every turn fires the primary model on **both** of its serverless providers (DeepInfra + Fireworks) concurrently; the first to yield its first token wins and the loser is aborted. The winner's TTFT is recorded against (model, provider), feeding the next turn's weighted pick. A provider that fails transiently cools off (short TTL for endpoint overload, longer for a broken endpoint).
 
-Per-band/model up/down feedback (`/api/feedback`) is aggregated into fit weights; when a pool's leader exceeds the `FEEDBACK_FLIP_RATIO` margin, it is forced into the pick, otherwise the pool is ε-shuffled. Empty pools fail loudly rather than falling back silently.
+If the primary fails on every provider, routing falls through to the next roster model (bounded attempts), reusing provider-error classification for transient vs. hard failures. An empty roster fails loudly (the all-disabled message) rather than falling back silently.
 
-Inference runs through Mastra connectors across multiple providers; per #94, completions default to DeepInfra models, while the routing classifier's guard model rides a Groq small-tier model. Chat responses carry `routing` metadata, and the SSE stream emits `meta`, `tool` (call and result), `delta`, `error`, and `done` events. See `docs/overview.md` for the product-level detail.
+Inference runs through Mastra connectors across multiple providers. Chat responses carry `routing` metadata, and the SSE stream emits `meta`, `tool` (call and result), `delta`, `error`, and `done` events. See `docs/overview.md` for the product-level detail.
 
 ## Optional Integrations
 
@@ -129,7 +129,7 @@ Inference runs through Mastra connectors across multiple providers; per #94, com
 - Root backend entry: `src/index.ts`
 - Server app bootstrap: `src/server/index.ts`
 - Routes: `src/server/routes/` (chat, auth, assets, mcpServers, feedback, profile, admin)
-- Services: `src/server/services/` (router/model config, Mastra agent + connectors, search/MCP/assets, metrics)
+- Services: `src/server/services/` (roster config + provider racing, Mastra agent + connectors, search/MCP/assets, metrics)
 - Frontend app: `src/client/src/App.tsx`
 - Product overview: `docs/overview.md`
 - Status and delivery log: `docs/progress.md` (static; open work is tracked in GitHub issues)
