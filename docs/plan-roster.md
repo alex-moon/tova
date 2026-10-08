@@ -206,7 +206,10 @@ demo on `epic/roster`.
 - [x] #237 completed on `epic/roster` (SP4 reached; CI green).
 - [x] #236 completed on `epic/roster` (SP6 reached; CI green).
 - [x] #238 completed on `epic/roster` (SP5 reached; CI green).
-- [ ] #214 and #166 resolved (decision/proposal at minimum).
+- [x] #214 resolved on `epic/roster` — owner chose the composer-side picker
+      (approach C, 2026-10-08); attach menu shipped (`docs/plan-214-attach-menu.md`).
+- [x] #166 mechanism proposal posted to the ticket (2026-10-08); implementation
+      pending owner approval of the mechanism + the four open decisions.
 - [ ] `epic/roster` merged to `main`.
 
 ## Follow-ups

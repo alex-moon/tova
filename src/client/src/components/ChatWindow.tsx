@@ -1,5 +1,5 @@
 import { useContext } from 'react';
-import React, { useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   Check,
   ChevronDown,
@@ -7,18 +7,20 @@ import {
   Eye,
   EyeOff,
   FileImage,
+  FileText,
   Loader2,
   Menu,
   Paperclip,
   Send,
   ThumbsDown,
   ThumbsUp,
+  Upload,
   X,
 } from 'lucide-react';
 import MarkdownContent from './MarkdownContent';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
-import AssetService from '@/services/assets';
+import AssetService, { type AssetSummary } from '@/services/assets';
 // Tolerant context read (not the throwing useAuth hook): standalone renders
 // of ChatWindow (tests, storybook-style usage) have no AuthProvider.
 import { AuthContext } from '../context/AuthContext';
@@ -294,6 +296,14 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
   const textareaRef = React.useRef<HTMLTextAreaElement>(null);
   const scrollRef = React.useRef<HTMLDivElement>(null);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
+  // Attach menu (#214): the paperclip opens this popover instead of the file
+  // dialogue directly. It offers "Upload" plus the user's five most recent
+  // library files, fetched lazily on first open.
+  const attachMenuRef = React.useRef<HTMLDivElement>(null);
+  const [attachMenuOpen, setAttachMenuOpen] = useState(false);
+  const [recentAssets, setRecentAssets] = useState<AssetSummary[] | null>(null);
+  const [recentError, setRecentError] = useState(false);
+  const [recentLoading, setRecentLoading] = useState(false);
   // Attached file (issue #34): a single asset per message; uploaded
   // immediately on selection (presign → direct PUT → confirm) and referenced
   // by id when the message is sent.
@@ -448,6 +458,57 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
     } finally {
       setUploading(false);
     }
+  };
+
+  // Attach menu (#214): fetch the five most-recent library files the first
+  // time the menu opens, then leave the list cached for the page's lifetime.
+  // A failed fetch only disables the recent list — the Upload row still works.
+  const loadRecentAssets = useCallback(async () => {
+    setRecentLoading(true);
+    setRecentError(false);
+    try {
+      const page = await AssetService.list();
+      setRecentAssets(page.assets.slice(0, 5));
+    } catch {
+      setRecentError(true);
+    } finally {
+      setRecentLoading(false);
+    }
+  }, []);
+
+  const openAttachMenu = () => {
+    setAttachMenuOpen(true);
+    if (recentAssets === null && !recentLoading) void loadRecentAssets();
+  };
+
+  // Close the menu on an outside pointer-down or Escape. Bound only while the
+  // menu is open so a closed composer installs no listeners.
+  useEffect(() => {
+    if (!attachMenuOpen) return;
+    const onPointerDown = (e: MouseEvent) => {
+      if (!attachMenuRef.current?.contains(e.target as Node)) setAttachMenuOpen(false);
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setAttachMenuOpen(false);
+    };
+    document.addEventListener('mousedown', onPointerDown);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', onPointerDown);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [attachMenuOpen]);
+
+  // Picking a recent file reuses the fresh-upload attachment shape and the
+  // same no-text/pending toast (#51 parity); the menu closes on pick.
+  const pickRecentAsset = (asset: AssetSummary) => {
+    setAttachment({
+      id: asset.id,
+      filename: asset.filename,
+      contentType: asset.contentType,
+    });
+    if (!asset.hasText) toastForAsset(asset);
+    setAttachMenuOpen(false);
   };
 
   return (
@@ -707,22 +768,95 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
                   e.target.value = '';
                 }}
               />
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                aria-label="Attach a file"
-                title="Attach a file"
-                disabled={isLoading || uploading}
-                onClick={() => fileInputRef.current?.click()}
-                className="h-8 w-8 text-muted-foreground hover:text-foreground"
-              >
-                {uploading ? (
-                  <Loader2 className="size-4 animate-spin" />
-                ) : (
-                  <Paperclip className="size-4" />
+              {/* Attach menu (#214): the paperclip opens a small popover with
+                  "Upload" plus the five most recent library files, so an
+                  already-uploaded file (e.g. an image for a VLM) can be
+                  referenced for the next turn without re-uploading. */}
+              <div ref={attachMenuRef} className="relative">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  aria-label="Attach a file"
+                  aria-haspopup="menu"
+                  aria-expanded={attachMenuOpen}
+                  title="Attach a file"
+                  disabled={isLoading || uploading}
+                  onClick={() => (attachMenuOpen ? setAttachMenuOpen(false) : openAttachMenu())}
+                  className="h-8 w-8 text-muted-foreground hover:text-foreground"
+                >
+                  {uploading ? (
+                    <Loader2 className="size-4 animate-spin" />
+                  ) : (
+                    <Paperclip className="size-4" />
+                  )}
+                </Button>
+                {attachMenuOpen && (
+                  <div
+                    role="menu"
+                    data-testid="attach-menu"
+                    className="absolute bottom-10 right-0 z-20 w-60 overflow-hidden rounded-lg border border-border panel-surface shadow-lg"
+                  >
+                    <button
+                      type="button"
+                      role="menuitem"
+                      data-testid="attach-menu-upload"
+                      onClick={() => {
+                        setAttachMenuOpen(false);
+                        fileInputRef.current?.click();
+                      }}
+                      className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm font-medium transition-colors hover:bg-accent hover:text-foreground"
+                    >
+                      <Upload className="size-4 shrink-0" aria-hidden />
+                      Upload a file
+                    </button>
+                    <div className="border-t border-border" />
+                    <div className="px-3 py-1.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                      Recent files
+                    </div>
+                    {recentLoading ? (
+                      <p
+                        className="flex items-center gap-2 px-3 pb-2 text-sm text-muted-foreground"
+                        data-testid="attach-menu-loading"
+                      >
+                        <Loader2 className="size-3.5 animate-spin" aria-hidden /> Loading…
+                      </p>
+                    ) : recentError ? (
+                      <p
+                        className="px-3 pb-2 text-sm text-muted-foreground"
+                        data-testid="attach-menu-error"
+                      >
+                        Could not load your files.
+                      </p>
+                    ) : recentAssets && recentAssets.length > 0 ? (
+                      recentAssets.map((asset) => (
+                        <button
+                          key={asset.id}
+                          type="button"
+                          role="menuitem"
+                          data-testid="attach-menu-item"
+                          onClick={() => pickRecentAsset(asset)}
+                          className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm transition-colors hover:bg-accent hover:text-foreground"
+                        >
+                          {isImageAttachment(asset) ? (
+                            <FileImage className="size-4 shrink-0" aria-hidden />
+                          ) : (
+                            <FileText className="size-4 shrink-0" aria-hidden />
+                          )}
+                          <span className="min-w-0 flex-1 truncate">{asset.filename}</span>
+                        </button>
+                      ))
+                    ) : (
+                      <p
+                        className="px-3 pb-2 text-sm text-muted-foreground"
+                        data-testid="attach-menu-empty"
+                      >
+                        No files yet.
+                      </p>
+                    )}
+                  </div>
                 )}
-              </Button>
+              </div>
               <Button
                 type="submit"
                 size="sm"
