@@ -206,12 +206,17 @@ demo on `epic/roster`.
 - [x] #237 completed on `epic/roster` (SP4 reached; CI green).
 - [x] #236 completed on `epic/roster` (SP6 reached; CI green).
 - [x] #238 completed on `epic/roster` (SP5 reached; CI green).
-- [ ] #214 and #166 resolved (decision/proposal at minimum).
+- [x] #214 resolved — owner chose the composer-side picker (approach C,
+      2026-10-08); attach menu implemented on `feat/tv/214-attach-menu`, PR #245
+      open against `epic/roster` (`docs/plan-214-attach-menu.md`).
+- [x] #166 mechanism proposal posted to the ticket (2026-10-08); implementation
+      pending owner approval of the mechanism + the four open decisions.
 - [ ] `epic/roster` merged to `main`.
 
 ## Follow-ups
 
-- #214 and #166 need owner input (mechanism/decision) before implementation.
+- #166 needs owner approval of the posted mechanism before implementation
+  (see the issue comment, 2026-10-08); #214 is resolved by PR #245.
 - #235 flag: the Fireworks DeepSeek V4.1 Flash price seeded from the official
   Fireworks serverless table is `$0.30/$1.20`; third-party aggregators list
   `$0.22/$0.66`. Owner confirmation wanted before it is treated as settled.
