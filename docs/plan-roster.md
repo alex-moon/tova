@@ -215,13 +215,15 @@ demo on `epic/roster`.
 ## Follow-ups
 
 - #166 needs owner approval of the posted mechanism before implementation
-  (see the issue comment, 2026-10-08); #214 is resolved by PR #245.
+  (see the issue comment, 2026-10-08); #214 resolved by PR #245 (merged to
+  `epic/roster`, 2026-10-08).
 - #235 flag: the Fireworks DeepSeek V4.1 Flash price seeded from the official
   Fireworks serverless table is `$0.30/$1.20`; third-party aggregators list
   `$0.22/$0.66`. Owner confirmation wanted before it is treated as settled.
 - #235 completes the per-provider cost path; `ProviderRouting` now has no
-  non-admin reader, so the collection/model can be deleted once #234 (open PR
-  #241) merges the roster-backed admin tab.
+  non-admin reader, so the collection/model can be deleted now that #234 (PR
+  #241) has merged the roster-backed admin tab. This is a net-new cleanup task
+  (not yet ticketed).
 - #236 flag: scheduled evals now default to GLM 5.3 Flash at $0.65/mtok vs the
   retired 20B guard model — owner confirmation wanted that the daily-run cost is
   acceptable (owner can pin `TOVA_EVAL_MODELS` or soften the schedule).
