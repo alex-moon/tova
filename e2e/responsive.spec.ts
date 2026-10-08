@@ -62,15 +62,30 @@ const mockAdminData = async (page: Page) => {
   const models = [
     {
       id: 'e2e-model-0',
-      provider: 'deepinfra',
-      model: 'openai/gpt-oss-20b',
-      tier: 'small',
+      modelId: 'openai/gpt-oss-20b',
+      label: 'openai/gpt-oss-20b',
       eligible: true,
       tools: true,
       vision: false,
       contextLength: 131072,
-      disabledUntil: null,
-      stats: [],
+      inputPrice: 0.1,
+      outputPrice: 0.3,
+      providers: [
+        {
+          provider: 'deepinfra',
+          modelId: 'openai/gpt-oss-20b',
+          enabled: true,
+          ttftMs: 320,
+          ttftSamples: 12,
+          disabledUntil: null,
+        },
+        {
+          provider: 'fireworks',
+          modelId: 'accounts/fireworks/models/gpt-oss-20b',
+          enabled: true,
+          disabledUntil: null,
+        },
+      ],
     },
   ];
   await page.route('**/api/admin/users', (route) =>
