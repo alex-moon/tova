@@ -117,14 +117,14 @@ export class SeedModelRoster implements MigrationInterface {
   async up(db: Db): Promise<void> {
     for (const row of ROWS) {
       await db
-        .collection('modelroster')
+        .collection('modelrosters')
         .updateOne({ modelId: row.modelId }, { $setOnInsert: row }, { upsert: true });
     }
   }
 
   async down(db: Db): Promise<void> {
     for (const row of ROWS) {
-      await db.collection('modelroster').deleteOne({ modelId: row.modelId });
+      await db.collection('modelrosters').deleteOne({ modelId: row.modelId });
     }
   }
 }
