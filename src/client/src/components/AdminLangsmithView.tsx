@@ -324,7 +324,9 @@ const AdminLangsmithView = () => {
             </h3>
             <p className="mb-3 text-xs text-muted-foreground">
               From our own messages. Token and cost totals count only turns logged after the
-              per-message usage change, so they lag the message counts while usage builds up.
+              per-message usage change, so they lag the message counts while usage builds up. Each
+              turn is priced by the provider that served it, so a model raced across two backends
+              bills at the winning provider's rate.
             </p>
             {sessionCosts && sessionCosts.sessions.length > 0 ? (
               <div className="overflow-x-auto">

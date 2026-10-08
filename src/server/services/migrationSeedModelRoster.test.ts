@@ -70,11 +70,26 @@ describe('migration SeedModelRoster', () => {
         outputPrice: seed.outputPrice,
         eligible: true,
       });
-      const providerPairs = (row?.providers as Array<{ provider: string; modelId: string }>).map(
-        (p) => `${p.provider}:${p.modelId}`,
-      );
+      const rows = row?.providers as Array<{
+        provider: string;
+        modelId: string;
+        inputPrice?: number;
+        outputPrice?: number;
+      }>;
       for (const p of seed.providers) {
-        expect(providerPairs).toContain(`${p.provider}:${p.modelId}`);
+        // Per-provider identity AND price must match the seed (#235): one model
+        // has two providers whose prices differ, so drift here would misprice
+        // every raced turn.
+        expect(rows).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({
+              provider: p.provider,
+              modelId: p.modelId,
+              inputPrice: p.inputPrice,
+              outputPrice: p.outputPrice,
+            }),
+          ]),
+        );
       }
     }
   });

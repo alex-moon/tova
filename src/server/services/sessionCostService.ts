@@ -1,7 +1,6 @@
 import { Message } from '../models/Message';
 import { Session } from '../models/Session';
-import { ProviderRouting } from '../models/ProviderRouting';
-import { pickPriceRow, estimateCostUsd, type PriceLookup } from './traceStatsCost';
+import { estimateCostUsd, loadPriceIndex, priceFor } from './traceStatsCost';
 import type { AdminSessionCostRow, AdminSessionsCostPayload } from '../../shared/contracts';
 
 /*
@@ -15,10 +14,14 @@ import type { AdminSessionCostRow, AdminSessionsCostPayload } from '../../shared
  * exists from #224 onward, so counts and token/cost totals describe different
  * rows until usage builds up. The skew is expected and surfaced in the UI.
  *
- * Cost is joined at read time from `ProviderRouting` prices (USD per 1M, #199),
- * using the same model-only tie-break as `traceStatsCost` (unknown ≠ free:
- * a message whose model has no known price contributes nothing to the session
- * cost and, if no message in the session is priced, the row renders `—`).
+ * Cost is joined at read time from roster prices (USD per 1M, #199), keyed by
+ * `(model, provider)` (#235): each turn is priced by the provider that actually
+ * served it, since one model's two providers can carry different prices. The
+ * group carries the persisted `Message.provider`; a legacy turn with no
+ * provider falls back to the model-only pick, same as `traceStatsCost`
+ * (unknown ≠ free: a message whose model has no known price contributes nothing
+ * to the session cost and, if no message in the session is priced, the row
+ * renders `—`).
  */
 
 export interface SessionCostOptions {
@@ -33,11 +36,13 @@ const DEFAULT_LIMIT = 50;
 const finiteOr = (value: unknown): number =>
   typeof value === 'number' && Number.isFinite(value) ? value : 0;
 
-// One row per (session, model) produced by the aggregation below. Grouping
-// server-side keeps the result bounded by distinct session×model pairs rather
-// than by every message in the window (the window can be 30 days wide).
+// One row per (session, model, provider) produced by the aggregation below.
+// Grouping server-side keeps the result bounded by distinct session×model×
+// provider tuples rather than by every message in the window (the window can be
+// 30 days wide). The provider dimension is what makes dual-price models price
+// correctly (#235): each turn is billed at its serving provider's rate.
 interface GroupedRow {
-  _id: { sessionId: unknown; modelName?: string | null };
+  _id: { sessionId: unknown; modelName?: string | null; provider?: string | null };
   messagesIn: number;
   messagesOut: number;
   inputTokens: number;
@@ -60,7 +65,7 @@ export const sessionCostBreakdown = async (
     { $match: { timestamp: { $gte: options.since } } },
     {
       $group: {
-        _id: { sessionId: '$sessionId', modelName: '$modelName' },
+        _id: { sessionId: '$sessionId', modelName: '$modelName', provider: '$provider' },
         messagesIn: { $sum: { $cond: [{ $eq: ['$role', 'user'] }, 1, 0] } },
         messagesOut: { $sum: { $cond: [{ $eq: ['$role', 'assistant'] }, 1, 0] } },
         inputTokens: { $sum: { $ifNull: ['$usage.inputTokens', 0] } },
@@ -86,31 +91,10 @@ export const sessionCostBreakdown = async (
     },
   ]);
 
-  // Pre-load the price rows for every distinct model once (same allowlist
-  // approach as applyCostToStats — never interpolate model strings into a
-  // query).
-  const modelNames = [
-    ...new Set(
-      grouped
-        .map((r) => r._id.modelName)
-        .filter((m): m is string => typeof m === 'string' && m.length > 0),
-    ),
-  ];
-  const priceRows =
-    modelNames.length > 0
-      ? await ProviderRouting.find({ model: { $in: modelNames } })
-          .select({ model: 1, provider: 1, inputPrice: 1, outputPrice: 1 })
-          .lean<{ model: string; provider?: string; inputPrice?: number; outputPrice?: number }[]>()
-      : [];
-
-  const byModel = new Map<string, PriceLookup[]>();
-  for (const row of priceRows
-    .slice()
-    .sort((a, b) => (a.provider ?? '').localeCompare(b.provider ?? ''))) {
-    const bucket = byModel.get(row.model) ?? [];
-    bucket.push(row);
-    byModel.set(row.model, bucket);
-  }
+  // One roster read prices every group: the index resolves `(model, provider)`
+  // with a model-only fallback for legacy turns (same resolver as the LangSmith
+  // rollup).
+  const priceIndex = await loadPriceIndex();
 
   interface Acc {
     messagesIn: number;
@@ -160,7 +144,7 @@ export const sessionCostBreakdown = async (
         ? estimateCostUsd(
             inputTokens,
             outputTokens,
-            pickPriceRow(byModel.get(row._id.modelName ?? '') ?? []),
+            priceFor(priceIndex, row._id.modelName ?? '', row._id.provider ?? undefined),
           )
         : null;
     if (cost !== null) {

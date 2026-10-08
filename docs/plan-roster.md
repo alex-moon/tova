@@ -138,10 +138,17 @@ demo on `epic/roster`.
 - [x] Delete the stale `docs/tickets-261003.md` snapshot.
 - [x] #232 completed on `epic/roster` (SP0 reached; CI green).
 - [x] #233 completed on `epic/roster` (tier machinery deleted; CI green).
-- [ ] #234–#238 completed on `epic/roster`.
+- [x] #235 completed on `epic/roster` (per-provider cost; CI green).
+- [ ] #234, #236–#238 completed on `epic/roster`.
 - [ ] #214 and #166 resolved (decision/proposal at minimum).
 - [ ] `epic/roster` merged to `main`.
 
 ## Follow-ups
 
 - #214 and #166 need owner input (mechanism/decision) before implementation.
+- #235 flag: the Fireworks DeepSeek V4.1 Flash price seeded from the official
+  Fireworks serverless table is `$0.30/$1.20`; third-party aggregators list
+  `$0.22/$0.66`. Owner confirmation wanted before it is treated as settled.
+- #235 completes the per-provider cost path; `ProviderRouting` now has no
+  non-admin reader, so the collection/model can be deleted once #234 (open PR
+  #241) merges the roster-backed admin tab.

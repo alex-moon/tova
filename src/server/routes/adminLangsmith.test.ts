@@ -2,7 +2,7 @@ import request from 'supertest';
 import { createApp } from '../index';
 import { User } from '../models/User';
 import { TraceStatsCache } from '../models/TraceStatsCache';
-import { ProviderRouting } from '../models/ProviderRouting';
+import { ModelRoster } from '../models/ModelRoster';
 import { Message } from '../models/Message';
 import { Session } from '../models/Session';
 import { listTraces, RETRY_WAIT_MS } from '../services/langsmithTracesService';
@@ -629,12 +629,19 @@ describe('admin langsmith (#186)', () => {
   it('prices a cached model from the in-DB price (#224)', async () => {
     const app = createApp();
     const cookie = await registerAdmin(app, 'ls-cache-cost@example.com');
-    await ProviderRouting.create({
-      provider: 'deepinfra',
-      model: 'priced/cached',
-      tier: 'large',
-      inputPrice: 2,
-      outputPrice: 4,
+    await ModelRoster.create({
+      modelId: 'priced/cached',
+      label: 'priced/cached',
+      eligible: true,
+      providers: [
+        {
+          provider: 'deepinfra',
+          modelId: 'priced/cached',
+          enabled: true,
+          inputPrice: 2,
+          outputPrice: 4,
+        },
+      ],
     });
     await TraceStatsCache.create({
       windowKey: 'days=7',
@@ -758,12 +765,19 @@ describe('admin langsmith (#186)', () => {
     const app = createApp();
     const cookie = await registerAdmin(app, 'ls-sessions@example.com');
 
-    await ProviderRouting.create({
-      provider: 'deepinfra',
-      model: 'priced/session',
-      tier: 'large',
-      inputPrice: 2,
-      outputPrice: 4,
+    await ModelRoster.create({
+      modelId: 'priced/session',
+      label: 'priced/session',
+      eligible: true,
+      providers: [
+        {
+          provider: 'deepinfra',
+          modelId: 'priced/session',
+          enabled: true,
+          inputPrice: 2,
+          outputPrice: 4,
+        },
+      ],
     });
 
     const sessionA = await Session.create({ userId: (await User.findOne())._id, title: 'Chat A' });
@@ -821,6 +835,67 @@ describe('admin langsmith (#186)', () => {
     expect(res.body.totals.messagesOut).toBe(2);
     // Only the priced session contributes to the total cost.
     expect(res.body.totals.estimatedCostUsd).toBe(10);
+  });
+
+  it('prices each turn by its persisted provider on a dual-priced model (#235)', async () => {
+    const app = createApp();
+    const cookie = await registerAdmin(app, 'ls-sessions-dual@example.com');
+
+    await ModelRoster.create({
+      modelId: 'dual/session',
+      label: 'dual/session',
+      eligible: true,
+      providers: [
+        {
+          provider: 'deepinfra',
+          modelId: 'dual/session',
+          enabled: true,
+          inputPrice: 1,
+          outputPrice: 1,
+        },
+        {
+          provider: 'fireworks',
+          modelId: 'dual/session',
+          enabled: true,
+          inputPrice: 10,
+          outputPrice: 10,
+        },
+      ],
+    });
+
+    const session = await Session.create({ userId: (await User.findOne())._id, title: 'Dual' });
+    // DeepInfra turn: 1M in @ $1 = $1.
+    await Message.create({
+      sessionId: session._id,
+      role: 'assistant',
+      content: 'a',
+      modelName: 'dual/session',
+      provider: 'deepinfra',
+      timestamp: new Date(),
+      usage: { inputTokens: 1_000_000, outputTokens: 0, totalTokens: 1_000_000 },
+    });
+    // Fireworks turn on the SAME model: 1M in @ $10 = $10.
+    await Message.create({
+      sessionId: session._id,
+      role: 'assistant',
+      content: 'b',
+      modelName: 'dual/session',
+      provider: 'fireworks',
+      timestamp: new Date(),
+      usage: { inputTokens: 1_000_000, outputTokens: 0, totalTokens: 1_000_000 },
+    });
+
+    const res = await request(app)
+      .get('/api/admin/langsmith/sessions?days=7')
+      .set('Cookie', cookie);
+    expect(res.status).toBe(200);
+
+    const row = res.body.sessions.find(
+      (s: { sessionId: string }) => s.sessionId === String(session._id),
+    );
+    // Provider-accurate: $1 (deepinfra) + $10 (fireworks), not 2 × the same rate.
+    expect(row.estimatedCostUsd).toBe(11);
+    expect(res.body.totals.estimatedCostUsd).toBe(11);
   });
 
   it('excludes messages older than the requested window (#224)', async () => {

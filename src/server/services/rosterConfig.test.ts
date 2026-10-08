@@ -167,6 +167,15 @@ describe('ROSTER_SEED (#232 owner-locked roster)', () => {
     }
   });
 
+  it('prices every provider entry (#235 per-provider price)', () => {
+    for (const m of ROSTER_SEED) {
+      for (const p of m.providers) {
+        expect(Number.isFinite(p.inputPrice)).toBe(true);
+        expect(Number.isFinite(p.outputPrice)).toBe(true);
+      }
+    }
+  });
+
   it('marks MiniMax M3 text-only and excludes it from image turns', () => {
     const minimax = ROSTER_SEED.find((m) => m.modelId === 'MiniMaxAI/MiniMax-M3');
     expect(minimax?.vision).toBe(false);
