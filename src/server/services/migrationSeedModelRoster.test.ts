@@ -44,7 +44,9 @@ describe('migration SeedModelRoster', () => {
     );
 
     // MiniMax M3 must be text-only (excluded from image turns).
-    const minimax = await db.collection('modelrosters').findOne({ modelId: 'MiniMaxAI/MiniMax-M3' });
+    const minimax = await db
+      .collection('modelrosters')
+      .findOne({ modelId: 'MiniMaxAI/MiniMax-M3' });
     expect(minimax).toMatchObject({ vision: false });
 
     await new SeedModelRoster().down(db);
