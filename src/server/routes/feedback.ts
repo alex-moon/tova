@@ -3,7 +3,6 @@ import { isValidObjectId } from 'mongoose';
 import { authenticate, AuthRequest } from '../middleware/auth';
 import { Session } from '../models/Session';
 import { Message } from '../models/Message';
-import { recordFeedback, clearFeedback, FeedbackValue } from '../services/modelMetricsStatsService';
 import { feedbackValueSchema } from '../validation';
 
 const router = express.Router();
@@ -50,22 +49,14 @@ router.post('/:messageId/feedback', authenticate, async (req: AuthRequest, res) 
     const message = await loadOwnedMessage(req, res);
     if (!message) return;
 
-    const prevValue = message.feedback?.value ?? null;
+    // #233: the vote itself stays a user feature; only the tier-era feedback
+    // tally (modelMetricsStatsService) is gone, so this records the thumb
+    // without touching any stats collection.
     const updated = await Message.findOneAndUpdate(
       { _id: message._id },
       { $set: { feedback: { value, updatedAt: new Date() } } },
       { new: true },
     );
-
-    // A re-click of the active thumb changes nothing; switching corrects the
-    // counters (plan decision 2). Stats failures must not fail the vote.
-    if (prevValue !== value) {
-      try {
-        await recordFeedback(message.routingBand ?? '', message.modelName ?? '', value, prevValue);
-      } catch (err) {
-        console.error('Feedback stats error:', err);
-      }
-    }
 
     return res.json(updated);
   } catch (err) {
@@ -74,16 +65,14 @@ router.post('/:messageId/feedback', authenticate, async (req: AuthRequest, res) 
   }
 });
 
-// Clear a vote (issue #18 comment on Q1): removes the persisted feedback and
-// decrements the previous value's counter. Idempotent: clearing a cleared
-// message just returns it, stats untouched.
+// Clear a vote (issue #18 comment on Q1): removes the persisted feedback.
+// Idempotent: clearing a cleared message just returns it.
 router.delete('/:messageId/feedback', authenticate, async (req: AuthRequest, res) => {
   try {
     const message = await loadOwnedMessage(req, res);
     if (!message) return;
 
-    const prevValue: FeedbackValue | null = message.feedback?.value ?? null;
-    if (!prevValue) {
+    if (!message.feedback?.value) {
       return res.json(message);
     }
     const updated = await Message.findOneAndUpdate(
@@ -91,12 +80,6 @@ router.delete('/:messageId/feedback', authenticate, async (req: AuthRequest, res
       { $set: { feedback: { value: null, updatedAt: new Date() } } },
       { new: true },
     );
-
-    try {
-      await clearFeedback(message.routingBand ?? '', message.modelName ?? '', prevValue);
-    } catch (err) {
-      console.error('Feedback stats error:', err);
-    }
 
     return res.json(updated);
   } catch (err) {

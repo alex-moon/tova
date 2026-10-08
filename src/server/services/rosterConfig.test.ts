@@ -1,5 +1,6 @@
 import {
   pickPrimary,
+  routingPrice,
   rosterScore,
   rosterModelsForTurn,
   ROSTER_SEED,
@@ -128,6 +129,26 @@ describe('rosterModelsForTurn (#232)', () => {
     const candidates = rosterModelsForTurn([halfCooling], false);
     expect(candidates).toHaveLength(1);
     expect(candidates[0].providers.map((p) => p.provider)).toEqual(['fireworks']);
+  });
+});
+
+describe('routingPrice (#199, moved with the roster in #233)', () => {
+  it('sums input and output price when both are present', () => {
+    expect(routingPrice({ inputPrice: 1.3, outputPrice: 2.6 })).toBeCloseTo(3.9);
+    expect(routingPrice({ inputPrice: 0.085, outputPrice: 0.4 })).toBeCloseTo(0.485);
+  });
+
+  it('treats a missing component as unknown, not zero', () => {
+    expect(routingPrice({ outputPrice: 2.6 })).toBeUndefined();
+    expect(routingPrice({ inputPrice: 1.3 })).toBeUndefined();
+    expect(routingPrice({})).toBeUndefined();
+  });
+
+  it('treats a non-finite component as unknown', () => {
+    expect(routingPrice({ inputPrice: NaN, outputPrice: 1 })).toBeUndefined();
+    expect(routingPrice({ inputPrice: 1, outputPrice: NaN })).toBeUndefined();
+    expect(routingPrice({ inputPrice: Infinity, outputPrice: 1 })).toBeUndefined();
+    expect(routingPrice({ inputPrice: 1, outputPrice: -Infinity })).toBeUndefined();
   });
 });
 

@@ -99,21 +99,6 @@ export const config = {
     },
   },
 
-  routing: {
-    get smallModel(): string {
-      return process.env.ROUTER_SMALL_MODEL || 'openai/gpt-oss-20b';
-    },
-    get guardModel(): string {
-      return process.env.ROUTER_GUARD_MODEL || 'openai/gpt-oss-20b';
-    },
-    get guardMaxTokens(): string | undefined {
-      return process.env.ROUTER_GUARD_MAX_TOKENS;
-    },
-    get epsilon(): string | undefined {
-      return process.env.ROUTER_EPSILON;
-    },
-  },
-
   entityGraph: {
     get extractionEnabled(): boolean {
       return Boolean(process.env.ENTITY_GRAPH_ENABLED);

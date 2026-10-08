@@ -19,13 +19,23 @@ import { CASES, resolveExpectedContent, type EvalCase } from '../evals/cases';
 import { clearEvalSource, seedEvalSource, evalUserId } from '../evals/mongoSource';
 import { runCase } from '../evals/runCase';
 import type { Assertion, AssertionResult } from '../evals/types';
-import { groqConnector, deepinfraConnector } from './mastraService';
-import { sweepModels, type ProviderName } from './modelConfigService';
+import { groqConnector, deepinfraConnector, fireworksConnector } from './mastraService';
+import { sweepModels } from './modelConfigService';
+import type { RosterProvider } from './rosterConfig';
 import { EvalRunRecord } from '../models/EvalRunRecord';
 
-export type WiredProvider = Extract<ProviderName, 'groq' | 'deepinfra'>;
+/*
+ * #233: the wired providers now include `fireworks` (added to the roster by
+ * #232). `groq` stays wired for the auxiliary-model single-run default; the
+ * roster sweep (#236) enumerates deepinfra/fireworks rows.
+ */
+export type WiredProvider = 'groq' | RosterProvider;
 
-export const connectorsByProvider = { groq: groqConnector, deepinfra: deepinfraConnector } as const;
+export const connectorsByProvider = {
+  groq: groqConnector,
+  deepinfra: deepinfraConnector,
+  fireworks: fireworksConnector,
+} as const;
 
 /** Eval score, stringly typed as the runner always produced it. `error` is a
  * run-level crash recorded in sweep mode, distinct from a graded `fail`. */
@@ -142,14 +152,15 @@ export const parseModelsFlag = (
 ): { provider: WiredProvider; model: string }[] | null => {
   if (value === undefined) return null;
   if (value === 'all') {
-    // Wired providers only: typesafe models are excluded (no connector here)
-    // and that exclusion is stated, not hidden (#158 plan).
+    // Wired roster providers only: typesafe/groq are excluded from the roster
+    // sweep (no roster rows, no sweep connector) and that exclusion is stated,
+    // not hidden (#158 plan).
     warned?.(
-      'sweep universe: eligible seed+env models on wired providers (groq, deepinfra); ' +
-        'unwired providers (e.g. typesafe) are excluded.',
+      'sweep universe: the fixed roster on wired providers (deepinfra, fireworks); ' +
+        'other providers are excluded.',
     );
-    return sweepModels(Object.keys(connectorsByProvider) as WiredProvider[]).map(
-      ({ provider, model }) => ({ provider: provider as WiredProvider, model }),
+    return sweepModels(Object.keys(connectorsByProvider) as RosterProvider[]).map(
+      ({ provider, model }) => ({ provider, model }),
     );
   }
   return value
@@ -160,7 +171,9 @@ export const parseModelsFlag = (
       const sep = entry.indexOf(':');
       if (sep === -1) return { provider: 'deepinfra' as const, model: entry };
       if (!(entry.slice(0, sep) in connectorsByProvider)) {
-        throw new Error(`Unknown provider in --models '${entry}' (wired: deepinfra, groq).`);
+        throw new Error(
+          `Unknown provider in --models '${entry}' (wired: deepinfra, fireworks, groq).`,
+        );
       }
       return { provider: entry.slice(0, sep) as WiredProvider, model: entry.slice(sep + 1) };
     });

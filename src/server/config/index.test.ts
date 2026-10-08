@@ -17,10 +17,6 @@ const keys = [
   'LANGSMITH_PROJECT',
   'LANGCHAIN_PROJECT',
   'BRAVE_SEARCH_API_KEY',
-  'ROUTER_SMALL_MODEL',
-  'ROUTER_GUARD_MODEL',
-  'ROUTER_GUARD_MAX_TOKENS',
-  'ROUTER_EPSILON',
   'ENTITY_GRAPH_ENABLED',
   'ENTITY_GRAPH_PROMPT_INJECTION',
   'CHAT_MAX_OUTPUT_TOKENS',
@@ -68,10 +64,6 @@ describe('config/index', () => {
       process.env.LANGSMITH_API_KEY = 'ls-key';
       process.env.LANGSMITH_PROJECT = 'tova-dev';
       process.env.BRAVE_SEARCH_API_KEY = 'brave';
-      process.env.ROUTER_SMALL_MODEL = 'small';
-      process.env.ROUTER_GUARD_MODEL = 'guard';
-      process.env.ROUTER_GUARD_MAX_TOKENS = '64';
-      process.env.ROUTER_EPSILON = '0.25';
       process.env.ENTITY_GRAPH_ENABLED = 'true';
       process.env.ENTITY_GRAPH_PROMPT_INJECTION = 'true';
       process.env.CHAT_MAX_OUTPUT_TOKENS = '2048';
@@ -101,10 +93,6 @@ describe('config/index', () => {
       expect(config.langsmith.apiKey).toBe('ls-key');
       expect(config.langsmith.project).toBe('tova-dev');
       expect(config.search.braveApiKey).toBe('brave');
-      expect(config.routing.smallModel).toBe('small');
-      expect(config.routing.guardModel).toBe('guard');
-      expect(config.routing.guardMaxTokens).toBe('64');
-      expect(config.routing.epsilon).toBe('0.25');
       expect(config.entityGraph.extractionEnabled).toBe(true);
       expect(config.entityGraph.promptInjectionEnabled).toBe(true);
       expect(config.chat.maxOutputTokens).toBe('2048');
@@ -139,13 +127,6 @@ describe('config/index', () => {
     it('storage defaults region to lon1 and bucket to empty string (||)', () => {
       expect(config.storage.bucket).toBe('');
       expect(config.storage.region).toBe('lon1');
-    });
-
-    it('routing defaults both models to openai/gpt-oss-20b (||)', () => {
-      expect(config.routing.smallModel).toBe('openai/gpt-oss-20b');
-      expect(config.routing.guardModel).toBe('openai/gpt-oss-20b');
-      expect(config.routing.guardMaxTokens).toBeUndefined();
-      expect(config.routing.epsilon).toBeUndefined();
     });
 
     it('safe browsing falls back to GOOGLE_API_KEY then undefined (|| ... || undefined)', () => {
