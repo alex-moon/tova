@@ -9,6 +9,13 @@ import { buildAttachmentEnvelope } from '../services/attachmentEnvelope';
 import { isImageContentType } from '../services/assetLimits';
 import { spacesWorkspaceStorage } from '../services/workspaceStorage';
 import { routeQuery } from '../services/routerService';
+import type { RoutingResult } from '../services/routerService';
+import {
+  pickRosterRoute,
+  rosterRacingEnabled,
+  routeAndComplete,
+  routeAndStream,
+} from '../services/racingService';
 import { generateChatTitle } from '../services/titleService';
 import { hasPermission, ROUTING_PERMISSION } from '../services/userService';
 import { buildSystemContent, fileLibraryIndex } from '../services/promptAssembly';
@@ -665,32 +672,78 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
       const zdrEntityBlock = await knowledgeBlockFor(content, userId as string);
 
       const zdrRoutingBand = buildRoutingBand(computeDeterministicMetrics(content));
-      const { routing: routingResult, completion: chatCompletion } = await withModelFailover(
-        // #169 phase 2: the guard classifies with the replayed context —
-        // prior-turns-only by construction of buildZdrMessages.
-        () =>
-          routeQuery(content, undefined, undefined, {
-            band: zdrRoutingBand,
-            history: zdrHistory.value,
-          }),
-        async (r) => {
-          // #214: library index injected only on the guard's files vote.
-          const libraryBlock = r.filesLikely ? await libraryBlockFor(userId as string) : '';
-          const turnMessages = buildZdrMessages(zdrHistory.value, content);
-          turnMessages.unshift({
-            role: 'system',
-            content: buildSystemContent(userDoc, zdrEntityBlock, libraryBlock),
-          });
-          appendAssetBlock(turnMessages, attachedAsset);
-          return inferenceService.createCompletion({
-            messages: turnMessages,
-            model: r.model,
-            provider: r.provider,
-            userId,
-            abortSignal: abortController.signal,
-          });
-        },
-      );
+      /*
+       * #232: ZDR turns can also ride the racing path. The tier path is kept
+       * for the fallback (racing disabled or an empty roster).
+       */
+      const zdrMessages = async (
+        filesLikely: boolean | undefined,
+      ): Promise<ReturnType<typeof buildZdrMessages>> => {
+        const libraryBlock = filesLikely ? await libraryBlockFor(userId as string) : '';
+        const turnMessages = buildZdrMessages(zdrHistory.value, content);
+        turnMessages.unshift({
+          role: 'system',
+          content: buildSystemContent(userDoc, zdrEntityBlock, libraryBlock),
+        });
+        appendAssetBlock(turnMessages, attachedAsset);
+        return turnMessages;
+      };
+      let routingResult: RoutingResult;
+      let chatCompletion: Awaited<ReturnType<typeof inferenceService.createCompletion>>;
+      if (rosterRacingEnabled()) {
+        // ZDR turns never carry image parts (no buildImageTurn on this path),
+        // so image gating is moot: race the full text roster.
+        const prePick = await pickRosterRoute(false);
+        if (prePick) {
+          // Build the prompt from the pre-race pick (racing does not use the
+          // guard, so no files vote); the winner re-shapes routing below.
+          const turnMessages = await zdrMessages(undefined);
+          const raced = await routeAndComplete(
+            {
+              messages: turnMessages,
+              userId,
+              abortSignal: abortController.signal,
+            },
+            false,
+          );
+          routingResult = raced.routing;
+          chatCompletion = raced.outcome.result.completion;
+        } else {
+          ({ routing: routingResult, completion: chatCompletion } = await withModelFailover(
+            () =>
+              routeQuery(content, undefined, undefined, {
+                band: zdrRoutingBand,
+                history: zdrHistory.value,
+              }),
+            async (r) =>
+              inferenceService.createCompletion({
+                messages: await zdrMessages(r.filesLikely),
+                model: r.model,
+                provider: r.provider,
+                userId,
+                abortSignal: abortController.signal,
+              }),
+          ));
+        }
+      } else {
+        ({ routing: routingResult, completion: chatCompletion } = await withModelFailover(
+          // #169 phase 2: the guard classifies with the replayed context —
+          // prior-turns-only by construction of buildZdrMessages.
+          () =>
+            routeQuery(content, undefined, undefined, {
+              band: zdrRoutingBand,
+              history: zdrHistory.value,
+            }),
+          async (r) =>
+            inferenceService.createCompletion({
+              messages: await zdrMessages(r.filesLikely),
+              model: r.model,
+              provider: r.provider,
+              userId,
+              abortSignal: abortController.signal,
+            }),
+        ));
+      }
       const zdrAssistantContent = chatCompletion.choices[0]?.message?.content ?? '';
       // #195: a tool-only ZDR turn still ends with a short confirmation.
       const zdrConfirmation = zdrAssistantContent.trim()
@@ -767,34 +820,61 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
       return next;
     };
 
-    const { routing: routingResult, completion: chatCompletion } = await withModelFailover(
-      () =>
-        routeQuery(content, undefined, undefined, {
-          band: routingBand,
-          hasImage,
-          history: guardHistory,
-        }),
-      async (r) => {
-        const libraryBlock = r.filesLikely ? await libraryBlockFor(userId as string) : '';
-        const turnMessages = await withSystemAndAsset(
-          buildSystemContent(userDoc, entityBlock, libraryBlock),
-        );
-        return inferenceService.createCompletion({
+    /*
+     * #232: persisted turns ride the racing path when enabled and a roster
+     * pick exists. Racing selects the model internally, so the prompt is
+     * assembled once from the pre-race pick (no guard files vote — racing does
+     * not call the guard) and the budget is sized against that pick's window.
+     * The winner re-shapes routing for persistence. The tier failover path
+     * remains the fallback.
+     */
+    let routingResult: RoutingResult;
+    let chatCompletion: Awaited<ReturnType<typeof inferenceService.createCompletion>>;
+    const rosterPrePick = rosterRacingEnabled() ? await pickRosterRoute(hasImage) : null;
+    if (rosterPrePick) {
+      const turnMessages = await withSystemAndAsset(buildSystemContent(userDoc, entityBlock, ''));
+      const raced = await routeAndComplete(
+        {
           messages: turnMessages,
-          model: r.model,
-          provider: r.provider,
-          // #104: always send an output-token budget so the provider cannot
-          // default it to the model's whole context window.
-          max_tokens: outputTokensFor(r.contextLength, promptCharsFrom(turnMessages)),
+          max_tokens: outputTokensFor(rosterPrePick.contextLength, promptCharsFrom(turnMessages)),
           userId,
           abortSignal: abortController.signal,
-          // #224: attach the chat session to this turn's trace so per-turn
-          // token usage is attributable to a session (only the persisted path
-          // has a session id).
           trace: { sessionId: String(session!._id) },
-        });
-      },
-    );
+        },
+        hasImage,
+      );
+      routingResult = raced.routing;
+      chatCompletion = raced.outcome.result.completion;
+    } else {
+      ({ routing: routingResult, completion: chatCompletion } = await withModelFailover(
+        () =>
+          routeQuery(content, undefined, undefined, {
+            band: routingBand,
+            hasImage,
+            history: guardHistory,
+          }),
+        async (r) => {
+          const libraryBlock = r.filesLikely ? await libraryBlockFor(userId as string) : '';
+          const turnMessages = await withSystemAndAsset(
+            buildSystemContent(userDoc, entityBlock, libraryBlock),
+          );
+          return inferenceService.createCompletion({
+            messages: turnMessages,
+            model: r.model,
+            provider: r.provider,
+            // #104: always send an output-token budget so the provider cannot
+            // default it to the model's whole context window.
+            max_tokens: outputTokensFor(r.contextLength, promptCharsFrom(turnMessages)),
+            userId,
+            abortSignal: abortController.signal,
+            // #224: attach the chat session to this turn's trace so per-turn
+            // token usage is attributable to a session (only the persisted path
+            // has a session id).
+            trace: { sessionId: String(session!._id) },
+          });
+        },
+      ));
+    }
 
     // Empty provider responses persist as '' (fail-visibility, #4 J); the
     // UI presents the '(no content returned)' placeholder.
@@ -974,6 +1054,17 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
     // presign path; the image part replaces the filename envelope this turn.
     const hasImage = turnsWithImage(attachedAsset);
 
+    /*
+     * #232: when racing is enabled, the primary model comes from the weighted
+     * roster pick (no guard classifier). The actual race runs after the
+     * messages are assembled (the race needs the full prompt); this pick only
+     * supplies the `contextLength` for the output budget and the pre-race
+     * `meta` routing. Falls back to the tier router when the roster is empty.
+     */
+    const racing = rosterRacingEnabled();
+    const rosterRoute = racing ? await pickRosterRoute(hasImage) : null;
+    const useRacing = racing && rosterRoute !== null;
+
     await ensureUserLocation(streamUserDoc, req.ip);
     if (zdr) {
       // Continuity comes from the client replay (#116); nothing is read back.
@@ -982,11 +1073,13 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
       // #169 phase 2: the replay is prior-turns-only by construction —
       // exactly the guard's context contract.
       guardHistory = zdrHistory;
-      routingResult = await routeQuery(content, undefined, undefined, {
-        band: routingBand,
-        hasImage,
-        history: guardHistory,
-      });
+      routingResult =
+        rosterRoute ??
+        (await routeQuery(content, undefined, undefined, {
+          band: routingBand,
+          hasImage,
+          history: guardHistory,
+        }));
     } else {
       // Save user message
       const userMessage = await saveUserMessageWithMetrics(
@@ -1012,11 +1105,13 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
       );
 
       // Determine model. Same image-turn gating as the non-streaming route (#115).
-      routingResult = await routeQuery(content, undefined, undefined, {
-        band: routingBand,
-        hasImage,
-        history: guardHistory,
-      });
+      routingResult =
+        rosterRoute ??
+        (await routeQuery(content, undefined, undefined, {
+          band: routingBand,
+          hasImage,
+          history: guardHistory,
+        }));
       messages = messagesFromPersistedHistory(history as { role: string; content: string }[]);
     }
 
@@ -1089,19 +1184,42 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
             routing: routingResult,
           });
 
-          const stream = await inferenceService.createStreamingCompletion({
-            messages,
-            model: routingResult.model,
-            provider: routingResult.provider,
-            // #104: always send an output-token budget so the provider cannot
-            // default it to the model's whole context window.
-            max_tokens: outputTokensFor(routingResult.contextLength, promptCharsFrom(messages)),
-            userId,
-            abortSignal: abortController.signal,
-            // #224: attach the chat session to this turn's trace (ZDR turns
-            // have no session — nothing durable can be joined).
-            ...(zdr ? {} : { trace: { sessionId: String(session!._id) } }),
-          });
+          /*
+           * #232: racing path. `routeAndStream` hedges the weighted primary's
+           * providers, aborts the loser, and does its own roster fallback — so
+           * the tier failover loop below is bypassed entirely. The winner's
+           * model/provider replace the pre-race pick for persistence.
+           */
+          let stream;
+          if (useRacing) {
+            const raced = await routeAndStream(
+              {
+                messages,
+                // #104: budget sized against the picked model's window.
+                max_tokens: outputTokensFor(routingResult.contextLength, promptCharsFrom(messages)),
+                userId,
+                abortSignal: abortController.signal,
+                ...(zdr ? {} : { trace: { sessionId: String(session!._id) } }),
+              },
+              hasImage,
+            );
+            stream = raced.outcome.result.stream;
+            routingResult = raced.routing;
+          } else {
+            stream = await inferenceService.createStreamingCompletion({
+              messages,
+              model: routingResult.model,
+              provider: routingResult.provider,
+              // #104: always send an output-token budget so the provider cannot
+              // default it to the model's whole context window.
+              max_tokens: outputTokensFor(routingResult.contextLength, promptCharsFrom(messages)),
+              userId,
+              abortSignal: abortController.signal,
+              // #224: attach the chat session to this turn's trace (ZDR turns
+              // have no session — nothing durable can be joined).
+              ...(zdr ? {} : { trace: { sessionId: String(session!._id) } }),
+            });
+          }
 
           for await (const chunk of stream) {
             // #224: the connector may emit one trailing usage chunk; capture

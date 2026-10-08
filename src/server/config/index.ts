@@ -70,6 +70,12 @@ export const config = {
     get deepinfraApiKey(): string | undefined {
       return process.env.DEEPINFRA_API_KEY;
     },
+    // #232: Mastra reads FIREWORKS_API_KEY implicitly for inference; surfaced
+    // here for parity with the DeepInfra key so config consumers have one
+    // place to read provider credentials.
+    get fireworksApiKey(): string | undefined {
+      return process.env.FIREWORKS_API_KEY;
+    },
   },
 
   // #179: Grafana Cloud (hosted Loki) for retained logs. `url` is the full

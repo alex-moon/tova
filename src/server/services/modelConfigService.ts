@@ -2,7 +2,7 @@ import { ProviderRouting } from '../models/ProviderRouting';
 
 export type ModelTier = 'small' | 'large' | 'guard';
 
-export type ProviderName = 'groq' | 'deepinfra' | 'typesafe';
+export type ProviderName = 'groq' | 'deepinfra' | 'fireworks' | 'typesafe';
 
 /*
  * Capabilities tracked per `providerroutings` row (#94): `tools` and `vision`

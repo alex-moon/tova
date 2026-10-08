@@ -12,7 +12,7 @@
  * routing/classification/auxiliary work runs on Jev hosted on the TypeSafe
  * API. DeepInfra callers get tagged during routing work in #4.
  */
-export type LlmProvider = 'groq' | 'deepinfra' | 'typesafe';
+export type LlmProvider = 'groq' | 'deepinfra' | 'fireworks' | 'typesafe';
 
 /*
  * LangSmith tracing context (issue #5): optional, attachable per call.

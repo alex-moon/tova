@@ -107,14 +107,19 @@ demo on `epic/roster`.
 - **SP0 — Foundation (after #232).** Fixed roster + provider racing runs behind
   the existing app; no deletions yet. The app is functionally complete and
   verifiable even though the old tier code still exists.
-- _None reached yet._
+  **Reached (2026-10-08).** `fireworks` connector, `ModelRoster` collection +
+  migration, weighted pick (`score = TTFT × price penalty`), hedged racing with
+  loser abort, roster fallback, and both chat routes wired. Racing is gated by
+  `ROSTER_RACING_ENABLED` (default on outside tests) and falls back to the tier
+  router when off/empty. `npm run ci` green (91 suites, 1196 tests). Tier
+  machinery intentionally still present — deletion is #233.
 
 ## Done (checklist)
 
 - [x] Enumerate open issues and triage for do-ability.
 - [x] Record the `epic/roster` base-branch plan.
 - [x] Delete the stale `docs/tickets-261003.md` snapshot.
-- [ ] #232 completed on `epic/roster`.
+- [x] #232 completed on `epic/roster` (SP0 reached; CI green).
 - [ ] #233–#238 completed on `epic/roster`.
 - [ ] #214 and #166 resolved (decision/proposal at minimum).
 - [ ] `epic/roster` merged to `main`.
