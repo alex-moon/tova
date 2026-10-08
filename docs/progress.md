@@ -2,6 +2,15 @@
 
 ## Status (current)
 
+#232–#238 roster epic (merged to `main` via fast-forward, 2026-10-08; plan doc
+archived to `docs/done/plan-roster.md`). The `epic/roster` branch delivered the
+fixed model roster + hedged provider racing (#232), the tier-era deletion (#233),
+roster-backed admin Models/Compare tabs (#234), per-provider cost tracking
+(#235), roster eval sweep (#236), LangSmith provider attribution + TTFT (#237),
+and relocated aux calls + enrichment pass (#238); #214 (composer attach menu)
+also merged into the epic. `npm run ci` green (87 suites, 1073 server tests)
+before the merge.
+
 #238 aux calls + enrichment pass (on the `epic/roster` epic branch, not yet
 merged to `main`). The four auxiliary LLM calls (chat title, entity extraction,
 follow-up suggestions, prompt-metric classification) no longer read the deleted

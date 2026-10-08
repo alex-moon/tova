@@ -210,7 +210,8 @@ demo on `epic/roster`.
       (approach C, 2026-10-08); attach menu shipped (`docs/plan-214-attach-menu.md`).
 - [x] #166 mechanism proposal posted to the ticket (2026-10-08); implementation
       pending owner approval of the mechanism + the four open decisions.
-- [ ] `epic/roster` merged to `main`.
+- [x] `epic/roster` merged to `main` (fast-forward, 2026-10-08; CI green —
+      87 server suites / 1073 tests before merge).
 
 ## Follow-ups
 
