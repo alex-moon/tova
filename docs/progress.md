@@ -2,6 +2,19 @@
 
 ## Status (current)
 
+#238 aux calls + enrichment pass (on the `epic/roster` epic branch, not yet
+merged to `main`). The four auxiliary LLM calls (chat title, entity extraction,
+follow-up suggestions, prompt-metric classification) no longer read the deleted
+tier env vars: a single `AUX_MODEL`/`AUX_PROVIDER` source (default
+`openai/gpt-oss-20b` on groq — the retired guard model) feeds them all. The
+retired guard's `files` enrichment signal is rebuilt as `enrichmentService.ts`:
+before a text turn races, a bounded "first tiny fast pass" on the aux model
+judges whether the user is likely referring to a library file and, if so,
+injects the bounded file-library index into the system prompt (`ENRICHMENT_ENABLED`
+kill switch, `ENRICHMENT_TIMEOUT_MS` cap; image and ZDR turns skip it). No new
+enrichment signals were invented — expansion awaits the owner's concrete list.
+`npm run ci` green (87 suites, 1072 server tests; 18 client files, 236 tests).
+
 #232/#233 fixed model roster + hedged provider racing, then tier-era deletion
 (on the `epic/roster` epic branch, not yet merged to `main`). #232 replaced
 tier-based smart routing with a fixed three-model roster (`modelroster`

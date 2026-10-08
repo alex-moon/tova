@@ -83,6 +83,13 @@ jest.mock('../services/titleService', () => ({
   generateChatTitle: jest.fn().mockResolvedValue('Hello'),
 }));
 
+// #238: stub the enrichment aux call so it does not occupy the mocked
+// inference-call slots the route tests inspect.
+jest.mock('../services/enrichmentService', () => ({
+  enrichmentLibraryBlock: jest.fn().mockResolvedValue(''),
+  isEnrichmentEnabled: () => false,
+}));
+
 const fullStreamFrom = (chunks: string[]) =>
   (async function* () {
     for (const chunk of chunks) {

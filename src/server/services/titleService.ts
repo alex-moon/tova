@@ -1,7 +1,10 @@
 import { redactForLog } from './logRedaction';
 import { inferenceService } from './inferenceService';
+import { config } from '../config';
 
-const TITLE_MODEL = process.env.ROUTER_SMALL_MODEL || 'openai/gpt-oss-20b';
+// #238: aux model source (was `ROUTER_SMALL_MODEL`). Read lazily so tests that
+// mutate the env after import still see it (config's stated contract).
+const titleModel = (): string => config.aux.model;
 
 const TITLE_PROMPT =
   'Generate a short chat title (at most six words) summarising what the user asks about. ' +
@@ -12,8 +15,8 @@ export const generateChatTitle = async (content: string): Promise<string> => {
   const fallback = `${trimmed.substring(0, 30)}${trimmed.length > 30 ? '…' : ''}`;
   try {
     const completion = await inferenceService.createToolFreeCompletion({
-      provider: 'groq',
-      model: TITLE_MODEL,
+      provider: config.aux.provider,
+      model: titleModel(),
       messages: [
         { role: 'system', content: TITLE_PROMPT },
         { role: 'user', content: trimmed },

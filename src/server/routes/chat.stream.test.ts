@@ -68,6 +68,13 @@ jest.mock('../services/titleService', () => ({
   generateChatTitle: jest.fn().mockResolvedValue('Hello'),
 }));
 
+// #238: the enrichment pass is a separate aux call; the route tests pin the
+// main completion's arguments, so stub enrichment to a no-op block.
+jest.mock('../services/enrichmentService', () => ({
+  enrichmentLibraryBlock: jest.fn().mockResolvedValue(''),
+  isEnrichmentEnabled: () => false,
+}));
+
 const isClassifierCall = (args?: { messages?: { role: string; content: string }[] }) =>
   args?.messages?.[0]?.content.startsWith('Classify the user prompt') ?? false;
 

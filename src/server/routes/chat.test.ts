@@ -61,6 +61,14 @@ jest.mock('../services/titleService', () => ({
   generateChatTitle: jest.fn().mockResolvedValue('Hello'),
 }));
 
+// #238: the enrichment pass is a separate aux call; the route tests pin the
+// main completion's arguments, so stub enrichment to a no-op block and keep
+// it off `inferenceService.mock.calls`.
+jest.mock('../services/enrichmentService', () => ({
+  enrichmentLibraryBlock: jest.fn().mockResolvedValue(''),
+  isEnrichmentEnabled: () => false,
+}));
+
 const registerUser = async (app: ReturnType<typeof createApp>, email: string) => {
   const response = await request(app)
     .post('/api/auth/register')

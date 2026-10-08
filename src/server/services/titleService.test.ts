@@ -32,7 +32,7 @@ describe('generateChatTitle', () => {
     expect(mockCreateCompletion).not.toHaveBeenCalled();
     const options = mockCreateToolFree.mock.calls[0][0];
     expect(options.provider).toBe('groq');
-    expect(options.model).toBe(process.env.ROUTER_SMALL_MODEL || 'openai/gpt-oss-20b');
+    expect(options.model).toBe(process.env.AUX_MODEL || 'openai/gpt-oss-20b');
     // No tool payload of any kind on an aux call (#117 operator confirmation).
     expect(options.messages?.map((m: { role: string }) => m.role)).toEqual(['system', 'user']);
     expect(JSON.stringify(options)).not.toMatch(/web_search|tools|tool_choice/);
