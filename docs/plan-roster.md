@@ -145,6 +145,18 @@ demo on `epic/roster`.
   `modelrosters` (plural). The app recovers via `listRoster`'s empty-collection
   seed, so the migration row is effectively dead for the app — worth a follow-up.
 
+- **SP3 — Cost is (model, provider)-aware (after #235).** Under racing one model
+  has two providers with different prices, so the old cost join — keyed by model
+  name only — could not bill a turn correctly. `ModelRoster` provider entries
+  now carry optional per-provider prices; a `(model, provider)` price index
+  (`buildPriceIndex`/`priceFor`/`loadPriceIndex`) reads the roster with
+  empty-collection recovery, and both `traceStatsCost` and `sessionCostService`
+  drop `ProviderRouting`. `sessionCostService` groups by `(session, model,
+  provider)`; a legacy/no-provider turn falls back to the model default; unknown
+  price stays `null` (#199 unknown ≠ free). The session figure stays blended (no
+  provider dimension). `npm run ci` green (86 server suites / 1057 tests; client
+  clean). Reached (2026-10-08).
+
 ## Done (checklist)
 
 - [x] Enumerate open issues and triage for do-ability.
@@ -153,10 +165,17 @@ demo on `epic/roster`.
 - [x] #232 completed on `epic/roster` (SP0 reached; CI green).
 - [x] #233 completed on `epic/roster` (tier machinery deleted; CI green).
 - [x] #234 completed on `epic/roster` (SP2 reached; CI green).
-- [ ] #235–#238 completed on `epic/roster`.
+- [x] #235 completed on `epic/roster` (SP3 reached; CI green).
+- [ ] #236–#238 completed on `epic/roster`.
 - [ ] #214 and #166 resolved (decision/proposal at minimum).
 - [ ] `epic/roster` merged to `main`.
 
 ## Follow-ups
 
 - #214 and #166 need owner input (mechanism/decision) before implementation.
+- #235 flag: the Fireworks DeepSeek V4.1 Flash price seeded from the official
+  Fireworks serverless table is `$0.30/$1.20`; third-party aggregators list
+  `$0.22/$0.66`. Owner confirmation wanted before it is treated as settled.
+- #235 completes the per-provider cost path; `ProviderRouting` now has no
+  non-admin reader, so the collection/model can be deleted once #234 (open PR
+  #241) merges the roster-backed admin tab.

@@ -276,9 +276,13 @@ export interface AdminLangsmithModelStats {
   totalTokens: number;
   inputTokens: number;
   outputTokens: number;
-  // #224: estimated USD spend for this model, joined from the in-DB price at
-  // read time (`null` = either side's price is unknown, distinct from $0 —
-  // #199 semantics). The UI renders null as `—`.
+  // #224/#235: estimated USD spend for this model, joined from the roster's
+  // per-provider price at read time (`null` = either side's price is unknown,
+  // distinct from $0 — #199 semantics). The rollup is keyed by model name only
+  // (LangSmith llm runs do not reliably carry the provider), so a dual-priced
+  // model prices from the model-only fallback until #237 exports the provider;
+  // per-turn spend is priced provider-accurately in the session view below.
+  // The UI renders null as `—`.
   estimatedCostUsd: number | null;
 }
 
@@ -316,9 +320,12 @@ export interface AdminSessionCostRow {
   messagesOut: number;
   inputTokens: number;
   outputTokens: number;
-  // Estimated USD spend for the session, joined from the in-DB price of each
-  // message's model at read time; `null` when no assistant message in the
-  // session has a known price (distinct from $0 — #199). UI renders `—`.
+  // Estimated USD spend for the session (#235), priced per turn by the
+  // `(model, provider)` that actually served it — a dual-priced model bills
+  // each turn at its winning provider's rate. The figure is blended across the
+  // session's providers (no provider dimension on the row by choice: a session
+  // may race either backend). `null` when no assistant message in the session
+  // has a known price (distinct from $0 — #199). UI renders `—`.
   estimatedCostUsd: number | null;
   // Latest message timestamp in the session, used for ordering/display.
   lastActivityAt: string;

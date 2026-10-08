@@ -27,6 +27,8 @@ export const ROSTER_PROVIDERS: RosterProvider[] = ['deepinfra', 'fireworks'];
 export interface RosterProviderRef {
   provider: RosterProvider;
   modelId: string;
+  inputPrice?: number;
+  outputPrice?: number;
   ttftMs?: number;
   ttftSamples?: number;
   disabledUntil?: Date | null;
@@ -62,8 +64,18 @@ export const ROSTER_SEED: RosterModel[] = [
     inputPrice: 0.2,
     outputPrice: 0.6,
     providers: [
-      { provider: 'deepinfra', modelId: 'deepseek-ai/DeepSeek-V4.1-Flash' },
-      { provider: 'fireworks', modelId: 'accounts/fireworks/models/deepseek-v4p1-flash' },
+      {
+        provider: 'deepinfra',
+        modelId: 'deepseek-ai/DeepSeek-V4.1-Flash',
+        inputPrice: 0.2,
+        outputPrice: 0.6,
+      },
+      {
+        provider: 'fireworks',
+        modelId: 'accounts/fireworks/models/deepseek-v4p1-flash',
+        inputPrice: 0.3,
+        outputPrice: 1.2,
+      },
     ],
   },
   {
@@ -75,8 +87,18 @@ export const ROSTER_SEED: RosterModel[] = [
     inputPrice: 0.15,
     outputPrice: 0.5,
     providers: [
-      { provider: 'deepinfra', modelId: 'zai-org/GLM-5.3-Flash' },
-      { provider: 'fireworks', modelId: 'accounts/fireworks/models/glm-5p3-flash' },
+      {
+        provider: 'deepinfra',
+        modelId: 'zai-org/GLM-5.3-Flash',
+        inputPrice: 0.15,
+        outputPrice: 0.5,
+      },
+      {
+        provider: 'fireworks',
+        modelId: 'accounts/fireworks/models/glm-5p3-flash',
+        inputPrice: 0.15,
+        outputPrice: 0.5,
+      },
     ],
   },
   {
@@ -90,8 +112,18 @@ export const ROSTER_SEED: RosterModel[] = [
     inputPrice: 0.28,
     outputPrice: 1.1,
     providers: [
-      { provider: 'deepinfra', modelId: 'MiniMaxAI/MiniMax-M3' },
-      { provider: 'fireworks', modelId: 'accounts/fireworks/models/minimax-m3' },
+      {
+        provider: 'deepinfra',
+        modelId: 'MiniMaxAI/MiniMax-M3',
+        inputPrice: 0.28,
+        outputPrice: 1.1,
+      },
+      {
+        provider: 'fireworks',
+        modelId: 'accounts/fireworks/models/minimax-m3',
+        inputPrice: 0.3,
+        outputPrice: 1.2,
+      },
     ],
   },
 ];
@@ -224,6 +256,8 @@ interface RosterDoc {
     provider: RosterProvider;
     modelId: string;
     enabled?: boolean;
+    inputPrice?: number;
+    outputPrice?: number;
     ttftMs?: number;
     ttftSamples?: number;
     disabledUntil?: Date | null;
@@ -241,6 +275,8 @@ const toRosterModel = (doc: RosterDoc): RosterModel => ({
   providers: (doc.providers ?? []).map((p) => ({
     provider: p.provider,
     modelId: p.modelId,
+    ...(p.inputPrice !== undefined ? { inputPrice: p.inputPrice } : {}),
+    ...(p.outputPrice !== undefined ? { outputPrice: p.outputPrice } : {}),
     ...(p.ttftMs !== undefined ? { ttftMs: p.ttftMs } : {}),
     ...(p.ttftSamples !== undefined ? { ttftSamples: p.ttftSamples } : {}),
     disabledUntil: p.disabledUntil ?? null,
@@ -266,6 +302,8 @@ const ensureSeed = async (): Promise<void> => {
               provider: p.provider,
               modelId: p.modelId,
               enabled: true,
+              ...(p.inputPrice !== undefined ? { inputPrice: p.inputPrice } : {}),
+              ...(p.outputPrice !== undefined ? { outputPrice: p.outputPrice } : {}),
               disabledUntil: null,
             })),
           },

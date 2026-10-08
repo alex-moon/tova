@@ -1,4 +1,4 @@
-import { ProviderRouting } from '../models/ProviderRouting';
+import { ModelRoster } from '../models/ModelRoster';
 import { applyCostToStats, estimateCostUsd, pickPriceRow } from './traceStatsCost';
 import type { AdminLangsmithStatsPayload } from '../../shared/contracts';
 
@@ -19,6 +19,20 @@ const row = (partial: Partial<AdminLangsmithStatsPayload['models'][number]>) => 
   estimatedCostUsd: null,
   ...partial,
 });
+
+// #235: a roster model carrying two priced providers (the dual-price case).
+const seedModel = (
+  modelId: string,
+  providers: { provider: string; inputPrice?: number; outputPrice?: number }[],
+) =>
+  ModelRoster.create({
+    modelId,
+    label: modelId,
+    tools: true,
+    vision: true,
+    eligible: true,
+    providers: providers.map((p) => ({ ...p, modelId, enabled: true, disabledUntil: null })),
+  });
 
 describe('estimateCostUsd (#224)', () => {
   it('multiplies each side by its per-1M price', () => {
@@ -50,15 +64,9 @@ describe('estimateCostUsd (#224)', () => {
   });
 });
 
-describe('applyCostToStats (#224)', () => {
+describe('applyCostToStats (#224/#235)', () => {
   it('stamps each priced model and the totals', async () => {
-    await ProviderRouting.create({
-      provider: 'deepinfra',
-      model: 'priced/model',
-      tier: 'large',
-      inputPrice: 1,
-      outputPrice: 2,
-    });
+    await seedModel('priced/model', [{ provider: 'deepinfra', inputPrice: 1, outputPrice: 2 }]);
 
     const result = await applyCostToStats(
       basePayload([
@@ -79,13 +87,7 @@ describe('applyCostToStats (#224)', () => {
   });
 
   it('sums only the priced models and leaves unknown ones null', async () => {
-    await ProviderRouting.create({
-      provider: 'deepinfra',
-      model: 'priced/one',
-      tier: 'small',
-      inputPrice: 1,
-      outputPrice: 1,
-    });
+    await seedModel('priced/one', [{ provider: 'deepinfra', inputPrice: 1, outputPrice: 1 }]);
 
     const result = await applyCostToStats(
       basePayload([
@@ -100,16 +102,26 @@ describe('applyCostToStats (#224)', () => {
   });
 
   it('treats a partially-priced model as unknown (unknown ≠ 0)', async () => {
-    await ProviderRouting.create({
-      provider: 'deepinfra',
-      model: 'half/model',
-      tier: 'small',
-      inputPrice: 1,
-    });
+    await seedModel('half/model', [{ provider: 'deepinfra', inputPrice: 1 }]);
 
     const result = await applyCostToStats(
       basePayload([row({ model: 'half/model', inputTokens: 1_000_000, outputTokens: 0 })]),
     );
     expect(result.models[0].estimatedCostUsd).toBeNull();
+  });
+
+  it('uses the model-only fallback when the rollup names a dual-priced model (#235)', async () => {
+    // The LangSmith rollup is model-keyed; with two priced providers the
+    // fallback prefers the fully-priced, alphabetically-first provider
+    // (`deepinfra`). The rollup cannot split by provider until #237 exports it.
+    await seedModel('dual/model', [
+      { provider: 'fireworks', inputPrice: 10, outputPrice: 10 },
+      { provider: 'deepinfra', inputPrice: 1, outputPrice: 1 },
+    ]);
+
+    const result = await applyCostToStats(
+      basePayload([row({ model: 'dual/model', inputTokens: 1_000_000, outputTokens: 0 })]),
+    );
+    expect(result.models[0].estimatedCostUsd).toBe(1);
   });
 });

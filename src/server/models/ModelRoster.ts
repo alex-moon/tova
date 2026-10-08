@@ -37,6 +37,23 @@ const rosterProviderSchema = new mongoose.Schema(
       default: true,
     },
     /*
+     * Per-provider pricing (#235): USD per 1M tokens, split input/output, both
+     * optional. Under racing the winning provider's price is the one that
+     * applied, and two providers of one model can differ — so the price lives
+     * on the provider entry, not the model. The model-root prices remain as the
+     * default/fallback for a turn whose provider is unknown (legacy rows) or a
+     * provider entry with no price. A missing price is "unknown" (≠ free,
+     * #199); cached pricing is deliberately not modelled.
+     */
+    inputPrice: {
+      type: Number,
+      min: 0,
+    },
+    outputPrice: {
+      type: Number,
+      min: 0,
+    },
+    /*
      * Rolling TTFT (OQ2: per-provider rollup on the routing doc). `ttftMs` is
      * the running mean over `ttftSamples` observations; `ttftUpdatedAt` is the
      * last observation. All three are absent on a provider that has never won
