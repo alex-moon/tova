@@ -1,6 +1,7 @@
 import 'dotenv/config';
 import type { LlmProvider } from '../src/server/services/llmTypes';
 import { runModelComparison } from '../src/server/services/modelCompare';
+import { ROSTER_SEED } from '../src/server/services/rosterConfig';
 
 /*
  * #129 one-off eval: run a single prompt against the existing agent on
@@ -13,13 +14,15 @@ import { runModelComparison } from '../src/server/services/modelCompare';
  *
  * Usage:
  *   npx tsx scripts/eval-model-compare.ts "prompt text" --models \
- *     deepinfra/Qwen/Qwen3-14B,groq/mistralai/mamba-codestral-7B-v0.3
- * Model refs are `<provider>/<model>`; provider is groq|deepinfra; defaults:
- *   deepinfra/Qwen/Qwen3-14B, groq/openai/gpt-oss-20b
- * Needs the relevant provider API keys (DEEPINFRA_API_KEY, GROQ_API_KEY).
+ *     deepinfra/zai-org/GLM-5.3-Flash,fireworks/accounts/fireworks/models/glm-5p3-flash
+ * Model refs are `<provider>/<model>`; provider is groq|deepinfra|fireworks.
+ * Defaults (#236): the fixed roster on both its providers.
+ * Needs the relevant provider API keys (DEEPINFRA_API_KEY, FIREWORKS_API_KEY).
  */
 
-const DEFAULT_REFS = ['deepinfra/Qwen/Qwen3-14B', 'groq/openai/gpt-oss-20b'];
+const DEFAULT_REFS = ROSTER_SEED.flatMap((model) =>
+  model.providers.map((p) => `${p.provider}/${p.modelId}`),
+);
 
 interface Args {
   prompt: string;
@@ -41,9 +44,9 @@ const parseArgs = (): Args | { usage: string } => {
   for (const ref of refStrings) {
     const sep = ref.indexOf('/');
     const provider = sep === -1 ? '' : ref.slice(0, sep);
-    if (provider !== 'groq' && provider !== 'deepinfra') {
+    if (provider !== 'groq' && provider !== 'deepinfra' && provider !== 'fireworks') {
       return {
-        usage: `invalid model ref "${ref}" (want <provider>/<model>, provider groq|deepinfra)`,
+        usage: `invalid model ref "${ref}" (want <provider>/<model>, provider groq|deepinfra|fireworks)`,
       };
     }
     refs.push({ provider, model: ref.slice(sep + 1) });

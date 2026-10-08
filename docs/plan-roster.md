@@ -171,6 +171,17 @@ demo on `epic/roster`.
   `TraceStatsCache`, and the admin table carry `provider`/TTFT. `npm run ci`
   green (86 server suites / 1062 tests; 18 client suites). Reached (2026-10-08).
 
+- **SP6 — Evals sweep the roster (after #236).** The sweep universe is the fixed
+  roster, not the tier seed set (`SEED_ENTRIES` is gone; `sweepModels` reads
+  `ROSTER_SEED`, landed in #233). `--models all` resolves to the 3 roster models
+  on both wired providers (6 runs); the scheduled default is no longer the
+  retired `openai/gpt-oss-20b` but **GLM 5.3 Flash on DeepInfra** (the cheapest
+  roster model), sourced from `ROSTER_SEED` and overridable via
+  `TOVA_EVAL_MODELS`/`TOVA_EVAL_MODEL`. `eval-model-compare.ts` defaults to the
+  roster on both providers and accepts `fireworks`. Eval unit stays
+  `(model, provider)`; the golden set is tier-free and unchanged. `npm run ci`
+  green (86 server suites / 1063 tests; client clean). Reached (2026-10-08).
+
 ## Done (checklist)
 
 - [x] Enumerate open issues and triage for do-ability.
@@ -181,7 +192,8 @@ demo on `epic/roster`.
 - [x] #234 completed on `epic/roster` (SP2 reached; CI green).
 - [x] #235 completed on `epic/roster` (SP3 reached; CI green).
 - [x] #237 completed on `epic/roster` (SP4 reached; CI green).
-- [ ] #236 and #238 completed on `epic/roster`.
+- [x] #236 completed on `epic/roster` (SP6 reached; CI green).
+- [ ] #238 completed on `epic/roster`.
 - [ ] #214 and #166 resolved (decision/proposal at minimum).
 - [ ] `epic/roster` merged to `main`.
 
@@ -194,3 +206,6 @@ demo on `epic/roster`.
 - #235 completes the per-provider cost path; `ProviderRouting` now has no
   non-admin reader, so the collection/model can be deleted once #234 (open PR
   #241) merges the roster-backed admin tab.
+- #236 flag: scheduled evals now default to GLM 5.3 Flash at $0.65/mtok vs the
+  retired 20B guard model — owner confirmation wanted that the daily-run cost is
+  acceptable (owner can pin `TOVA_EVAL_MODELS` or soften the schedule).

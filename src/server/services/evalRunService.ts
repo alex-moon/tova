@@ -21,7 +21,7 @@ import { runCase } from '../evals/runCase';
 import type { Assertion, AssertionResult } from '../evals/types';
 import { groqConnector, deepinfraConnector, fireworksConnector } from './mastraService';
 import { sweepModels } from './modelConfigService';
-import type { RosterProvider } from './rosterConfig';
+import { ROSTER_SEED, type RosterProvider } from './rosterConfig';
 import { EvalRunRecord } from '../models/EvalRunRecord';
 
 /*
@@ -385,13 +385,25 @@ export const startEvalRun = async (
   return { id, results };
 };
 
-const DEFAULT_EVAL_MODEL = 'openai/gpt-oss-20b';
+/*
+ * #236: the scheduled default is a roster model, not the retired guard model
+ * (`openai/gpt-oss-20b` has no roster home). GLM 5.3 Flash is the cheapest
+ * roster entry, keeping an unattended daily run as cheap as the roster allows.
+ * Sourced from `ROSTER_SEED` so the id cannot drift from the roster definition;
+ * override with `TOVA_EVAL_MODELS` (or `TOVA_EVAL_MODEL`/`TOVA_EVAL_PROVIDER`).
+ */
+const defaultEvalRef = (): { provider: RosterProvider; model: string } => {
+  const model = ROSTER_SEED.find((m) => m.modelId === 'zai-org/GLM-5.3-Flash') ?? ROSTER_SEED[0];
+  const provider = model.providers.find((p) => p.provider === 'deepinfra') ?? model.providers[0];
+  return { provider: provider.provider, model: provider.modelId };
+};
 
 /**
  * Resolves the model set for a scheduled run (OQ2 fallback): the
  * `TOVA_EVAL_MODELS` csv when set, else the runner's single-model default
- * (`TOVA_EVAL_MODEL` / `TOVA_EVAL_PROVIDER`). Values come from config, not
- * ad-hoc `process.env` (issue #142).
+ * (`TOVA_EVAL_MODEL` / `TOVA_EVAL_PROVIDER`, defaulting to the cheapest roster
+ * model on DeepInfra). Values come from config, not ad-hoc `process.env`
+ * (issue #142).
  */
 export const resolveScheduledModels = (
   evals: { models?: string; model?: string; provider?: string } = {},
@@ -400,10 +412,11 @@ export const resolveScheduledModels = (
     const parsed = parseModelsFlag(evals.models);
     if (parsed && parsed.length > 0) return parsed;
   }
+  const fallback = defaultEvalRef();
   return [
     {
-      provider: evals.provider === 'groq' ? 'groq' : 'deepinfra',
-      model: evals.model ?? DEFAULT_EVAL_MODEL,
+      provider: evals.provider === 'groq' ? 'groq' : fallback.provider,
+      model: evals.model ?? fallback.model,
     },
   ];
 };
