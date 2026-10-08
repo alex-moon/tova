@@ -19,32 +19,41 @@ export interface AdminUser {
   updatedAt: string;
 }
 
-// Model inventory row, GET /api/admin/models (issues #33/#104). Each entry
-// is one `providerroutings` document — a provider/model pair can repeat
-// across tiers, so `id` is the Mongo _id and rows are per-tier. `stats`
-// (#233) is always empty now that the tier-era (band, model) feedback tallies
-// are gone; it is retained until #234 reworks the Models tab onto the roster.
-// #115 badge fields: `tools` is schema-defaulted to true;
-// `vision` is only ever true when the row explicitly claims it;
+// Model inventory row, GET /api/admin/models (#234). Each entry is one
+// `modelroster` document: the fixed-roster era registers a MODEL once with a
+// paired `providers[]` list, so `id` is the roster _id and `modelId` is the
+// stable model key. #115 capability fields: `tools` is schema-defaulted to
+// true; `vision` is only ever true when the model explicitly claims it;
 // `contextLength` is the advertised limit (omitted when none is known).
-// #168: `disabledUntil` is the system-owned cool-off expiry (ISO wire
-// string), null when the model is not cooling off. #199: `inputPrice`/
-// `outputPrice` are USD per 1M tokens, omitted when unknown; the row's
-// routing price is their sum and rows over the admin cap are excluded from
-// the routing pools.
+// #199 pricing: `inputPrice`/`outputPrice` are USD per 1M tokens, omitted when
+// unknown; price is now a soft weighted-score input, not a hard cap.
 export interface AdminModel {
   id: string;
-  provider: string;
-  model: string;
-  tier: 'small' | 'large' | 'guard';
+  modelId: string;
+  label: string;
   eligible: boolean;
   tools: boolean;
   vision: boolean;
   contextLength?: number;
   inputPrice?: number;
   outputPrice?: number;
+  providers: AdminModelProvider[];
+}
+
+// One backend of a roster model. `disabledUntil` is the system-owned per-
+// provider cool-off expiry (#168/#213), an ISO wire string or null when not
+// cooling off. `ttftMs`/`ttftSamples` are the rolling mean first-token latency
+// and its observation count (OQ3: the exact figure `pickPrimary` scores on);
+// both omitted when the provider has never won a race. `enabled` lets an
+// operator take one backend out of the race without removing the model (OQ5).
+export interface AdminModelProvider {
+  provider: string;
+  modelId: string;
+  enabled: boolean;
+  ttftMs?: number;
+  ttftSamples?: number;
+  ttftUpdatedAt?: string;
   disabledUntil: string | null;
-  stats: { band: string; up: number; down: number }[];
 }
 
 // #168 per-model endpoint-error diagnostics (Alex, 2026-09-26): every
@@ -64,19 +73,19 @@ export interface AdminModelError {
   lastSeenAt: string;
 }
 
-// GET /api/admin/models payload. `errors` is keyed provider+model (one model
-// can serve several tiers, so a per-row join would duplicate rows).
+// GET /api/admin/models payload. `errors` is keyed provider+model.
 export interface AdminModelsPayload {
   models: AdminModel[];
   errors: AdminModelError[];
 }
 
-// #217: provider catalog lookup, GET /api/admin/model-lookup. `found: false`
-// is a successful "the provider does not host this model" answer; a thrown
-// provider/network failure surfaces as a non-200 instead. `contextLength` and
-// prices are omitted when the provider does not report them (prices are USD
-// per 1M tokens, matching AdminModel); `vision` is present only when the
-// catalog tags the model multimodal.
+// #217/#234: provider catalog lookup, GET /api/admin/model-lookup. `found:
+// false` is a successful "the provider does not host this model" answer; a
+// thrown provider/network failure surfaces as a non-200 instead.
+// `contextLength` and prices are omitted when the provider does not report them
+// (prices are USD per 1M tokens, matching AdminModel); `vision` is present only
+// when the catalog tags the model multimodal. DeepInfra reports context,
+// prices and vision; Fireworks reports context/vision/tools but no prices.
 export interface AdminModelLookup {
   found: boolean;
   provider?: string;

@@ -125,15 +125,28 @@ describe('AdminView models table (issue #33/#104)', () => {
 
   const sampleRow = () => ({
     id: 'r1',
-    provider: 'groq',
-    model: 'test-large',
-    tier: 'large',
+    modelId: 'test-large',
+    label: 'Test Large',
     eligible: true,
     tools: true,
     vision: false,
     contextLength: 131072,
-    disabledUntil: null,
-    stats: [{ band: 'short|prose', up: 3, down: 1 }],
+    providers: [
+      {
+        provider: 'deepinfra',
+        modelId: 'test-large',
+        enabled: true,
+        ttftMs: 420,
+        ttftSamples: 12,
+        disabledUntil: null,
+      },
+      {
+        provider: 'fireworks',
+        modelId: 'accounts/fireworks/models/test-large',
+        enabled: true,
+        disabledUntil: null,
+      },
+    ],
   });
 
   beforeEach(() => {
@@ -150,15 +163,40 @@ describe('AdminView models table (issue #33/#104)', () => {
     return render(<AdminView />);
   };
 
-  it('renders configured models rows with tiers, context and feedback tallies', async () => {
+  it('renders one roster row per model with its providers and live TTFT', async () => {
     setup();
     await screen.findByTestId('admin-view');
     fireEvent.click(screen.getByTestId('admin-tab-models'));
     expect(await screen.findByTestId('admin-models')).toBeInTheDocument();
-    expect(screen.getByTestId('admin-model-r1')).toHaveTextContent('test-large');
+    expect(screen.getByTestId('admin-model-r1')).toHaveTextContent('Test Large');
     expect(screen.getByTestId('admin-models')).toHaveTextContent('131,072');
-    expect(screen.getByTestId('admin-models')).toHaveTextContent('short|prose: 3↑ 1↓');
+    const providers = screen.getByTestId('admin-model-providers-r1');
+    expect(providers).toHaveTextContent('deepinfra');
+    expect(providers).toHaveTextContent('fireworks');
+    expect(screen.getByTestId('provider-ttft-r1-deepinfra')).toHaveTextContent('TTFT 420 ms (12)');
+    // A provider with no observation reads as unknown, not 0.
+    expect(screen.getByTestId('provider-ttft-r1-fireworks')).toHaveTextContent('TTFT —');
     expect(screen.queryByText('Loading users...')).not.toBeInTheDocument();
+  });
+
+  // #234 OQ5: providers are edited independently.
+  it('disables a single provider and preserves the other via the API', async () => {
+    setup();
+    fireEvent.click(await screen.findByTestId('admin-tab-models'));
+    fireEvent.click(await screen.findByTestId('provider-enabled-r1-deepinfra'));
+    await waitFor(() =>
+      expect(updateModel).toHaveBeenCalledWith('r1', {
+        providers: [
+          { provider: 'deepinfra', modelId: 'test-large', enabled: false },
+          {
+            provider: 'fireworks',
+            modelId: 'accounts/fireworks/models/test-large',
+            enabled: true,
+          },
+        ],
+      }),
+    );
+    await waitFor(() => expect(listModels).toHaveBeenCalledTimes(2));
   });
 
   it('shows an empty state when no models are configured', async () => {
@@ -172,29 +210,23 @@ describe('AdminView models table (issue #33/#104)', () => {
   it('renders vision/tools capability badges with the context length', async () => {
     listModels.mockResolvedValue(
       modelsPayload([
-        {
-          id: 'r1',
-          provider: 'groq',
-          model: 'test-large',
-          tier: 'large',
-          eligible: true,
-          tools: true,
-          vision: false,
-          contextLength: 131072,
-          disabledUntil: null,
-          stats: [],
-        },
+        sampleRow(),
         {
           id: 'r2',
-          provider: 'deepinfra',
-          model: 'Qwen/Qwen3-VL-8B-Instruct',
-          tier: 'small',
+          modelId: 'Qwen/Qwen3-VL-8B-Instruct',
+          label: 'Qwen3 VL 8B',
           eligible: true,
           tools: true,
           vision: true,
           contextLength: 262144,
-          disabledUntil: null,
-          stats: [],
+          providers: [
+            {
+              provider: 'deepinfra',
+              modelId: 'Qwen/Qwen3-VL-8B-Instruct',
+              enabled: true,
+              disabledUntil: null,
+            },
+          ],
         },
       ]),
     );
@@ -229,25 +261,40 @@ describe('AdminView models table (issue #33/#104)', () => {
     await waitFor(() => expect(listModels).toHaveBeenCalledTimes(2));
   });
 
-  // #217: the manual form is gone. Add = search the provider catalog, review
-  // the summary, pick a tier and post the looked-up values.
-  it('searches the provider catalog and adds a found model with the tier', async () => {
+  // #217/#234: the manual form is gone. Add = search BOTH provider catalogs,
+  // review the summary and post a roster model with the resolved providers.
+  it('searches both provider catalogs and adds a model with the resolved providers', async () => {
     setup();
-    lookupModel.mockResolvedValue({
-      found: true,
-      provider: 'deepinfra',
-      model: 'XiaomiMiMo/MiMo-V2.6-Flash',
-      contextLength: 1048576,
-      inputPrice: 0.14,
-      outputPrice: 0.28,
-      vision: true,
-    });
+    lookupModel.mockImplementation((provider: string) =>
+      Promise.resolve(
+        provider === 'deepinfra'
+          ? {
+              found: true,
+              provider: 'deepinfra',
+              model: 'XiaomiMiMo/MiMo-V2.6-Flash',
+              contextLength: 1048576,
+              inputPrice: 0.14,
+              outputPrice: 0.28,
+              vision: true,
+            }
+          : {
+              found: true,
+              provider: 'fireworks',
+              model: 'accounts/fireworks/models/mimo-v2p6-flash',
+              contextLength: 1048576,
+              vision: true,
+            },
+      ),
+    );
     fireEvent.click(await screen.findByTestId('admin-tab-models'));
     fireEvent.change(screen.getByTestId('model-form-model'), {
       target: { value: 'XiaomiMiMo/MiMo-V2.6-Flash' },
     });
     fireEvent.click(screen.getByTestId('model-form-search'));
-    await waitFor(() => expect(lookupModel).toHaveBeenCalledWith('XiaomiMiMo/MiMo-V2.6-Flash'));
+    await waitFor(() =>
+      expect(lookupModel).toHaveBeenCalledWith('deepinfra', 'XiaomiMiMo/MiMo-V2.6-Flash'),
+    );
+    expect(lookupModel).toHaveBeenCalledWith('fireworks', 'XiaomiMiMo/MiMo-V2.6-Flash');
 
     const summary = await screen.findByTestId('model-form-result');
     expect(summary).toHaveTextContent('XiaomiMiMo/MiMo-V2.6-Flash');
@@ -255,14 +302,22 @@ describe('AdminView models table (issue #33/#104)', () => {
     expect(screen.getByTestId('model-form-result-input-price')).toHaveTextContent('$0.140');
     expect(screen.getByTestId('model-form-result-output-price')).toHaveTextContent('$0.280');
     expect(screen.getByTestId('model-form-result-caps')).toHaveTextContent('vision');
+    expect(screen.getByTestId('model-form-result-providers')).toHaveTextContent(
+      'deepinfra, fireworks',
+    );
 
-    fireEvent.change(screen.getByTestId('model-form-tier'), { target: { value: 'large' } });
     fireEvent.click(screen.getByTestId('model-form-submit'));
     await waitFor(() =>
       expect(createModel).toHaveBeenCalledWith({
-        provider: 'deepinfra',
-        model: 'XiaomiMiMo/MiMo-V2.6-Flash',
-        tier: 'large',
+        modelId: 'XiaomiMiMo/MiMo-V2.6-Flash',
+        label: 'XiaomiMiMo/MiMo-V2.6-Flash',
+        providers: [
+          { provider: 'deepinfra', modelId: 'XiaomiMiMo/MiMo-V2.6-Flash' },
+          {
+            provider: 'fireworks',
+            modelId: 'accounts/fireworks/models/mimo-v2p6-flash',
+          },
+        ],
         contextLength: 1048576,
         inputPrice: 0.14,
         outputPrice: 0.28,
@@ -270,6 +325,40 @@ describe('AdminView models table (issue #33/#104)', () => {
       }),
     );
     await waitFor(() => expect(listModels).toHaveBeenCalledTimes(2));
+  });
+
+  it('adds a model resolved on only one provider', async () => {
+    setup();
+    lookupModel.mockImplementation((provider: string) =>
+      Promise.resolve(
+        provider === 'deepinfra'
+          ? {
+              found: true,
+              provider: 'deepinfra',
+              model: 'XiaomiMiMo/MiMo-V2.6-Flash',
+              contextLength: 1048576,
+              inputPrice: 0.14,
+              outputPrice: 0.28,
+            }
+          : { found: false },
+      ),
+    );
+    fireEvent.click(await screen.findByTestId('admin-tab-models'));
+    fireEvent.change(screen.getByTestId('model-form-model'), {
+      target: { value: 'XiaomiMiMo/MiMo-V2.6-Flash' },
+    });
+    fireEvent.click(screen.getByTestId('model-form-search'));
+    fireEvent.click(await screen.findByTestId('model-form-submit'));
+    await waitFor(() =>
+      expect(createModel).toHaveBeenCalledWith({
+        modelId: 'XiaomiMiMo/MiMo-V2.6-Flash',
+        label: 'XiaomiMiMo/MiMo-V2.6-Flash',
+        providers: [{ provider: 'deepinfra', modelId: 'XiaomiMiMo/MiMo-V2.6-Flash' }],
+        contextLength: 1048576,
+        inputPrice: 0.14,
+        outputPrice: 0.28,
+      }),
+    );
   });
 
   it('shows "Model not found" and does not offer Add on a miss', async () => {
@@ -283,7 +372,7 @@ describe('AdminView models table (issue #33/#104)', () => {
     expect(createModel).not.toHaveBeenCalled();
   });
 
-  it('shows a lookup error inline when the provider call fails', async () => {
+  it('shows a lookup error inline when both provider calls fail', async () => {
     setup();
     lookupModel.mockRejectedValue(new AdminError('Failed to look up model.'));
     fireEvent.click(await screen.findByTestId('admin-tab-models'));
@@ -292,6 +381,8 @@ describe('AdminView models table (issue #33/#104)', () => {
     expect(await screen.findByTestId('model-form-error')).toHaveTextContent(
       'Failed to look up model.',
     );
+    expect(screen.queryByTestId('model-form-not-found')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('model-form-submit')).not.toBeInTheDocument();
   });
 
   // #217: Refresh replaces the old Edit button — re-pull provider-owned values
@@ -308,8 +399,8 @@ describe('AdminView models table (issue #33/#104)', () => {
       vision: true,
     });
     fireEvent.click(await screen.findByTestId('admin-tab-models'));
-    fireEvent.click(await screen.findByTestId('model-refresh-r1'));
-    await waitFor(() => expect(lookupModel).toHaveBeenCalledWith('test-large'));
+    fireEvent.click(screen.getByTestId('model-refresh-r1'));
+    await waitFor(() => expect(lookupModel).toHaveBeenCalledWith('deepinfra', 'test-large'));
     await waitFor(() =>
       expect(updateModel).toHaveBeenCalledWith('r1', {
         contextLength: 262144,
@@ -332,38 +423,39 @@ describe('AdminView models table (issue #33/#104)', () => {
     expect(updateModel).not.toHaveBeenCalled();
   });
 
-  // #199: price columns, the derived in+out total, and the over-cap flag.
-  it('renders price columns and flags a row over the cap', async () => {
+  // #234 OQ4: price is a soft score input now — no hard cap/over-cap badge.
+  it('renders the in/out price pair and a dash when unpriced, with no over-cap badge', async () => {
     listModels.mockResolvedValue(
       modelsPayload([
         {
           ...sampleRow(),
           id: 'cheap',
-          model: 'cheap-model',
+          modelId: 'cheap-model',
+          label: 'Cheap',
           inputPrice: 0.2,
           outputPrice: 0.6,
         },
         {
           ...sampleRow(),
           id: 'pricey',
-          model: 'pricey-model',
+          modelId: 'pricey-model',
+          label: 'Pricey',
           inputPrice: 2.85,
           outputPrice: 14.25,
         },
-        { ...sampleRow(), id: 'unpriced', model: 'unpriced-model' },
+        { ...sampleRow(), id: 'unpriced', modelId: 'unpriced-model', label: 'Unpriced' },
       ]),
     );
     render(<AdminView />);
     fireEvent.click(await screen.findByTestId('admin-tab-models'));
-    expect(await screen.findByTestId('admin-model-price-cheap')).toHaveTextContent('$0.800');
-    expect(screen.getByTestId('admin-model-input-price-cheap')).toHaveTextContent('$0.200');
-    expect(screen.getByTestId('admin-model-output-price-cheap')).toHaveTextContent('$0.600');
-    expect(screen.getByTestId('admin-model-price-pricey')).toHaveTextContent('$17.100');
-    expect(screen.getByTestId('admin-model-overcap-pricey')).toBeInTheDocument();
-    expect(screen.queryByTestId('admin-model-overcap-cheap')).not.toBeInTheDocument();
-    // Unpriced rows show a dash, not $0.000, and are not flagged.
+    expect(await screen.findByTestId('admin-model-price-cheap')).toHaveTextContent(
+      '$0.200 / $0.600',
+    );
+    expect(screen.getByTestId('admin-model-price-pricey')).toHaveTextContent('$2.850 / $14.250');
+    // Unpriced rows show a dash, not $0.000.
     expect(screen.getByTestId('admin-model-price-unpriced')).toHaveTextContent('—');
-    expect(screen.queryByTestId('admin-model-overcap-unpriced')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('admin-model-overcap-cheap')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('admin-model-overcap-pricey')).not.toBeInTheDocument();
   });
 });
 
@@ -374,17 +466,15 @@ describe('AdminView models table (issue #33/#104)', () => {
 describe('AdminView cool-off badge and error diagnostics (#168)', () => {
   afterEach(cleanup);
 
-  const coolingRow = (disabledUntil: string | null, overrides = {}) => ({
+  const coolingRow = (disabledUntil: string | null, overrides: Record<string, unknown> = {}) => ({
     id: 'r1',
-    provider: 'deepinfra',
-    model: 'test-cooling',
-    tier: 'large',
+    modelId: 'test-cooling',
+    label: 'Test Cooling',
     eligible: true,
     tools: true,
     vision: false,
     contextLength: 131072,
-    disabledUntil,
-    stats: [],
+    providers: [{ provider: 'deepinfra', modelId: 'test-cooling', enabled: true, disabledUntil }],
     ...overrides,
   });
 
@@ -403,25 +493,34 @@ describe('AdminView cool-off badge and error diagnostics (#168)', () => {
     );
     render(<AdminView />);
     fireEvent.click(await screen.findByTestId('admin-tab-models'));
-    const badge = await screen.findByTestId('admin-model-cooloff-r1');
+    const badge = await screen.findByTestId('admin-model-cooloff-r1-deepinfra');
     expect(badge).toHaveTextContent(/Cooling off · ~\d+h left/);
   });
 
-  it('renders no badge when the model is not cooling off (null or expired)', async () => {
+  it('renders no badge when the provider is not cooling off (null or expired)', async () => {
     listModels.mockResolvedValue(
       modelsPayload([
         coolingRow(null),
         coolingRow(new Date(Date.now() - 60_000).toISOString(), {
           id: 'r2',
-          model: 'test-expired',
+          modelId: 'test-expired',
+          label: 'Test Expired',
+          providers: [
+            {
+              provider: 'deepinfra',
+              modelId: 'test-expired',
+              enabled: true,
+              disabledUntil: new Date(Date.now() - 60_000).toISOString(),
+            },
+          ],
         }),
       ]),
     );
     render(<AdminView />);
     fireEvent.click(await screen.findByTestId('admin-tab-models'));
     await screen.findByTestId('admin-model-r1');
-    expect(screen.queryByTestId('admin-model-cooloff-r1')).not.toBeInTheDocument();
-    expect(screen.queryByTestId('admin-model-cooloff-r2')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('admin-model-cooloff-r1-deepinfra')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('admin-model-cooloff-r2-deepinfra')).not.toBeInTheDocument();
   });
 
   it('renders the per-model error diagnostics table with statuses, categories and counts', async () => {
@@ -649,17 +748,17 @@ describe('AdminView logs section (#179)', () => {
 describe('AdminView model comparison (issue #129)', () => {
   afterEach(cleanup);
 
-  const sampleRow = (overrides = {}) => ({
+  const sampleRow = (overrides: Record<string, unknown> = {}) => ({
     id: 'r1',
-    provider: 'deepinfra',
-    model: 'Qwen/Qwen3-14B',
-    tier: 'small',
+    modelId: 'Qwen/Qwen3-14B',
+    label: 'Qwen3 14B',
     eligible: true,
     tools: true,
     vision: false,
     contextLength: 131072,
-    disabledUntil: null,
-    stats: [],
+    providers: [
+      { provider: 'deepinfra', modelId: 'Qwen/Qwen3-14B', enabled: true, disabledUntil: null },
+    ],
     ...overrides,
   });
 
@@ -685,15 +784,15 @@ describe('AdminView model comparison (issue #129)', () => {
     await screen.findByTestId('compare-run');
   };
 
-  it('lists eligible non-guard models with checkboxes', async () => {
+  it('lists roster provider entries with checkboxes', async () => {
     await switchToCompare();
-    expect(screen.getByTestId('compare-model-Qwen/Qwen3-14B')).not.toBeChecked();
+    expect(screen.getByTestId('compare-model-deepinfra-Qwen/Qwen3-14B')).not.toBeChecked();
   });
 
   it('disables the run button until a prompt and at least one model are set', async () => {
     await switchToCompare();
     expect(screen.getByTestId('compare-run')).toBeDisabled();
-    fireEvent.click(screen.getByTestId('compare-model-Qwen/Qwen3-14B'));
+    fireEvent.click(screen.getByTestId('compare-model-deepinfra-Qwen/Qwen3-14B'));
     expect(screen.getByTestId('compare-run')).toBeDisabled();
     fireEvent.change(screen.getByTestId('compare-prompt'), { target: { value: 'Hello there' } });
     expect(screen.getByTestId('compare-run')).toBeEnabled();
@@ -710,8 +809,8 @@ describe('AdminView model comparison (issue #129)', () => {
           latencyMs: 1200,
         },
         {
-          provider: 'groq',
-          model: 'openai/gpt-oss-20b',
+          provider: 'fireworks',
+          model: 'accounts/fireworks/models/qwen3-14b',
           answer: null,
           latencyMs: 300,
           error: 'boom',
@@ -719,18 +818,33 @@ describe('AdminView model comparison (issue #129)', () => {
       ],
     });
     await setup([
-      sampleRow(),
-      sampleRow({ id: 'r2', provider: 'groq', model: 'openai/gpt-oss-20b', tier: 'large' }),
+      sampleRow({
+        providers: [
+          { provider: 'deepinfra', modelId: 'Qwen/Qwen3-14B', enabled: true, disabledUntil: null },
+          {
+            provider: 'fireworks',
+            modelId: 'accounts/fireworks/models/qwen3-14b',
+            enabled: true,
+            disabledUntil: null,
+          },
+        ],
+      }),
     ]);
     fireEvent.click(screen.getByTestId('admin-tab-compare'));
-    fireEvent.click(screen.getByTestId('compare-model-Qwen/Qwen3-14B'));
-    fireEvent.click(screen.getByTestId('compare-model-openai/gpt-oss-20b'));
+    fireEvent.click(screen.getByTestId('compare-model-deepinfra-Qwen/Qwen3-14B'));
+    fireEvent.click(
+      screen.getByTestId('compare-model-fireworks-accounts/fireworks/models/qwen3-14b'),
+    );
     fireEvent.change(screen.getByTestId('compare-prompt'), { target: { value: 'Hello there' } });
     fireEvent.click(screen.getByTestId('compare-run'));
     await screen.findByTestId('compare-results');
     expect(compareModels).toHaveBeenCalledWith('Hello there', [
       { provider: 'deepinfra', model: 'Qwen/Qwen3-14B', contextLength: 131072 },
-      { provider: 'groq', model: 'openai/gpt-oss-20b', contextLength: 131072 },
+      {
+        provider: 'fireworks',
+        model: 'accounts/fireworks/models/qwen3-14b',
+        contextLength: 131072,
+      },
     ]);
     expect(screen.getByTestId('compare-answer-Qwen/Qwen3-14B')).toBeInTheDocument();
     expect(screen.getByText('conversational answer')).toBeInTheDocument();
@@ -740,7 +854,7 @@ describe('AdminView model comparison (issue #129)', () => {
   it('shows the API error message when the comparison run fails', async () => {
     compareModels.mockRejectedValue(new AdminError('Models unavailable.'));
     await switchToCompare();
-    fireEvent.click(screen.getByTestId('compare-model-Qwen/Qwen3-14B'));
+    fireEvent.click(screen.getByTestId('compare-model-deepinfra-Qwen/Qwen3-14B'));
     fireEvent.change(screen.getByTestId('compare-prompt'), { target: { value: 'Hello there' } });
     fireEvent.click(screen.getByTestId('compare-run'));
     expect(await screen.findByTestId('compare-error')).toHaveTextContent('Models unavailable.');

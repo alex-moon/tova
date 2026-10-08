@@ -1,5 +1,5 @@
-import type { CompletionOptions, LlmProvider } from './llmTypes';
-import { groqConnector, deepinfraConnector } from './mastraService';
+import type { CompletionOptions, LlmConnector, LlmProvider } from './llmTypes';
+import { groqConnector, deepinfraConnector, fireworksConnector } from './mastraService';
 import { buildSystemContent } from './promptAssembly';
 import { outputTokensFor, promptCharsFrom } from './outputTokenCap';
 
@@ -48,10 +48,13 @@ export const MAX_COMPARE_MODELS = 6;
  * #151: the typesafe connector does not exist yet (openai-compatible wiring
  * is pending), so the entry resolves to `undefined` and compare runs against
  * it surface the "Unknown provider" error row instead of crashing the run.
+ * #232/#234: fireworks is a first-class roster provider and is wired here so
+ * the admin Compare tab can race each roster model's two backends.
  */
-const PROVIDERS: Record<string, (typeof groqConnector | typeof deepinfraConnector) | undefined> = {
+const PROVIDERS: Record<string, LlmConnector | undefined> = {
   groq: groqConnector,
   deepinfra: deepinfraConnector,
+  fireworks: fireworksConnector,
   typesafe: undefined,
 };
 

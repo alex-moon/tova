@@ -3,7 +3,7 @@ import mongoose from 'mongoose';
 import { User, UserDocument } from '../models/User';
 import { authenticateBearerOrSession, requireRole, AuthRequest } from '../middleware/auth';
 import { AdminUser } from '../../shared/contracts';
-import { ProviderRouting } from '../models/ProviderRouting';
+import { ModelRoster } from '../models/ModelRoster';
 import { ModelRouteError } from '../models/ModelRouteError';
 import { LogLevel } from '../services/logService';
 import { queryRetainedLogs } from '../services/lokiLogs';
@@ -69,48 +69,92 @@ router.get('/users', ...adminGuard, async (_req, res) => {
 });
 
 /*
- * Model inventory with CRUD (issue #104). Each row is one `providerroutings`
- * document (a provider/model pair can repeat across tiers). `stats` (#233) is
- * always empty now that the tier-era feedback tallies are gone; it is retained
- * until #234 reworks the Models tab onto the roster.
- * Read errors degrade to empty lists; the view shows a 'no data' state.
+ * Model inventory with CRUD (issue #104, reworked onto the roster in #234).
+ * Each row is ONE `modelroster` document: a model registered once with a
+ * paired `providers[]` list (two serverless backends). Read errors degrade to
+ * empty lists; the view shows a 'no data' state.
  */
-// #151: 'typesafe' rides along now so admin CRUD can write rows for the
-// new provider ahead of its connector landing.
-const PROVIDER_SET = ['groq', 'deepinfra', 'typesafe'] as const;
-const TIER_SET = ['small', 'large', 'guard'] as const;
+// #232: the racing path only talks to the two roster providers. `typesafe`
+// rides along in compare (#151) but is not a roster provider.
+const ROSTER_PROVIDER_SET = ['deepinfra', 'fireworks'] as const;
+// Compare still accepts the legacy provider set so historic rows remain
+// runnable (#151 keeps `typesafe` reachable ahead of its connector).
+const PROVIDER_SET = ['groq', 'deepinfra', 'fireworks', 'typesafe'] as const;
+type CompareProvider = (typeof PROVIDER_SET)[number];
 
-type ProviderRow = {
+type ProviderEntry = {
   provider: string;
-  model: string;
-  tier: string;
+  modelId: string;
+  enabled?: boolean;
+  ttftMs?: number;
+  ttftSamples?: number;
+  ttftUpdatedAt?: Date;
+  disabledUntil?: Date | null;
+};
+
+type RosterRow = {
+  modelId: string;
+  label: string;
   eligible: boolean;
   tools?: boolean;
   vision?: boolean;
   contextLength?: number;
   inputPrice?: number;
   outputPrice?: number;
-  disabledUntil?: Date;
+  providers?: ProviderEntry[];
   _id: mongoose.Types.ObjectId;
 };
 
+interface ProviderMutation {
+  provider: string;
+  modelId: string;
+  enabled?: boolean;
+}
+
 interface ModelMutation {
-  model?: string;
-  tier?: string;
-  provider?: string;
+  modelId?: string;
+  label?: string;
   eligible?: boolean;
   tools?: boolean;
   vision?: boolean;
   contextLength?: number | null;
   inputPrice?: number | null;
   outputPrice?: number | null;
+  providers?: ProviderMutation[];
 }
 
 const isProvided = (v: unknown): boolean =>
   v !== undefined && v !== null && v !== '' && v !== false;
 
+const isRosterProvider = (value: unknown): value is (typeof ROSTER_PROVIDER_SET)[number] =>
+  typeof value === 'string' && (ROSTER_PROVIDER_SET as readonly string[]).includes(value);
+
 /*
- * Validates a create/update payload against the ProviderRouting schema and
+ * Validate a provider entry (`{provider, modelId, enabled?}`). Returns the
+ * whitelisted entry or an error string. `enabled` is optional (defaults true
+ * on create); it is a boolean when present.
+ */
+const validateProviderEntry = (value: unknown): ProviderMutation | { error: string } => {
+  if (!value || typeof value !== 'object') return { error: 'Invalid provider entry' };
+  const p = value as Record<string, unknown>;
+  if (!isRosterProvider(p.provider)) {
+    return { error: `provider must be one of: ${ROSTER_PROVIDER_SET.join(', ')}` };
+  }
+  if (typeof p.modelId !== 'string' || !p.modelId.trim()) {
+    return { error: 'providers[].modelId is required' };
+  }
+  if (p.enabled !== undefined && typeof p.enabled !== 'boolean') {
+    return { error: 'providers[].enabled must be a boolean' };
+  }
+  return {
+    provider: p.provider,
+    modelId: p.modelId.trim(),
+    ...(p.enabled !== undefined ? { enabled: p.enabled } : {}),
+  };
+};
+
+/*
+ * Validates a create/update payload against the ModelRoster schema and
  * returns just the whitelisted fields, or a 400 message. `forUpdate` only
  * rejects fields in the payload; omitted fields mean "leave unchanged".
  */
@@ -123,27 +167,19 @@ const validateModelMutation = (
   }
   const b = body as Record<string, unknown>;
   const out: ModelMutation = {};
-  if (b.provider !== undefined) {
-    if (typeof b.provider !== 'string' || !PROVIDER_SET.includes(b.provider as 'groq')) {
-      return { error: 'Invalid provider' };
-    }
-    out.provider = b.provider;
+  if (b.modelId !== undefined) {
+    if (typeof b.modelId !== 'string' || !b.modelId.trim()) return { error: 'Invalid modelId' };
+    out.modelId = b.modelId.trim();
   } else if (!forUpdate) {
-    return { error: 'provider is required' };
+    return { error: 'modelId is required' };
   }
-  if (b.model !== undefined) {
-    if (typeof b.model !== 'string' || !b.model.trim()) return { error: 'Invalid model' };
-    out.model = b.model.trim();
+  if (b.label !== undefined) {
+    if (typeof b.label !== 'string' || !b.label.trim()) return { error: 'Invalid label' };
+    out.label = b.label.trim();
   } else if (!forUpdate) {
-    return { error: 'model is required' };
-  }
-  if (b.tier !== undefined) {
-    if (typeof b.tier !== 'string' || !TIER_SET.includes(b.tier as 'small')) {
-      return { error: 'Invalid tier' };
-    }
-    out.tier = b.tier;
-  } else if (!forUpdate) {
-    return { error: 'tier is required' };
+    // A label is required by the schema; default it to the model id so an
+    // operator adding the seed models by hand is not forced to name them.
+    out.label = (b.modelId as string | undefined)?.trim() ?? '';
   }
   if (b.eligible !== undefined) {
     if (typeof b.eligible !== 'boolean') return { error: 'eligible must be a boolean' };
@@ -167,8 +203,8 @@ const validateModelMutation = (
   /*
    * #199 prices: USD per 1M tokens, non-negative finite numbers (not
    * integers — sub-cent rates like $0.085 are legal). `''`/`null` clears the
-   * field back to "unknown", mirroring the contextLength branch. A cleared
-   * price is admitted by the cap (unknown ≠ expensive).
+   * field back to "unknown", mirroring the contextLength branch. Price is now
+   * a soft weighted-score input (#234 OQ4), not a hard cap.
    */
   for (const field of ['inputPrice', 'outputPrice'] as const) {
     if (b[field] !== undefined && isProvided(b[field])) {
@@ -181,17 +217,38 @@ const validateModelMutation = (
       out[field] = null;
     }
   }
+  if (b.providers !== undefined) {
+    if (!Array.isArray(b.providers) || b.providers.length === 0) {
+      return { error: 'providers must be a non-empty array' };
+    }
+    const providers: ProviderMutation[] = [];
+    const seen = new Set<string>();
+    for (const entry of b.providers) {
+      const parsed = validateProviderEntry(entry);
+      if ('error' in parsed) return { error: parsed.error };
+      // A duplicate provider would make the per-provider TTFT update target two
+      // entries; reject so the roster stays one entry per provider.
+      if (seen.has(parsed.provider)) {
+        return { error: `Duplicate provider entry: ${parsed.provider}` };
+      }
+      seen.add(parsed.provider);
+      providers.push(parsed);
+    }
+    out.providers = providers;
+  } else if (!forUpdate) {
+    return { error: 'providers is required' };
+  }
   if (forUpdate) {
     const allowed = new Set([
-      'provider',
-      'model',
-      'tier',
+      'modelId',
+      'label',
       'eligible',
       'tools',
       'vision',
       'contextLength',
       'inputPrice',
       'outputPrice',
+      'providers',
     ]);
     if (Object.keys(b).some((k) => !allowed.has(k))) {
       return { error: 'Unknown field' };
@@ -200,15 +257,41 @@ const validateModelMutation = (
   return out;
 };
 
+const toAdminModel = (row: RosterRow) => ({
+  id: String(row._id),
+  modelId: row.modelId,
+  label: row.label,
+  eligible: row.eligible !== false,
+  tools: row.tools !== false,
+  vision: row.vision === true,
+  contextLength: row.contextLength,
+  // #199 pricing (USD per 1M tokens); undefined on unpriced models, which
+  // JSON drops so the client only sees the key when a price is known.
+  inputPrice: row.inputPrice,
+  outputPrice: row.outputPrice,
+  providers: (row.providers ?? []).map((p) => ({
+    provider: p.provider,
+    modelId: p.modelId,
+    enabled: p.enabled !== false,
+    // OQ3: exactly the rolling figure the router scores on — no client-side
+    // recomputation, so operators see what `pickPrimary` sees.
+    ttftMs: p.ttftMs,
+    ttftSamples: p.ttftSamples,
+    ttftUpdatedAt: p.ttftUpdatedAt ? new Date(p.ttftUpdatedAt).toISOString() : undefined,
+    // #168: system-owned per-provider cool-off; absent/null = not cooling off.
+    disabledUntil: p.disabledUntil ? new Date(p.disabledUntil).toISOString() : null,
+  })),
+});
+
 const duplicateModelError = (err: unknown): boolean =>
   err instanceof mongoose.mongo.MongoServerError && err.code === 11000;
 
 router.get('/models', ...adminGuard, async (_req, res) => {
   try {
-    // #233: the tier-era (band, model) feedback tallies are gone with the
-    // router; the admin table reads routing rows + the #175 error tally only.
-    const [routes, routeErrors] = await Promise.all([
-      ProviderRouting.find({}).lean(),
+    // #234: the admin table reads the roster (one row per model) + the #175
+    // error tally. The tier-era feedback tallies are gone with the router.
+    const [roster, routeErrors] = await Promise.all([
+      ModelRoster.find({}).lean(),
       // #168 diagnostics, consolidated onto the #175 tally (OQ-7, decision
       // 2026-09-26): inferenceService records every completion failure into
       // `modelrouteerrors`, so the admin table reads that single mechanism —
@@ -216,29 +299,8 @@ router.get('/models', ...adminGuard, async (_req, res) => {
       ModelRouteError.find({}).sort({ lastSeenAt: -1 }).lean(),
     ]);
     res.json({
-      models: ((routes ?? []) as unknown as ProviderRow[]).map((route) => ({
-        id: String(route._id),
-        provider: route.provider,
-        model: route.model,
-        tier: route.tier,
-        eligible: route.eligible,
-        tools: route.tools !== false,
-        vision: route.vision === true,
-        contextLength: route.contextLength,
-        // #233: the tier-era (band, model) feedback tallies are gone, so the
-        // stats column is always empty until #234 reworks the Models tab onto
-        // the roster. Emitted as `[]` so the client contract stays satisfied.
-        stats: [],
-        // #199 pricing (USD per 1M tokens); undefined on unpriced rows, which
-        // JSON drops so the client only sees the key when a price is known.
-        inputPrice: route.inputPrice,
-        outputPrice: route.outputPrice,
-        // #168: system-owned cool-off, surfaced for the admin badge (absent
-        // on legacy rows → null). Cleared only by expiry, not admin CRUD.
-        disabledUntil: route.disabledUntil ? new Date(route.disabledUntil).toISOString() : null,
-      })),
-      // #168 diagnostics, keyed provider+model (a model can serve several
-      // tiers, so embedding per row would duplicate).
+      models: ((roster ?? []) as unknown as RosterRow[]).map(toAdminModel),
+      // #168 diagnostics, keyed provider+model.
       errors: (
         (routeErrors ?? []) as unknown as {
           provider: string;
@@ -265,13 +327,14 @@ router.get('/models', ...adminGuard, async (_req, res) => {
 });
 
 /*
- * #217: resolve a model's provider-owned details from the provider catalog so
- * the admin can add a row without hand-entering context/prices. DeepInfra only
- * for now (Groq's catalog carries no pricing). `found: false` with HTTP 200 is
- * a normal answer; a provider/network failure is a 502 so the client can tell
- * "not hosted" from "could not check".
+ * #217/#234: resolve a model's provider-owned details from the provider
+ * catalog so the admin can add a model without hand-entering context/prices.
+ * DeepInfra reports context/prices/vision; Fireworks reports context/vision
+ * but no prices. `found: false` with HTTP 200 is a normal answer; a
+ * provider/network failure is a 502 so the client can tell "not hosted" from
+ * "could not check".
  */
-const LOOKUP_PROVIDERS = ['deepinfra'] as const;
+const LOOKUP_PROVIDERS = ['deepinfra', 'fireworks'] as const;
 
 const isLookupProvider = (value: string): value is LookupProvider =>
   (LOOKUP_PROVIDERS as readonly string[]).includes(value);
@@ -280,7 +343,9 @@ router.get('/model-lookup', ...adminGuard, async (req, res) => {
   const provider = typeof req.query.provider === 'string' ? req.query.provider : '';
   const model = typeof req.query.model === 'string' ? req.query.model.trim() : '';
   if (!isLookupProvider(provider)) {
-    return res.status(400).json({ message: 'provider must be one of: deepinfra' });
+    return res
+      .status(400)
+      .json({ message: `provider must be one of: ${LOOKUP_PROVIDERS.join(', ')}` });
   }
   if (!model) {
     return res.status(400).json({ message: 'model is required' });
@@ -302,10 +367,9 @@ router.post('/models', ...adminGuard, async (req, res) => {
     return res.status(400).json({ message: payload.error });
   }
   try {
-    const doc = await ProviderRouting.create({
-      provider: payload.provider,
-      model: payload.model,
-      tier: payload.tier,
+    const doc = await ModelRoster.create({
+      modelId: payload.modelId,
+      label: payload.label,
       ...(payload.eligible !== undefined ? { eligible: payload.eligible } : {}),
       ...(payload.tools !== undefined ? { tools: payload.tools } : {}),
       ...(payload.vision !== undefined ? { vision: payload.vision } : {}),
@@ -316,11 +380,17 @@ router.post('/models', ...adminGuard, async (req, res) => {
       ...(payload.outputPrice !== undefined && payload.outputPrice !== null
         ? { outputPrice: payload.outputPrice }
         : {}),
+      providers: (payload.providers ?? []).map((p) => ({
+        provider: p.provider,
+        modelId: p.modelId,
+        enabled: p.enabled ?? true,
+        disabledUntil: null,
+      })),
     });
     res.status(201).json({ id: doc.id });
   } catch (err) {
     if (duplicateModelError(err)) {
-      return res.status(409).json({ message: 'A routing row already exists for this model' });
+      return res.status(409).json({ message: 'A roster model already exists for this modelId' });
     }
     res.status(500).json({ message: 'Error creating model' });
   }
@@ -336,12 +406,49 @@ router.put('/models/:id', ...adminGuard, async (req, res) => {
     return res.status(400).json({ message: payload.error });
   }
   try {
-    const doc = await ProviderRouting.findByIdAndUpdate(id, payload, { new: true });
+    /*
+     * Providers are edited by merging on the provider key: an incoming entry
+     * replaces `modelId`/`enabled` for that backend but preserves its rolling
+     * TTFT and cool-off (operator edits must not wipe system-owned metrics).
+     * A provider not named in the payload is left untouched.
+     */
+    const set: Record<string, unknown> = {};
+    for (const field of [
+      'modelId',
+      'label',
+      'eligible',
+      'tools',
+      'vision',
+      'contextLength',
+      'inputPrice',
+      'outputPrice',
+    ] as const) {
+      if (payload[field] !== undefined) set[field] = payload[field];
+    }
+    const update: Record<string, unknown> = { $set: set };
+    if (payload.providers) {
+      const existing = (await ModelRoster.findById(id).lean()) as unknown as RosterRow | null;
+      if (!existing) return res.status(404).json({ message: 'Model not found' });
+      const byProvider = new Map((existing.providers ?? []).map((p) => [p.provider, p]));
+      update.providers = payload.providers.map((p) => {
+        const prior = byProvider.get(p.provider);
+        return {
+          provider: p.provider,
+          modelId: p.modelId,
+          enabled: p.enabled ?? prior?.enabled ?? true,
+          ttftMs: prior?.ttftMs,
+          ttftSamples: prior?.ttftSamples,
+          ttftUpdatedAt: prior?.ttftUpdatedAt,
+          disabledUntil: prior?.disabledUntil ?? null,
+        };
+      });
+    }
+    const doc = await ModelRoster.findByIdAndUpdate(id, update, { new: true });
     if (!doc) return res.status(404).json({ message: 'Model not found' });
     res.json({ id: doc.id });
   } catch (err) {
     if (duplicateModelError(err)) {
-      return res.status(409).json({ message: 'A routing row already exists for this model' });
+      return res.status(409).json({ message: 'A roster model already exists for this modelId' });
     }
     res.status(500).json({ message: 'Error updating model' });
   }
@@ -353,7 +460,7 @@ router.delete('/models/:id', ...adminGuard, async (req, res) => {
     return res.status(404).json({ message: 'Model not found' });
   }
   try {
-    const doc = await ProviderRouting.findByIdAndDelete(id);
+    const doc = await ModelRoster.findByIdAndDelete(id);
     if (!doc) return res.status(404).json({ message: 'Model not found' });
     res.status(204).end();
   } catch (_err) {
@@ -379,7 +486,7 @@ router.post('/model-compare', ...adminGuard, async (req, res) => {
       return res.status(400).json({ message: 'Invalid model row' });
     }
     const m = entry as { provider?: unknown; model?: unknown; contextLength?: unknown };
-    if (typeof m.provider !== 'string' || !PROVIDER_SET.includes(m.provider as 'groq')) {
+    if (typeof m.provider !== 'string' || !PROVIDER_SET.includes(m.provider as CompareProvider)) {
       return res.status(400).json({ message: 'Invalid provider' });
     }
     if (typeof m.model !== 'string' || !m.model.trim()) {
@@ -392,7 +499,7 @@ router.post('/model-compare', ...adminGuard, async (req, res) => {
       }
     }
     models.push({
-      provider: m.provider as 'groq',
+      provider: m.provider as CompareProvider,
       model: m.model.trim(),
       ...(m.contextLength !== undefined ? { contextLength: Number(m.contextLength) } : {}),
     });

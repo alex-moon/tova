@@ -69,17 +69,18 @@ const AdminService = {
 
 export default AdminService;
 
-// Model inventory with CRUD (issue #104): list, create, update, delete
-// routing rows in the admin view. Mutations return the row id (POST/PUT) or
-// nothing (DELETE); callers refetch for the authoritative list. #168: the
-// list also carries per-model error diagnostics (deploy wipes logs, so the
-// shapes accumulate in Mongo instead).
+// Model inventory with CRUD (issue #104, roster-shaped in #234): list,
+// create, update, delete roster models in the admin view. Mutations return the
+// row id (POST/PUT) or nothing (DELETE); callers refetch for the authoritative
+// list. #168: the list also carries per-model error diagnostics (deploy wipes
+// logs, so the shapes accumulate in Mongo instead).
 export type ModelInput = Partial<
-  Omit<AdminModel, 'id' | 'stats' | 'contextLength' | 'inputPrice' | 'outputPrice'>
+  Omit<AdminModel, 'id' | 'providers' | 'contextLength' | 'inputPrice' | 'outputPrice'>
 > & {
   contextLength?: number | null;
   inputPrice?: number | null;
   outputPrice?: number | null;
+  providers?: { provider: string; modelId: string; enabled?: boolean }[];
 };
 
 const listModels = async (): Promise<AdminModelsPayload> => {
@@ -117,13 +118,16 @@ const deleteModel = async (id: string): Promise<void> => {
   }
 };
 
-// #217: provider catalog lookup. The provider is fixed to DeepInfra (the
-// dropdown was removed — see docs/plan-217-provider-model-lookup.md); the
-// response's `found: false` is a normal miss, not an error.
-const lookupModel = async (model: string): Promise<AdminModelLookup> => {
+// #217/#234: provider catalog lookup. DeepInfra reports context/prices/vision;
+// Fireworks reports context/vision but no prices. The response's `found: false`
+// is a normal miss, not an error.
+const lookupModel = async (
+  provider: 'deepinfra' | 'fireworks',
+  model: string,
+): Promise<AdminModelLookup> => {
   try {
     const res = await axios.get<AdminModelLookup>('/api/admin/model-lookup', {
-      params: { provider: 'deepinfra', model },
+      params: { provider, model },
     });
     return res.data;
   } catch (err) {

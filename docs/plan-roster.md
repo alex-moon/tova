@@ -131,6 +131,20 @@ demo on `epic/roster`.
   (roster seeded, no tier collections). `npm run ci` green (86 suites, 1173
   tests). Reached (2026-10-08).
 
+- **SP2 — Admin speaks the roster (after #234).** Admin `/models` reads the
+  `modelroster` collection: one row per model with nested providers, live
+  per-provider TTFT, per-provider enable toggles, and price as plain info (no
+  over-cap badge). Model CRUD is roster-shaped; `model-lookup` resolves
+  DeepInfra and Fireworks; the add-flow resolves both catalogs. The Compare tab
+  lists roster provider entries (no guard filter). `npm run ci` green (86 server
+  suites / 1054 tests; 18 client suites / 235 tests); rendered at 390px phone
+  width. Reached (2026-10-08).
+  **Known drift surfaced, not fixed (out of #234 scope):** the #232 seed
+  migration `20261008000000-seed-model-roster.ts` writes collection
+  `modelroster` (singular) while the `ModelRoster` mongoose model reads
+  `modelrosters` (plural). The app recovers via `listRoster`'s empty-collection
+  seed, so the migration row is effectively dead for the app — worth a follow-up.
+
 ## Done (checklist)
 
 - [x] Enumerate open issues and triage for do-ability.
@@ -138,7 +152,8 @@ demo on `epic/roster`.
 - [x] Delete the stale `docs/tickets-261003.md` snapshot.
 - [x] #232 completed on `epic/roster` (SP0 reached; CI green).
 - [x] #233 completed on `epic/roster` (tier machinery deleted; CI green).
-- [ ] #234–#238 completed on `epic/roster`.
+- [x] #234 completed on `epic/roster` (SP2 reached; CI green).
+- [ ] #235–#238 completed on `epic/roster`.
 - [ ] #214 and #166 resolved (decision/proposal at minimum).
 - [ ] `epic/roster` merged to `main`.
 

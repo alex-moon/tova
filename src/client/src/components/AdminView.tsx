@@ -42,16 +42,15 @@ const coolOffHoursLeft = (disabledUntil: string | null): number | null => {
 };
 
 /*
- * #199: mirror of the server cap (USD per 1M tokens, in + out). Display-only
- * — the server enforces exclusion from the pools — but the admin table flags
- * a row that would be ruled out so a bad price is visible before it bites.
+ * #234: format a provider's rolling TTFT. `pickPrimary` scores on exactly
+ * this figure (unknown → neutral default), so operators see what the router
+ * sees rather than a client-side recomputation.
  */
-const MAX_MODEL_PRICE_USD_PER_MTOK = 1.5;
-
-const modelPrice = (m: AdminModel): number | undefined =>
-  m.inputPrice !== undefined && m.outputPrice !== undefined
-    ? m.inputPrice + m.outputPrice
-    : undefined;
+const formatTtft = (ms: number | undefined, samples: number | undefined): string => {
+  if (ms === undefined) return '—';
+  const mean = `${Math.round(ms)} ms`;
+  return samples !== undefined ? `${mean} (${samples})` : mean;
+};
 
 const AdminView = () => {
   const [users, setUsers] = useState<AdminUser[] | null>(null);
@@ -112,36 +111,51 @@ const AdminView = () => {
     }
   }, []);
 
-  // Direct model comparison (issue #129): pick rows from the inventory, type
-  // a prompt, and run it through the existing agent on each selection side
-  // by side. Server-mirrored cap on selections (MAX_COMPARE_MODELS = 6).
+  // Direct model comparison (issue #129, roster-shaped in #234): pick
+  // provider entries (a roster model's two backends are separate entries), type
+  // a prompt, and run it through the existing agent on each selection side by
+  // side. Server-mirrored cap on selections (MAX_COMPARE_MODELS = 6).
   const [comparePrompt, setComparePrompt] = useState('');
-  const [selectedModelIds, setSelectedModelIds] = useState<Set<string>>(new Set());
+  // Selection is keyed `provider|modelId` — the exact pair the roster races.
+  const [selectedCompareKeys, setSelectedCompareKeys] = useState<Set<string>>(new Set());
   const [comparison, setComparison] = useState<ModelComparisonRun | null>(null);
   const [comparing, setComparing] = useState(false);
   const [compareError, setCompareError] = useState<string | null>(null);
 
-  const toggleModelSelected = (id: string) => {
-    setSelectedModelIds((prev) => {
+  const compareKey = (provider: string, modelId: string) => `${provider}|${modelId}`;
+
+  // One checkbox per provider entry, so a 3-model roster offers its up-to-six
+  // raced backends (OQ6).
+  const compareEntries = (models ?? []).flatMap((m) =>
+    m.providers.map((p) => ({
+      key: compareKey(p.provider, p.modelId),
+      provider: p.provider,
+      modelId: p.modelId,
+      contextLength: m.contextLength,
+    })),
+  );
+
+  const toggleCompareSelected = (key: string) => {
+    setSelectedCompareKeys((prev) => {
       const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
       return next;
     });
   };
 
   const runComparison = async () => {
-    const selected = (models ?? []).filter((m) => selectedModelIds.has(m.id));
+    const selected = compareEntries.filter((e) => selectedCompareKeys.has(e.key));
     if (!comparePrompt.trim() || selected.length === 0) return;
     setComparing(true);
     setCompareError(null);
     try {
       const run = await AdminModelsService.compareModels(
         comparePrompt.trim(),
-        selected.map((m) => ({
-          provider: m.provider,
-          model: m.model,
-          ...(m.contextLength !== undefined ? { contextLength: m.contextLength } : {}),
+        selected.map((e) => ({
+          provider: e.provider,
+          model: e.modelId,
+          ...(e.contextLength !== undefined ? { contextLength: e.contextLength } : {}),
         })),
       );
       // Selection order in the view is the checkbox order in the table; the
@@ -155,21 +169,29 @@ const AdminView = () => {
     }
   };
 
-  // Add-a-model flow (#217): the provider catalog supplies context/prices/
-  // capabilities, so there is no manual stats form. The admin types a model
-  // name, searches, reviews the summary, picks a tier and adds. Provider is
-  // fixed to DeepInfra (the dropdown was removed — see
-  // docs/plan-217-provider-model-lookup.md, Groq investigation).
+  // Add-a-model flow (#217, roster-shaped in #234): the provider catalogs
+  // supply context/prices/capabilities, so there is no manual stats form. The
+  // admin types a modelId, searches, reviews the summary and adds. The search
+  // resolves BOTH roster providers (OQ2): DeepInfra supplies context/prices/
+  // vision, Fireworks supplies context/vision/tools. Whichever providers
+  // resolve become the model's `providers[]`.
   const [lookupModelName, setLookupModelName] = useState('');
-  const [lookupTier, setLookupTier] = useState<'small' | 'large'>('small');
-  const [lookupResult, setLookupResult] = useState<AdminModelLookup | null>(null);
+  const [lookupDeepinfra, setLookupDeepinfra] = useState<AdminModelLookup | null>(null);
+  const [lookupFireworks, setLookupFireworks] = useState<AdminModelLookup | null>(null);
   const [looking, setLooking] = useState(false);
   const [lookupError, setLookupError] = useState<string | null>(null);
   // #217: which row's Refresh is in flight, so its button can show a throbber.
   const [refreshingId, setRefreshingId] = useState<string | null>(null);
 
+  // The detail summary shown under the form is DeepInfra-first (it is the only
+  // catalog with prices); Fireworks fills in tools/context when DeepInfra is
+  // absent. `found` on either provider offers the Add button.
+  const lookupFound = (lookupDeepinfra?.found ?? false) || (lookupFireworks?.found ?? false);
+  const lookupSummary = lookupDeepinfra?.found ? lookupDeepinfra : lookupFireworks;
+
   const resetLookup = () => {
-    setLookupResult(null);
+    setLookupDeepinfra(null);
+    setLookupFireworks(null);
     setLookupError(null);
   };
 
@@ -178,27 +200,61 @@ const AdminView = () => {
     if (!name) return;
     setLooking(true);
     resetLookup();
-    try {
-      setLookupResult(await AdminModelsService.lookupModel(name));
-    } catch (err) {
-      setLookupError(err instanceof AdminError ? err.message : 'Something went wrong.');
-    } finally {
-      setLooking(false);
+    // Resolve both providers in parallel. A provider that does not host the
+    // model answers `found: false`; a transport failure throws. Each is caught
+    // independently so a failure on one provider cannot hide a hit on the
+    // other. If NEITHER provider could be reached, the error is surfaced
+    // instead of a misleading "not found".
+    const settle = (p: Promise<AdminModelLookup>) =>
+      p.then(
+        (result) => ({ result, error: null as string | null }),
+        (e: unknown) => ({
+          result: { found: false } as AdminModelLookup,
+          error: e instanceof AdminError ? e.message : 'Something went wrong.',
+        }),
+      );
+    const [deepinfra, fireworks] = await Promise.all([
+      settle(AdminModelsService.lookupModel('deepinfra', name)),
+      settle(AdminModelsService.lookupModel('fireworks', name)),
+    ]);
+    setLookupDeepinfra(deepinfra.result);
+    setLookupFireworks(fireworks.result);
+    if (
+      !deepinfra.result.found &&
+      !fireworks.result.found &&
+      (deepinfra.error || fireworks.error)
+    ) {
+      setLookupError(deepinfra.error ?? fireworks.error);
     }
+    setLooking(false);
   };
 
   const addLookedUpModel = async () => {
-    if (!lookupResult?.found || !lookupResult.model) return;
+    if (!lookupFound) return;
+    const name = lookupModelName.trim();
+    const providers: { provider: string; modelId: string }[] = [];
+    // DeepInfra keys the roster modelId directly; Fireworks stores its own
+    // `accounts/fireworks/models/...` id (the lookup echoes the id it matched).
+    if (lookupDeepinfra?.found) providers.push({ provider: 'deepinfra', modelId: name });
+    if (lookupFireworks?.found) {
+      providers.push({ provider: 'fireworks', modelId: lookupFireworks.model ?? name });
+    }
     const payload: ModelInput = {
-      provider: 'deepinfra',
-      model: lookupResult.model,
-      tier: lookupTier,
-      ...(lookupResult.contextLength !== undefined
-        ? { contextLength: lookupResult.contextLength }
+      modelId: name,
+      label: name,
+      providers,
+      ...(lookupSummary?.contextLength !== undefined
+        ? { contextLength: lookupSummary.contextLength }
         : {}),
-      ...(lookupResult.inputPrice !== undefined ? { inputPrice: lookupResult.inputPrice } : {}),
-      ...(lookupResult.outputPrice !== undefined ? { outputPrice: lookupResult.outputPrice } : {}),
-      ...(lookupResult.vision !== undefined ? { vision: lookupResult.vision } : {}),
+      // Only DeepInfra publishes prices (OQ2); Fireworks leaves them unknown,
+      // which the weighted score treats as neutral (never free).
+      ...(lookupDeepinfra?.inputPrice !== undefined
+        ? { inputPrice: lookupDeepinfra.inputPrice }
+        : {}),
+      ...(lookupDeepinfra?.outputPrice !== undefined
+        ? { outputPrice: lookupDeepinfra.outputPrice }
+        : {}),
+      ...(lookupSummary?.vision ? { vision: true } : {}),
     };
     try {
       await AdminModelsService.createModel(payload);
@@ -210,16 +266,17 @@ const AdminView = () => {
     }
   };
 
-  // #217: Refresh re-pulls the provider's current values for an existing row
-  // and updates it in place. Only provider-owned fields are overwritten —
-  // tier/provider/model/eligible are left alone. Vision is only ever set to
-  // true (a catalog that omits the tag must not clobber an admin correction).
+  // #217: Refresh re-pulls the provider's current values for an existing model
+  // and updates it in place. Only provider-owned model-level fields are
+  // overwritten — providers/eligible/label are left alone. Vision is only ever
+  // set to true (a catalog that omits the tag must not clobber an admin
+  // correction). DeepInfra is preferred for the model-level context/prices.
   const refreshModel = async (m: AdminModel) => {
     setRefreshingId(m.id);
     try {
-      const details = await AdminModelsService.lookupModel(m.model);
+      const details = await AdminModelsService.lookupModel('deepinfra', m.modelId);
       if (!details.found) {
-        setError(`Model not found in the ${m.provider} catalog.`);
+        setError(`Model not found in the deepinfra catalog.`);
         return;
       }
       await AdminModelsService.updateModel(m.id, {
@@ -239,6 +296,24 @@ const AdminView = () => {
   const toggleModelEligible = async (m: AdminModel) => {
     try {
       await AdminModelsService.updateModel(m.id, { eligible: !m.eligible });
+      await loadModels();
+    } catch (err) {
+      setError(err instanceof AdminError ? err.message : 'Something went wrong.');
+    }
+  };
+
+  // #234 OQ5: each provider can be taken out of the race independently. Send
+  // the full provider list with just the toggled entry flipped, so the server
+  // merges it (and preserves the system-owned TTFT/cool-off).
+  const toggleProviderEnabled = async (m: AdminModel, providerId: string) => {
+    try {
+      await AdminModelsService.updateModel(m.id, {
+        providers: m.providers.map((p) => ({
+          provider: p.provider,
+          modelId: p.modelId,
+          enabled: p.provider === providerId ? !p.enabled : p.enabled,
+        })),
+      });
       await loadModels();
     } catch (err) {
       setError(err instanceof AdminError ? err.message : 'Something went wrong.');
@@ -391,17 +466,20 @@ const AdminView = () => {
     }
   }, []);
 
-  const openGraphDetail = useCallback(async (id: string) => {
-    setGraphDetail(null);
-    setGraphLoading(true);
-    try {
-      setGraphDetail(await AdminGraphService.getGraphEntity(id));
-    } catch (err) {
-      setGraphError(err instanceof AdminError ? err.message : 'Something went wrong.');
-    } finally {
-      setGraphLoading(false);
-    }
-  }, []);
+  const openGraphDetail = useCallback(
+    async (id: string) => {
+      setGraphDetail(null);
+      setGraphLoading(true);
+      try {
+        setGraphDetail(await AdminGraphService.getGraphEntity(id));
+      } catch (err) {
+        setGraphError(err instanceof AdminError ? err.message : 'Something went wrong.');
+      } finally {
+        setGraphLoading(false);
+      }
+    },
+    [setGraphDetail],
+  );
 
   const selectGraphUser = (userId: string) => {
     setGraphUserId(userId);
@@ -555,8 +633,10 @@ const AdminView = () => {
             <section data-testid="admin-models-section">
               <h3 className="font-heading text-lg font-semibold">Models</h3>
               <p className="text-xs text-muted-foreground">
-                Routing rows (issue #33/#104) — disable, refresh, add or delete; feedback tallies
-                per band. Model details are pulled from the DeepInfra catalog (#217).
+                Roster models (issue #33/#104/#234) — one row per model with its two raced
+                providers. Disable a provider, refresh model details, add or delete; the live TTFT
+                is the exact figure the router scores on. Details are pulled from the DeepInfra
+                catalog (prices) and Fireworks (capabilities) (#217).
               </p>
               <div className="mt-4 rounded-xl border border-border bg-card p-4">
                 <div className="flex flex-wrap items-end gap-3">
@@ -591,19 +671,7 @@ const AdminView = () => {
                     )}
                     {looking ? 'Searching…' : 'Search'}
                   </button>
-                  <label className="text-sm">
-                    <span className="mr-2 text-muted-foreground">Tier</span>
-                    <select
-                      data-testid="model-form-tier"
-                      value={lookupTier}
-                      onChange={(e) => setLookupTier(e.target.value as 'small' | 'large')}
-                      className="rounded-lg border border-border bg-background px-2 py-1"
-                    >
-                      <option value="small">small</option>
-                      <option value="large">large</option>
-                    </select>
-                  </label>
-                  {lookupResult?.found && (
+                  {lookupFound && (
                     <button
                       data-testid="model-form-submit"
                       onClick={() => void addLookedUpModel()}
@@ -618,7 +686,7 @@ const AdminView = () => {
                     {lookupError}
                   </p>
                 )}
-                {lookupResult && !lookupResult.found && (
+                {lookupDeepinfra && lookupFireworks && !lookupFound && !lookupError && (
                   <p
                     data-testid="model-form-not-found"
                     className="mt-3 text-sm text-muted-foreground"
@@ -626,41 +694,52 @@ const AdminView = () => {
                     Model not found
                   </p>
                 )}
-                {lookupResult?.found && (
+                {lookupFound && lookupSummary && (
                   <dl
                     data-testid="model-form-result"
                     className="mt-3 grid grid-cols-2 gap-x-6 gap-y-1 text-sm sm:grid-cols-4"
                   >
                     <div>
                       <dt className="text-xs text-muted-foreground">Model</dt>
-                      <dd data-testid="model-form-result-model">{lookupResult.model}</dd>
+                      <dd data-testid="model-form-result-model">{lookupSummary.model}</dd>
                     </div>
                     <div>
                       <dt className="text-xs text-muted-foreground">Context</dt>
                       <dd data-testid="model-form-result-context">
-                        {lookupResult.contextLength?.toLocaleString() ?? '—'}
+                        {lookupSummary.contextLength?.toLocaleString() ?? '—'}
                       </dd>
                     </div>
                     <div>
                       <dt className="text-xs text-muted-foreground">In $/M</dt>
                       <dd data-testid="model-form-result-input-price">
-                        {lookupResult.inputPrice !== undefined
-                          ? `$${lookupResult.inputPrice.toFixed(3)}`
+                        {lookupSummary.inputPrice !== undefined
+                          ? `$${lookupSummary.inputPrice.toFixed(3)}`
                           : '—'}
                       </dd>
                     </div>
                     <div>
                       <dt className="text-xs text-muted-foreground">Out $/M</dt>
                       <dd data-testid="model-form-result-output-price">
-                        {lookupResult.outputPrice !== undefined
-                          ? `$${lookupResult.outputPrice.toFixed(3)}`
+                        {lookupSummary.outputPrice !== undefined
+                          ? `$${lookupSummary.outputPrice.toFixed(3)}`
                           : '—'}
                       </dd>
                     </div>
                     <div>
                       <dt className="text-xs text-muted-foreground">Capabilities</dt>
                       <dd data-testid="model-form-result-caps">
-                        {lookupResult.vision ? 'vision' : 'text'}
+                        {lookupSummary.vision ? 'vision' : 'text'}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt className="text-xs text-muted-foreground">Providers</dt>
+                      <dd data-testid="model-form-result-providers">
+                        {[
+                          lookupDeepinfra?.found ? 'deepinfra' : null,
+                          lookupFireworks?.found ? 'fireworks' : null,
+                        ]
+                          .filter(Boolean)
+                          .join(', ') || '—'}
                       </dd>
                     </div>
                   </dl>
@@ -674,159 +753,146 @@ const AdminView = () => {
                   <thead>
                     <tr className="border-b border-border text-left text-muted-foreground">
                       <th className="px-4 py-3 font-medium">Model</th>
-                      <th className="px-4 py-3 font-medium">Provider</th>
-                      <th className="px-4 py-3 font-medium">Tier</th>
+                      <th className="px-4 py-3 font-medium">Providers</th>
                       <th className="px-4 py-3 font-medium">Context</th>
-                      <th className="px-4 py-3 font-medium">In $/M</th>
-                      <th className="px-4 py-3 font-medium">Out $/M</th>
-                      <th className="px-4 py-3 font-medium">In+Out</th>
+                      <th className="px-4 py-3 font-medium">In / Out $/M</th>
                       <th className="px-4 py-3 font-medium">Eligible</th>
                       <th className="px-4 py-3 font-medium">Capabilities</th>
-                      <th className="px-4 py-3 font-medium">Feedback</th>
                       <th className="px-4 py-3" />
                     </tr>
                   </thead>
                   <tbody>
-                    {models?.map((model) => {
-                      const coolOff = coolOffHoursLeft(model.disabledUntil);
-                      const price = modelPrice(model);
-                      const overCap = price !== undefined && price > MAX_MODEL_PRICE_USD_PER_MTOK;
-                      return (
-                        <tr key={model.id} className="border-b border-border last:border-b-0">
-                          <td
-                            className="px-4 py-3"
-                            data-label="Model"
-                            data-testid={`admin-model-${model.id}`}
+                    {models?.map((model) => (
+                      <tr key={model.id} className="border-b border-border last:border-b-0">
+                        <td
+                          className="px-4 py-3"
+                          data-label="Model"
+                          data-testid={`admin-model-${model.id}`}
+                        >
+                          {model.label}
+                        </td>
+                        <td className="px-4 py-3" data-label="Providers">
+                          <ul
+                            className="flex flex-col gap-1"
+                            data-testid={`admin-model-providers-${model.id}`}
                           >
-                            {model.model}
-                            {coolOff !== null && (
-                              <span
-                                data-testid={`admin-model-cooloff-${model.id}`}
-                                className="ml-2 inline-block rounded-full border border-warning px-2 py-0.5 text-xs text-warning"
-                              >
-                                Cooling off · ~{coolOff}h left
-                              </span>
+                            {model.providers.map((p) => {
+                              const coolOff = coolOffHoursLeft(p.disabledUntil);
+                              return (
+                                <li
+                                  key={p.provider}
+                                  className="flex items-center gap-2 text-muted-foreground"
+                                  data-testid={`admin-model-provider-${model.id}-${p.provider}`}
+                                >
+                                  <input
+                                    type="checkbox"
+                                    data-testid={`provider-enabled-${model.id}-${p.provider}`}
+                                    checked={p.enabled}
+                                    onChange={() => void toggleProviderEnabled(model, p.provider)}
+                                    title={`Race ${p.provider} for this model`}
+                                  />
+                                  <span className="font-mono text-xs">{p.provider}</span>
+                                  <span
+                                    className="text-xs"
+                                    data-testid={`provider-ttft-${model.id}-${p.provider}`}
+                                  >
+                                    TTFT {formatTtft(p.ttftMs, p.ttftSamples)}
+                                  </span>
+                                  {coolOff !== null && (
+                                    <span
+                                      data-testid={`admin-model-cooloff-${model.id}-${p.provider}`}
+                                      className="inline-block rounded-full border border-warning px-2 py-0.5 text-xs text-warning"
+                                    >
+                                      Cooling off · ~{coolOff}h left
+                                    </span>
+                                  )}
+                                </li>
+                              );
+                            })}
+                            {model.providers.length === 0 && (
+                              <li className="text-xs text-muted-foreground">No providers</li>
                             )}
-                            {overCap && (
-                              <span
-                                data-testid={`admin-model-overcap-${model.id}`}
-                                className="ml-2 inline-block rounded-full border border-destructive px-2 py-0.5 text-xs text-destructive"
-                              >
-                                Over ${MAX_MODEL_PRICE_USD_PER_MTOK.toFixed(2)} cap ✓ excluded
-                              </span>
-                            )}
-                          </td>
-                          <td className="px-4 py-3 text-muted-foreground" data-label="Provider">
-                            {model.provider}
-                          </td>
-                          <td className="px-4 py-3" data-label="Tier">
-                            {model.tier}
-                          </td>
-                          <td className="px-4 py-3 text-muted-foreground" data-label="Context">
-                            {model.contextLength?.toLocaleString() ?? '—'}
-                          </td>
-                          <td
-                            className="px-4 py-3 text-muted-foreground"
-                            data-label="In $/M"
-                            data-testid={`admin-model-input-price-${model.id}`}
-                          >
-                            {model.inputPrice !== undefined
-                              ? `$${model.inputPrice.toFixed(3)}`
-                              : '—'}
-                          </td>
-                          <td
-                            className="px-4 py-3 text-muted-foreground"
-                            data-label="Out $/M"
-                            data-testid={`admin-model-output-price-${model.id}`}
-                          >
-                            {model.outputPrice !== undefined
-                              ? `$${model.outputPrice.toFixed(3)}`
-                              : '—'}
-                          </td>
-                          <td
-                            className={`px-4 py-3 ${
-                              overCap ? 'font-medium text-destructive' : 'text-muted-foreground'
+                          </ul>
+                        </td>
+                        <td className="px-4 py-3 text-muted-foreground" data-label="Context">
+                          {model.contextLength?.toLocaleString() ?? '—'}
+                        </td>
+                        <td
+                          className="px-4 py-3 text-muted-foreground"
+                          data-label="In / Out $/M"
+                          data-testid={`admin-model-price-${model.id}`}
+                        >
+                          {model.inputPrice !== undefined && model.outputPrice !== undefined
+                            ? `$${model.inputPrice.toFixed(3)} / $${model.outputPrice.toFixed(3)}`
+                            : '—'}
+                        </td>
+                        <td className="px-4 py-3" data-label="Eligible">
+                          <input
+                            type="checkbox"
+                            data-testid={`model-eligible-${model.id}`}
+                            checked={model.eligible}
+                            onChange={() => toggleModelEligible(model)}
+                          />
+                        </td>
+                        <td
+                          className="px-4 py-3"
+                          data-label="Capabilities"
+                          data-testid={`admin-model-caps-${model.id}`}
+                        >
+                          <span
+                            className={`mr-1.5 inline-block rounded-full border px-2 py-0.5 text-xs ${
+                              model.vision
+                                ? 'border-primary text-primary'
+                                : 'border-border text-muted-foreground'
                             }`}
-                            data-label="In+Out"
-                            data-testid={`admin-model-price-${model.id}`}
+                            data-testid={`admin-model-vision-${model.id}`}
                           >
-                            {price !== undefined ? `$${price.toFixed(3)}` : '—'}
-                          </td>
-                          <td className="px-4 py-3" data-label="Eligible">
-                            <input
-                              type="checkbox"
-                              data-testid={`model-eligible-${model.id}`}
-                              checked={model.eligible}
-                              onChange={() => toggleModelEligible(model)}
-                            />
-                          </td>
-                          <td
-                            className="px-4 py-3"
-                            data-label="Capabilities"
-                            data-testid={`admin-model-caps-${model.id}`}
+                            vision {model.vision ? '✓' : '✗'}
+                          </span>
+                          <span
+                            className={`mr-1.5 inline-block rounded-full border px-2 py-0.5 text-xs ${
+                              model.tools
+                                ? 'border-primary text-primary'
+                                : 'border-border text-muted-foreground'
+                            }`}
                           >
-                            <span
-                              className={`mr-1.5 inline-block rounded-full border px-2 py-0.5 text-xs ${
-                                model.vision
-                                  ? 'border-primary text-primary'
-                                  : 'border-border text-muted-foreground'
-                              }`}
-                              data-testid={`admin-model-vision-${model.id}`}
-                            >
-                              vision {model.vision ? '✓' : '✗'}
-                            </span>
-                            <span
-                              className={`mr-1.5 inline-block rounded-full border px-2 py-0.5 text-xs ${
-                                model.tools
-                                  ? 'border-primary text-primary'
-                                  : 'border-border text-muted-foreground'
-                              }`}
-                            >
-                              tools {model.tools ? '✓' : '✗'}
-                            </span>
-                            <span className="inline-block px-2 py-0.5 text-xs text-muted-foreground">
-                              {model.contextLength
-                                ? `${model.contextLength.toLocaleString()} tok`
-                                : ''}
-                            </span>
-                          </td>
-                          <td className="px-4 py-3 text-muted-foreground" data-label="Feedback">
-                            {model.stats.length === 0
-                              ? '—'
-                              : model.stats
-                                  .map((s) => `${s.band}: ${s.up}↑ ${s.down}↓`)
-                                  .join(' · ')}
-                          </td>
-                          <td className="px-4 py-3">
-                            <button
-                              data-testid={`model-refresh-${model.id}`}
-                              onClick={() => void refreshModel(model)}
-                              disabled={refreshingId === model.id}
-                              className="mr-2 inline-flex items-center gap-1.5 rounded-lg border border-border px-2 py-1 text-xs transition-colors hover:bg-accent disabled:opacity-50"
-                            >
-                              {refreshingId === model.id && (
-                                <span
-                                  data-testid={`model-refresh-throbber-${model.id}`}
-                                  className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent"
-                                  aria-hidden="true"
-                                />
-                              )}
-                              Refresh
-                            </button>
-                            <button
-                              data-testid={`model-delete-${model.id}`}
-                              onClick={() => deleteModel(model)}
-                              className="rounded-lg border border-destructive px-2 py-1 text-xs text-destructive transition-colors hover:bg-destructive/10"
-                            >
-                              Delete
-                            </button>
-                          </td>
-                        </tr>
-                      );
-                    })}
+                            tools {model.tools ? '✓' : '✗'}
+                          </span>
+                          <span className="inline-block px-2 py-0.5 text-xs text-muted-foreground">
+                            {model.contextLength
+                              ? `${model.contextLength.toLocaleString()} tok`
+                              : ''}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3">
+                          <button
+                            data-testid={`model-refresh-${model.id}`}
+                            onClick={() => void refreshModel(model)}
+                            disabled={refreshingId === model.id}
+                            className="mr-2 inline-flex items-center gap-1.5 rounded-lg border border-border px-2 py-1 text-xs transition-colors hover:bg-accent disabled:opacity-50"
+                          >
+                            {refreshingId === model.id && (
+                              <span
+                                data-testid={`model-refresh-throbber-${model.id}`}
+                                className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent"
+                                aria-hidden="true"
+                              />
+                            )}
+                            Refresh
+                          </button>
+                          <button
+                            data-testid={`model-delete-${model.id}`}
+                            onClick={() => deleteModel(model)}
+                            className="rounded-lg border border-destructive px-2 py-1 text-xs text-destructive transition-colors hover:bg-destructive/10"
+                          >
+                            Delete
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
                     {models?.length === 0 && (
                       <tr>
-                        <td className="px-4 py-3 text-muted-foreground" colSpan={11}>
+                        <td className="px-4 py-3 text-muted-foreground" colSpan={7}>
                           No models configured.
                         </td>
                       </tr>
@@ -858,11 +924,16 @@ const AdminView = () => {
                       </thead>
                       <tbody>
                         {modelErrors.map((e) => {
-                          const cooling = (models ?? []).some(
-                            (m) =>
-                              m.provider === e.provider &&
-                              m.model === e.model &&
-                              coolOffHoursLeft(m.disabledUntil) !== null,
+                          // #234: the error tally is keyed provider+modelId; a
+                          // row is currently cooling off when that provider
+                          // entry's cool-off is in the future.
+                          const cooling = (models ?? []).some((m) =>
+                            m.providers.some(
+                              (p) =>
+                                p.provider === e.provider &&
+                                p.modelId === e.model &&
+                                coolOffHoursLeft(p.disabledUntil) !== null,
+                            ),
                           );
                           const rowKey = `${e.provider}/${e.model}/${e.status ?? 'none'}/${e.category}`;
                           const expanded = expandedErrors.has(rowKey);
@@ -943,8 +1014,9 @@ const AdminView = () => {
             <section data-testid="admin-compare-section">
               <h3 className="font-heading text-lg font-semibold">Compare</h3>
               <p className="text-xs text-muted-foreground">
-                One prompt through the existing agent on selected models (issue #129) — same path as
-                the ticket's eval script. Sequential runs; picks inform routing decisions.
+                One prompt through the existing agent on selected provider entries (issue #129) —
+                each roster model offers its two raced backends, so a 3-model roster is up to six
+                runs. Sequential; picks inform routing decisions.
               </p>
               <div className="mt-4 flex flex-col gap-4 rounded-xl border border-border bg-card p-4">
                 <textarea
@@ -955,26 +1027,26 @@ const AdminView = () => {
                   placeholder="Prompt to run against each selected model…"
                   className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
                 />
-                <div className="flex flex-wrap gap-3">
-                  {models
-                    ?.filter((m) => m.tier !== 'guard')
-                    .map((model) => (
-                      <label key={model.id} className="inline-flex items-center gap-1.5 text-sm">
-                        <input
-                          type="checkbox"
-                          data-testid={`compare-model-${model.model}`}
-                          checked={selectedModelIds.has(model.id)}
-                          onChange={() => toggleModelSelected(model.id)}
-                        />
-                        {model.provider}/{model.model}
-                        <span className="text-muted-foreground">({model.tier})</span>
-                      </label>
-                    ))}
+                <div className="flex flex-col gap-2">
+                  {compareEntries.map((entry) => (
+                    <label key={entry.key} className="flex items-start gap-2 text-sm break-all">
+                      <input
+                        type="checkbox"
+                        className="mt-1 shrink-0"
+                        data-testid={`compare-model-${entry.provider}-${entry.modelId}`}
+                        checked={selectedCompareKeys.has(entry.key)}
+                        onChange={() => toggleCompareSelected(entry.key)}
+                      />
+                      <span>
+                        {entry.provider}/{entry.modelId}
+                      </span>
+                    </label>
+                  ))}
                 </div>
                 <button
                   data-testid="compare-run"
                   onClick={runComparison}
-                  disabled={comparing || !comparePrompt.trim() || selectedModelIds.size === 0}
+                  disabled={comparing || !comparePrompt.trim() || selectedCompareKeys.size === 0}
                   className="self-start rounded-lg border border-primary bg-primary px-3 py-1.5 text-sm text-primary-foreground transition-colors disabled:opacity-50"
                 >
                   {comparing ? 'Running…' : 'Run comparison'}
