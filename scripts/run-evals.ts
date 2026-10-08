@@ -14,12 +14,12 @@
  * Not part of CI (same stance as `scripts/eval-classify-models.ts`):
  *   npx tsx scripts/run-evals.ts [--keep-fixtures]
  *   npx tsx scripts/run-evals.ts --models all
- *   npx tsx scripts/run-evals.ts --models "groq:openai/gpt-oss-20b,deepinfra:Qwen/Qwen3-14B"
+ *   npx tsx scripts/run-evals.ts --models "deepinfra:zai-org/GLM-5.3-Flash"
  * Needs: DEEPINFRA_API_KEY (agent; completions are DeepInfra, #94), local
  * MongoDB (fixtures), optional LANGSMITH_API_KEY (export), BRAVE_API_KEY
  * (web_search case). Model: TOVA_EVAL_MODEL (+TOVA_EVAL_PROVIDER
- * groq|deepinfra), default openai/gpt-oss-20b (the completion pool's small
- * default, tool-capable). `--models` sweeps every listed model through all
+ * groq|deepinfra), default GLM 5.3 Flash on deepinfra (#236: the cheapest
+ * roster model). `--models` sweeps every listed model through all
  * cases; `--models all` enumerates the fixed roster on the wired providers
  * (deepinfra/fireworks — matched to connectors here; groq stays wired for the
  * single-run default). Bare entries in the csv default to provider
@@ -32,6 +32,7 @@ import { buildMongoUri } from '../src/server/mongoUri';
 import {
   langsmithClientFromEnv,
   parseModelsFlag,
+  resolveScheduledModels,
   runEvalSuite,
   type EvalResult,
   type WiredProvider,
@@ -72,9 +73,12 @@ const printSweepTable = (results: EvalResult[]): void => {
 };
 
 const main = async (): Promise<void> => {
-  const model = process.env.TOVA_EVAL_MODEL ?? 'openai/gpt-oss-20b';
+  // #236: default to a roster model (cheapest = GLM 5.3 Flash on DeepInfra);
+  // the retired guard model `openai/gpt-oss-20b` has no roster home.
+  const fallback = resolveScheduledModels({});
+  const model = process.env.TOVA_EVAL_MODEL ?? fallback[0].model;
   const provider = (
-    process.env.TOVA_EVAL_PROVIDER === 'groq' ? 'groq' : 'deepinfra'
+    process.env.TOVA_EVAL_PROVIDER === 'groq' ? 'groq' : fallback[0].provider
   ) as WiredProvider;
   const keepFixtures = process.argv.includes('--keep-fixtures');
   const requested = parseModelsArg();
