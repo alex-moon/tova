@@ -104,6 +104,7 @@
     "typescript-eslint": "^8.69.0"
   },
   "overrides": {
+    "handlebars": "4.7.10",
     "proxy-addr": "2.0.8",
     "shell-quote": "1.11.0"
   },
