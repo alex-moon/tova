@@ -1,9 +1,32 @@
 import { describe, expect, it, vi, afterEach } from 'vitest';
-import { render, screen, fireEvent, cleanup } from '@testing-library/react';
+import { render, screen, fireEvent, cleanup, waitFor } from '@testing-library/react';
 import type { ComponentProps } from 'react';
 
+vi.mock('sonner', () => ({ toast: { error: vi.fn(), success: vi.fn(), info: vi.fn() } }));
+
+vi.mock('../services/assets', async (importOriginal) => {
+  const original = await importOriginal<typeof import('../services/assets')>();
+  return {
+    ...original,
+    default: { ...original.default, list: vi.fn(), upload: vi.fn() },
+  };
+});
+
 import ChatWindow from './ChatWindow';
+import AssetService from '../services/assets';
+import type { AssetSummary } from '../services/assets';
 import type { Message, ToolEvent } from '../App';
+
+const mockAsset = (over: Partial<AssetSummary> = {}): AssetSummary => ({
+  id: 'a1',
+  filename: 'notes.txt',
+  contentType: 'text/plain',
+  size: 12,
+  status: 'ready',
+  hasText: true,
+  createdAt: new Date().toISOString(),
+  ...over,
+});
 
 const base = (over: Partial<Message> = {}): Message => ({
   _id: 'm1',
@@ -499,5 +522,83 @@ describe('Composer incognito toggle (issue #144)', () => {
       />,
     );
     expect(screen.queryByTestId('chat-incognito-toggle')).not.toBeInTheDocument();
+  });
+});
+
+describe('Composer attach menu (issue #214)', () => {
+  afterEach(() => {
+    cleanup();
+    vi.mocked(AssetService.list).mockReset();
+  });
+
+  const openMenu = () => {
+    fireEvent.click(screen.getByLabelText('Attach a file'));
+    return screen.getByTestId('attach-menu');
+  };
+
+  it('does not open the menu until the paperclip is clicked', () => {
+    renderChat([]);
+    expect(screen.queryByTestId('attach-menu')).not.toBeInTheDocument();
+  });
+
+  it('lazily lists the five most recent files with Upload on top', async () => {
+    vi.mocked(AssetService.list).mockResolvedValue({
+      assets: Array.from({ length: 6 }, (_, i) =>
+        mockAsset({ id: `a${i}`, filename: `file-${i}.txt` }),
+      ),
+      nextCursor: null,
+    });
+    renderChat([]);
+    // No fetch on render — only when the menu opens.
+    expect(AssetService.list).not.toHaveBeenCalled();
+    openMenu();
+    await waitFor(() => expect(screen.getAllByTestId('attach-menu-item')).toHaveLength(5));
+    expect(screen.getByTestId('attach-menu-upload')).toBeInTheDocument();
+    expect(AssetService.list).toHaveBeenCalledTimes(1);
+    expect(screen.getByText('file-0.txt')).toBeInTheDocument();
+    expect(screen.queryByText('file-5.txt')).not.toBeInTheDocument();
+  });
+
+  it('caches the recent list across open/close', async () => {
+    vi.mocked(AssetService.list).mockResolvedValue({ assets: [mockAsset()], nextCursor: null });
+    renderChat([]);
+    openMenu();
+    await waitFor(() => expect(screen.getByTestId('attach-menu-item')).toBeInTheDocument());
+    fireEvent.mouseDown(document.body);
+    openMenu();
+    await waitFor(() => expect(screen.getByTestId('attach-menu-item')).toBeInTheDocument());
+    expect(AssetService.list).toHaveBeenCalledTimes(1);
+  });
+
+  it('picks a recent file into the attachment chip and closes', async () => {
+    vi.mocked(AssetService.list).mockResolvedValue({
+      assets: [mockAsset({ id: 'img', filename: 'photo.png', contentType: 'image/png' })],
+      nextCursor: null,
+    });
+    renderChat([]);
+    openMenu();
+    await waitFor(() => expect(screen.getByTestId('attach-menu-item')).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId('attach-menu-item'));
+    expect(screen.queryByTestId('attach-menu')).not.toBeInTheDocument();
+    expect(screen.getByTestId('attachment-chip')).toHaveTextContent('photo.png');
+  });
+
+  it('keeps Upload usable when the recent fetch fails', async () => {
+    vi.mocked(AssetService.list).mockRejectedValue(new Error('nope'));
+    renderChat([]);
+    openMenu();
+    await waitFor(() => expect(screen.getByTestId('attach-menu-error')).toBeInTheDocument());
+    expect(screen.getByTestId('attach-menu-upload')).toBeInTheDocument();
+  });
+
+  it('closes on Escape and on an outside pointer-down', () => {
+    vi.mocked(AssetService.list).mockResolvedValue({ assets: [], nextCursor: null });
+    renderChat([]);
+    openMenu();
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(screen.queryByTestId('attach-menu')).not.toBeInTheDocument();
+    openMenu();
+    fireEvent.mouseDown(document.body);
+    expect(screen.queryByTestId('attach-menu')).not.toBeInTheDocument();
   });
 });
