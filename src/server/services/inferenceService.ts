@@ -1,5 +1,5 @@
 import { CompletionOptions, LlmConnector, LlmProvider } from './llmTypes';
-import { deepinfraConnector, groqConnector } from './mastraService';
+import { deepinfraConnector, fireworksConnector, groqConnector } from './mastraService';
 import { recordModelError } from './modelErrorTally';
 
 /*
@@ -18,6 +18,7 @@ export type { LlmConnector, LlmProvider } from './llmTypes';
 const connectors: Partial<Record<LlmProvider, LlmConnector>> = {
   groq: groqConnector,
   deepinfra: deepinfraConnector,
+  fireworks: fireworksConnector,
   // typesafe connector lands with #151's openai-compatible wiring.
 };
 

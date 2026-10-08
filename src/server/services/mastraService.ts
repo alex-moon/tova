@@ -718,6 +718,7 @@ const agentFor = (provider: LlmProvider, model: string, tools?: boolean): Agent 
   const cacheKey = `${provider}/${model}/${mode}/${hasSearchKey() ? 'search' : 'nosearch'}`;
   const cached = agentCache.get(cacheKey);
   if (cached) return cached;
+  const routerId = MASTRA_PROVIDER_ID[provider];
   const agent = new Agent({
     // The neutral message shape is structurally Core-compatible; the cast
     // exists because the union `role` in the neutral type does not narrow
@@ -725,7 +726,7 @@ const agentFor = (provider: LlmProvider, model: string, tools?: boolean): Agent 
     id: `tova-${provider}`,
     name: `tova-${provider}`,
     instructions: mode === 'full' ? TOOL_INSTRUCTIONS : '',
-    model: `${provider}/${model}`,
+    model: `${routerId}/${model}`,
     ...(mode === 'full'
       ? {
           tools: {
@@ -834,6 +835,21 @@ const splitLeadingSystem = (
 const mergedInstructions = (toolInstructions: string, callerSystem: string | undefined): string =>
   [toolInstructions, callerSystem].filter((part): part is string => Boolean(part)).join('\n\n');
 
+/*
+ * #232: Mastra's bundled router reaches Fireworks under the provider id
+ * `fireworks-ai` (its registry entry is `fireworks-ai`, base URL
+ * `https://api.fireworks.ai/inference/v1/`, key `FIREWORKS_API_KEY`). The
+ * neutral app-level provider name stays `fireworks`; only the router id that
+ * Mastra receives is remapped here. Every other provider id is identical to
+ * its Mastra router id.
+ */
+const MASTRA_PROVIDER_ID: Record<LlmProvider, string> = {
+  groq: 'groq',
+  deepinfra: 'deepinfra',
+  fireworks: 'fireworks-ai',
+  typesafe: 'typesafe',
+};
+
 const buildConnector = (provider: LlmProvider): LlmConnector => {
   // #52: the default main-chat path always carries built-in tools now.
   const defaultMode: ToolsMode = 'full';
@@ -907,3 +923,4 @@ const buildConnector = (provider: LlmProvider): LlmConnector => {
 
 export const groqConnector: LlmConnector = buildConnector('groq');
 export const deepinfraConnector: LlmConnector = buildConnector('deepinfra');
+export const fireworksConnector: LlmConnector = buildConnector('fireworks');
