@@ -1,4 +1,5 @@
 import { getJwtSecret } from './jwt';
+import type { LlmProvider } from '../services/llmTypes';
 
 /*
  * Central, typed server config surface (issue #142). One module over every
@@ -105,6 +106,28 @@ export const config = {
     },
     get promptInjectionEnabled(): boolean {
       return Boolean(process.env.ENTITY_GRAPH_PROMPT_INJECTION);
+    },
+  },
+
+  // #238: the aux model source for the small, latency-insensitive LLM calls
+  // (chat title, entity extraction, follow-ups, prompt metrics, enrichment).
+  // Replaces the tier-era `ROUTER_SMALL_MODEL`/`ROUTER_GUARD_MODEL` reads. The
+  // owner retired small models for *chat routing* only; a single cheap fixed
+  // aux model is kept. Default is the retired guard model on its old provider
+  // so the wire behaviour is unchanged.
+  aux: {
+    get model(): string {
+      return process.env.AUX_MODEL || 'openai/gpt-oss-20b';
+    },
+    get provider(): LlmProvider {
+      return (process.env.AUX_PROVIDER as LlmProvider) || 'groq';
+    },
+    // #238: hard cap on the serial enrichment pre-pass so a slow aux call
+    // degrades to "no block" instead of delaying the chat turn.
+    get enrichmentTimeoutMs(): number {
+      const raw = process.env.ENRICHMENT_TIMEOUT_MS;
+      const parsed = raw === undefined || raw === '' ? NaN : Number(raw);
+      return Number.isFinite(parsed) && parsed > 0 ? parsed : 1500;
     },
   },
 

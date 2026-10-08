@@ -171,6 +171,18 @@ demo on `epic/roster`.
   `TraceStatsCache`, and the admin table carry `provider`/TTFT. `npm run ci`
   green (86 server suites / 1062 tests; 18 client suites). Reached (2026-10-08).
 
+- **SP5 — Aux relocated, enrichment restored (after #238).** The four aux calls
+  (title, entity extraction, follow-ups, prompt metrics) read one
+  `AUX_MODEL`/`AUX_PROVIDER` source (default `openai/gpt-oss-20b` on groq)
+  instead of the deleted `ROUTER_*` vars. The retired guard's `files` signal is
+  rebuilt as a bounded enrichment pass (`enrichmentService.ts`) wired into both
+  chat routes: a cheap tool-free aux call judges file intent and injects the
+  bounded library index on a positive vote; `ENRICHMENT_ENABLED=0` kills it and
+  `ENRICHMENT_TIMEOUT_MS` (default 1500) caps the serial pre-pass. Image and ZDR
+  turns skip it. No expansion signals invented (owner list pending). `npm run ci`
+  green (87 server suites / 1072 tests; 18 client suites / 236 tests). Reached
+  (2026-10-08).
+
 ## Done (checklist)
 
 - [x] Enumerate open issues and triage for do-ability.
@@ -181,7 +193,8 @@ demo on `epic/roster`.
 - [x] #234 completed on `epic/roster` (SP2 reached; CI green).
 - [x] #235 completed on `epic/roster` (SP3 reached; CI green).
 - [x] #237 completed on `epic/roster` (SP4 reached; CI green).
-- [ ] #236 and #238 completed on `epic/roster`.
+- [x] #238 completed on `epic/roster` (SP5 reached; CI green).
+- [ ] #236 completed on `epic/roster`.
 - [ ] #214 and #166 resolved (decision/proposal at minimum).
 - [ ] `epic/roster` merged to `main`.
 

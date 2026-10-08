@@ -2,8 +2,10 @@ import { redactForLog } from './logRedaction';
 import { Message } from '../models/Message';
 import { inferenceService } from './inferenceService';
 import { computeDeterministicMetrics } from './promptMetrics';
+import { config } from '../config';
 
-const LLM_MODEL = process.env.ROUTER_GUARD_MODEL || 'openai/gpt-oss-20b';
+// #238: aux model source (was `ROUTER_GUARD_MODEL`), read lazily.
+const llmModel = (): string => config.aux.model;
 
 const LLM_PROMPT =
   'Classify the user prompt below. Reply with ONLY one JSON object and nothing else, ' +
@@ -100,7 +102,8 @@ export const classifyPromptDimensions = async (
     // #77: tool-free agent — same rationale as the guard classifier
     // (tool-rejecting small models, issue #41).
     const completion = await inferenceService.createToolFreeCompletion({
-      model: LLM_MODEL,
+      provider: config.aux.provider,
+      model: llmModel(),
       messages: [{ role: 'user', content: `${LLM_PROMPT}\n\nPrompt: ${content.trim()}` }],
       temperature: 0,
       max_tokens: 100,

@@ -3,6 +3,7 @@ import { inferenceService } from './inferenceService';
 import { Entity, LOW_CONFIDENCE, bumpConfidence, type Salience } from '../models/Entity';
 import { redactForLog } from './logRedaction';
 import { EntityEdge } from '../models/EntityEdge';
+import { config } from '../config';
 
 /*
  * Per-user entity graph extraction (issue #138, plan-138 task 2). One
@@ -13,7 +14,8 @@ import { EntityEdge } from '../models/EntityEdge';
  * bad extraction must not fail a chat turn that has already been served.
  */
 
-const EXTRACTION_MODEL = process.env.ROUTER_SMALL_MODEL || 'openai/gpt-oss-20b';
+// #238: aux model source (was `ROUTER_SMALL_MODEL`), read lazily.
+const extractionModel = (): string => config.aux.model;
 
 // Plan-138 decision 6: extraction stays off until the flag is set, so the
 // extra LLM call can be disabled instantly without a deploy.
@@ -239,8 +241,8 @@ export const extractAndPersistFromTurn = async (input: ExtractionInput): Promise
     `${input.assistantText.replace(/\s+/g, ' ').trim()}`;
   try {
     const completion = await inferenceService.createToolFreeCompletion({
-      provider: 'groq',
-      model: EXTRACTION_MODEL,
+      provider: config.aux.provider,
+      model: extractionModel(),
       messages: [
         { role: 'system', content: EXTRACTION_PROMPT },
         { role: 'user', content: trimmedExchange.substring(0, 4000) },

@@ -35,6 +35,7 @@ import { zdrHistorySchema } from '../validation';
 import { redactForLog } from '../services/logRedaction';
 import { decideTurn } from '../services/zdrTurn';
 import { AllModelsDisabledError } from '../services/modelConfigService';
+import { enrichmentLibraryBlock } from '../services/enrichmentService';
 
 const router = express.Router();
 
@@ -429,6 +430,22 @@ const messagesFromPersistedHistory = (
     content: m.content as string,
   }));
 
+/*
+ * #238: the aux enrichment prompt wants plain text history, oldest first, and
+ * WITHOUT the just-saved current turn (it rides separately as the query). The
+ * persisted find is newest-first and includes the current turn, so it is
+ * dropped by id and the tail reversed — the pre-#232 `guardHistoryFromDocs`
+ * shape, non-mutating this time (the same `history` array is reused below).
+ */
+const enrichmentHistoryFromDocs = (
+  docs: { _id: unknown; role: string; content: string }[],
+  currentMessageId: unknown,
+): { role: 'user' | 'assistant'; content: string }[] =>
+  [...docs]
+    .filter((m) => String(m._id) !== String(currentMessageId))
+    .reverse()
+    .map((m) => ({ role: m.role as 'user' | 'assistant', content: m.content }));
+
 // Throwaway chat attachments (#116): as soon as the turn that consumed them
 // completes, the row and its Spaces object go. Never throws — cleanup must
 // not turn a finished answer into an error.
@@ -668,7 +685,11 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
       });
     }
     // Save user message
-    await saveUserMessageWithMetrics(String(session!._id), content, attachedAsset);
+    const userMessage = await saveUserMessageWithMetrics(
+      String(session!._id),
+      content,
+      attachedAsset,
+    );
 
     // Image turns (#115) route vision-first only when the
     // presign path is actually available; otherwise the turn degrades to the
@@ -685,6 +706,22 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
     // service itself never throws, so chat cannot block hard on it.
     await ensureUserLocation(userDoc, req.ip);
     const entityBlock = await knowledgeBlockFor(content, userId as string);
+    /*
+     * #238: the enrichment pass (bounded serial) decides whether to inject the
+     * file-library index. Text-only: image turns skip it, matching the retired
+     * guard. `enrichmentHistoryFromDocs` is non-mutating so the same `history`
+     * array survives for `withSystemAndAsset`.
+     */
+    const libraryBlock = hasImage
+      ? ''
+      : await enrichmentLibraryBlock(
+          content,
+          enrichmentHistoryFromDocs(
+            history as { _id: unknown; role: string; content: string }[],
+            userMessage._id,
+          ),
+          userId as string,
+        );
     const withSystemAndAsset = async (systemContent: string) => {
       const next = messagesFromPersistedHistory(history as { role: string; content: string }[]);
       next.unshift({ role: 'system', content: systemContent });
@@ -697,14 +734,16 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
 
     /*
      * #232: the turn races the fixed roster. Racing selects the model
-     * internally, so the prompt is assembled once (no guard files vote — racing
-     * does not call the guard) and the budget is sized against the pre-race
+     * internally, so the prompt is assembled once (#238: the enrichment pass
+     * supplies the library block) and the budget is sized against the pre-race
      * pick's window. The winner re-shapes routing for persistence. An empty
      * roster (no model could be picked) is surfaced as the all-disabled error.
      */
     const rosterPrePick = await pickRosterRoute(hasImage);
     if (!rosterPrePick) throw new AllModelsDisabledError();
-    const turnMessages = await withSystemAndAsset(buildSystemContent(userDoc, entityBlock, ''));
+    const turnMessages = await withSystemAndAsset(
+      buildSystemContent(userDoc, entityBlock, libraryBlock),
+    );
     const raced = await routeAndComplete(
       {
         messages: turnMessages,
@@ -901,13 +940,23 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
     if (!rosterRoute) throw new AllModelsDisabledError();
 
     await ensureUserLocation(streamUserDoc, req.ip);
+    /*
+     * #238: the enrichment pass supplies the file-library block (empty on ZDR —
+     * the write-nothing turn injects no index, as before — and on image turns,
+     * which are text-only for enrichment).
+     */
+    let libraryBlock = '';
     if (zdr) {
       // Continuity comes from the client replay (#116); nothing is read back.
       messages = buildZdrMessages(zdrHistory, content);
       routingResult = rosterRoute;
     } else {
       // Save user message
-      await saveUserMessageWithMetrics(String(session!._id), content, attachedAsset);
+      const userMessage = await saveUserMessageWithMetrics(
+        String(session!._id),
+        content,
+        attachedAsset,
+      );
 
       // Get chat history — the window includes the just-saved current turn,
       // reversing to oldest-first for the prompt.
@@ -915,17 +964,26 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
         .sort({ timestamp: -1 })
         .limit(10);
 
+      if (!hasImage) {
+        libraryBlock = await enrichmentLibraryBlock(
+          content,
+          enrichmentHistoryFromDocs(
+            history as { _id: unknown; role: string; content: string }[],
+            userMessage._id,
+          ),
+          userId as string,
+        );
+      }
+
       // Same image-turn gating as the non-streaming route (#115).
       routingResult = rosterRoute;
       messages = messagesFromPersistedHistory(history as { role: string; content: string }[]);
     }
 
     const streamEntityBlock = await knowledgeBlockFor(content, userId as string);
-    // Racing does not call the guard classifier, so there is no files vote to
-    // inject a library index on a raced turn.
     messages.unshift({
       role: 'system',
-      content: buildSystemContent(streamUserDoc, streamEntityBlock, ''),
+      content: buildSystemContent(streamUserDoc, streamEntityBlock, libraryBlock),
     });
     if (attachedAsset) {
       const imageAttached = hasImage ? await buildImageTurn(messages, attachedAsset) : false;

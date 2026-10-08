@@ -69,6 +69,13 @@ jest.mock('../services/titleService', () => ({
   generateChatTitle: jest.fn().mockResolvedValue('Hello'),
 }));
 
+// #238: stub the enrichment aux call so the main completion stays findable in
+// `mockAgentStream.mock.calls`.
+jest.mock('../services/enrichmentService', () => ({
+  enrichmentLibraryBlock: jest.fn().mockResolvedValue(''),
+  isEnrichmentEnabled: () => false,
+}));
+
 const app = createApp();
 
 describe('knowledge block degrades to empty when Mongo is unreachable (plan-138 task 9)', () => {
@@ -98,11 +105,14 @@ describe('knowledge block degrades to empty when Mongo is unreachable (plan-138 
         .send({ content: 'restaurants near taj hotel' });
 
       expect(response.status).toBe(200);
-      const system = mockAgentStream.mock.calls[0][0].messages.find(
-        (m: { role: string }) => m.role === 'system',
-      );
-      expect(system.content).not.toContain('user:knowledge_graph');
-      expect(system.content).not.toContain('Taj Hotel');
+      // #238: the turn now also makes an enrichment aux call, so the main
+      // completion is not necessarily call[0]. Find the system message across
+      // all calls instead of assuming a position.
+      const system = mockAgentStream.mock.calls
+        .flatMap((call) => call[0]?.messages ?? [])
+        .find((m: { role: string }) => m.role === 'system');
+      expect(system?.content ?? '').not.toContain('user:knowledge_graph');
+      expect(system?.content ?? '').not.toContain('Taj Hotel');
     } finally {
       mute.mockRestore();
       jest.restoreAllMocks();

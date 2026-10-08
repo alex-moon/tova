@@ -1,7 +1,9 @@
 import { redactForLog } from './logRedaction';
 import { inferenceService } from './inferenceService';
+import { config } from '../config';
 
-const SUGGESTION_MODEL = process.env.ROUTER_GUARD_MODEL || 'openai/gpt-oss-20b';
+// #238: aux model source (was `ROUTER_GUARD_MODEL`), read lazily.
+const suggestionModel = (): string => config.aux.model;
 
 const SUGGESTION_PROMPT =
   'Generate 2-3 very short follow-up questions the user might ask next, as a ' +
@@ -24,7 +26,8 @@ export const generateFollowups = async (
     // suggestion model rejects tool-carrying requests. Suggestions need no
     // search, so this call goes to a plain agent even when the key is set.
     const completion = await inferenceService.createToolFreeCompletion({
-      model: SUGGESTION_MODEL,
+      provider: config.aux.provider,
+      model: suggestionModel(),
       messages: [
         { role: 'system', content: SUGGESTION_PROMPT },
         { role: 'user', content: trimmed },
