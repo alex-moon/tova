@@ -15,6 +15,16 @@
 `epic/roster` is currently identical to `main` (`git rev-list --count` is 0 in
 both directions), so the branch is a clean base.
 
+## Working rules on `epic/roster`
+
+- **Checkout `epic/roster` before starting work, and check it out again after
+  finishing.** Do not do roster work on `main` or any other branch.
+- **Commit and push all work.** Nothing is considered done until it is committed
+  and pushed to `epic/roster`.
+- **Keep this doc (`docs/plan-roster.md`) updated on `epic/roster` and pushed.**
+  The roster, stable points, and checklist live here; they must reflect the
+  pushed state of the branch, not just the working tree.
+
 ## Scope
 
 Nine open issues on `alex-moon/tova`:
