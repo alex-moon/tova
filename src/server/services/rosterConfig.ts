@@ -1,5 +1,4 @@
 import { ModelRoster } from '../models/ModelRoster';
-import { routingPrice } from './modelConfigService';
 
 /*
  * #232: the fixed model roster and its weighted primary pick.
@@ -96,6 +95,22 @@ export const ROSTER_SEED: RosterModel[] = [
     ],
   },
 ];
+
+/*
+ * Summed routing price for a ref, or `undefined` when either component is
+ * missing (#199). Unknown is deliberately distinct from 0: a half-priced model
+ * is not treated as cheap. Moved here with the roster (#233); the tier-era
+ * config service that used to own it is gone. Non-finite components also read
+ * as unknown so a `NaN` can never slip past a comparison.
+ */
+export const routingPrice = (ref: {
+  inputPrice?: number;
+  outputPrice?: number;
+}): number | undefined => {
+  const { inputPrice, outputPrice } = ref;
+  if (!Number.isFinite(inputPrice) || !Number.isFinite(outputPrice)) return undefined;
+  return (inputPrice as number) + (outputPrice as number);
+};
 
 /* ----------------------------------------------------------------------------
  * Weighted score (owner decision OQ3): score = f(TTFT) * price penalty.

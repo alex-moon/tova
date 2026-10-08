@@ -4,8 +4,6 @@ import { createApp } from '../index';
 import { Message } from '../models/Message';
 import { Session } from '../models/Session';
 import { User } from '../models/User';
-import { AllModelsDisabledError } from '../services/modelConfigService';
-
 const mockGenerate = jest.fn();
 
 jest.mock('@mastra/core/agent', () => {
@@ -16,17 +14,52 @@ jest.mock('@mastra/core/agent', () => {
   };
 });
 
-const mockRouteQuery = jest.fn();
+const MOCK_ROUTING = { model: 'mock-small-model', reason: 'roster-pick' };
 
-jest.mock('../services/routerService', () => ({
-  routeQuery: (...args: unknown[]) => mockRouteQuery(...args),
-}));
+// #233: routing now runs through the fixed-roster racing path. Drive it by
+// setting `mockRacingState.routing`; the mock delegates the actual provider
+// call back through the real `inferenceService` so the mocked Mastra Agent
+// stays the observable dispatch boundary.
+const mockRacingState: { routing: typeof MOCK_ROUTING | null; error?: unknown } = {
+  routing: MOCK_ROUTING,
+};
+
+jest.mock('../services/racingService', () => {
+  const { inferenceService } = jest.requireActual('../services/inferenceService');
+  const failIfSet = () => {
+    if (mockRacingState.error) throw mockRacingState.error;
+  };
+  return {
+    pickRosterRoute: async () => {
+      failIfSet();
+      return mockRacingState.routing;
+    },
+    routeAndComplete: async (opts: Record<string, unknown>) => {
+      failIfSet();
+      const routing = mockRacingState.routing;
+      const completion = await inferenceService.createCompletion({
+        ...opts,
+        model: routing?.model,
+        provider: routing?.provider,
+      });
+      return { routing, outcome: { result: { completion } } };
+    },
+    routeAndStream: async (opts: Record<string, unknown>) => {
+      failIfSet();
+      const routing = mockRacingState.routing;
+      const stream = await inferenceService.createStreamingCompletion({
+        ...opts,
+        model: routing?.model,
+        provider: routing?.provider,
+      });
+      return { routing, outcome: { result: { stream } } };
+    },
+  };
+});
 
 jest.mock('../services/titleService', () => ({
   generateChatTitle: jest.fn().mockResolvedValue('Hello'),
 }));
-
-const MOCK_ROUTING = { model: 'mock-small-model', reason: 'classifier-simple' };
 
 const registerUser = async (app: ReturnType<typeof createApp>, email: string) => {
   const response = await request(app)
@@ -36,12 +69,17 @@ const registerUser = async (app: ReturnType<typeof createApp>, email: string) =>
   return response.headers['set-cookie'];
 };
 
+beforeEach(() => {
+  mockRacingState.routing = MOCK_ROUTING;
+  mockRacingState.error = undefined;
+});
+
 describe('Chat route routing metadata', () => {
   beforeEach(() => {
     mockGenerate.mockReset().mockResolvedValue({
       text: 'e2e-ok',
     });
-    mockRouteQuery.mockReset().mockResolvedValue(MOCK_ROUTING);
+    mockRacingState.routing = MOCK_ROUTING;
   });
 
   it('exposes the routing decision (model, reason) in the response', async () => {
@@ -61,9 +99,9 @@ describe('Chat route routing metadata', () => {
     expect(saved).toBeTruthy();
   });
 
-  it('persists a routingBand captured from the user turn on the assistant message', async () => {
+  it('initializes the feedback slot on the assistant message', async () => {
     const app = createApp();
-    const cookies = await registerUser(app, 'band-meta-1@example.com');
+    const cookies = await registerUser(app, 'feedback-slot@example.com');
 
     const response = await request(app)
       .post('/api/chat')
@@ -72,8 +110,6 @@ describe('Chat route routing metadata', () => {
 
     expect(response.status).toBe(200);
     const assistantMessage = await Message.findOne({ role: 'assistant' });
-    // "Hello there" is a short prose prompt → short|prose band
-    expect(assistantMessage?.routingBand).toBe('short|prose');
     expect(assistantMessage?.feedback).toMatchObject({ value: null, updatedAt: null });
   });
 
@@ -117,11 +153,11 @@ describe('Chat route routing metadata', () => {
     // Plan task-9 bullet: the DeepInfra path must be exercised at the route
     // level, not only in the connector unit tests. The mocked Agent ctor
     // model string is the observable dispatch boundary.
-    mockRouteQuery.mockResolvedValueOnce({
+    mockRacingState.routing = {
       model: 'Qwen/Qwen2.5-72B-Instruct',
-      reason: 'classifier-complex',
+      reason: 'roster-pick',
       provider: 'deepinfra',
-    });
+    } as typeof MOCK_ROUTING;
     const app = createApp();
     const cookies = await registerUser(app, 'routing-deepinfra@example.com');
     const agentCtor = jest.requireMock('@mastra/core/agent').Agent as jest.Mock;
@@ -137,49 +173,6 @@ describe('Chat route routing metadata', () => {
       { model: string },
     ];
     expect(ctorCall[0].model).toBe('deepinfra/Qwen/Qwen2.5-72B-Instruct');
-  });
-
-  it('passes prior turns, oldest first, to the guard classifier — never the current turn (#169 phase 2)', async () => {
-    const app = createApp();
-    const cookies = await registerUser(app, 'routing-guard-history@example.com');
-    const cookieHeader = Array.isArray(cookies) ? cookies : [cookies];
-
-    const first = await request(app)
-      .post('/api/chat')
-      .set('Cookie', cookieHeader)
-      .send({ content: 'first question' });
-    expect(first.status).toBe(200);
-    // First turn of a session: no prior turns exist, so the guard context
-    // is the empty tail — the guard judges the bare message.
-    expect(mockRouteQuery).toHaveBeenLastCalledWith('first question', undefined, undefined, {
-      band: expect.any(String),
-      hasImage: false,
-      history: [],
-    });
-
-    const second = await request(app)
-      .post('/api/chat')
-      .set('Cookie', cookieHeader)
-      .send({ sessionId: first.body.sessionId, content: 'second question' });
-    expect(second.status).toBe(200);
-    expect(mockRouteQuery).toHaveBeenLastCalledWith(
-      'second question',
-      undefined,
-      undefined,
-      expect.objectContaining({
-        hasImage: false,
-        history: [
-          { role: 'user', content: 'first question' },
-          { role: 'assistant', content: 'e2e-ok' },
-        ],
-      }),
-    );
-    // The current turn rides separately as the query — it must never
-    // also appear inside the guard's history tail.
-    const lastDeps = mockRouteQuery.mock.calls[mockRouteQuery.mock.calls.length - 1]?.[3] as {
-      history?: { content: string }[];
-    };
-    expect(lastDeps.history?.some((m) => m.content === 'second question')).toBe(false);
   });
 
   it('persists deduped sources when the agent ran web_search (#16)', async () => {
@@ -405,7 +398,7 @@ const flush = async () => {
 
 describe('Chat route prompt metrics', () => {
   beforeEach(() => {
-    mockRouteQuery.mockReset().mockResolvedValue(MOCK_ROUTING);
+    mockRacingState.routing = MOCK_ROUTING;
     mockGenerate.mockReset().mockResolvedValue({
       text: 'e2e-ok',
     });
@@ -441,8 +434,6 @@ describe('Chat route prompt metrics', () => {
     expect(assistantMessage?.metrics).toMatchObject({
       sessionMessageIndex: 1,
     });
-    // Code-fenced user prompts get the code band, deterministically
-    expect(assistantMessage?.routingBand).toBe('short|prose');
 
     await flush();
     const updated = await Message.findOne({ role: 'user' });
@@ -664,10 +655,9 @@ describe('pre-stream 429 surfacing (#117)', () => {
   it('the non-stream route surfaces the rate-limit detail additively on failure', async () => {
     const app = createApp();
     mockGenerate.mockResolvedValue({ text: 'e2e-ok' });
-    mockRouteQuery.mockRejectedValueOnce(
-      Object.assign(new Error('Rate limit reached on tokens per minute (TPM)'), {
-        statusCode: 429,
-      }),
+    mockRacingState.error = Object.assign(
+      new Error('Rate limit reached on tokens per minute (TPM)'),
+      { statusCode: 429 },
     );
     const cookie = await registerUser(app, 'prestream-nonstream-429@example.com');
     const res = await request(app).post('/api/chat').set('Cookie', cookie).send({
@@ -681,10 +671,9 @@ describe('pre-stream 429 surfacing (#117)', () => {
   it('the stream route surfaces the rate-limit detail when it fails before any SSE event', async () => {
     const app = createApp();
     mockGenerate.mockResolvedValue({ text: 'e2e-ok' });
-    mockRouteQuery.mockRejectedValueOnce(
-      Object.assign(new Error('Rate limit reached on tokens per minute (TPM)'), {
-        statusCode: 429,
-      }),
+    mockRacingState.error = Object.assign(
+      new Error('Rate limit reached on tokens per minute (TPM)'),
+      { statusCode: 429 },
     );
     const cookie = await registerUser(app, 'prestream-stream-429@example.com');
     const res = await request(app).post('/api/chat/stream').set('Cookie', cookie).send({
@@ -701,7 +690,8 @@ describe('#168 all-cooling-off surfacing', () => {
     mockGenerate.mockReset().mockResolvedValue({
       text: 'e2e-ok',
     });
-    mockRouteQuery.mockReset().mockRejectedValue(new AllModelsDisabledError());
+    // An empty roster (no pickable model) is surfaced as the all-disabled error.
+    mockRacingState.routing = null;
   });
 
   it('the non-stream route returns 503 with the friendly message as the primary text', async () => {
@@ -730,7 +720,7 @@ describe('#168 all-cooling-off surfacing', () => {
 describe('non-streaming tool-only confirmation (#195)', () => {
   beforeEach(() => {
     mockGenerate.mockReset().mockResolvedValue({ text: 'e2e-ok' });
-    mockRouteQuery.mockReset().mockResolvedValue(MOCK_ROUTING);
+    mockRacingState.routing = MOCK_ROUTING;
   });
 
   it('persists and returns a synthesized confirmation when a tool ran with no text', async () => {
@@ -796,7 +786,7 @@ describe('non-streaming tool-only confirmation (#195)', () => {
 describe('#226 sessions ordered by most recent message', () => {
   beforeEach(() => {
     mockGenerate.mockReset().mockResolvedValue({ text: 'e2e-ok' });
-    mockRouteQuery.mockReset().mockResolvedValue(MOCK_ROUTING);
+    mockRacingState.routing = MOCK_ROUTING;
   });
 
   const listSessionIds = async (

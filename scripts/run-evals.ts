@@ -20,11 +20,11 @@
  * (web_search case). Model: TOVA_EVAL_MODEL (+TOVA_EVAL_PROVIDER
  * groq|deepinfra), default openai/gpt-oss-20b (the completion pool's small
  * default, tool-capable). `--models` sweeps every listed model through all
- * cases; `--models all` enumerates the eligible seed+env tier models
- * restricted to the wired providers (groq/deepinfra — `typesafe` models are
- * excluded because no connector is wired for them here). Bare entries in the
- * csv default to provider `deepinfra`. A `tova-evals-<model>` run over all
- * models builds a per-model evidence base in LangSmith (#158).
+ * cases; `--models all` enumerates the fixed roster on the wired providers
+ * (deepinfra/fireworks — matched to connectors here; groq stays wired for the
+ * single-run default). Bare entries in the csv default to provider
+ * `deepinfra`. A `tova-evals-<model>` run over all models builds a per-model
+ * evidence base in LangSmith (#158).
  */
 import 'dotenv/config';
 import mongoose from 'mongoose';
@@ -91,6 +91,10 @@ const main = async (): Promise<void> => {
     }
     if (p === 'groq' && !process.env.GROQ_API_KEY) {
       console.error(`GROQ_API_KEY must be set to run ${p} models.`);
+      process.exit(1);
+    }
+    if (p === 'fireworks' && !process.env.FIREWORKS_API_KEY) {
+      console.error(`FIREWORKS_API_KEY must be set to run ${p} models.`);
       process.exit(1);
     }
   }

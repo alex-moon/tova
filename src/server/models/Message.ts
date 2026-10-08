@@ -87,9 +87,6 @@ const messageSchema = new mongoose.Schema({
     ],
     default: undefined,
   },
-  routingBand: {
-    type: String,
-  },
   /*
    * Token usage for the assistant turn (issue #224): the provider's
    * prompt/completion split and the turn total (across tool steps). All

@@ -123,6 +123,13 @@ demo on `epic/roster`.
   `ROSTER_RACING_ENABLED` (default on outside tests) and falls back to the tier
   router when off/empty. `npm run ci` green (91 suites, 1196 tests). Tier
   machinery intentionally still present — deletion is #233.
+- **SP1 — Tier machinery deleted (after #233).** Racing is the only routing
+  path; no tier/guard/ε/feedback-band code remains. The guard classifier is
+  gone from the chat routes, so raced turns inject no library index (aux +
+  enrichment is #238). Admin `/models` reads routing rows + the error tally
+  only; the roster admin tab is #234. Migrations run clean on a fresh DB
+  (roster seeded, no tier collections). `npm run ci` green (86 suites, 1173
+  tests). Reached (2026-10-08).
 
 ## Done (checklist)
 
@@ -130,7 +137,8 @@ demo on `epic/roster`.
 - [x] Record the `epic/roster` base-branch plan.
 - [x] Delete the stale `docs/tickets-261003.md` snapshot.
 - [x] #232 completed on `epic/roster` (SP0 reached; CI green).
-- [ ] #233–#238 completed on `epic/roster`.
+- [x] #233 completed on `epic/roster` (tier machinery deleted; CI green).
+- [ ] #234–#238 completed on `epic/roster`.
 - [ ] #214 and #166 resolved (decision/proposal at minimum).
 - [ ] `epic/roster` merged to `main`.
 

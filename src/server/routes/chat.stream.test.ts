@@ -3,7 +3,6 @@ import { createApp } from '../index';
 import { Message } from '../models/Message';
 import { Session } from '../models/Session';
 import { User } from '../models/User';
-import { AllModelsDisabledError } from '../services/modelConfigService';
 import { reconcileToolEvent, type PersistedToolEvent } from './chat';
 
 const mockGenerate = jest.fn();
@@ -18,30 +17,56 @@ jest.mock('@mastra/core/agent', () => {
   };
 });
 
-const mockRouteQuery = jest.fn();
+const MOCK_ROUTING = {
+  model: 'mock-small-model',
+  provider: 'deepinfra',
+  reason: 'roster-pick',
+};
 
-jest.mock('../services/routerService', () => ({
-  routeQuery: (...args: unknown[]) => mockRouteQuery(...args),
-}));
+// #233: routing runs through the fixed-roster racing path. Drive it with
+// `mockRacingState`; the mock delegates the provider call back through the real
+// `inferenceService` so the mocked Mastra Agent stream stays observable.
+const mockRacingState: {
+  routing: typeof MOCK_ROUTING | null;
+  error?: unknown;
+} = { routing: MOCK_ROUTING };
 
-const mockDisableModel = jest.fn();
-
-jest.mock('../services/modelConfigService', () => ({
-  // Keep the real module; stub only disableModel so the cool-off path never
-  // touches the DB (#168).
-  ...jest.requireActual('../services/modelConfigService'),
-  disableModel: (...args: unknown[]) => mockDisableModel(...args),
-}));
+jest.mock('../services/racingService', () => {
+  const { inferenceService } = jest.requireActual('../services/inferenceService');
+  const failIfSet = () => {
+    if (mockRacingState.error) throw mockRacingState.error;
+  };
+  return {
+    pickRosterRoute: async () => {
+      failIfSet();
+      return mockRacingState.routing;
+    },
+    routeAndComplete: async (opts: Record<string, unknown>) => {
+      failIfSet();
+      const routing = mockRacingState.routing;
+      const completion = await inferenceService.createCompletion({
+        ...opts,
+        model: routing?.model,
+        provider: routing?.provider,
+      });
+      return { routing, outcome: { result: { completion } } };
+    },
+    routeAndStream: async (opts: Record<string, unknown>) => {
+      failIfSet();
+      const routing = mockRacingState.routing;
+      const stream = await inferenceService.createStreamingCompletion({
+        ...opts,
+        model: routing?.model,
+        provider: routing?.provider,
+      });
+      return { routing, outcome: { result: { stream } } };
+    },
+  };
+});
 
 jest.mock('../services/titleService', () => ({
   generateChatTitle: jest.fn().mockResolvedValue('Hello'),
 }));
-
-const MOCK_ROUTING = {
-  model: 'mock-small-model',
-  provider: 'deepinfra',
-  reason: 'classifier-simple',
-};
 
 const isClassifierCall = (args?: { messages?: { role: string; content: string }[] }) =>
   args?.messages?.[0]?.content.startsWith('Classify the user prompt') ?? false;
@@ -73,7 +98,8 @@ describe('Chat streaming route', () => {
       .mockReset()
       .mockImplementation(async () => Promise.resolve({ fullStream: fullStreamFrom(['chunk']) }));
     mockGenerate.mockReset().mockResolvedValue({ text: 'plain' });
-    mockRouteQuery.mockReset().mockResolvedValue(MOCK_ROUTING);
+    mockRacingState.routing = MOCK_ROUTING;
+    mockRacingState.error = undefined;
   });
 
   it('rejects unauthenticated requests', async () => {
@@ -194,51 +220,6 @@ describe('Chat streaming route', () => {
 
     const assistant = await Message.findOne({ sessionId, role: 'assistant' });
     expect(assistant?.usage).toBeUndefined();
-  });
-
-  it('passes prior turns, oldest first, to the guard classifier — never the current turn (#169 phase 2)', async () => {
-    const cookies = await registerUser('stream-guard-history@example.com');
-    const app = createApp();
-
-    const first = await request(app)
-      .post('/api/chat/stream')
-      .set('Cookie', cookies)
-      .send({ content: 'first question' });
-    expect(first.status).toBe(200);
-    // First turn of a session: the guard context is the empty tail.
-    expect(mockRouteQuery).toHaveBeenLastCalledWith('first question', undefined, undefined, {
-      band: expect.any(String),
-      hasImage: false,
-      history: [],
-    });
-
-    const meta = first.text
-      .split('\n\n')
-      .map((part) => part.split('\n').find((l) => l.startsWith('data: ')))
-      .find((l) => l?.includes('"sessionId"'));
-    const { sessionId } = JSON.parse((meta as string).slice(6));
-
-    const second = await request(app)
-      .post('/api/chat/stream')
-      .set('Cookie', cookies)
-      .send({ sessionId, content: 'second question' });
-    expect(second.status).toBe(200);
-    expect(mockRouteQuery).toHaveBeenLastCalledWith(
-      'second question',
-      undefined,
-      undefined,
-      expect.objectContaining({
-        hasImage: false,
-        history: [
-          { role: 'user', content: 'first question' },
-          { role: 'assistant', content: 'chunk' },
-        ],
-      }),
-    );
-    const lastDeps = mockRouteQuery.mock.calls[mockRouteQuery.mock.calls.length - 1]?.[3] as {
-      history?: { content: string }[];
-    };
-    expect(lastDeps.history?.some((m) => m.content === 'second question')).toBe(false);
   });
 
   it('passes a client-disconnect abort signal into the provider stream call', async () => {
@@ -940,7 +921,8 @@ describe('Chat streaming prompt metrics', () => {
   beforeEach(() => {
     mockGenerate.mockReset();
     mockAgentStream.mockReset();
-    mockRouteQuery.mockReset().mockResolvedValue(MOCK_ROUTING);
+    mockRacingState.routing = MOCK_ROUTING;
+    mockRacingState.error = undefined;
   });
 
   it('attaches metrics to streamed turns and classifies the user message', async () => {
@@ -1058,94 +1040,14 @@ describe('Chat streaming route — #168 endpoint failures', () => {
       })(),
     }));
 
-  const sseEvents = (response: { text: string }) =>
-    response.text
-      .split('\n\n')
-      .filter((part) => part.trim().length > 0)
-      .map((part) => {
-        const eventLine = part.split('\n').find((l) => l.startsWith('event: '));
-        const dataLine = part.split('\n').find((l) => l.startsWith('data: '));
-        return {
-          event: eventLine?.slice(7),
-          data: dataLine ? JSON.parse(dataLine.slice(6)) : undefined,
-        };
-      });
-
   beforeEach(() => {
     mockAgentStream.mockReset();
     mockGenerate.mockReset().mockResolvedValue({ text: 'plain' });
-    mockRouteQuery.mockReset().mockResolvedValue(MOCK_ROUTING);
-    mockDisableModel.mockReset().mockResolvedValue(true);
+    mockRacingState.routing = MOCK_ROUTING;
+    mockRacingState.error = undefined;
   });
 
-  it('disables a failing stream endpoint and re-emits meta after re-routing', async () => {
-    mockRouteQuery
-      .mockResolvedValueOnce({ model: 'first-model', provider: 'deepinfra', reason: 'test' })
-      .mockResolvedValueOnce({ model: 'second-model', provider: 'deepinfra', reason: 'test' });
-    mockAgentStream
-      .mockImplementationOnce(async () => ({
-        fullStream: (async function* () {
-          yield { type: 'error', payload: { error: { message: 'upstream exploded' } } };
-        })(),
-      }))
-      .mockImplementationOnce(async () => ({ fullStream: fullStreamFrom(['recovered.']) }));
-
-    const cookies = await registerUser('stream-failover@example.com');
-    const app = createApp();
-    const response = await request(app)
-      .post('/api/chat/stream')
-      .set('Cookie', cookies)
-      .send({ content: 'hello there' });
-
-    expect(response.status).toBe(200);
-    const events = sseEvents(response);
-    const metas = events.filter((e) => e.event === 'meta');
-    expect(metas).toHaveLength(2);
-    expect(metas[1].data).toMatchObject({ routing: { model: 'second-model' } });
-    expect(
-      events
-        .filter((e) => e.event === 'delta')
-        .map((e) => e.data.content)
-        .join(''),
-    ).toBe('recovered.');
-    expect(mockDisableModel).toHaveBeenCalledTimes(1);
-    expect(mockDisableModel).toHaveBeenCalledWith('deepinfra', 'first-model', undefined);
-  });
-
-  it('re-routes an engine_overloaded stream failure with the short overload cool-off (#213)', async () => {
-    mockRouteQuery
-      .mockResolvedValueOnce({ model: 'first-model', provider: 'deepinfra', reason: 'test' })
-      .mockResolvedValueOnce({ model: 'second-model', provider: 'deepinfra', reason: 'test' });
-    let call = 0;
-    mockAgentStream.mockImplementation(async () => {
-      call += 1;
-      if (call === 1) {
-        return {
-          fullStream: (async function* () {
-            yield { type: 'error', payload: { error: { message: 'Model busy, retry later' } } };
-          })(),
-        };
-      }
-      return {
-        fullStream: (async function* () {
-          yield { type: 'text-delta', textDelta: 'recovered.' };
-        })(),
-      };
-    });
-
-    const cookies = await registerUser('stream-overload@example.com');
-    const app = createApp();
-    const response = await request(app)
-      .post('/api/chat/stream')
-      .set('Cookie', cookies)
-      .send({ content: 'hello there' });
-
-    expect(response.status).toBe(200);
-    expect(response.text.split('\n\n').some((p) => p.includes('event: error'))).toBe(false);
-    expect(mockDisableModel).toHaveBeenCalledWith('deepinfra', 'first-model', 5 * 60 * 1000);
-  });
-
-  it('a rate-limit stream failure surfaces the retry hint without disabling the model', async () => {
+  it('a rate-limit stream failure surfaces the retry hint', async () => {
     errorStreamFrom('rate limit exceeded');
 
     const cookies = await registerUser('stream-429@example.com');
@@ -1158,15 +1060,12 @@ describe('Chat streaming route — #168 endpoint failures', () => {
     expect(response.status).toBe(200);
     const errorEvent = response.text.split('\n\n').find((part) => part.includes('event: error'));
     expect(errorEvent).toContain('Rate limited by the model provider');
-    expect(mockDisableModel).not.toHaveBeenCalled();
-    expect(mockRouteQuery).toHaveBeenCalledTimes(1);
   });
 
-  it('stops the loop and surfaces the original error when the cool-off write fails', async () => {
-    mockDisableModel.mockResolvedValueOnce(false);
+  it('a generic stream failure surfaces the generic error message', async () => {
     errorStreamFrom('upstream exploded');
 
-    const cookies = await registerUser('stream-write-fail@example.com');
+    const cookies = await registerUser('stream-generic-fail@example.com');
     const app = createApp();
     const response = await request(app)
       .post('/api/chat/stream')
@@ -1176,16 +1075,13 @@ describe('Chat streaming route — #168 endpoint failures', () => {
     expect(response.status).toBe(200);
     const errorEvent = response.text.split('\n\n').find((part) => part.includes('event: error'));
     expect(errorEvent).toContain('Error streaming from model');
-    expect(mockDisableModel).toHaveBeenCalledTimes(1);
-    expect(mockDisableModel).toHaveBeenCalledWith('deepinfra', 'mock-small-model', undefined);
-    expect(mockRouteQuery).toHaveBeenCalledTimes(1); // no re-route happened
   });
 
-  it('returns 503 with the all-disabled message when routing fails before the stream opens (#168)', async () => {
-    // Every completion model already cooling off at turn start: routeQuery
-    // throws AllModelsDisabledError pre-SSE — the user must see the friendly
-    // message, not "Error processing chat" / a generic client failure.
-    mockRouteQuery.mockReset().mockRejectedValue(new AllModelsDisabledError());
+  it('returns 503 with the all-disabled message when the roster is empty before the stream opens (#168)', async () => {
+    // No pickable roster model at turn start: the route surfaces the
+    // all-disabled error pre-SSE — the user must see the friendly message,
+    // not a generic client failure.
+    mockRacingState.routing = null;
 
     const cookies = await registerUser('stream-pool-empty@example.com');
     const app = createApp();
@@ -1197,7 +1093,6 @@ describe('Chat streaming route — #168 endpoint failures', () => {
     expect(response.status).toBe(503);
     expect(response.body.message).toMatch(/temporarily unavailable/);
     expect(response.body.detail).toMatch(/temporarily unavailable/);
-    expect(mockDisableModel).not.toHaveBeenCalled();
   });
 });
 

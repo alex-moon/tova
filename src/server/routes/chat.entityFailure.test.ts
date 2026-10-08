@@ -37,9 +37,33 @@ jest.mock('../services/followupService', () => ({
   generateFollowups: jest.fn().mockResolvedValue([]),
 }));
 
-jest.mock('../services/routerService', () => ({
-  routeQuery: jest.fn().mockResolvedValue({ model: 'mock-small-model', reason: 't' }),
-}));
+// #233: routing runs through the fixed-roster racing path. A single fixed
+// routing result is always available; the provider call delegates back through
+// the mocked `inferenceService`.
+const MOCK_ROUTING = { model: 'mock-small-model', provider: 'deepinfra', reason: 'roster-pick' };
+
+jest.mock('../services/racingService', () => {
+  const { inferenceService } = jest.requireMock('../services/inferenceService');
+  return {
+    pickRosterRoute: async () => MOCK_ROUTING,
+    routeAndComplete: async (opts: Record<string, unknown>) => {
+      const completion = await inferenceService.createCompletion({
+        ...opts,
+        model: MOCK_ROUTING.model,
+        provider: MOCK_ROUTING.provider,
+      });
+      return { routing: MOCK_ROUTING, outcome: { result: { completion } } };
+    },
+    routeAndStream: async (opts: Record<string, unknown>) => {
+      const stream = await inferenceService.createStreamingCompletion({
+        ...opts,
+        model: MOCK_ROUTING.model,
+        provider: MOCK_ROUTING.provider,
+      });
+      return { routing: MOCK_ROUTING, outcome: { result: { stream } } };
+    },
+  };
+});
 
 jest.mock('../services/titleService', () => ({
   generateChatTitle: jest.fn().mockResolvedValue('Hello'),

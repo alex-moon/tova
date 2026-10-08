@@ -1,41 +1,21 @@
-import type { RoutingResult } from './routerService';
-import { AllModelsDisabledError, disableModel, overloadCoolOffMinutes } from './modelConfigService';
-import { isOverloadError } from './providerErrors';
-
-export { ALL_MODELS_DISABLED_MESSAGE, AllModelsDisabledError } from './modelConfigService';
 /*
- * #213: endpoint overload is a *per-endpoint transient* failure, distinct from
- * an account rate limit even though both can arrive as HTTP 429. It is exactly
- * what cool-off + re-route is for, so it is checked BEFORE `isRateLimitError`
- * (which classifies on the bare 429 status). Classification lives in a leaf
- * module so the diagnostics tally can share it without an import cycle.
- */
-export { isOverloadError } from './providerErrors';
-
-/*
- * Model-failure cool-off (#168): when a routed completion endpoint fails, the
- * failed model is immediately disabled for a cool-off period (see `disableModel`)
- * and the turn is re-routed against the freshly-excluded pool. When no
- * non-disabled models remain, the router fails with an end-user-visible message.
+ * #233: provider error classification. Formerly the tier-era serial failover
+ * loop's discriminator; the loop (`withModelFailover`) is gone with the tier
+ * router (#232/#233), but the racing runtime (`racingService.ts`) reuses the
+ * same retry/abort/test-not-fail decisions:
  *
- * Not retried / not disabling:
  * - client aborts: the user hung up; the endpoint never failed.
- * - prompt-size errors (`isPromptSizeErrors` below): the 413 family is a
- *   prompt-shape problem surfaced with its own actionable message — disabling
- *   a healthy endpoint for hours on a single oversized prompt would be wrong.
- * - rate-limit errors (#168, decision 2026-09-26): 429 gets a back-off
- *   mechanism, which is a separate mechanism from cool-off and does not
- *   exist yet — until it does, a 429 fails the turn loudly without
- *   disabling the endpoint (retry-looping into other models would drain the
- *   pool on rate limits, which is not a per-endpoint failure state).
+ * - prompt-size errors: the 413 family is a prompt-shape problem surfaced with
+ *   its own actionable message — disabling a healthy endpoint for hours on a
+ *   single oversized prompt would be wrong.
+ * - rate-limit errors: 429 gets a back-off mechanism (deferred); until then it
+ *   fails the turn loudly without disabling the endpoint.
  *
- * An `AllModelsDisabledError` escaping `route` (a pool that was already
- * drained by cool-off before this turn) passes through untouched.
- *
- * The guard classifier lives outside this path (`routeQuery` handles its own
- * error fallback); the cool-off applies to the tier pools (`disableModel`
- * writes `providerroutings.disabledUntil`, which every pool read excludes).
+ * `isOverloadError` (#213) lives in the leaf `providerErrors.ts` module so the
+ * diagnostics tally can share it without an import cycle.
  */
+
+export { isOverloadError } from './providerErrors';
 
 export const isClientAbort = (err: unknown): boolean =>
   err instanceof Error && (err.name === 'AbortError' || err.name === 'CanceledError');
@@ -59,63 +39,11 @@ export const isRateLimitError = (err: unknown): boolean => {
 
 /*
  * Mirrors the 413 / "Request too large" detection in `streamingErrorMessage`
- * 413 detection in `streamingErrorMessage` (routes/chat.ts). Kept here (not
- * imported from the route) so services stay free of route-import cycles.
+ * (routes/chat.ts). Kept here (not imported from the route) so services stay
+ * free of route-import cycles.
  */
 export const isPromptSizeError = (err: unknown): boolean => {
   const message = err instanceof Error ? err.message : '';
   const statusCode = (err as { statusCode?: unknown } | null | undefined)?.statusCode;
   return statusCode === 413 || /Request too large/.test(message);
-};
-
-export interface FailoverOutcome<T> {
-  routing: RoutingResult;
-  completion: T;
-}
-
-/** Safety cap: one disable per attempt exhausts any sane pool long before. */
-export const MAX_ATTEMPTS = 8;
-
-export const withModelFailover = async <T>(
-  route: () => Promise<RoutingResult>,
-  invoke: (routing: RoutingResult) => Promise<T>,
-): Promise<FailoverOutcome<T>> => {
-  let disabledAny = false;
-  let lastError: unknown;
-  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-    let routing: RoutingResult;
-    try {
-      routing = await route();
-    } catch (err) {
-      // Pool empty. Only retry-shaped when this loop already disabled
-      // something — a pool that started empty is a config problem and keeps
-      // its original loud error.
-      if (disabledAny) throw new AllModelsDisabledError();
-      throw err;
-    }
-    try {
-      const completion = await invoke(routing);
-      return { routing, completion };
-    } catch (err) {
-      if (isClientAbort(err)) throw err;
-      if (isPromptSizeError(err)) throw err;
-      // #213: endpoint overload re-routes on a short cool-off; a genuine
-      // account rate limit still fails loudly (back-off stays deferred).
-      const overload = isOverloadError(err);
-      if (!overload && isRateLimitError(err)) throw err;
-      lastError = err;
-      const disabled = await disableModel(
-        routing.provider,
-        routing.model,
-        overload ? overloadCoolOffMinutes() * 60 * 1000 : undefined,
-      );
-      if (!disabled) {
-        // Cool-off write failed: the pool is unchanged, so a re-route would
-        // re-pick the same broken endpoint — surface the original error.
-        throw err;
-      }
-      disabledAny = true;
-    }
-  }
-  throw lastError;
 };

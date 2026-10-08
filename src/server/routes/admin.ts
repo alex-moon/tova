@@ -4,7 +4,6 @@ import { User, UserDocument } from '../models/User';
 import { authenticateBearerOrSession, requireRole, AuthRequest } from '../middleware/auth';
 import { AdminUser } from '../../shared/contracts';
 import { ProviderRouting } from '../models/ProviderRouting';
-import { ModelMetricStat } from '../models/ModelMetricStat';
 import { ModelRouteError } from '../models/ModelRouteError';
 import { LogLevel } from '../services/logService';
 import { queryRetainedLogs } from '../services/lokiLogs';
@@ -71,8 +70,9 @@ router.get('/users', ...adminGuard, async (_req, res) => {
 
 /*
  * Model inventory with CRUD (issue #104). Each row is one `providerroutings`
- * document (a provider/model pair can repeat across tiers); `stats` carries
- * the feedback tallies captured in ModelMetricStat for the model name.
+ * document (a provider/model pair can repeat across tiers). `stats` (#233) is
+ * always empty now that the tier-era feedback tallies are gone; it is retained
+ * until #234 reworks the Models tab onto the roster.
  * Read errors degrade to empty lists; the view shows a 'no data' state.
  */
 // #151: 'typesafe' rides along now so admin CRUD can write rows for the
@@ -205,21 +205,16 @@ const duplicateModelError = (err: unknown): boolean =>
 
 router.get('/models', ...adminGuard, async (_req, res) => {
   try {
-    const [routes, stats, routeErrors] = await Promise.all([
+    // #233: the tier-era (band, model) feedback tallies are gone with the
+    // router; the admin table reads routing rows + the #175 error tally only.
+    const [routes, routeErrors] = await Promise.all([
       ProviderRouting.find({}).lean(),
-      ModelMetricStat.find({}).lean(),
       // #168 diagnostics, consolidated onto the #175 tally (OQ-7, decision
       // 2026-09-26): inferenceService records every completion failure into
       // `modelrouteerrors`, so the admin table reads that single mechanism —
       // most recent shapes first.
       ModelRouteError.find({}).sort({ lastSeenAt: -1 }).lean(),
     ]);
-    const statMap = new Map<string, { band: string; up: number; down: number }[]>();
-    for (const stat of stats as { band: string; modelName: string; up: number; down: number }[]) {
-      const list = statMap.get(stat.modelName) ?? [];
-      list.push({ band: stat.band, up: stat.up ?? 0, down: stat.down ?? 0 });
-      statMap.set(stat.modelName, list);
-    }
     res.json({
       models: ((routes ?? []) as unknown as ProviderRow[]).map((route) => ({
         id: String(route._id),
@@ -230,6 +225,10 @@ router.get('/models', ...adminGuard, async (_req, res) => {
         tools: route.tools !== false,
         vision: route.vision === true,
         contextLength: route.contextLength,
+        // #233: the tier-era (band, model) feedback tallies are gone, so the
+        // stats column is always empty until #234 reworks the Models tab onto
+        // the roster. Emitted as `[]` so the client contract stays satisfied.
+        stats: [],
         // #199 pricing (USD per 1M tokens); undefined on unpriced rows, which
         // JSON drops so the client only sees the key when a price is known.
         inputPrice: route.inputPrice,
@@ -237,7 +236,6 @@ router.get('/models', ...adminGuard, async (_req, res) => {
         // #168: system-owned cool-off, surfaced for the admin badge (absent
         // on legacy rows → null). Cleared only by expiry, not admin CRUD.
         disabledUntil: route.disabledUntil ? new Date(route.disabledUntil).toISOString() : null,
-        stats: [...(statMap.get(route.model) ?? [])],
       })),
       // #168 diagnostics, keyed provider+model (a model can serve several
       // tiers, so embedding per row would duplicate).

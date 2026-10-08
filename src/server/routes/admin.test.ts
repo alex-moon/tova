@@ -3,7 +3,6 @@ import mongoose from 'mongoose';
 import { createApp } from '../index';
 import { User } from '../models/User';
 import { ProviderRouting } from '../models/ProviderRouting';
-import { ModelMetricStat } from '../models/ModelMetricStat';
 import { ModelRouteError } from '../models/ModelRouteError';
 import { Entity } from '../models/Entity';
 import { EntityEdge } from '../models/EntityEdge';
@@ -258,7 +257,7 @@ describe('admin routes', () => {
       expect(nonAdmin.status).toBe(403);
     });
 
-    it('lists configured models row-per-routing with eligibility and per-band feedback tallies', async () => {
+    it('lists configured models row-per-routing with eligibility', async () => {
       const app = createApp();
       const cookie = await registerAdmin(app, 'models-admin@example.com');
 
@@ -275,11 +274,6 @@ describe('admin routes', () => {
         tier: 'guard',
         eligible: false,
       });
-      await ModelMetricStat.findOneAndUpdate(
-        { band: 'short|prose', modelName: 'test-large' },
-        { up: 3, down: 1 },
-        { upsert: true },
-      );
 
       const res = await request(app).get('/api/admin/models').set('Cookie', cookie);
       expect(res.status).toBe(200);
@@ -290,7 +284,6 @@ describe('admin routes', () => {
       const byTier = new Map(rows.map((r) => [r.tier, r]));
       expect(byTier.get('guard')).toMatchObject({
         eligible: false,
-        stats: [{ band: 'short|prose', up: 3, down: 1 }],
         disabledUntil: null,
       });
       expect(byTier.get('large')).toMatchObject({ eligible: true, contextLength: 131072 });
