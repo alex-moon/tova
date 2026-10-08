@@ -20,7 +20,7 @@ export interface AdminUser {
 }
 
 // Model inventory row, GET /api/admin/models (#234). Each entry is one
-// `modelroster` document: the fixed-roster era registers a MODEL once with a
+// `modelrosters` document: the fixed-roster era registers a MODEL once with a
 // paired `providers[]` list, so `id` is the roster _id and `modelId` is the
 // stable model key. #115 capability fields: `tools` is schema-defaulted to
 // true; `vision` is only ever true when the model explicitly claims it;

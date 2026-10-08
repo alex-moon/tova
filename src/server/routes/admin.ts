@@ -70,7 +70,7 @@ router.get('/users', ...adminGuard, async (_req, res) => {
 
 /*
  * Model inventory with CRUD (issue #104, reworked onto the roster in #234).
- * Each row is ONE `modelroster` document: a model registered once with a
+ * Each row is ONE `modelrosters` document: a model registered once with a
  * paired `providers[]` list (two serverless backends). Read errors degrade to
  * empty lists; the view shows a 'no data' state.
  */

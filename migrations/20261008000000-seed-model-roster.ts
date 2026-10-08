@@ -2,7 +2,7 @@ import { MigrationInterface } from 'mongo-migrate-ts';
 import { Db } from 'mongodb';
 
 /*
- * #232: seed the fixed model roster into a new `modelroster` collection.
+ * #232: seed the fixed model roster into a new `modelrosters` collection.
  *
  * The roster replaces the tier-shaped `providerroutings` rows for the racing
  * path: one document per MODEL with a nested `providers[]` list carrying both

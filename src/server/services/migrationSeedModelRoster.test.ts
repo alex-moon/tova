@@ -5,7 +5,7 @@ import { ROSTER_SEED } from './rosterConfig';
 
 /*
  * #232: the roster migration must upgrade a deployed database to the fixed
- * model roster. App-level seeding only recovers an EMPTY `modelroster`
+ * model roster. App-level seeding only recovers an EMPTY `modelrosters`
  * collection, so an upgrade needs this migration. The test also pins the
  * migration rows to `ROSTER_SEED` so the two sources cannot drift.
  */
@@ -19,10 +19,10 @@ describe('migration SeedModelRoster', () => {
 
   it('up inserts the three roster models with both providers, down removes them', async () => {
     await new SeedModelRoster().up(db);
-    expect(await db.collection('modelroster').countDocuments()).toBe(ROSTER_SEED.length);
+    expect(await db.collection('modelrosters').countDocuments()).toBe(ROSTER_SEED.length);
 
     const flash = await db
-      .collection('modelroster')
+      .collection('modelrosters')
       .findOne({ modelId: 'deepseek-ai/DeepSeek-V4.1-Flash' });
     expect(flash).toMatchObject({
       label: 'DeepSeek V4.1 Flash',
@@ -44,23 +44,23 @@ describe('migration SeedModelRoster', () => {
     );
 
     // MiniMax M3 must be text-only (excluded from image turns).
-    const minimax = await db.collection('modelroster').findOne({ modelId: 'MiniMaxAI/MiniMax-M3' });
+    const minimax = await db.collection('modelrosters').findOne({ modelId: 'MiniMaxAI/MiniMax-M3' });
     expect(minimax).toMatchObject({ vision: false });
 
     await new SeedModelRoster().down(db);
-    expect(await db.collection('modelroster').countDocuments()).toBe(0);
+    expect(await db.collection('modelrosters').countDocuments()).toBe(0);
   });
 
   it('up is idempotent on an already-migrated database', async () => {
     await new SeedModelRoster().up(db);
     await new SeedModelRoster().up(db);
-    expect(await db.collection('modelroster').countDocuments()).toBe(ROSTER_SEED.length);
+    expect(await db.collection('modelrosters').countDocuments()).toBe(ROSTER_SEED.length);
   });
 
   it('pins the migration rows to ROSTER_SEED (no drift)', async () => {
     await new SeedModelRoster().up(db);
     for (const seed of ROSTER_SEED) {
-      const row = await db.collection('modelroster').findOne({ modelId: seed.modelId });
+      const row = await db.collection('modelrosters').findOne({ modelId: seed.modelId });
       expect(row).toMatchObject({
         label: seed.label,
         tools: seed.tools,
