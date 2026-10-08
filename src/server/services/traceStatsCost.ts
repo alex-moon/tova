@@ -117,10 +117,10 @@ export const estimateCostUsd = (
   );
 };
 
-// Load the roster price index, then stamp each model row and the totals with
-// the estimate. LangSmith rolls up by model name, so the provider is not in the
-// key here: the index resolves the model-only fallback (a trace that carries a
-// provider can pass it through `priceFor`; #237 owns exporting it).
+// Load the roster price index, then stamp each row and the totals with the
+// estimate. #237: the rollup now carries the provider per row, so a raced
+// model prices from the winning provider's entry; the model-only fallback in
+// `priceFor` still covers a legacy no-provider row.
 export const applyCostToStats = async (
   payload: AdminLangsmithStatsPayload,
   index?: PriceIndex,
@@ -135,7 +135,11 @@ export const applyCostToStats = async (
   let costSum = 0;
 
   const models: AdminLangsmithModelStats[] = payload.models.map((m) => {
-    const cost = estimateCostUsd(m.inputTokens, m.outputTokens, priceFor(priceIndex, m.model));
+    const cost = estimateCostUsd(
+      m.inputTokens,
+      m.outputTokens,
+      priceFor(priceIndex, m.model, m.provider ?? undefined),
+    );
     if (cost !== null) {
       anyKnown = true;
       costSum += cost;

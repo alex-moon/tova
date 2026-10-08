@@ -50,9 +50,11 @@ export const runTraceStatsTick = async (
         computedAt: new Date(),
         models: payload.models.map((m) => ({
           model: m.model,
+          provider: m.provider,
           calls: m.calls,
           errors: m.errors,
           avgDurationMs: m.avgDurationMs,
+          avgTtftMs: m.avgTtftMs,
           totalTokens: m.totalTokens,
           inputTokens: m.inputTokens,
           outputTokens: m.outputTokens,

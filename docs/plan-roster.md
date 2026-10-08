@@ -157,6 +157,20 @@ demo on `epic/roster`.
   provider dimension). `npm run ci` green (86 server suites / 1057 tests; client
   clean). Reached (2026-10-08).
 
+- **SP4 — Traces attribute the provider (after #237).** Under racing one model is
+  served by two providers (one aborted); the LangSmith trace must name the
+  winner and the rollup must not count the loser. Live-trace investigation
+  confirmed provider (`extra.metadata.ls_provider`) and TTFT
+  (`first_token_time - start_time`) are already exported, so no export change was
+  needed. `langsmithTracesService` reads the provider (mapping Mastra's
+  `fireworks-ai` → `fireworks`) onto rows, detail runs, and stats; `traceStats`
+  rolls up by `(model, provider)` and carries per-row `avgTtftMs`; an aborted
+  loser (errored run with an abort/cancel signature) is dropped entirely.
+  `racingService` tags each raced call (`race:roster`, `provider:<name>`) for the
+  LangSmith UI. Runtime TTFT stays authoritative; traces corroborate. Contracts,
+  `TraceStatsCache`, and the admin table carry `provider`/TTFT. `npm run ci`
+  green (86 server suites / 1062 tests; 18 client suites). Reached (2026-10-08).
+
 ## Done (checklist)
 
 - [x] Enumerate open issues and triage for do-ability.
@@ -166,7 +180,8 @@ demo on `epic/roster`.
 - [x] #233 completed on `epic/roster` (tier machinery deleted; CI green).
 - [x] #234 completed on `epic/roster` (SP2 reached; CI green).
 - [x] #235 completed on `epic/roster` (SP3 reached; CI green).
-- [ ] #236–#238 completed on `epic/roster`.
+- [x] #237 completed on `epic/roster` (SP4 reached; CI green).
+- [ ] #236 and #238 completed on `epic/roster`.
 - [ ] #214 and #166 resolved (decision/proposal at minimum).
 - [ ] `epic/roster` merged to `main`.
 

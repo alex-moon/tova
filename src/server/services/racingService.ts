@@ -5,6 +5,7 @@ import type {
   NeutralChunkStream,
   NeutralCompletion,
   NeutralStreamChunk,
+  TraceContext,
 } from './llmTypes';
 import { isClientAbort, isPromptSizeError, isRateLimitError } from './modelFailover';
 import { isOverloadError } from './providerErrors';
@@ -129,6 +130,23 @@ const combineSignals = (a: AbortSignal, b: AbortSignal): AbortSignal => {
   return merged.signal;
 };
 
+/*
+ * #237: tag a raced provider call's trace so racing is debuggable in the
+ * LangSmith UI (`race: 'roster'`, `provider:<name>`). Identifiers only — same
+ * redaction rule as the rest of the trace context. The caller's own
+ * tags/metadata are preserved.
+ *
+ * The winner is not tagged here: the span is created when the call starts, so
+ * neither racer knows its fate yet. The loser is identifiable by its
+ * abort/cancel error (filtered from the stats rollup), which is honest — the
+ * span *was* cancelled, we just cannot know it would be the loser up front.
+ */
+const raceTrace = (base: TraceContext | undefined, provider: LlmProvider): TraceContext => ({
+  ...(base?.sessionId ? { sessionId: base.sessionId } : {}),
+  tags: [...(base?.tags ?? []), 'race:roster', `provider:${provider}`],
+  metadata: { ...(base?.metadata ?? {}), race: 'roster', provider },
+});
+
 type Chunk = NeutralStreamChunk;
 type StreamIterator = AsyncIterator<Chunk>;
 
@@ -191,11 +209,13 @@ const raceProviders = async (
     controller.signal.addEventListener('abort', abortChild, { once: true });
     try {
       const signal = clientSignal ? combineSignals(clientSignal, perCall.signal) : perCall.signal;
+      const provider = providerRef.provider as LlmProvider;
       const stream = await start({
         ...options,
-        provider: providerRef.provider as LlmProvider,
+        provider,
         model: providerRef.modelId,
         abortSignal: signal,
+        trace: raceTrace(options.trace, provider),
       });
       const iterator = stream[Symbol.asyncIterator]();
       const next = await iterator.next();
@@ -379,10 +399,12 @@ export const raceRosterCompletion = async (
     const attempts = primary.providers.map(
       async (p): Promise<CompletionOutcome['result'] | { failed: unknown }> => {
         try {
+          const provider = p.provider as LlmProvider;
           const completion = await start({
             ...options,
-            provider: p.provider as LlmProvider,
+            provider,
             model: p.modelId,
+            trace: raceTrace(options.trace, provider),
           });
           return { model: primary, provider: p, completion };
         } catch (error) {

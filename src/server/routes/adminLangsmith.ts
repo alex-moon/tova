@@ -75,9 +75,11 @@ router.get('/langsmith/stats', ...adminGuard, async (req, res) => {
         computedAt: Date;
         models: {
           model: string;
+          provider: string | null;
           calls: number;
           errors: number;
           avgDurationMs: number | null;
+          avgTtftMs: number | null;
           totalTokens: number;
           inputTokens: number;
           outputTokens: number;

@@ -65,6 +65,19 @@ interface RawRun {
   app_path?: string | null;
   inputs?: unknown;
   outputs?: unknown;
+  /*
+   * #237: `extra.metadata` carries the MODEL_GENERATION span attributes the
+   * `@mastra/langsmith` exporter maps out — notably `ls_provider` and
+   * `ls_model_name` (verified live against the `tova-dev` project,
+   * 2026-10-08). The provider is how a raced turn's winner is attributed.
+   */
+  extra?: { metadata?: Record<string, unknown> } | null;
+  /*
+   * #237: first-class TTFT signal. `first_token_time - start_time` is the
+   * time-to-first-token; a matching `new_token` event carries the same
+   * instant. Absent on non-streaming runs.
+   */
+  first_token_time?: string | null;
 }
 
 export class LangsmithError extends Error {
@@ -160,6 +173,45 @@ export const modelFromRunName = (name: string | null | undefined): string | null
   return match ? match[1] : null;
 };
 
+/*
+ * #237: Mastra's router provider id for Fireworks is `fireworks-ai`
+ * (MASTRA_PROVIDER_ID in mastraService.ts); the app-level neutral name is
+ * `fireworks`. Map it back so a trace provider matches the roster's provider
+ * string. Every other id is identical to its roster name.
+ */
+const MASTRA_PROVIDER_ALIASES: Record<string, string> = { 'fireworks-ai': 'fireworks' };
+
+// Provider from the MODEL_GENERATION span metadata (`ls_provider`), mapped to
+// the app-level provider name. Null when the run carries no provider (non-llm
+// runs, or a trace exported before #237).
+export const providerFromRun = (run: RawRun): string | null => {
+  const provider = run.extra?.metadata?.ls_provider;
+  if (typeof provider !== 'string' || provider.length === 0) return null;
+  return MASTRA_PROVIDER_ALIASES[provider] ?? provider;
+};
+
+// #237: the run's time-to-first-token. LangSmith exposes it as a first-class
+// `first_token_time`; absent on non-streaming runs (a generate call has no
+// first-token instant), so it is null there rather than the whole-run duration.
+export const ttftMsOf = (run: RawRun): number | null => {
+  if (!run.start_time || !run.first_token_time) return null;
+  const ms = new Date(run.first_token_time).getTime() - new Date(run.start_time).getTime();
+  return Number.isFinite(ms) && ms >= 0 ? ms : null;
+};
+
+/*
+ * #237: is this llm run a race loser that was aborted rather than a real
+ * failure? The aborted provider's stream is cancelled mid-flight, which the
+ * exporter records as an errored run. Such a run never served the user, so it
+ * must not count toward calls/errors/latency. Matched by name or message, same
+ * shape `isClientAbort` uses in modelFailover.ts (kept local to avoid the
+ * service importing the routing module).
+ */
+export const isAbortedRun = (run: RawRun): boolean => {
+  const error = run.error ?? '';
+  return /abort|cancel/i.test(error) || /AbortError|CanceledError/.test(error);
+};
+
 const durationMsOf = (run: RawRun): number | null => {
   if (!run.start_time || !run.end_time) return null;
   const ms = new Date(run.end_time).getTime() - new Date(run.start_time).getTime();
@@ -171,6 +223,7 @@ const errorSnippet = (error: string | null | undefined): string | null =>
 
 interface ModelJoin {
   modelOf: Map<string, string>;
+  providerOf: Map<string, string>;
   tokensOf: Map<string, number>;
 }
 
@@ -188,8 +241,9 @@ const joinLlmChildren = async (
   traceIds: string[],
 ): Promise<ModelJoin> => {
   const modelOf = new Map<string, string>();
+  const providerOf = new Map<string, string>();
   const tokensOf = new Map<string, number>();
-  if (traceIds.length === 0) return { modelOf, tokensOf };
+  if (traceIds.length === 0) return { modelOf, providerOf, tokensOf };
 
   const baseFilter = `in(trace_id, [${traceIds.map((id) => `"${id}"`).join(', ')}])`;
   for (let page = 0; page < JOIN_MAX_PAGES; page++) {
@@ -197,20 +251,24 @@ const joinLlmChildren = async (
       filter: `and(${baseFilter}, eq(run_type, "llm"))`,
       limit: PAGE_SIZE,
       offset: page * PAGE_SIZE,
-      select: ['trace_id', 'name', 'total_tokens'],
+      // #237: `extra` carries `ls_provider`; the model still comes from the
+      // run name (the join's existing key).
+      select: ['trace_id', 'name', 'total_tokens', 'extra'],
     });
     const children = res.runs ?? [];
     for (const run of children) {
       if (!run.trace_id) continue;
       const model = modelFromRunName(run.name);
       if (model && !modelOf.has(run.trace_id)) modelOf.set(run.trace_id, model);
+      const provider = providerFromRun(run);
+      if (provider && !providerOf.has(run.trace_id)) providerOf.set(run.trace_id, provider);
       if (typeof run.total_tokens === 'number' && run.total_tokens > 0) {
         tokensOf.set(run.trace_id, (tokensOf.get(run.trace_id) ?? 0) + run.total_tokens);
       }
     }
     if (children.length < PAGE_SIZE) break;
   }
-  return { modelOf, tokensOf };
+  return { modelOf, providerOf, tokensOf };
 };
 
 const rootFilter = (errorsOnly: boolean) =>
@@ -224,6 +282,7 @@ const toTraceRow = (run: RawRun, join: ModelJoin): AdminTraceRow | null => {
     name: run.name ?? '',
     status: run.status ?? 'unknown',
     model: join.modelOf.get(run.trace_id) ?? null,
+    provider: join.providerOf.get(run.trace_id) ?? null,
     startedAt: run.start_time ?? '',
     durationMs: durationMsOf(run),
     totalTokens: join.tokensOf.get(run.trace_id) ?? null,
@@ -313,9 +372,11 @@ export const getTrace = async (traceId: string): Promise<AdminTraceDetail | null
       runType: run.run_type ?? 'unknown',
       status: run.status ?? 'unknown',
       model: modelFromRunName(run.name),
+      provider: providerFromRun(run),
       startedAt: run.start_time ?? '',
       endedAt: run.end_time ?? null,
       durationMs: durationMsOf(run),
+      ttftMs: ttftMsOf(run),
       totalTokens: typeof run.total_tokens === 'number' ? run.total_tokens : null,
       error: errorSnippet(run.error),
       inputs: run.inputs ?? null,
@@ -326,7 +387,8 @@ export const getTrace = async (traceId: string): Promise<AdminTraceDetail | null
 };
 
 /*
- * Per-model rollup since `days` ago, aggregated from llm runs directly.
+ * Per-(model, provider) rollup since `days` ago, aggregated from llm runs
+ * directly.
  *
  * Why llm runs and not root turns: the model identity and token counts live
  * on the llm children, so a root-based rollup would need a children-join
@@ -334,10 +396,18 @@ export const getTrace = async (traceId: string): Promise<AdminTraceDetail | null
  * first live smoke test of that shape hung for minutes). One paged sweep of
  * llm runs answers per-model health in ~STATS_MAX_RUNS/PAGE_SIZE + 2 calls.
  *
+ * #237: under racing one model is served by two providers at different
+ * pricise; the rollup is now keyed by `(model, provider)`, using the
+ * `ls_provider` metadata the exporter already emits. A run without a provider
+ * (legacy trace) rolls up under the model with a null provider. Rows also
+ * carry `avgTtftMs` from `first_token_time - start_time`, so the runtime TTFT
+ * the weighted pick uses can be eyeballed against LangSmith.
+ *
  * Semantics, kept honest in the contract: rows count llm *calls* (a tool
  * turn makes several to the same model), and turns that failed before any
  * llm call do not appear here — the traces list's errors-only filter covers
- * turn-level failures.
+ * turn-level failures. An aborted race loser (an errored run whose error is an
+ * abort/cancel) is excluded entirely: it never served the user.
  *
  * #224: each row and the totals also carry the input/output token split
  * (`prompt_tokens`/`completion_tokens`), so the cached rollup can price a
@@ -355,10 +425,11 @@ export const traceStats = async (days = 7): Promise<AdminLangsmithStatsPayload |
   const since = new Date(sinceMs).toISOString();
   const filter = `and(eq(run_type, "llm"), gte(start_time, "${since}"))`;
 
-  const byModel = new Map<
+  const byKey = new Map<
     string,
     {
       model: string;
+      provider: string | null;
       calls: number;
       errors: number;
       totalTokens: number;
@@ -366,9 +437,15 @@ export const traceStats = async (days = 7): Promise<AdminLangsmithStatsPayload |
       outputTokens: number;
       durationSum: number;
       durationCount: number;
+      ttftSum: number;
+      ttftCount: number;
     }
   >();
   const totals = { calls: 0, errors: 0, totalTokens: 0, inputTokens: 0, outputTokens: 0 };
+
+  // Stable key for `(model, provider)`; the provider is null for a legacy run.
+  const keyOf = (model: string, provider: string | null): string =>
+    `${model}\u0000${provider ?? ''}`;
 
   for (let offset = 0; offset < STATS_MAX_RUNS; offset += PAGE_SIZE) {
     const res = await queryRuns(headers, resolved.id, {
@@ -378,11 +455,14 @@ export const traceStats = async (days = 7): Promise<AdminLangsmithStatsPayload |
       select: [
         'name',
         'status',
+        'error',
         'start_time',
         'end_time',
         'total_tokens',
         'prompt_tokens',
         'completion_tokens',
+        'first_token_time',
+        'extra',
       ],
     });
     const llmRuns = res.runs ?? [];
@@ -391,7 +471,11 @@ export const traceStats = async (days = 7): Promise<AdminLangsmithStatsPayload |
     for (const run of llmRuns) {
       const model = modelFromRunName(run.name);
       if (!model) continue;
+      // #237: an aborted race loser never served the user; drop it entirely.
+      if (isAbortedRun(run)) continue;
+      const provider = providerFromRun(run);
       const duration = durationMsOf(run);
+      const ttft = ttftMsOf(run);
       const tokens = typeof run.total_tokens === 'number' ? run.total_tokens : 0;
       // Token split for cost (#224). Absent/non-numeric counts as 0, same as
       // the total above; `totalTokens` stays the reported run total, not the
@@ -400,8 +484,10 @@ export const traceStats = async (days = 7): Promise<AdminLangsmithStatsPayload |
       const outputTokens = typeof run.completion_tokens === 'number' ? run.completion_tokens : 0;
       const isError = run.status === 'error';
 
-      const entry = byModel.get(model) ?? {
+      const key = keyOf(model, provider);
+      const entry = byKey.get(key) ?? {
         model,
+        provider,
         calls: 0,
         errors: 0,
         totalTokens: 0,
@@ -409,6 +495,8 @@ export const traceStats = async (days = 7): Promise<AdminLangsmithStatsPayload |
         outputTokens: 0,
         durationSum: 0,
         durationCount: 0,
+        ttftSum: 0,
+        ttftCount: 0,
       };
       entry.calls += 1;
       if (isError) entry.errors += 1;
@@ -419,7 +507,11 @@ export const traceStats = async (days = 7): Promise<AdminLangsmithStatsPayload |
         entry.durationSum += duration;
         entry.durationCount += 1;
       }
-      byModel.set(model, entry);
+      if (ttft !== null) {
+        entry.ttftSum += ttft;
+        entry.ttftCount += 1;
+      }
+      byKey.set(key, entry);
 
       totals.calls += 1;
       if (isError) totals.errors += 1;
@@ -431,10 +523,11 @@ export const traceStats = async (days = 7): Promise<AdminLangsmithStatsPayload |
     if (llmRuns.length < PAGE_SIZE) break;
   }
 
-  const models: AdminLangsmithModelStats[] = [...byModel.values()]
-    .map(({ durationSum, durationCount, ...stats }) => ({
+  const models: AdminLangsmithModelStats[] = [...byKey.values()]
+    .map(({ durationSum, durationCount, ttftSum, ttftCount, ...stats }) => ({
       ...stats,
       avgDurationMs: durationCount > 0 ? Math.round(durationSum / durationCount) : null,
+      avgTtftMs: ttftCount > 0 ? Math.round(ttftSum / ttftCount) : null,
       // Cost is joined at read time from the in-DB price (#224); the raw
       // aggregator never prices.
       estimatedCostUsd: null,
