@@ -13,9 +13,14 @@ import mongoose from 'mongoose';
 const modelStatSchema = new mongoose.Schema(
   {
     model: { type: String, required: true },
+    // #237: the provider this row covers. Absent on rows written before the
+    // provider rollup; read back as null (model-only fallback).
+    provider: { type: String, default: null },
     calls: { type: Number, required: true },
     errors: { type: Number, required: true },
     avgDurationMs: { type: Number, default: null },
+    // #237: mean TTFT across the row's streamed calls.
+    avgTtftMs: { type: Number, default: null },
     totalTokens: { type: Number, required: true },
     inputTokens: { type: Number, required: true },
     outputTokens: { type: Number, required: true },

@@ -468,9 +468,11 @@ describe('admin langsmith (#186)', () => {
     expect(res.body.models).toEqual([
       {
         model: 'openai/gpt-oss-20b',
+        provider: null,
         calls: 2,
         errors: 1,
         avgDurationMs: 2500,
+        avgTtftMs: null,
         totalTokens: 110,
         inputTokens: 78,
         outputTokens: 32,
@@ -478,9 +480,11 @@ describe('admin langsmith (#186)', () => {
       },
       {
         model: 'qwen/qwen3-14b',
+        provider: null,
         calls: 1,
         errors: 0,
         avgDurationMs: 2000,
+        avgTtftMs: null,
         totalTokens: 50,
         inputTokens: 40,
         outputTokens: 10,
@@ -497,6 +501,100 @@ describe('admin langsmith (#186)', () => {
     });
     // Cold cache: this sweep is the live fallback.
     expect(res.body.stale).toBe(true);
+  });
+
+  it('splits stats by (model, provider), averages TTFT, and drops aborted losers (#237)', async () => {
+    const app = createApp();
+    const cookie = await registerAdmin(app, 'ls-provider@example.com');
+
+    fetchSpy.mockImplementation((url: string) => {
+      if (String(url).includes('/api/v1/sessions')) {
+        return Promise.resolve(jsonResponse(200, [{ id: 'proj-1', name: 'tova-dev' }]));
+      }
+      return Promise.resolve(
+        jsonResponse(200, {
+          runs: [
+            // Winner on deepinfra: TTFT 1000ms - 100ms start = ... well, a
+            // start/first_token gap of 700ms, duration 2000ms.
+            {
+              name: "llm: 'deepseek-ai/DeepSeek-V4.1-Flash'",
+              run_type: 'llm',
+              status: 'success',
+              start_time: '2026-10-08T10:00:00.000000',
+              end_time: '2026-10-08T10:00:02.000000',
+              first_token_time: '2026-10-08T10:00:00.700000',
+              total_tokens: 100,
+              prompt_tokens: 70,
+              completion_tokens: 30,
+              extra: { metadata: { ls_provider: 'deepinfra' } },
+            },
+            // The aborted loser on fireworks: an errored run cancelled mid-race.
+            // It must not appear at all (not a call, not an error).
+            {
+              name: "llm: 'deepseek-ai/DeepSeek-V4.1-Flash'",
+              run_type: 'llm',
+              status: 'error',
+              error: 'AbortError: The operation was aborted',
+              start_time: '2026-10-08T10:00:00.000000',
+              end_time: '2026-10-08T10:00:00.400000',
+              total_tokens: 0,
+              extra: { metadata: { ls_provider: 'fireworks-ai' } },
+            },
+          ],
+        }),
+      );
+    });
+
+    const res = await request(app).get('/api/admin/langsmith/stats?days=7').set('Cookie', cookie);
+    expect(res.status).toBe(200);
+    // One row: the fireworks loser is dropped, so only the deepinfra winner
+    // remains. The cost is now priced from the ROW'S provider (#237), not the
+    // model-only fallback: DeepSeek's deepinfra entry is 0.2/0.6 =>
+    // 70/1e6*0.2 + 30/1e6*0.6 = 0.000032 (the fireworks entry is 0.3/1.2).
+    expect(res.body.models).toEqual([
+      {
+        model: 'deepseek-ai/DeepSeek-V4.1-Flash',
+        provider: 'deepinfra',
+        calls: 1,
+        errors: 0,
+        avgDurationMs: 2000,
+        avgTtftMs: 700,
+        totalTokens: 100,
+        inputTokens: 70,
+        outputTokens: 30,
+        estimatedCostUsd: 0.000032,
+      },
+    ]);
+    expect(res.body.totals).toMatchObject({ calls: 1, errors: 0 });
+  });
+
+  it('maps the Mastra fireworks-ai provider id back to fireworks (#237)', async () => {
+    const app = createApp();
+    const cookie = await registerAdmin(app, 'ls-fireworks@example.com');
+
+    fetchSpy.mockImplementation((url: string) => {
+      if (String(url).includes('/api/v1/sessions')) {
+        return Promise.resolve(jsonResponse(200, [{ id: 'proj-1', name: 'tova-dev' }]));
+      }
+      return Promise.resolve(
+        jsonResponse(200, {
+          runs: [
+            {
+              name: "llm: 'deepseek-ai/DeepSeek-V4.1-Flash'",
+              run_type: 'llm',
+              status: 'success',
+              start_time: '2026-10-08T10:00:00.000000',
+              end_time: '2026-10-08T10:00:01.000000',
+              extra: { metadata: { ls_provider: 'fireworks-ai' } },
+            },
+          ],
+        }),
+      );
+    });
+
+    const res = await request(app).get('/api/admin/langsmith/stats?days=7').set('Cookie', cookie);
+    expect(res.status).toBe(200);
+    expect(res.body.models[0].provider).toBe('fireworks');
   });
 
   it('treats an absent or non-numeric token split as 0 without disturbing totals (#224)', async () => {
@@ -546,9 +644,11 @@ describe('admin langsmith (#186)', () => {
     expect(res.body.models).toEqual([
       {
         model: 'openai/gpt-oss-20b',
+        provider: null,
         calls: 3,
         errors: 0,
         avgDurationMs: null,
+        avgTtftMs: null,
         totalTokens: 530,
         inputTokens: 0,
         outputTokens: 0,

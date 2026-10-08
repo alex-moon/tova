@@ -124,6 +124,44 @@ describe('racingService (#232)', () => {
     expect(loserSignal?.aborted).toBe(true);
   });
 
+  it('tags both provider calls with race + provider trace context (#237)', async () => {
+    const seen: CompletionOptions[] = [];
+    const deps: RaceDeps = {
+      roster: [model()],
+      now: () => 1,
+      startStream: async (options: CompletionOptions) => {
+        seen.push(options);
+        // Fireworks yields first; deepinfra never yields (aborted loser).
+        return options.provider === 'fireworks'
+          ? streamOf([{ delta: 'win' }])
+          : (async function* () {
+              await new Promise((r) => setTimeout(r, 1000));
+              yield { delta: 'never' };
+            })();
+      },
+    };
+
+    await raceRoster(
+      { messages: [], trace: { sessionId: 'sess-1', tags: ['chat'], metadata: { turn: 1 } } },
+      false,
+      deps,
+    );
+
+    expect(seen).toHaveLength(2);
+    for (const options of seen) {
+      // The caller's own trace context is preserved.
+      expect(options.trace?.sessionId).toBe('sess-1');
+      expect(options.trace?.tags).toEqual(
+        expect.arrayContaining(['chat', 'race:roster', `provider:${options.provider}`]),
+      );
+      expect(options.trace?.metadata).toMatchObject({
+        turn: 1,
+        race: 'roster',
+        provider: options.provider,
+      });
+    }
+  });
+
   it('returns a resumed stream that includes the winning first chunk', async () => {
     const deps: RaceDeps = {
       roster: [model()],

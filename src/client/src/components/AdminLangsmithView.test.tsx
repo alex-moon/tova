@@ -39,6 +39,7 @@ const traceRow = (overrides: Partial<AdminTracesPayload['traces'][number]> = {})
   name: "agent run: 'tova-groq'",
   status: 'success',
   model: 'openai/gpt-oss-20b',
+  provider: 'groq',
   startedAt: '2026-09-27T10:00:00.000Z',
   durationMs: 2000,
   totalTokens: 585,
@@ -57,9 +58,11 @@ const statsPayload = (): AdminLangsmithStatsPayload => ({
   models: [
     {
       model: 'openai/gpt-oss-20b',
+      provider: 'groq',
       calls: 10,
       errors: 2,
       avgDurationMs: 1500,
+      avgTtftMs: 400,
       totalTokens: 4000,
       inputTokens: 3000,
       outputTokens: 1000,
@@ -67,9 +70,11 @@ const statsPayload = (): AdminLangsmithStatsPayload => ({
     },
     {
       model: 'qwen/qwen3-14b',
+      provider: null,
       calls: 4,
       errors: 0,
       avgDurationMs: 3000,
+      avgTtftMs: null,
       totalTokens: 900,
       inputTokens: 700,
       outputTokens: 200,
@@ -132,9 +137,11 @@ const traceDetail = (): AdminTraceDetail => ({
       runType: 'chain',
       status: 'success',
       model: null,
+      provider: null,
       startedAt: '2026-09-27T10:00:00.000Z',
       endedAt: '2026-09-27T10:00:02.000Z',
       durationMs: 2000,
+      ttftMs: null,
       totalTokens: 0,
       error: null,
       inputs: { input: 'user turn text' },
@@ -147,9 +154,11 @@ const traceDetail = (): AdminTraceDetail => ({
       runType: 'llm',
       status: 'success',
       model: 'openai/gpt-oss-20b',
+      provider: 'groq',
       startedAt: '2026-09-27T10:00:00.100000Z',
       endedAt: '2026-09-27T10:00:01.000000Z',
       durationMs: 900,
+      ttftMs: 300,
       totalTokens: 585,
       error: null,
       inputs: { messages: [{ role: 'user', content: 'hello' }] },
@@ -177,6 +186,8 @@ describe('AdminLangsmithView (#186)', () => {
     const row = await screen.findByTestId('langsmith-trace-trace-1');
     expect(row).toHaveTextContent('success');
     expect(row).toHaveTextContent('openai/gpt-oss-20b');
+    // #237: the row names the serving provider alongside the model.
+    expect(row).toHaveTextContent('openai/gpt-oss-20b · groq');
     expect(row).toHaveTextContent('585');
 
     const stats = screen.getByTestId('langsmith-stats');
@@ -189,7 +200,7 @@ describe('AdminLangsmithView (#186)', () => {
     render(<AdminLangsmithView />);
     const stats = await screen.findByTestId('langsmith-stats');
 
-    const priced = screen.getByTestId('langsmith-cost-openai/gpt-oss-20b');
+    const priced = screen.getByTestId('langsmith-cost-openai/gpt-oss-20b-groq');
     expect(priced).toHaveTextContent('in 3,000');
     expect(priced).toHaveTextContent('out 1,000');
     expect(priced).toHaveTextContent('$0.0042');
@@ -200,6 +211,21 @@ describe('AdminLangsmithView (#186)', () => {
     expect(stats).toHaveTextContent('updated');
     const total = screen.getByTestId('langsmith-cost-total');
     expect(total).toHaveTextContent('$0.0042');
+  });
+
+  it('shows the provider on stats rows and average TTFT (#237)', async () => {
+    render(<AdminLangsmithView />);
+    const stats = await screen.findByTestId('langsmith-stats');
+
+    // A provider-bearing row renders `model · provider`; the legacy
+    // no-provider row renders the model alone.
+    const row = screen.getByTestId('langsmith-model-openai/gpt-oss-20b-groq');
+    expect(row).toHaveTextContent('openai/gpt-oss-20b · groq');
+    expect(row).toHaveTextContent('400ms');
+    expect(screen.getByTestId('langsmith-model-qwen/qwen3-14b')).toHaveTextContent(
+      'qwen/qwen3-14b',
+    );
+    expect(stats).toHaveTextContent('Avg TTFT');
   });
 
   it('renders the per-session cost breakdown with — for an unpriced session (#224)', async () => {
@@ -277,6 +303,11 @@ describe('AdminLangsmithView (#186)', () => {
     expect(screen.getByTestId('langsmith-run-llm-1')).toHaveTextContent(
       "llm: 'openai/gpt-oss-20b'",
     );
+    // #237: the llm run names its provider and its time-to-first-token.
+    expect(screen.getByTestId('langsmith-run-llm-1')).toHaveTextContent(
+      'openai/gpt-oss-20b · groq',
+    );
+    expect(screen.getByTestId('langsmith-run-llm-1')).toHaveTextContent('first token 300ms');
     // The llm run's outputs render as formatted JSON inside the details block.
     expect(screen.getByTestId('langsmith-run-llm-1')).toHaveTextContent('hi there');
 

@@ -219,6 +219,10 @@ export interface AdminTraceRow {
   name: string;
   status: string;
   model: string | null;
+  // #237: the provider that served the trace's llm run, from the run's
+  // `ls_provider` span metadata (mapped to the app name, e.g. `fireworks`).
+  // Null when the trace has no llm child or predates provider export.
+  provider: string | null;
   startedAt: string;
   durationMs: number | null;
   totalTokens: number | null;
@@ -243,9 +247,15 @@ export interface AdminTraceRun {
   runType: string;
   status: string;
   model: string | null;
+  // #237: provider that served this llm run (`ls_provider` metadata), null on
+  // non-llm runs or a trace exported before provider export.
+  provider: string | null;
   startedAt: string;
   endedAt: string | null;
   durationMs: number | null;
+  // #237: time-to-first-token (`first_token_time - start_time`), null when the
+  // run is non-streaming or carries no first-token instant.
+  ttftMs: number | null;
   totalTokens: number | null;
   error: string | null;
   inputs: unknown;
@@ -270,18 +280,24 @@ export interface AdminTraceDetail {
 // `totalTokens` still holds whatever the run itself reported.
 export interface AdminLangsmithModelStats {
   model: string;
+  // #237: the provider this row covers, from the run's `ls_provider` metadata;
+  // null for a legacy run with no provider. Under racing a model has one row
+  // per provider, so the row is keyed by `(model, provider)`.
+  provider: string | null;
   calls: number;
   errors: number;
   avgDurationMs: number | null;
+  // #237: mean time-to-first-token (`first_token_time - start_time`) across
+  // the row's streamed calls; null when none carried a first-token instant.
+  avgTtftMs: number | null;
   totalTokens: number;
   inputTokens: number;
   outputTokens: number;
-  // #224/#235: estimated USD spend for this model, joined from the roster's
-  // per-provider price at read time (`null` = either side's price is unknown,
-  // distinct from $0 — #199 semantics). The rollup is keyed by model name only
-  // (LangSmith llm runs do not reliably carry the provider), so a dual-priced
-  // model prices from the model-only fallback until #237 exports the provider;
-  // per-turn spend is priced provider-accurately in the session view below.
+  // #224/#235: estimated USD spend for this (model, provider), joined from the
+  // roster's per-provider price at read time (`null` = either side's price is
+  // unknown, distinct from $0 — #199 semantics). With the provider on the row
+  // (#237) a dual-priced model prices from the winning provider's entry; a
+  // legacy no-provider row keeps the deterministic model-only fallback.
   // The UI renders null as `—`.
   estimatedCostUsd: number | null;
 }

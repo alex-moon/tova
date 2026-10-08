@@ -24,6 +24,11 @@ const formatDuration = (ms: number | null): string =>
 const formatTokens = (tokens: number | null): string =>
   tokens === null ? '—' : tokens.toLocaleString();
 
+// #237: a stats row is per (model, provider); the provider is null on a
+// legacy no-provider rollup.
+const modelLabel = (row: AdminLangsmithModelStats): string =>
+  row.provider ? `${row.model} · ${row.provider}` : row.model;
+
 // Estimated cost is null when a price is unknown (#199 unknown ≠ free), so
 // render `—` rather than $0. Sub-cent spend keeps more precision than 2dp.
 const formatCost = (usd: number | null): string => {
@@ -75,9 +80,12 @@ const RunBlock = ({ run, depth }: { run: AdminTraceRun; depth: number }) => (
       >
         {run.status}
         {run.model ? ` · ${run.model}` : ''}
+        {run.provider ? ` · ${run.provider}` : ''}
       </span>
       <span className="text-xs text-muted-foreground">
-        {formatDuration(run.durationMs)} · {formatTokens(run.totalTokens)} tok
+        {formatDuration(run.durationMs)}
+        {run.ttftMs !== null ? ` · first token ${formatDuration(run.ttftMs)}` : ''} ·{' '}
+        {formatTokens(run.totalTokens)} tok
       </span>
     </div>
     {run.error && (
@@ -108,20 +116,24 @@ const RunBlock = ({ run, depth }: { run: AdminTraceRun; depth: number }) => (
 // real table; the cost row is muted and visually bound to its model.
 const ModelStatsRow = ({ row }: { row: AdminLangsmithModelStats }) => (
   <>
-    <tr data-testid={`langsmith-model-${row.model}`} className="border-b border-border">
-      <td className="px-3 py-2">{row.model}</td>
+    <tr
+      data-testid={`langsmith-model-${row.model}${row.provider ? `-${row.provider}` : ''}`}
+      className="border-b border-border"
+    >
+      <td className="px-3 py-2">{modelLabel(row)}</td>
       <td className="px-3 py-2">{row.calls}</td>
       <td className={`px-3 py-2 ${row.errors > 0 ? 'text-destructive' : 'text-muted-foreground'}`}>
         {row.errors}
       </td>
       <td className="px-3 py-2">{formatDuration(row.avgDurationMs)}</td>
+      <td className="px-3 py-2">{formatDuration(row.avgTtftMs)}</td>
       <td className="px-3 py-2">{formatTokens(row.totalTokens)}</td>
     </tr>
     <tr
-      data-testid={`langsmith-cost-${row.model}`}
+      data-testid={`langsmith-cost-${row.model}${row.provider ? `-${row.provider}` : ''}`}
       className="border-b border-border last:border-b-0 text-xs text-muted-foreground"
     >
-      <td colSpan={5} className="px-3 py-1.5">
+      <td colSpan={6} className="px-3 py-1.5">
         <span className="pl-3">
           in {formatTokens(row.inputTokens)} · out {formatTokens(row.outputTokens)} · est.{' '}
           {formatCost(row.estimatedCostUsd)}
@@ -286,12 +298,13 @@ const AdminLangsmithView = () => {
                       <th className="px-3 py-2 font-medium">Calls</th>
                       <th className="px-3 py-2 font-medium">Errors</th>
                       <th className="px-3 py-2 font-medium">Avg latency</th>
+                      <th className="px-3 py-2 font-medium">Avg TTFT</th>
                       <th className="px-3 py-2 font-medium">Tokens</th>
                     </tr>
                   </thead>
                   <tbody>
                     {stats.models.map((row) => (
-                      <ModelStatsRow key={row.model} row={row} />
+                      <ModelStatsRow key={`${row.model}/${row.provider ?? ''}`} row={row} />
                     ))}
                   </tbody>
                   <tfoot>
@@ -305,6 +318,7 @@ const AdminLangsmithView = () => {
                       <td className="px-3 py-2">
                         est. {formatCost(stats.totals.estimatedCostUsd)}
                       </td>
+                      <td className="px-3 py-2" />
                       <td className="px-3 py-2">{formatTokens(stats.totals.totalTokens)}</td>
                     </tr>
                   </tfoot>
@@ -444,6 +458,7 @@ const AdminLangsmithView = () => {
                     </td>
                     <td className="px-4 py-3" data-label="Model">
                       {trace.model ?? '—'}
+                      {trace.provider ? ` · ${trace.provider}` : ''}
                     </td>
                     <td className="px-4 py-3" data-label="Duration">
                       {formatDuration(trace.durationMs)}
