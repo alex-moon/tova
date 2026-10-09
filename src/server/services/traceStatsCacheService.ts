@@ -1,4 +1,5 @@
 import { traceStats } from './langsmithTracesService';
+import { redactForLog } from './logRedaction';
 import {
   TraceStatsCache,
   windowKeyFor,
@@ -83,11 +84,17 @@ export const startTraceStatsPoller = (
   timer = setInterval(() => {
     if (busy) return;
     busy = true;
-    // A failed sweep must not kill the poller; the next tick retries, and the
-    // route's stale fallback covers the gap.
-    void runTraceStatsTick().finally(() => {
-      busy = false;
-    });
+    // A failed sweep must not kill the poller *or* the process; the next tick
+    // retries, and the route's stale fallback covers the gap. The `.catch` is
+    // load-bearing: a bare `.finally` re-throws the original rejection, and an
+    // unhandled rejection from this voided promise terminates the process.
+    void runTraceStatsTick()
+      .catch((err) => {
+        console.error('Trace stats poll failed:', redactForLog(err));
+      })
+      .finally(() => {
+        busy = false;
+      });
   }, intervalMs);
   timer.unref?.();
   return timer;

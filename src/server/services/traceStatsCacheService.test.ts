@@ -77,4 +77,31 @@ describe('traceStatsCacheService (#224)', () => {
     // The poller loop catches it; direct tick callers still see the rejection.
     expect(await TraceStatsCache.countDocuments()).toBe(0);
   });
+
+  // #248: a rejected sweep used to escape the interval callback as an
+  // unhandled rejection, which terminated the process. The poller must absorb
+  // it (and log it) while still clearing `busy` so later ticks run.
+  it('does not leak an unhandled rejection when a polled sweep fails', async () => {
+    jest.useFakeTimers();
+    const errorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+    const unhandled: unknown[] = [];
+    const onUnhandled = (reason: unknown) => unhandled.push(reason);
+    process.on('unhandledRejection', onUnhandled);
+
+    try {
+      traceStatsMock.mockRejectedValue(new Error('boom'));
+      startTraceStatsPoller(1_000);
+
+      await jest.advanceTimersByTimeAsync(1_000);
+      // Let any microtask-queued rejection surface to the handler.
+      await Promise.resolve();
+
+      expect(unhandled).toEqual([]);
+      expect(errorSpy).toHaveBeenCalled();
+    } finally {
+      process.off('unhandledRejection', onUnhandled);
+      errorSpy.mockRestore();
+      jest.useRealTimers();
+    }
+  });
 });

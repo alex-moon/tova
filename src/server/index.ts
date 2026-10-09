@@ -31,8 +31,29 @@ import {
 import { config } from './config';
 import { attachConsoleCapture } from './services/logService';
 import { requestLog } from './middleware/requestLog';
+import { redactForLog } from './services/logRedaction';
 
 attachConsoleCapture();
+
+/*
+ * Process-level safety net (#248). Nothing an outbound fetch or background
+ * job does should be able to take the whole server down: before this, a single
+ * unhandled rejection (e.g. a stalled `fetch` aborting with a DOMException)
+ * hit Node's default and terminated the process, turning every request into a
+ * 502 until a redeploy. Rejections are logged and swallowed so the server
+ * keeps serving; an uncaught exception is logged and exits, letting Docker's
+ * restart policy bring the process back cleanly rather than limp on in an
+ * undefined state.
+ */
+export const installProcessSafetyNet = (): void => {
+  process.on('unhandledRejection', (reason) => {
+    console.error('Unhandled promise rejection:', redactForLog(reason));
+  });
+  process.on('uncaughtException', (err) => {
+    console.error('Uncaught exception:', redactForLog(err));
+    process.exit(1);
+  });
+};
 
 const DEFAULT_PORT = 5000;
 
@@ -124,6 +145,7 @@ export const createApp = (): Express => {
 };
 
 export const startServer = async (): Promise<Server> => {
+  installProcessSafetyNet();
   const app = createApp();
   const port = getPort();
 
