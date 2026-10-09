@@ -6,6 +6,8 @@ Any piece of work larger than a tweak (new feature, refactor, infra change, mult
 
 A **tweak** is a trivial one-line fix, typo, or config nudge. Tweaks skip steps 1–3 but still require verification (step 5) and a PR (step 6).
 
+Work organized as an epic additionally follows the **Epics** section at the end of this doc.
+
 ## Steps
 
 ### 1. Ticket
@@ -50,3 +52,17 @@ Push the branch and open a PR against `main` with a short summary and the plan d
 ### 7. Archive
 
 Once the PR merges, move the plan doc to `docs/done/` (create the directory if it does not exist).
+
+## Epics
+
+An **epic** is a set of related tickets shipped as one body of work. It is represented on GitHub by an umbrella issue labelled `epic` whose body lists the slice tickets; each slice cites `Epic: #<n>` in its body (see #251 for the shape).
+
+1. **Umbrella ticket**: create the epic issue first, label it `epic`, and list the slice tickets in its body. Slices are ordinary tickets and follow the standard process (steps 1–7) with the modifications below.
+2. **Branch**: create `epic/<n>-<summary>` from `main` (e.g. `epic/251-workspace`), where `<n>` is the epic ticket number.
+3. **Plan doc**: the epic has its own plan doc, `docs/plan-<n>-<summary>.md`, with the same minimum content as a ticket plan doc. It lives on the **epic branch** and is always updated there — it is the decision log for the whole epic.
+4. **Slice branches and PRs**: cut slice branches from the **epic branch** (not `main`), named per the standard convention. Slice PRs target the epic branch instead of `main`; a slice's plan doc is archived to `docs/done/` when its PR merges (into the epic branch).
+5. **Cross-merges**: ticket branches may merge each other as needed — a slice that depends on another can merge that branch directly.
+6. **Ship the epic**: once all slices are done, open **one big PR from the epic branch to `main`**, linking the epic plan doc. The full quality gate (`npm run ci`) runs on it like any other PR.
+7. **Archive**: move the epic plan doc to `docs/done/` once the epic PR merges.
+
+Everything else follows the standard process unchanged.
