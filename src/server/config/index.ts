@@ -137,12 +137,6 @@ export const config = {
     },
   },
 
-  mcp: {
-    get toolBudgetTokens(): string | undefined {
-      return process.env.MCP_TOOL_BUDGET_TOKENS;
-    },
-  },
-
   // #225: scheduled eval suite. Off by default — a fresh deploy must not
   // start live provider calls unattended (OQ4). `schedule` is `off|daily`;
   // `hourUtc` is the earliest UTC hour a daily run may start. Names follow
