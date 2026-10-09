@@ -24,6 +24,7 @@
     "db:restore": "tsx scripts/db-sync.ts restore",
     "db:sync": "tsx scripts/db-sync.ts sync",
     "db:password": "tsx scripts/db-sync.ts password",
+    "logs": "tsx scripts/loki.ts",
     "evals": "tsx scripts/run-evals.ts",
     "test": "NODE_OPTIONS=--experimental-vm-modules jest",
     "lint": "eslint src migrations --ext .ts,.tsx",
