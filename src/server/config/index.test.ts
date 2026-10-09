@@ -20,7 +20,6 @@ const keys = [
   'ENTITY_GRAPH_ENABLED',
   'ENTITY_GRAPH_PROMPT_INJECTION',
   'CHAT_MAX_OUTPUT_TOKENS',
-  'MCP_TOOL_BUDGET_TOKENS',
   'PORT',
   'TRUST_PROXY_HOPS',
   'MONGODB_URL',
@@ -67,7 +66,6 @@ describe('config/index', () => {
       process.env.ENTITY_GRAPH_ENABLED = 'true';
       process.env.ENTITY_GRAPH_PROMPT_INJECTION = 'true';
       process.env.CHAT_MAX_OUTPUT_TOKENS = '2048';
-      process.env.MCP_TOOL_BUDGET_TOKENS = '900';
       process.env.PORT = '4000';
       process.env.TRUST_PROXY_HOPS = '1';
       process.env.MONGODB_URL = 'mongodb://example/tova';
@@ -96,7 +94,6 @@ describe('config/index', () => {
       expect(config.entityGraph.extractionEnabled).toBe(true);
       expect(config.entityGraph.promptInjectionEnabled).toBe(true);
       expect(config.chat.maxOutputTokens).toBe('2048');
-      expect(config.mcp.toolBudgetTokens).toBe('900');
       expect(config.runtime.port).toBe('4000');
       expect(config.runtime.trustProxyHops).toBe('1');
       expect(config.runtime.mongodbUrl).toBe('mongodb://example/tova');
@@ -158,8 +155,6 @@ describe('config/index', () => {
     });
 
     it('raw string accessors stay raw (no parsing in the module)', () => {
-      process.env.MCP_TOOL_BUDGET_TOKENS = 'not-a-number';
-      expect(config.mcp.toolBudgetTokens).toBe('not-a-number');
       process.env.CHAT_MAX_OUTPUT_TOKENS = 'garbage';
       expect(config.chat.maxOutputTokens).toBe('garbage');
     });

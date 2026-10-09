@@ -7,7 +7,6 @@ import mongoose from 'mongoose';
 import { z } from 'zod';
 import type { McpServerDocument } from '../models/McpServer';
 import { McpServer } from '../models/McpServer';
-import type { LlmProvider } from './llmTypes';
 import { decryptEnvelope } from './crypto';
 import {
   degradedToolError,
@@ -241,47 +240,6 @@ const sanitizeToolsetKey = (name: string): string =>
   `mcp_${name.replace(/[^a-zA-Z0-9_]+/g, '_').slice(0, 40)}`;
 
 /*
- * MCP tool budget (#77 root cause 2). Attaching a full MCP server's tools to
- * every chat request inflates the prompt by an unbounded number of tokens —
- * the GitHub MCP server tests against carries far more than fits under a
- * free-tier 8000 TPM limit — which turned every chat turn into a Groq 413.
- * The budget caps what user MCP toolsets may add to *each* request, measured
- * as an estimate (serialized description + input schema at ~4 chars/token).
- * Tools attach in order until the budget is spent; tools that do not fit are
- * logged and dropped, and chat continues degraded, never failed.
- *
- * Provider awareness (#109): since #94 completions never route to Groq by
- * default — DeepInfra models have handled full MCP tool lists without issue —
- * so on `deepinfra` turns the budget is not applied at all and every user
- * tool attaches unaudited. The 1500 default still applies to `groq` turns
- * (the enum keeps the provider for legacy rows) and to `typesafe` turns
- * (#151: these host the guard/tier paths, which keep today's incidental
- * default for now). It also applies to turns with no provider tag
- * (un-tagged callers default to `groq` inside `inferenceService`, so this
- * matches their effective behaviour). An
- * explicit `MCP_TOOL_BUDGET_TOKENS` operator override forces the budget on
- * all providers; `0` drops every user tool on every provider (empty-string
- * or invalid values fall back to the 1500 default).
- */
-export const budgetAppliesFor = (provider?: LlmProvider): boolean => {
-  if (process.env.MCP_TOOL_BUDGET_TOKENS !== undefined) return true;
-  return provider !== 'deepinfra';
-};
-const toolTokenBudget = (): number => {
-  const parsed = Number.parseInt(process.env.MCP_TOOL_BUDGET_TOKENS ?? '1500', 10);
-  return Number.isFinite(parsed) && parsed >= 0 ? parsed : 1500;
-};
-const CHARS_PER_TOKEN = 4;
-
-const estimateToolTokens = (toolInfo: McpToolInfo): number =>
-  Math.ceil(
-    Buffer.byteLength(
-      JSON.stringify({ description: toolInfo.description, inputSchema: toolInfo.inputSchema }),
-      'utf8',
-    ) / CHARS_PER_TOKEN,
-  );
-
-/*
  * Per-user toolset resolution: platform servers plus the calling user's own.
  * Connections happen in parallel with a bounded connect timeout so a first
  * chat after adding N servers stays within that bound, never N× it. Any
@@ -290,15 +248,9 @@ const estimateToolTokens = (toolInfo: McpToolInfo): number =>
  */
 export const mcpToolsetsForUser = async (
   userId?: string,
-  options?: { provider?: LlmProvider },
 ): Promise<Record<string, Record<string, ReturnType<typeof createTool>>>> => {
   const now = Date.now();
-  const budgetApplies = budgetAppliesFor(options?.provider);
-  /* The cache key includes the budget flag so a Groq turn and a DeepInfra
-   * turn for the same user inside one TTL window cannot share a mis-budgeted
-   * resolution (a race the plain userId key would expose, plan #109).
-   * Behaviourally identical tools either way; only the audit differs. */
-  const cacheKey = `${userId ?? '__anon__'}|budget:${budgetApplies}`;
+  const cacheKey = userId ?? '__anon__';
   const cached = serversCache.get(cacheKey);
   if (cached && cached.expiresAt > now) return cached.promise;
 
@@ -326,29 +278,12 @@ export const mcpToolsetsForUser = async (
       }),
     );
     const toolsets: Record<string, Record<string, ReturnType<typeof createTool>>> = {};
-    let budgetRemaining = toolTokenBudget();
-    let droppedTools = 0;
     for (const entry of live) {
       if (!entry) continue;
       const setKey = sanitizeToolsetKey(entry.server.name);
       const tools: Record<string, ReturnType<typeof createTool>> = {};
-      const toolCount = entry.tools.length;
-      let acceptedInServer = 0;
       for (const toolInfo of entry.tools) {
         if (tools[toolInfo.name]) continue;
-        if (budgetApplies && entry.server.scope === 'user') {
-          // Budget applies to user-raised toolsets only; platform toolsets
-          // are curated by the deployment itself. On DeepInfra turns
-          // (#109) the audit is skipped entirely: every user tool attaches
-          // with no counting and no drop warn.
-          const cost = estimateToolTokens(toolInfo);
-          if (budgetRemaining - cost < 0) {
-            droppedTools += toolCount - acceptedInServer;
-            break;
-          }
-          budgetRemaining -= cost;
-          acceptedInServer += 1;
-        }
         tools[toolInfo.name] = createTool({
           id: `${setKey}/${toolInfo.name}`,
           description: toolInfo.description || `Tool ${toolInfo.name} from an MCP server`,
@@ -375,14 +310,6 @@ export const mcpToolsetsForUser = async (
         });
       }
       if (Object.keys(tools).length) toolsets[setKey] = tools;
-    }
-    if (droppedTools > 0) {
-      console.warn(
-        'MCP tool budget (%d est. tokens): dropped %d user tool%s from this turn\u2019s chat request',
-        toolTokenBudget(),
-        droppedTools,
-        droppedTools === 1 ? '' : 's',
-      );
     }
     return toolsets;
   })();
