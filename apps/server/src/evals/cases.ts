@@ -46,9 +46,9 @@ export const CASES: EvalCase[] = [
         tool: 'generate_file',
         argsSubset: { filename: 'README.md' },
       },
-      { type: 'content_equals', expected: '@repo:README.md' },
+      { type: 'content_equals', expected: '@repo:../README.md' },
     ],
-    expectedContent: '@repo:README.md',
+    expectedContent: '@repo:../README.md',
   },
   {
     id: 'bupa-fertility-files',
