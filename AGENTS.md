@@ -50,7 +50,7 @@ Do cleanup-as-we-go, but only with explicit confirmation:
 
 ### Client UI work
 
-When changing the React client (`src/client`), the end user is assumed to be on a phone, not a desktop:
+When changing the React client (`apps/client`), the end user is assumed to be on a phone, not a desktop:
 
 - **Mobile-first.** Design and verify for narrow viewports first; treat desktop as the enhancement, not the baseline. When a layout works on desktop but not mobile, it is broken.
 - **Every route is a phone surface — including `/admin`.** The owner uses the admin view on mobile as a deliberate quick-view for the desktop-first tools it fronts (LangSmith traces, Grafana logs); that is why those tabs live inside Tova at all. There is no desktop-only exemption. Density is fine, horizontal overflow without an affordance is not.
@@ -63,7 +63,7 @@ These rules are behavioral policy, so they apply to every client change regardle
 
 - Start the stack (Mongo + dev server + Vite): `npm run stack:up` then `npm run dev`; the client is at `http://localhost:5173`.
 - **Reset to a known login any time with `npm run db:password`**, then sign in as any seeded user with the password `password`. This is the owner's local workflow and the intended fixture path — do not register-and-promote accounts instead (that is what PATs replaced, #184).
-- The responsive end-to-end suite is `npm run test:e2e` (`e2e/playwright.config.ts`). It runs every spec in both a `mobile` (375×667, touch) and a `desktop` project. As of #220 it is gated by CI when `src/client/**` or `e2e/**` changes, and `e2e/responsive.spec.ts` asserts no route overflows horizontally at phone width. Locally, reset the DB first (`npm run db:password`) — the auth specs depend on the seeded fixture password `password`.
+- The responsive end-to-end suite is `npm run test:e2e` (`e2e/playwright.config.ts`). It runs every spec in both a `mobile` (375×667, touch) and a `desktop` project. As of #220 it is gated by CI when `apps/client/**` or `e2e/**` changes, and `e2e/responsive.spec.ts` asserts no route overflows horizontally at phone width. Locally, reset the DB first (`npm run db:password`) — the auth specs depend on the seeded fixture password `password`.
 
 _No known client drift as of #220; this section is a standing slot for the next drift found._
 
@@ -99,7 +99,7 @@ Reading the dump artifacts directly has a catch: they live under `data/`, which 
 
 ### Reading logs from Grafana Cloud (Loki)
 
-Retained production logs live in Grafana Cloud (hosted Loki) and are readable directly with the `LOKI_*` credentials in `.env` — the same ones the admin logs view uses (`src/server/services/lokiLogs.ts`). The token is both read- and write-scoped; `LOKI_URL` is the push URL and the query API lives on the same host.
+Retained production logs live in Grafana Cloud (hosted Loki) and are readable directly with the `LOKI_*` credentials in `.env` — the same ones the admin logs view uses (`apps/server/src/services/lokiLogs.ts`). The token is both read- and write-scoped; `LOKI_URL` is the push URL and the query API lives on the same host.
 
 - `npm run logs -- '<logql>' --since <window> --limit <n> [--raw] [--json]` — runs `scripts/loki.ts`. The query is a LogQL stream selector; `--since` accepts `30m`/`2h`/`24h`/`7d` (default `1h`); `--limit` defaults to 100; `--raw` drops timestamps, `--json` prints the raw Loki response. Default selector is `{job="tova"}`.
 - Examples: `npm run logs -- --since 6h`, `npm run logs -- '{job="tova"} |= "GET /api"' --since 24h --raw`, `npm run logs -- '{service="backend"} |~ "error|fail"' --since 2h`.
@@ -111,11 +111,11 @@ Retained production logs live in Grafana Cloud (hosted Loki) and are readable di
 
 Naming convention: a bare verb **checks**; append `:fix` to **write**. So `lint`/`format` check, `lint:fix`/`format:fix` change files.
 
-- `npm run lint` — ESLint (TypeScript rules + Prettier rules) over `src/` and `migrations/`. Use `npm run lint:fix` to auto-fix.
+- `npm run lint` — ESLint (TypeScript rules + Prettier rules) over `apps/`. Use `npm run lint:fix` to auto-fix.
 - `npm run typecheck` — TypeScript.
 - `npm test` — backend Jest suite.
 - `npm run format` — Prettier check over the repo (config in `.prettierrc`). Use `npm run format:fix` to write. (`format:check` is an alias of `format`.) Do not hand-format; let these run.
 
-Iterate per side with the shortcut scripts: `ci:server` / `ci:client`, plus `lint:server` / `format:server` / `test:server` and `lint:client` / `format:client` / `test:client` (vitest, config in `src/client/vite.config.ts`).
+Iterate per side with the shortcut scripts: `ci:server` / `ci:client`, plus `lint:server` / `format:server` / `test:server` and `lint:client` / `format:client` / `test:client` (vitest, config in `apps/client/vite.config.ts`).
 
 Style: Prettier settings in `.prettierrc` (single quotes, trailing commas, 100 print width). Rules live in the root `eslint.config.js`.

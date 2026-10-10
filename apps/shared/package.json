@@ -6,7 +6,6 @@
   "main": "dist/contracts.js",
   "types": "dist/contracts.d.ts",
   "scripts": {
-    "build": "tsc -p tsconfig.json",
-    "prepare": "tsc -p tsconfig.json"
+    "build": "tsc -p tsconfig.json"
   }
 }

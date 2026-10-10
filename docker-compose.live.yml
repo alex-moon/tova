@@ -1,4 +1,17 @@
 services:
+  # #257: one-shot migration runner on the compose network. Same .env as the
+  # backend, so it connects to exactly the same DB (Atlas MONGODB_URL or the
+  # compose mongo), runs `up`, and exits. The backend waits for
+  # service_completed_successfully, replacing the old host-side
+  # migrate-then-restart-backend dance in scripts/deploy.sh.
+  migrations:
+    build:
+      context: .
+      dockerfile: apps/migrations/Dockerfile
+    env_file:
+      - .env
+    restart: "no"
+
   backend:
     build:
       context: .
@@ -12,11 +25,14 @@ services:
       - NODE_ENV=production
     env_file:
       - .env
+    depends_on:
+      migrations:
+        condition: service_completed_successfully
 
   frontend:
     build:
       context: .
-      dockerfile: src/client/Dockerfile
+      dockerfile: apps/client/Dockerfile
     ports:
       - '15173:4173'
     depends_on:
