@@ -56,7 +56,11 @@ const gotoChat = async (page: Page) => {
 test('profile save PATCHes the endpoint with the current fields and only changed toggles', async ({
   page,
 }) => {
-  const user = { id: 'e2e-user-1', email, zdr: false };
+  // #261: a user whose stored zone already matches the browser costs no
+  // timezone report — the app is in steady state, so this spec still sees
+  // exactly one PATCH: the save itself.
+  const zone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const user = { id: 'e2e-user-1', email, zdr: false, timezone: zone };
   await mockUserAndApp(page, user);
   const patches: string[] = [];
   await page.route('**/api/profile', async (route) => {
