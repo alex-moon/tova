@@ -44,8 +44,12 @@ describe('resolveSystemPrompt', () => {
 
   it('introduces no mechanical trigger conditions (D7)', () => {
     // Dispositions generalise, conditions fire wrongly: the stance layer must
-    // stay free of "when the user …, then …" trigger constructions.
-    expect(resolveSystemPrompt()).not.toMatch(/when the user\s/i);
+    // stay free of "when the user …, then …" trigger constructions. The guard
+    // is deliberately narrow — "if they …" is ordinary prose ("if they reopen
+    // it"), and a broad guard would reject the prompt's own voice. What it
+    // rejects is the trigger *table* opener that pairs a subject with a
+    // consequent.
+    expect(resolveSystemPrompt()).not.toMatch(/\bwhen(ever)? the (user|person|human)\b/i);
   });
 });
 

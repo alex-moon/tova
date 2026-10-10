@@ -1,4 +1,5 @@
 import { CASES, resolveExpectedContent } from './cases';
+import { defaultReadRepoFile, resolveAssertions } from '../services/evalRunService';
 
 describe('#112 golden set', () => {
   it('has unique ids and non-empty prompts for every case', () => {
@@ -75,5 +76,28 @@ describe('#112 golden set', () => {
   it('resolves @repo: markers against the injected reader and leaves literals alone', () => {
     expect(resolveExpectedContent('@repo:README.md', () => 'repo body')).toBe('repo body');
     expect(resolveExpectedContent('any literal', () => 'unused')).toBe('any literal');
+  });
+
+  /*
+   * The eval runner is not in CI, so a @repo: path that no longer resolves
+   * against the real repo (as `@repo:README.md` did after the #257 monorepo
+   * move — the reader's root is `apps/`, not the git root) fails silently
+   * until the next live run. Pin every marker against the actual reader.
+   */
+  it('every @repo: marker in CASES resolves against the real repo reader', () => {
+    for (const testCase of CASES) {
+      const markers = [
+        ...(testCase.expectedContent?.startsWith('@repo:') ? [testCase.expectedContent] : []),
+        ...testCase.assertions
+          .filter((a) => a.type === 'content_equals' && a.expected.startsWith('@repo:'))
+          .map((a) => (a as { expected: string }).expected),
+      ];
+      for (const marker of markers) {
+        expect(() => resolveExpectedContent(marker, defaultReadRepoFile)).not.toThrow();
+        expect(resolveExpectedContent(marker, defaultReadRepoFile).length).toBeGreaterThan(0);
+      }
+      // The whole assertion set must resolve, not just the markers scanned above.
+      expect(() => resolveAssertions(testCase, defaultReadRepoFile)).not.toThrow();
+    }
   });
 });
