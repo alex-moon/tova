@@ -3,7 +3,7 @@ import { createApp } from '../index';
 import { Message } from '../models/Message';
 import { Session } from '../models/Session';
 import { User } from '../models/User';
-import { reconcileToolEvent, type PersistedToolEvent } from './chat';
+import { paragraphBreakFor, reconcileToolEvent, type PersistedToolEvent } from './chat';
 
 const mockGenerate = jest.fn();
 const mockAgentStream = jest.fn();
@@ -465,6 +465,75 @@ describe('Chat streaming route', () => {
     expect(done?.data.sourceTitles).toEqual([
       { url: 'https://example.com/groq-docs', title: 'Groq docs' },
     ]);
+  });
+
+  // #262: a tool use between two text runs separates them as paragraphs. The
+  // separator is persisted in the stored content (and rides the delta stream),
+  // so the live view and a refresh agree.
+  it('separates text runs with a paragraph break when a tool use falls between them (#262)', async () => {
+    const cookies = await registerUser('stream-paragraph-break@example.com');
+    mockAgentStream.mockImplementation(async () => ({
+      fullStream: (async function* () {
+        yield { type: 'text-delta', payload: { text: 'Let me look that up.' } };
+        yield {
+          type: 'tool-call',
+          payload: { toolName: 'web_search', args: { query: 'groq pricing' } },
+        };
+        yield {
+          type: 'tool-result',
+          payload: {
+            toolName: 'web_search',
+            result: { results: [{ title: 'A page', snippet: 'a', url: 'https://a.example.com' }] },
+          },
+        };
+        yield { type: 'text-delta', payload: { text: 'Here is the answer.' } };
+      })(),
+    }));
+
+    const app = createApp();
+    const response = await request(app)
+      .post('/api/chat/stream')
+      .set('Cookie', cookies)
+      .send({ content: 'what happened today' });
+
+    expect(response.status).toBe(200);
+    // The break rides the delta stream too, so the live view matches.
+    expect(response.text).toContain('"content":"\\n\\nHere is the answer."');
+    const persisted = await Message.findOne({ role: 'assistant' });
+    expect(persisted?.content).toBe('Let me look that up.\n\nHere is the answer.');
+  });
+
+  // A search-first turn (tool before any text) must not gain a leading break,
+  // and a lone-newline tail is topped up to a single blank line, not stacked.
+  it('paragraph break boundary cases (#262): no leading break, lone-newline tail topped up', () => {
+    expect(paragraphBreakFor('')).toBe('\n\n');
+    expect(paragraphBreakFor('answer')).toBe('\n\n');
+    expect(paragraphBreakFor('answer\n')).toBe('\n');
+    expect(paragraphBreakFor('answer\n\n')).toBe('');
+    expect(paragraphBreakFor('answer\n\n\n')).toBe('');
+  });
+
+  it('a tool that ends the turn leaves no trailing paragraph break (#262)', async () => {
+    const cookies = await registerUser('stream-tool-ending@example.com');
+    mockAgentStream.mockImplementation(async () => ({
+      fullStream: (async function* () {
+        yield { type: 'text-delta', payload: { text: 'Searching now.' } };
+        yield { type: 'tool-call', payload: { toolName: 'web_search', args: { query: 'x' } } };
+        yield {
+          type: 'tool-result',
+          payload: { toolName: 'web_search', result: { results: [] } },
+        };
+      })(),
+    }));
+
+    const app = createApp();
+    await request(app)
+      .post('/api/chat/stream')
+      .set('Cookie', cookies)
+      .send({ content: 'look this up' });
+
+    const persisted = await Message.findOne({ role: 'assistant' });
+    expect(persisted?.content).toBe('Searching now.');
   });
 
   it('emits an empty-status tool result when the search returns nothing', async () => {
