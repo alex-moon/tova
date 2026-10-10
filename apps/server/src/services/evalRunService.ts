@@ -277,7 +277,7 @@ export const langsmithClientFromEnv = async (
   return new Client({ apiKey });
 };
 
-const defaultReadRepoFile = (p: string): string => {
+export const defaultReadRepoFile = (p: string): string => {
   const repoRoot = path.resolve(__dirname, '../../..');
   return fs.readFileSync(path.join(repoRoot, p), 'utf8');
 };

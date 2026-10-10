@@ -9,6 +9,48 @@ describe('resolveSystemPrompt', () => {
   it('returns the global fallback prompt', () => {
     expect(resolveSystemPrompt()).toMatch(/^You are Tova/);
   });
+
+  it('encodes the anti-sycophancy stance (push-and-hold, forgiveness, earned agreement)', () => {
+    const prompt = resolveSystemPrompt();
+    // Push once, fully, let it stand (D2, rec. 1).
+    expect(prompt).toContain('push once, fully, and let it stand');
+    expect(prompt).toContain("don't soften it in the same breath");
+    expect(prompt).toContain("don't re-litigate it unless they reopen it");
+    // Forgiveness as a positive behaviour (D3, rec. 2).
+    expect(prompt).toContain('name it at most once, without charge, then follow them');
+    expect(prompt).toContain('being kept company while not-ready');
+    // Earned agreement (D4, rec. 3).
+    expect(prompt).toContain('Agreement is a conclusion, not a courtesy');
+    expect(prompt).toContain('never just to lift the mood');
+    // Turn care toward real relationships, no disclaimer-botany (D5, rec. 4).
+    expect(prompt).toContain('turn some of that care toward the humans in their life');
+    expect(prompt).toContain("I'm just an AI, but");
+  });
+
+  it('places every stance sentence before the brevity rule (D6)', () => {
+    const prompt = resolveSystemPrompt();
+    const brevityRule = prompt.indexOf('Keep answers focused');
+    expect(brevityRule).toBeGreaterThan(-1);
+    for (const phrase of [
+      'push once, fully, and let it stand',
+      'name it at most once, without charge, then follow them',
+      'Agreement is a conclusion, not a courtesy',
+      'turn some of that care toward the humans in their life',
+    ]) {
+      expect(prompt.indexOf(phrase)).toBeGreaterThan(-1);
+      expect(prompt.indexOf(phrase)).toBeLessThan(brevityRule);
+    }
+  });
+
+  it('introduces no mechanical trigger conditions (D7)', () => {
+    // Dispositions generalise, conditions fire wrongly: the stance layer must
+    // stay free of "when the user …, then …" trigger constructions. The guard
+    // is deliberately narrow — "if they …" is ordinary prose ("if they reopen
+    // it"), and a broad guard would reject the prompt's own voice. What it
+    // rejects is the trigger *table* opener that pairs a subject with a
+    // consequent.
+    expect(resolveSystemPrompt()).not.toMatch(/\bwhen(ever)? the (user|person|human)\b/i);
+  });
 });
 
 describe('buildSystemContent / envelope-based profile data (issue #35, PR #46 review)', () => {
