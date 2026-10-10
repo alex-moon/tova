@@ -84,6 +84,27 @@ describe('createSystemAsset (#66)', () => {
         'text/markdown',
       );
     });
+
+    it('writes provenance when one is passed (#252)', async () => {
+      mockPutObject.mockResolvedValue(undefined);
+      const userId = oid();
+      const sessionId = oid();
+      await createSystemAsset(userId, 'notes.md', VALID, 'text/markdown', {
+        kind: 'chat',
+        sessionId,
+      });
+      const asset = await Asset.findOne({ userId });
+      expect(asset?.provenance?.kind).toBe('chat');
+      expect(asset?.provenance?.sessionId).toBe(sessionId);
+    });
+
+    it('leaves provenance absent when omitted (#252)', async () => {
+      mockPutObject.mockResolvedValue(undefined);
+      const userId = oid();
+      await createSystemAsset(userId, 'notes.md', VALID, 'text/markdown');
+      const asset = await Asset.findOne({ userId });
+      expect(asset?.provenance).toBeUndefined();
+    });
   });
 
   describe('storage failure', () => {

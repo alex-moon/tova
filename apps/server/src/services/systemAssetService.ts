@@ -1,4 +1,5 @@
 import { Asset } from '../models/Asset';
+import type { AssetProvenance } from '../models/Asset';
 import { spacesWorkspaceStorage } from './workspaceStorage';
 import { MAX_ASSET_SIZE, sanitizeFilename } from './assetLimits';
 
@@ -27,6 +28,10 @@ export const createSystemAsset = async (
   filename: string,
   buffer: Buffer,
   contentType: string,
+  // #252: optional origin for the generated file. Trailing/optional so every
+  // existing call site keeps compiling. Omitted means provenance is left
+  // absent (unknown) — never defaulted.
+  provenance?: AssetProvenance,
 ): Promise<CreateSystemAssetResult> => {
   if (!SYSTEM_ALLOWED_CONTENT_TYPES.has(contentType)) {
     return fail('invalid', `Content type ${contentType} is not allowed for generated files`);
@@ -51,6 +56,7 @@ export const createSystemAsset = async (
     size: buffer.length,
     status: 'pending',
     origin: 'system-generated',
+    ...(provenance ? { provenance } : {}),
   });
   const key = `${userId}/${asset._id}/${safeName}`;
 

@@ -212,7 +212,9 @@ const modelSettingsFrom = (options: CompletionOptions) => ({
  * per provider/model/mode so per-user state cannot live on them). Tool
  * `execute` receives this context as its second argument and reads
  * `requestContext.get('userId')` to scope per-user work (e.g. asset
- * library lookups).
+ * library lookups). Since #252 the caller's sessionId rides alongside it
+ * (`requestContext.get('sessionId')`) so provenance-writing tools can
+ * attribute files to their conversation.
  */
 /*
  * MCP toolsets (#36): when the caller is a user, resolve platform + personal
@@ -233,6 +235,10 @@ const callOptionsFrom = (
 ) => {
   const requestContext = new RequestContext();
   if (options.userId !== undefined) requestContext.set('userId', options.userId);
+  // #252: the chat session rides alongside userId so provenance-writing tools
+  // (generate_file) can attribute a file to its conversation without coupling
+  // to the LangSmith tracing switch (see CompletionOptions.sessionId).
+  if (options.sessionId !== undefined) requestContext.set('sessionId', options.sessionId);
   return {
     ...(options.abortSignal ? { abortSignal: options.abortSignal } : {}),
     // #198: the merged single system message rides in as a per-call override
@@ -627,12 +633,17 @@ const generateFileExecute = async (
   const userId = requestContext.get('userId') as string | undefined;
   if (!userId) return { error: 'unavailable' };
   if (!spacesWorkspaceStorage.isConfigured()) return { error: 'unavailable' };
+  // #252: attribute the file to its conversation when a session is on the
+  // context; with no session we leave provenance absent (unknown) rather than
+  // inventing one (ZDR turns, raced calls, future non-chat callers).
+  const sessionId = requestContext.get('sessionId') as string | undefined;
   try {
     const result = await createSystemAsset(
       userId,
       filename,
       Buffer.from(content, 'utf8'),
       'text/markdown',
+      sessionId ? { kind: 'chat', sessionId } : undefined,
     );
     if (!result.ok) return { error: result.code };
     return {

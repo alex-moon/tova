@@ -1,4 +1,4 @@
-import type { AssetDocument } from '../models/Asset';
+import type { AssetDocument, AssetProvenance } from '../models/Asset';
 
 const safeAsset = (asset: AssetDocument): unknown => ({
   id: String(asset._id),
@@ -6,6 +6,10 @@ const safeAsset = (asset: AssetDocument): unknown => ({
   contentType: asset.contentType,
   size: asset.size,
   status: asset.status,
+  // #252: where the file came from. Absent provenance serialises as explicit
+  // null so the client sees a stable key and can tell "unknown" from "field
+  // missing in an old payload"; never faked from the scalar `origin`.
+  provenance: (asset.provenance as AssetProvenance | undefined) ?? null,
   // lets the UI tell the user when no text could be extracted (issue #34
   // owner ask) — the extracted text itself stays server-side, never a
   // client-rendered payload.
@@ -49,6 +53,8 @@ const previewAsset = (asset: AssetDocument): unknown => {
     contentType: asset.contentType,
     size: asset.size,
     status: asset.status,
+    // #252: same contract as `safeAsset` — explicit null when unknown.
+    provenance: (asset.provenance as AssetProvenance | undefined) ?? null,
     // null when nothing was extracted — the viewer shows "(no extracted text)".
     content,
     // 'markdown' when the body is markdown (rendered), else 'text'.

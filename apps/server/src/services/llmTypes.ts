@@ -50,6 +50,14 @@ export interface CompletionOptions {
    * baking user data into memoised agent instances.
    */
   userId?: string;
+  /*
+   * Calling session id for this turn (issue #252), set by the chat routes.
+   * Distinct from `trace.sessionId`: `trace` is a LangSmith-tracing concern
+   * and is deliberately absent for ZDR/raced turns, whereas tools that write
+   * provenance need the session independently of tracing. Rides into Mastra's
+   * request context like `userId`; absent means unknown (never invented).
+   */
+  sessionId?: string;
   temperature?: number;
   max_tokens?: number;
   /*

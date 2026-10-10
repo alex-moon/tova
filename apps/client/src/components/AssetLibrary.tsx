@@ -20,6 +20,15 @@ const formatSize = (bytes: number): string => {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 };
 
+// Issue #252: short, human label for a file's provenance. Unknown (null/absent)
+// renders nothing — absence means unknown, never faked as "Uploaded".
+const provenanceLabel = (kind: string | undefined): string | null => {
+  if (kind === 'upload') return 'Uploaded';
+  if (kind === 'chat') return 'From chat';
+  if (kind === 'task') return 'From task';
+  return null;
+};
+
 // Type icon only (owner constraint on issue #34): file contents are never
 // rendered or previewed in the browser — the grid shows icons, not thumbs.
 const IconFor: React.FC<{ contentType: string; filename: string }> = ({
@@ -377,6 +386,12 @@ const AssetLibrary: React.FC<AssetLibraryProps> = ({ onSelect, selectedId = null
                       <span className="block truncate text-sm">{asset.filename}</span>
                       <span className="block text-xs text-muted-foreground">
                         {formatSize(asset.size)} · {new Date(asset.createdAt).toLocaleDateString()}
+                        {provenanceLabel(asset.provenance?.kind) && (
+                          <span data-testid="asset-provenance">
+                            {' '}
+                            · {provenanceLabel(asset.provenance?.kind)}
+                          </span>
+                        )}
                         {asset.markdownStatus === 'pending' && (
                           <span data-testid="asset-extracting">
                             {' '}
