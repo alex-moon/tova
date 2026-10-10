@@ -97,7 +97,7 @@ Required: set `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, and `GOOGLE_CALLBACK_U
 | `npm run ci`                             | Full gate: `ci:client` then `ci:server`                                                      |
 | `npm run deploy`                         | Deploy the live stack over SSH (see below)                                                   |
 
-`db:drop`, `db:restore`, `db:sync`, and `db:password` are destructive against `MONGODB_URL`, so they refuse to run if that URL points anywhere except `localhost`/`127.0.0.1` unless you append `-- --i-know-this-is-dangerous` (e.g. `npm run db:sync -- --i-know-this-is-dangerous`). Dumps land in `data/db-dumps/` (git-ignored).
+`db:drop`, `db:restore`, `db:sync`, and `db:password` are destructive against `MONGODB_URL`, so they refuse to run if that URL points anywhere except `localhost`/`127.0.0.1` unless you append `-- --i-know-this-is-dangerous` (e.g. `npm run db:sync -- --i-know-this-is-dangerous`). Dumps land in `data/db-dumps/` (git-ignored). These npm scripts wrap MongoDB's `mongodump`/`mongorestore` (Database Tools) — use the scripts, not the raw binaries.
 
 ## Live (all-in-Docker) Workflow
 

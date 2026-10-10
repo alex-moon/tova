@@ -82,14 +82,14 @@ Admin API endpoints (`/api/admin/*`) accept a personal access token: generate on
 
 A local MongoDB is available at `mongodb://localhost:27017/tova` at any time. If it is not running, start the stack with `npm run stack:up`.
 
-There is no `mongosh` binary in this environment (yet). To query or mutate the local database, write a small script with `scripts/mongo.ts` (helper built on `mongodb` driver, async by default):
+The MongoDB toolchain (`mongosh`, `mongodump`, `mongorestore`) is installed and on PATH, but it is not the interface — never invoke those binaries directly. To query or mutate the local database, write a small script with `scripts/mongo.ts` (helper built on `mongodb` driver, async by default):
 
 - `npx tsx scripts/mongo.ts <js-expression>` — evaluates a snippet with `db` bound to the `tova` database, prints the result. Examples: `npx tsx scripts/mongo.ts "await db.listCollections().toArray()"`, `npx tsx scripts/mongo.ts "await db.collection('sessions').countDocuments()"`.
 - Prefer small, explicit snippets; this is a debugging tool, not an ORM.
 
 ### Database snapshots as diagnostic aid
 
-Take a live dump of production at any time to aid diagnostics (it is non-destructive and safe to run freely):
+Take a live dump of production at any time to aid diagnostics (it is non-destructive and safe to run freely). **Always use the `npm run db:*` scripts; never run `mongodump`, `mongorestore`, or `mongosh` by hand** — the scripts wrap those binaries internally (adding the localhost guard, tarball naming, and db-name parsing that raw commands lack), so there is nothing to install and no command to reconstruct. If a `db:*` script fails because a binary is missing, that is an environment defect to report — not a cue to hand-roll the command.
 
 - `npm run db:dump` — dumps the production/Atlas cluster (`MONGODB_DUMP_URL` in `.env`) into a tarball under `data/db-dumps/` (git-ignored). `npm run db:sync` additionally drops and restores it into the local stack (`MONGODB_URL`) so you can interrogate real data locally; the destructive steps refuse to run against a non-localhost target without `-- --i-know-this-is-dangerous`.
 - Prefer the sync-then-interrogate-locally route: run `npm run db:sync`, then use `scripts/mongo.ts` snippets against the local db.
