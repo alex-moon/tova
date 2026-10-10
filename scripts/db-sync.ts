@@ -129,8 +129,9 @@ const restore = () => {
   execFileSync('mkdir', ['-p', workDir]);
   try {
     execFileSync('tar', ['-xzf', tarball, '-C', workDir]);
-    // Tarballs may contain a single dumped db directory (legacy db-dump.sh
-    // layout) or the db files directly (dump above). Handle both.
+    // Tarballs may contain a single dumped-db directory (the legacy layout of
+    // the retired db-dump.sh; its tarballs may still exist) or the db files
+    // directly (dump above). Handle both.
     const entries = readdirSync(workDir);
     const dir =
       entries.length === 1 && existsSync(path.join(workDir, entries[0], targetDb(url)))

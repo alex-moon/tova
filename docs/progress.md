@@ -2,6 +2,22 @@
 
 ## Status (current)
 
+#260 db:sync discoverability (in flight, branch `fix/tv/260-db-sync-friction`):
+agents kept reaching for `mongosh`/`mongodump`/`mongorestore` instead of
+`npm run db:sync` for three reinforcing reasons, all doc/artifact-level — the
+tooling itself works (verified with a real dump → drop → restore round-trip):
+AGENTS.md claimed no `mongosh` binary existed when the full toolchain is
+installed (agents that checked stopped trusting the doc), the superseded
+`scripts/db-dump.sh`/`db-restore.sh` still sat in `scripts/` pointing readers
+at "Install MongoDB Database Tools", env vars that don't exist in `.env`
+(`MONGODB_DUMP_URI` vs the real `MONGODB_DUMP_URL`), and an interactive
+`read -p` prompt that hangs agent shells, and no doc stated that the
+`db:*` npm scripts already wrap the binaries. Fixes: both legacy scripts
+deleted; AGENTS.md now states the binaries are installed-but-not-the-interface
+and names the hand-rolled-command anti-pattern; README notes the wrapping;
+the legacy-tarball compat in `db-sync.ts restore()` stays (old-layout
+tarballs may still exist) with its comment reworded.
+
 #232–#238 roster epic (merged to `main` via fast-forward, 2026-10-08; plan doc
 archived to `docs/done/plan-roster.md`). The `epic/roster` branch delivered the
 fixed model roster + hedged provider racing (#232), the tier-era deletion (#233),
