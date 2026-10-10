@@ -28,7 +28,7 @@
  */
 import 'dotenv/config';
 import mongoose from 'mongoose';
-import { buildMongoUri } from '../src/server/mongoUri';
+import { buildMongoUri } from '../apps/server/src/mongoUri';
 import {
   langsmithClientFromEnv,
   parseModelsFlag,
@@ -36,7 +36,7 @@ import {
   runEvalSuite,
   type EvalResult,
   type WiredProvider,
-} from '../src/server/services/evalRunService';
+} from '../apps/server/src/services/evalRunService';
 
 const parseModelsArg = (): { provider: WiredProvider; model: string }[] | null => {
   const index = process.argv.indexOf('--models');

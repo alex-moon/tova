@@ -1,6 +1,6 @@
 import 'dotenv/config';
 import { MongoClient } from 'mongodb';
-import { buildMongoUri } from '../src/server/mongoUri';
+import { buildMongoUri } from '../apps/server/src/mongoUri';
 
 const uri = buildMongoUri();
 

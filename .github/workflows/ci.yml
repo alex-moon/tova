@@ -59,16 +59,16 @@ jobs:
 
           while IFS= read -r file; do
             case "$file" in
-              src/server/*|src/shared/*|src/index.ts|migrations/*|Dockerfile)
+              apps/server/*|apps/shared/*|apps/migrations/*|Dockerfile)
                 server=true ;;
-              src/client/*)
+              apps/client/*)
                 client=true
                 e2e=true ;;
               e2e/*)
                 e2e=true ;;
-              package.json|package-lock.json|src/client/package.json|src/client/package-lock.json)
+              package.json|package-lock.json|apps/*/package.json)
                 deps=true ;;
-              eslint.config.js|tsconfig.json|tsconfig.test.json|jest.config.js|.prettierrc|prettier.config.*)
+              eslint.config.js|tsconfig*.json|apps/*/tsconfig*.json|jest.config.js|.prettierrc|prettier.config.*)
                 tooling=true ;;
               .github/*)
                 # Workflow changes affect the gate itself: run everything.
@@ -140,28 +140,19 @@ jobs:
   # assertion is caught mechanically. Gated on client/e2e changes to respect
   # the free-tier-minutes constraint (#141) — a server-only PR skips it.
   #
-  # Runs against the local stack the way a developer does: a Mongo service
-  # container, migrations (seeds the admin user), `db:password` (fixture
+  # Runs against the local stack the way a developer does: a Mongo container,
+  # migrations (seeds the admin user), `db:password` (fixture
   # password `password`, see AGENTS.md), then the dev server + Vite client.
   # The chat stream is mocked inside the specs, so no provider keys are needed.
+  #
+  # #257: Mongo runs via a login + `docker run` step, not a `services:` block —
+  # service images are pulled before any step can authenticate, so with
+  # Docker Hub rate-limiting anonymous pulls the job could fail before it
+  # started. A step-based container can log in first (same fix as semgrep).
   e2e:
     runs-on: ubuntu-latest
     needs: changed
     if: needs.changed.outputs.e2e == 'true'
-
-    services:
-      mongodb:
-        image: mongo:latest
-        env:
-          MONGO_INITDB_ROOT_USERNAME: tova
-          MONGO_INITDB_ROOT_PASSWORD: tova
-        ports:
-          - 27017:27017
-        options: >-
-          --health-cmd "mongosh --quiet --eval \"db.adminCommand('ping')\""
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 10
 
     env:
       MONGODB_HOST: localhost
@@ -180,6 +171,34 @@ jobs:
 
       - name: Install Playwright browsers
         run: npx playwright install --with-deps chromium
+
+      # Direct CLI docker login (repo convention: no third-party actions).
+      # Skipped when the repo secrets are unset — pulls fall back to anonymous.
+      - name: Log in to Docker Hub
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          if [[ -n "$DOCKERHUB_USERNAME" && -n "$DOCKERHUB_TOKEN" ]]; then
+            printf '%s' "$DOCKERHUB_TOKEN" | docker login -u "$DOCKERHUB_USERNAME" --password-stdin
+          fi
+
+      - name: Start fixture Mongo
+        run: |
+          docker run -d --name mongodb -p 27017:27017 \
+            -e MONGO_INITDB_ROOT_USERNAME=tova \
+            -e MONGO_INITDB_ROOT_PASSWORD=tova \
+            mongo:latest
+          for i in $(seq 1 30); do
+            if (exec 3<>/dev/tcp/127.0.0.1/27017) 2>/dev/null; then
+              exec 3>&- 3<&-
+              echo "mongo is up"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "mongo did not come up" >&2
+          exit 1
 
       - name: Migrate and set the test fixture password
         run: |
@@ -233,17 +252,29 @@ jobs:
           curl -sSfL https://github.com/gitleaks/gitleaks/releases/download/v8.24.3/gitleaks_8.24.3_linux_x64.tar.gz | tar -xz
           ./gitleaks detect --source . --redact --no-banner
 
+  # #257: semgrep runs via a login + `docker run` step instead of a job
+  # `container:` — container images are pulled before any step can
+  # authenticate (same reason the e2e job dropped its services: block).
   semgrep:
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
-    container:
-      image: semgrep/semgrep
 
     steps:
       - uses: actions/checkout@v4
 
+      - name: Log in to Docker Hub
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          if [[ -n "$DOCKERHUB_USERNAME" && -n "$DOCKERHUB_TOKEN" ]]; then
+            printf '%s' "$DOCKERHUB_TOKEN" | docker login -u "$DOCKERHUB_USERNAME" --password-stdin
+          fi
+
       - name: Semgrep scan (default OSS rules)
-        run: semgrep scan --config p/default --error --metrics=off src/server
+        run: |
+          docker run --rm -v "$PWD:/src" -w /src semgrep/semgrep \
+            --config p/default --error --metrics=off apps/server/src
 
   npm-audit:
     if: github.event_name == 'push'

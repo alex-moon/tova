@@ -10,15 +10,14 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
 
-    # Ephemeral fixture Mongo for the post-deploy eval smoke (#158 OQ1): the
-    # eval runner seeds a temp source at startup, so a throwaway
-    # localhost-only instance keeps every run self-contained. It is torn down
-    # when the job ends.
-    services:
-      mongo:
-        image: mongo:7
-        ports:
-          - 27017:27017
+    # Post-deploy eval smoke disabled: it was warn-only (continue-on-error) and
+    # only pushed to the LangSmith `tova-evals` dataset, nothing the app reads.
+    # It needed a `mongo:7` service container pull, which failed without Docker
+    # Hub credentials. Re-enable by restoring the `services: mongo` block and the
+    # "Post-deploy evals" step — service images are pulled before any step can
+    # authenticate, so convert it to a login + `docker run` step instead (the
+    # pattern the e2e job uses in ci.yml). The nightly all-models sweep still
+    # runs separately (see .iteration/docs/plan-158-more-evals.md).
 
     # Runs only on successful pushes to main (not PR events).
     if: >
@@ -47,20 +46,10 @@ jobs:
           chmod 600 ~/.ssh/known_hosts
 
       - name: Deploy to ajmoon.com
+        # DOCKERHUB_* authenticate the deploy host's `docker compose build`
+        # pulls (scripts/deploy.sh pipes the token through ssh stdin).
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
         run: |
           npm run deploy
-
-      # Post-deploy eval smoke (#158): the golden cases against one fixed
-      # model, graded offline against an ephemeral Mongo. Warn-only for now —
-      # it must not fail deploys while the deterministic graders bed in. The
-      # nightly all-models sweep is a separate scheduled job, not a
-      # per-deploy cost (see .iteration/docs/plan-158-more-evals.md).
-      - name: Post-deploy evals
-        continue-on-error: true
-        env:
-          DEEPINFRA_API_KEY: ${{ secrets.DEEPINFRA_API_KEY }}
-          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
-          BRAVE_SEARCH_API_KEY: ${{ secrets.BRAVE_SEARCH_API_KEY }}
-          MONGODB_URL: mongodb://localhost:27017/tova
-          LANGSMITH_API_KEY: ${{ secrets.LANGSMITH_API_KEY }}
-        run: npx tsx scripts/run-evals.ts

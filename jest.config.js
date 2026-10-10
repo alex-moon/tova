@@ -9,22 +9,22 @@ module.exports = {
   // error paths whose expected console.error/warn logging would otherwise
   // pollute the test output.
   silent: true,
-  roots: ['<rootDir>/src/server'],
+  roots: ['<rootDir>/apps/server/src'],
   testMatch: ['**/*.test.ts'],
-  globalSetup: '<rootDir>/src/server/test/globalSetup.ts',
-  globalTeardown: '<rootDir>/src/server/test/globalTeardown.ts',
-  setupFilesAfterEnv: ['<rootDir>/src/server/test/setup.ts'],
-  modulePathIgnorePatterns: ['<rootDir>/dist/'],
+  globalSetup: '<rootDir>/apps/server/src/test/globalSetup.ts',
+  globalTeardown: '<rootDir>/apps/server/src/test/globalTeardown.ts',
+  setupFilesAfterEnv: ['<rootDir>/apps/server/src/test/setup.ts'],
+  modulePathIgnorePatterns: ['<rootDir>/apps/server/dist/'],
   // `@mastra/core`'s CJS build requires ESM-only transitive deps (e.g.
   // `@sindresorhus/slugify`), which ts-jest cannot load. Suites that need
   // agent behaviour mock '@mastra/core/agent' explicitly; everything else
   // gets inert stubs (src/server/test/mastra*Stub.ts etc.).
   moduleNameMapper: {
-    '^@mastra/core/agent$': '<rootDir>/src/server/test/mastraAgentStub.ts',
-    '^@mastra/core/tools$': '<rootDir>/src/server/test/mastraToolsStub.ts',
-    '^@mastra/core/storage$': '<rootDir>/src/server/test/mastraStorageStub.ts',
-    '^@mastra/core$': '<rootDir>/src/server/test/mastraCoreStub.ts',
-    '^@mastra/observability$': '<rootDir>/src/server/test/observabilityStub.ts',
-    '^@mastra/langsmith$': '<rootDir>/src/server/test/langsmithStub.ts',
+    '^@mastra/core/agent$': '<rootDir>/apps/server/src/test/mastraAgentStub.ts',
+    '^@mastra/core/tools$': '<rootDir>/apps/server/src/test/mastraToolsStub.ts',
+    '^@mastra/core/storage$': '<rootDir>/apps/server/src/test/mastraStorageStub.ts',
+    '^@mastra/core$': '<rootDir>/apps/server/src/test/mastraCoreStub.ts',
+    '^@mastra/observability$': '<rootDir>/apps/server/src/test/observabilityStub.ts',
+    '^@mastra/langsmith$': '<rootDir>/apps/server/src/test/langsmithStub.ts',
   },
 };
