@@ -1,7 +1,7 @@
 {
-  "name": "client",
+  "name": "@tova/client",
   "private": true,
-  "version": "0.0.0",
+  "version": "1.0.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -32,7 +32,8 @@
     "remark-gfm": "^4.0.1",
     "sonner": "^2.0.8",
     "tailwind-merge": "^3.6.0",
-    "tailwindcss": "^4.3.3"
+    "tailwindcss": "^4.3.3",
+    "@tova/shared": "1.0.0"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
