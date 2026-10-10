@@ -76,7 +76,7 @@ Required: set `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, and `GOOGLE_CALLBACK_U
 | `npm install`                            | Install root and client dependencies (`postinstall` adds the client)                         |
 | `npm run install:all`                    | Explicit form of the above                                                                   |
 | `npm run stack:up` / `stack:down`        | Start/stop the Dockerized MongoDB backing service                                            |
-| `npm run db:migrate` / `db:migrate:down` | Run/undo DB migrations (`mongo-migrate-ts`, `apps/migrations/`)                                   |
+| `npm run db:migrate` / `db:migrate:down` | Run/undo DB migrations (`mongo-migrate-ts`, `apps/migrations/`)                              |
 | `npm run db:dump`                        | `mongodump` from `MONGODB_DUMP_URL` into a `data/db-dumps/` tarball                          |
 | `npm run db:drop`                        | Drop the database in `MONGODB_URL` (localhost-gated, see below)                              |
 | `npm run db:restore`                     | Restore the latest `data/db-dumps/` tarball into `MONGODB_URL` (gated)                       |
@@ -90,7 +90,7 @@ Required: set `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, and `GOOGLE_CALLBACK_U
 | `npm start`                              | Start the built backend from `dist/index.js`                                                 |
 | `npm test`                               | Run the backend Jest suite (also run via `test:server`)                                      |
 | `npm run test:e2e`                       | Run the Playwright e2e suite (`e2e/`)                                                        |
-| `npm run lint` / `lint:fix`              | ESLint check / auto-fix over `apps/`; `fix` does both fixes                 |
+| `npm run lint` / `lint:fix`              | ESLint check / auto-fix over `apps/`; `fix` does both fixes                                  |
 | `npm run format` / `format:fix`          | Prettier check / write over the repo (`format:check` is an alias)                            |
 | `npm run typecheck`                      | TypeScript, no emit                                                                          |
 | `npm run ci:server` / `ci:client`        | Granular gates: server = lint, format, typecheck, tests; client = lint, format, tests, build |

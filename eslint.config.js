@@ -51,10 +51,7 @@ module.exports = [
     // Storage abstraction boundary (#149): only workspaceStorage.ts (and tests)
     // may import the Spaces driver directly.
     files: ['apps/server/src/**/*.ts'],
-    ignores: [
-      'apps/server/src/services/workspaceStorage.ts',
-      'apps/server/src/**/*.test.ts',
-    ],
+    ignores: ['apps/server/src/services/workspaceStorage.ts', 'apps/server/src/**/*.test.ts'],
     rules: {
       'no-restricted-imports': [
         'error',
