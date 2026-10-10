@@ -77,6 +77,14 @@ const userSchema = new mongoose.Schema(
             type: Boolean,
             default: false,
           },
+          // IANA timezone from the browser (#266 follow-up to #261):
+          // `Intl.DateTimeFormat().resolvedOptions().timeZone`, e.g.
+          // 'Europe/London'. Absent = unknown; the prompt falls back to UTC.
+          timezone: {
+            type: String,
+            maxlength: 64,
+            default: null,
+          },
           // Delete-confirmation preferences (issue #59): only `false` is ever
           // written explicitly ("Always" or a Profile toggle); absent keys
           // default to true, so legacy docs need no backfill.
@@ -141,6 +149,7 @@ export interface UserSettings {
   startupChat?: 'recent' | 'new';
   zdr?: boolean;
   confirmDeletes?: { chat: boolean; file: boolean } | null;
+  timezone?: string | null;
 }
 
 export interface UserLocation {

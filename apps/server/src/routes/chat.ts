@@ -16,7 +16,7 @@ import {
 } from '../services/racingService';
 import { generateChatTitle } from '../services/titleService';
 import { hasPermission, ROUTING_PERMISSION } from '../services/userService';
-import { buildSystemContent } from '../services/promptAssembly';
+import { buildSystemContent, timestampHeader } from '../services/promptAssembly';
 import {
   isEntityInjectionEnabled,
   retrieveKnowledgeBlock,
@@ -327,6 +327,18 @@ export const reconcileToolEvent = <T extends PersistedToolEvent>(
   return list;
 };
 
+/*
+ * Paragraph-break separator (#262): when text resumes after a tool use, the
+ * gap between the two text runs must render as a paragraph break. Top the
+ * already-streamed content up to exactly one blank line — nothing when it
+ * already ends in one, a single `\n` when it ends in a lone newline, else a
+ * full `\n\n`. Pure so the boundary cases are unit-testable.
+ */
+export const paragraphBreakFor = (contentEnding: string): string => {
+  const trailingNewlines = contentEnding.match(/\n*$/)?.[0].length ?? 0;
+  return '\n\n'.slice(Math.min(trailingNewlines, 2));
+};
+
 const toolResultEvent = (result: { name: string; result: unknown }) => {
   const base = {
     phase: 'result' as const,
@@ -422,13 +434,28 @@ const buildZdrMessages = (
   { role: 'user', content },
 ];
 
+/*
+ * #261: every persisted turn is prefixed with a `[timestamp]` header so the
+ * model can see when each turn happened and how long passed between them. The
+ * header is emitted at prompt-assembly time from the stored `Message.timestamp`
+ * (always UTC in the DB) and never persisted into `content` itself; `timezone`
+ * only shapes the rendered stamp. The docs arrive newest-first (the caller's
+ * `sort({ timestamp: -1 })`); after reversing them the previous turn's
+ * timestamp is the one immediately before.
+ */
 const messagesFromPersistedHistory = (
-  history: { role: string; content: string }[],
+  history: { role: string; content: string; timestamp?: Date }[],
+  timezone?: string | null,
 ): { role: 'system' | 'user' | 'assistant'; content: string | MessageContentPart[] }[] =>
-  history.reverse().map((m) => ({
-    role: m.role as 'user' | 'assistant',
-    content: m.content as string,
-  }));
+  history.reverse().map((m, i) => {
+    const header = m.timestamp
+      ? `${timestampHeader(m.timestamp, history[i - 1]?.timestamp, timezone)}\n`
+      : '';
+    return {
+      role: m.role as 'user' | 'assistant',
+      content: header + (m.content as string),
+    };
+  });
 
 /*
  * #238: the aux enrichment prompt wants plain text history, oldest first, and
@@ -634,7 +661,13 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
         const turnMessages = buildZdrMessages(zdrHistory.value, content);
         turnMessages.unshift({
           role: 'system',
-          content: buildSystemContent(userDoc, zdrEntityBlock, ''),
+          content: buildSystemContent(
+            userDoc,
+            zdrEntityBlock,
+            '',
+            true,
+            userDoc.settings?.timezone,
+          ),
         });
         appendAssetBlock(turnMessages, attachedAsset);
         return turnMessages;
@@ -723,7 +756,10 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
           userId as string,
         );
     const withSystemAndAsset = async (systemContent: string) => {
-      const next = messagesFromPersistedHistory(history as { role: string; content: string }[]);
+      const next = messagesFromPersistedHistory(
+        history as { role: string; content: string; timestamp?: Date }[],
+        userDoc.settings?.timezone,
+      );
       next.unshift({ role: 'system', content: systemContent });
       if (attachedAsset) {
         const imageAttached = hasImage ? await buildImageTurn(next, attachedAsset) : false;
@@ -742,7 +778,7 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
     const rosterPrePick = await pickRosterRoute(hasImage);
     if (!rosterPrePick) throw new AllModelsDisabledError();
     const turnMessages = await withSystemAndAsset(
-      buildSystemContent(userDoc, entityBlock, libraryBlock),
+      buildSystemContent(userDoc, entityBlock, libraryBlock, false, userDoc.settings?.timezone),
     );
     const raced = await routeAndComplete(
       {
@@ -980,13 +1016,26 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
 
       // Same image-turn gating as the non-streaming route (#115).
       routingResult = rosterRoute;
-      messages = messagesFromPersistedHistory(history as { role: string; content: string }[]);
+      messages = messagesFromPersistedHistory(
+        history as { role: string; content: string; timestamp?: Date }[],
+        streamUserDoc.settings?.timezone,
+      );
     }
 
     const streamEntityBlock = await knowledgeBlockFor(content, userId as string);
     messages.unshift({
       role: 'system',
-      content: buildSystemContent(streamUserDoc, streamEntityBlock, libraryBlock),
+      // #261: persisted turns carry per-message timestamps (no date line); ZDR
+      // turns are untimestamped and keep the date line as their only clock.
+      // Either way the date line / stamps render in the user's local zone when
+      // known (storage stays UTC).
+      content: buildSystemContent(
+        streamUserDoc,
+        streamEntityBlock,
+        libraryBlock,
+        zdr,
+        streamUserDoc.settings?.timezone,
+      ),
     });
     if (attachedAsset) {
       const imageAttached = hasImage ? await buildImageTurn(messages, attachedAsset) : false;
@@ -1062,6 +1111,13 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
       routingResult = raced.routing;
       const stream = raced.outcome.result.stream;
 
+      // #262: a tool use between two text runs must render as a paragraph
+      // break, not run-on prose. `toolRanSinceText` is armed whenever a tool
+      // chunk arrives after text has streamed; the next text delta consumes it
+      // by prepending a blank line. Text→tool→text then persists and renders as
+      // two paragraphs, while a search-first turn (tool before any text) adds
+      // nothing and a tool-ending turn leaves no trailing break.
+      let toolRanSinceText = false;
       for await (const chunk of stream) {
         // #224: the connector may emit one trailing usage chunk; capture it
         // and continue without forwarding it as a delta/tool event.
@@ -1084,10 +1140,18 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
           collectSourcesInto(sources, chunk.toolResult.result, titles);
           toolResults.push(chunk.toolResult);
         }
+        // Arm the break on any tool chunk that follows already-streamed text.
+        if ((chunk.toolCall || chunk.toolResult) && assistantContent.length > 0) {
+          toolRanSinceText = true;
+        }
         const delta = chunk.delta;
         if (delta) {
-          assistantContent += delta;
-          sendEvent('delta', { content: delta });
+          // Consume the pending break (#262), topping up to exactly one blank
+          // line so the two text runs render as separate paragraphs.
+          const emitted = (toolRanSinceText ? paragraphBreakFor(assistantContent) : '') + delta;
+          toolRanSinceText = false;
+          assistantContent += emitted;
+          sendEvent('delta', { content: emitted });
         }
       }
     } catch (err) {

@@ -25,6 +25,8 @@ export const toAuthUser = (user: UserDocument): AuthUser => {
     payload.incognitoByDefault = user.settings.zdr;
   }
   if (user.settings?.confirmDeletes) payload.confirmDeletes = user.settings.confirmDeletes;
+  // IANA timezone (#261) rides only once captured from the browser.
+  if (user.settings?.timezone) payload.timezone = user.settings.timezone;
   // Country-level geolocation (#50) rides only once resolved; no timestamp
   // is exposed — route consumers never need it and the "remove my location"
   // follow-up can pick it up if it turns out to want it.

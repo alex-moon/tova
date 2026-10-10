@@ -3,7 +3,7 @@ import { createApp } from '../index';
 import { Message } from '../models/Message';
 import { Session } from '../models/Session';
 import { User } from '../models/User';
-import { reconcileToolEvent, type PersistedToolEvent } from './chat';
+import { paragraphBreakFor, reconcileToolEvent, type PersistedToolEvent } from './chat';
 
 const mockGenerate = jest.fn();
 const mockAgentStream = jest.fn();
@@ -173,6 +173,128 @@ describe('Chat streaming route', () => {
     });
     const session = await Session.findById(sessionId);
     expect(session).not.toBeNull();
+  });
+
+  // #261: persisted turns carry a `[timestamp]` header in the prompt so the
+  // model can see when each turn happened and how long passed between them;
+  // the redundant system-prompt date line is dropped on this path.
+  it('stamps every persisted turn and drops the date line in the prompt (#261)', async () => {
+    const cookies = await registerUser('stream-timestamps@example.com');
+    await mockStream(['ok']);
+
+    const userId = (await User.findOne({ email: 'stream-timestamps@example.com' }))!._id;
+    const session = await Session.create({ userId, title: 'timestamps' });
+    await Message.create({
+      sessionId: session._id,
+      role: 'user',
+      content: 'first turn',
+      timestamp: new Date('2026-10-08T14:32:00Z'),
+    });
+    await Message.create({
+      sessionId: session._id,
+      role: 'assistant',
+      content: 'first reply',
+      timestamp: new Date('2026-10-08T14:33:00Z'),
+    });
+
+    const app = createApp();
+    const response = await request(app)
+      .post('/api/chat/stream')
+      .set('Cookie', cookies)
+      .send({ sessionId: String(session._id), content: 'second turn' });
+
+    expect(response.status).toBe(200);
+    const [turns, options] = mockAgentStream.mock.calls[0] as unknown as [
+      { role: string; content: string }[],
+      { instructions: string },
+    ];
+    // The date line is gone on the persisted path.
+    expect(options.instructions).not.toContain("Today's date is");
+    // Seeded turns carry absolute stamps; the assistant reply 1 minute later
+    // gets no relative line (sub-hour), and the 2-day gap to the new turn does.
+    const userTurns = turns.filter((m) => m.role === 'user');
+    expect(userTurns[0].content).toBe('[2026-10-08 14:32 UTC]\nfirst turn');
+    const assistantTurn = turns.find((m) => m.role === 'assistant');
+    expect(assistantTurn?.content).toBe('[2026-10-08 14:33 UTC]\nfirst reply');
+    expect(userTurns[1].content).toMatch(
+      /^\[\d{4}-\d{2}-\d{2} \d{2}:\d{2} UTC — 2 days since the last message\]\nsecond turn$/,
+    );
+  });
+
+  // #261: ZDR/incognito turns are untimestamped (the replay carries no clock),
+  // so they keep the date line as their only clock.
+  it('keeps the date line and leaves ZDR replay turns unstamped (#261)', async () => {
+    const cookies = await registerUser('stream-timestamps-zdr@example.com');
+    await mockStream(['ok']);
+
+    const app = createApp();
+    const response = await request(app)
+      .post('/api/chat/stream')
+      .set('Cookie', cookies)
+      .send({
+        content: 'second turn',
+        zdr: true,
+        history: [
+          { role: 'user', content: 'first turn' },
+          { role: 'assistant', content: 'first reply' },
+        ],
+      });
+
+    expect(response.status).toBe(200);
+    const [turns, options] = mockAgentStream.mock.calls[0] as unknown as [
+      { role: string; content: string }[],
+      { instructions: string },
+    ];
+    expect(options.instructions).toMatch(/Today's date is/);
+    expect(turns.find((m) => m.role === 'user')?.content).toBe('first turn');
+    expect(turns.find((m) => m.role === 'assistant')?.content).toBe('first reply');
+  });
+
+  // #261 D6: the model communicates with the user, so with a stored zone the
+  // prompt carries the user's local times — stamps, the zone context line, and
+  // (on ZDR) the date line all render in it. Storage stays UTC throughout.
+  it('renders the prompt in the user’s local zone when settings.timezone is set (#261)', async () => {
+    const cookies = await registerUser('stream-timestamps-tz@example.com');
+    await User.updateOne(
+      { email: 'stream-timestamps-tz@example.com' },
+      { settings: { customInstructions: null, timezone: 'Europe/London' } },
+    );
+    await mockStream(['ok']);
+
+    const userId = (await User.findOne({ email: 'stream-timestamps-tz@example.com' }))!._id;
+    const session = await Session.create({ userId, title: 'tz' });
+    await Message.create({
+      sessionId: session._id,
+      role: 'user',
+      content: 'first turn',
+      timestamp: new Date('2026-10-08T14:32:00Z'), // 15:32 BST
+    });
+
+    const app = createApp();
+    const response = await request(app)
+      .post('/api/chat/stream')
+      .set('Cookie', cookies)
+      .send({ sessionId: String(session._id), content: 'second turn' });
+
+    expect(response.status).toBe(200);
+    const [turns, options] = mockAgentStream.mock.calls[0] as unknown as [
+      { role: string; content: string }[],
+      { instructions: string },
+    ];
+    // The stored UTC instant renders as the user's wall clock (BST = GMT+1),
+    // and the context line names the IANA zone so the label is unambiguous.
+    expect(turns.find((m) => m.role === 'user')?.content).toBe(
+      '[2026-10-08 15:32 GMT+1]\nfirst turn',
+    );
+    expect(options.instructions).toMatch(
+      /The user's timezone is Europe\/London \(currently GMT(?:[+-]\d+(?::\d+)?)?\)\./,
+    );
+    // The persisted path still drops the redundant date line (#261 D3).
+    expect(options.instructions).not.toContain("Today's date is");
+    // Storage is untouched: the persisted message keeps its raw content.
+    const stored = await Message.findOne({ sessionId: session._id, role: 'user' });
+    expect(stored?.content).toBe('first turn');
+    expect(new Date(stored?.timestamp as Date).toISOString()).toBe('2026-10-08T14:32:00.000Z');
   });
 
   it('persists the turn token usage on the assistant message (#224)', async () => {
@@ -465,6 +587,75 @@ describe('Chat streaming route', () => {
     expect(done?.data.sourceTitles).toEqual([
       { url: 'https://example.com/groq-docs', title: 'Groq docs' },
     ]);
+  });
+
+  // #262: a tool use between two text runs separates them as paragraphs. The
+  // separator is persisted in the stored content (and rides the delta stream),
+  // so the live view and a refresh agree.
+  it('separates text runs with a paragraph break when a tool use falls between them (#262)', async () => {
+    const cookies = await registerUser('stream-paragraph-break@example.com');
+    mockAgentStream.mockImplementation(async () => ({
+      fullStream: (async function* () {
+        yield { type: 'text-delta', payload: { text: 'Let me look that up.' } };
+        yield {
+          type: 'tool-call',
+          payload: { toolName: 'web_search', args: { query: 'groq pricing' } },
+        };
+        yield {
+          type: 'tool-result',
+          payload: {
+            toolName: 'web_search',
+            result: { results: [{ title: 'A page', snippet: 'a', url: 'https://a.example.com' }] },
+          },
+        };
+        yield { type: 'text-delta', payload: { text: 'Here is the answer.' } };
+      })(),
+    }));
+
+    const app = createApp();
+    const response = await request(app)
+      .post('/api/chat/stream')
+      .set('Cookie', cookies)
+      .send({ content: 'what happened today' });
+
+    expect(response.status).toBe(200);
+    // The break rides the delta stream too, so the live view matches.
+    expect(response.text).toContain('"content":"\\n\\nHere is the answer."');
+    const persisted = await Message.findOne({ role: 'assistant' });
+    expect(persisted?.content).toBe('Let me look that up.\n\nHere is the answer.');
+  });
+
+  // A search-first turn (tool before any text) must not gain a leading break,
+  // and a lone-newline tail is topped up to a single blank line, not stacked.
+  it('paragraph break boundary cases (#262): no leading break, lone-newline tail topped up', () => {
+    expect(paragraphBreakFor('')).toBe('\n\n');
+    expect(paragraphBreakFor('answer')).toBe('\n\n');
+    expect(paragraphBreakFor('answer\n')).toBe('\n');
+    expect(paragraphBreakFor('answer\n\n')).toBe('');
+    expect(paragraphBreakFor('answer\n\n\n')).toBe('');
+  });
+
+  it('a tool that ends the turn leaves no trailing paragraph break (#262)', async () => {
+    const cookies = await registerUser('stream-tool-ending@example.com');
+    mockAgentStream.mockImplementation(async () => ({
+      fullStream: (async function* () {
+        yield { type: 'text-delta', payload: { text: 'Searching now.' } };
+        yield { type: 'tool-call', payload: { toolName: 'web_search', args: { query: 'x' } } };
+        yield {
+          type: 'tool-result',
+          payload: { toolName: 'web_search', result: { results: [] } },
+        };
+      })(),
+    }));
+
+    const app = createApp();
+    await request(app)
+      .post('/api/chat/stream')
+      .set('Cookie', cookies)
+      .send({ content: 'look this up' });
+
+    const persisted = await Message.findOne({ role: 'assistant' });
+    expect(persisted?.content).toBe('Searching now.');
   });
 
   it('emits an empty-status tool result when the search returns nothing', async () => {

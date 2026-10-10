@@ -663,22 +663,24 @@ const generateFileExecute = async (
 /*
  * Built-in clock tool (issue #52): deterministic, zero-dependency, no
  * external calls. It answers "what's the date/time" without a web-search
- * round trip. No user timezone is stored anywhere (#50 model), so the
- * offset is always `null` — the tool and instructions both report UTC so
- * the model stays honest about it.
+ * round trip. The tool is a per-agent singleton with no per-user context, so
+ * it reports the authoritative UTC instant; the system prompt supplies the
+ * user's IANA zone and current local time (#261), and the model combines the
+ * two. `timezoneOffsetMinutes` stays null here — not resolved in the tool.
  */
 export const currentDatetimeTool = createTool({
   id: 'current_datetime',
   description:
-    'Get the current date and time. Always call this instead of guessing the current ' +
-    'date or time. It reports UTC only — it does not know the local time of day.',
+    'Get the current date and time as an authoritative UTC instant. Always call this ' +
+    'instead of guessing. The system prompt names the user’s timezone and its current ' +
+    'offset; use them to state the local time — the tool itself reports UTC.',
   inputSchema: z.object({}),
   outputSchema: z.object({
     utc: z.string().describe('Current time as an ISO 8601 UTC timestamp'),
     timezoneOffsetMinutes: z
       .number()
       .nullable()
-      .describe('Minutes from UTC the user is — always null: not resolved yet'),
+      .describe('Minutes from UTC the user is — always null: not resolved in the tool'),
   }),
   execute: async () => ({ utc: new Date().toISOString(), timezoneOffsetMinutes: null }),
 });
@@ -689,7 +691,8 @@ const TOOL_INSTRUCTIONS =
   'the `fetch_url` tool with that exact URL and read the returned page content ' +
   'before answering; use it whenever you need the substance of a specific page. ' +
   'When the user asks about the current date or time, call the `current_datetime` ' +
-  'tool instead of guessing; it reports UTC only, do not convert to local time. ' +
+  'tool instead of guessing; it returns UTC, and the system prompt names the ' +
+  'user’s local timezone and offset — state the time in the user’s local zone. ' +
   'Write the query as focused keywords. When search results arrive, answer with ' +
   'terse markdown links ([title](url)) for the claims you used; answer from your ' +
   'own knowledge when no search is needed. When the user refers to their files ' +

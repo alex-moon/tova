@@ -59,6 +59,7 @@ const AuthService = {
     zdr?: boolean;
     incognitoByDefault?: boolean;
     confirmDeletes?: { chat?: boolean; file?: boolean };
+    timezone?: string;
   }): Promise<AuthUser> {
     try {
       const res = await axios.patch<{ user: AuthUser }>('/api/profile', patch);

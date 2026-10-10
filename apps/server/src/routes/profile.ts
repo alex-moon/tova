@@ -55,7 +55,8 @@ router.patch('/', authenticate, async (req: AuthRequest, res) => {
       parsed.data.startupChat !== undefined ||
       parsed.data.confirmDeletes !== undefined ||
       parsed.data.zdr !== undefined ||
-      parsed.data.incognitoByDefault !== undefined
+      parsed.data.incognitoByDefault !== undefined ||
+      parsed.data.timezone !== undefined
     ) {
       if (!user.settings) {
         // Mongoose applies the schema default (null) for any field omitted
@@ -129,6 +130,13 @@ router.patch('/', authenticate, async (req: AuthRequest, res) => {
         // is gone — nothing is ever deleted as a side effect of this flag;
         // wiping existing data is the explicit factory reset below.
         settings.zdr = zdrPatch;
+      }
+      const timezonePatch = parsed.data.timezone;
+      if (timezonePatch !== undefined) {
+        // IANA-validated in profilePatchSchema (#261). The client reports it
+        // from the browser once per session; the prompt renders local times in
+        // it. Written only when present (absent = untouched).
+        settings.timezone = timezonePatch;
       }
     }
 
