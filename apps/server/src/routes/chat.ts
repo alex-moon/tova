@@ -327,6 +327,18 @@ export const reconcileToolEvent = <T extends PersistedToolEvent>(
   return list;
 };
 
+/*
+ * Paragraph-break separator (#262): when text resumes after a tool use, the
+ * gap between the two text runs must render as a paragraph break. Top the
+ * already-streamed content up to exactly one blank line — nothing when it
+ * already ends in one, a single `\n` when it ends in a lone newline, else a
+ * full `\n\n`. Pure so the boundary cases are unit-testable.
+ */
+export const paragraphBreakFor = (contentEnding: string): string => {
+  const trailingNewlines = contentEnding.match(/\n*$/)?.[0].length ?? 0;
+  return '\n\n'.slice(Math.min(trailingNewlines, 2));
+};
+
 const toolResultEvent = (result: { name: string; result: unknown }) => {
   const base = {
     phase: 'result' as const,
@@ -1056,6 +1068,13 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
       routingResult = raced.routing;
       const stream = raced.outcome.result.stream;
 
+      // #262: a tool use between two text runs must render as a paragraph
+      // break, not run-on prose. `toolRanSinceText` is armed whenever a tool
+      // chunk arrives after text has streamed; the next text delta consumes it
+      // by prepending a blank line. Text→tool→text then persists and renders as
+      // two paragraphs, while a search-first turn (tool before any text) adds
+      // nothing and a tool-ending turn leaves no trailing break.
+      let toolRanSinceText = false;
       for await (const chunk of stream) {
         // #224: the connector may emit one trailing usage chunk; capture it
         // and continue without forwarding it as a delta/tool event.
@@ -1078,10 +1097,18 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
           collectSourcesInto(sources, chunk.toolResult.result, titles);
           toolResults.push(chunk.toolResult);
         }
+        // Arm the break on any tool chunk that follows already-streamed text.
+        if ((chunk.toolCall || chunk.toolResult) && assistantContent.length > 0) {
+          toolRanSinceText = true;
+        }
         const delta = chunk.delta;
         if (delta) {
-          assistantContent += delta;
-          sendEvent('delta', { content: delta });
+          // Consume the pending break (#262), topping up to exactly one blank
+          // line so the two text runs render as separate paragraphs.
+          const emitted = (toolRanSinceText ? paragraphBreakFor(assistantContent) : '') + delta;
+          toolRanSinceText = false;
+          assistantContent += emitted;
+          sendEvent('delta', { content: emitted });
         }
       }
     } catch (err) {
