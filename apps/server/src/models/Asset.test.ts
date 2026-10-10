@@ -69,4 +69,13 @@ describe('Asset model provenance (#252)', () => {
     const doc = await createWithProvenance({ kind: 'upload' });
     expect((doc.provenance as unknown as { _id?: unknown })?._id).toBeUndefined();
   });
+
+  it('strips an unknown key rather than persisting it (stable vocabulary)', async () => {
+    const doc = await createWithProvenance({ kind: 'upload', bogus: 'nope' });
+    expect(JSON.parse(JSON.stringify(doc.provenance))).toEqual({ kind: 'upload' });
+  });
+
+  it('rejects an empty provenance object (kind is required)', async () => {
+    await expect(createWithProvenance({})).rejects.toThrow();
+  });
 });
