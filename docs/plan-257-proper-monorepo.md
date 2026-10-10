@@ -87,7 +87,7 @@ pull failed without Docker Hub credentials).
 - [x] Post-deploy eval smoke disabled with re-enable notes
 - [x] Workflow changed-area globs + AGENTS.md/README refs updated
 - [x] `npm run ci` green
-- [ ] PR opened
+- [x] PR opened (#258)
 
 ## Follow-ups
 
