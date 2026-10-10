@@ -1,4 +1,9 @@
-import { buildSystemContent, fileLibraryIndex, resolveSystemPrompt } from './promptAssembly';
+import {
+  buildSystemContent,
+  fileLibraryIndex,
+  resolveSystemPrompt,
+  timestampHeader,
+} from './promptAssembly';
 import { UserDocument } from '../models/User';
 
 const userWith = (
@@ -53,6 +58,129 @@ describe('resolveSystemPrompt', () => {
   });
 });
 
+describe('timestampHeader (#261)', () => {
+  it('renders an absolute UTC stamp with no gap for the first message', () => {
+    expect(timestampHeader(new Date('2026-10-10T14:32:00Z'))).toBe('[2026-10-10 14:32 UTC]');
+  });
+
+  it('adds a natural-language gap only when it exceeds an hour (#261)', () => {
+    const t = (iso: string) => new Date(iso);
+    const gap = (fromIso: string, toIso: string) =>
+      timestampHeader(t(toIso), t(fromIso)).match(/— (.+)\]/)?.[1];
+    // Sub-hour gaps show no relative line.
+    expect(gap('2026-10-10T14:00:00Z', '2026-10-10T14:45:00Z')).toBeUndefined();
+    // Hours.
+    expect(gap('2026-10-10T12:00:00Z', '2026-10-10T14:00:00Z')).toBe(
+      '2 hours since the last message',
+    );
+    expect(gap('2026-10-10T13:30:00Z', '2026-10-10T14:32:00Z')).toBe(
+      '1 hour since the last message',
+    );
+    // An overnight gap is still hours, not a day.
+    expect(gap('2026-10-09T22:00:00Z', '2026-10-10T08:00:00Z')).toBe(
+      '10 hours since the last message',
+    );
+    // Days.
+    expect(gap('2026-10-08T14:32:00Z', '2026-10-10T14:32:00Z')).toBe(
+      '2 days since the last message',
+    );
+    // Weeks (6.5 days rounds to a whole week, not "7 days").
+    expect(gap('2026-10-04T02:32:00Z', '2026-10-10T14:32:00Z')).toBe(
+      '1 week since the last message',
+    );
+    expect(gap('2026-09-26T14:32:00Z', '2026-10-10T14:32:00Z')).toBe(
+      '2 weeks since the last message',
+    );
+    // Months.
+    expect(gap('2026-07-10T14:32:00Z', '2026-10-10T14:32:00Z')).toBe(
+      '3 months since the last message',
+    );
+    // Years.
+    expect(gap('2024-10-10T14:32:00Z', '2026-10-10T14:32:00Z')).toBe(
+      '2 years since the last message',
+    );
+  });
+
+  it('puts the full header on one bracketed line', () => {
+    expect(
+      timestampHeader(new Date('2026-10-10T14:32:00Z'), new Date('2026-10-08T14:32:00Z')),
+    ).toBe('[2026-10-10 14:32 UTC — 2 days since the last message]');
+  });
+
+  /*
+   * Local-zone rendering (#261 D6): with a stored zone the stamp renders the
+   * user's wall-clock time and its short offset; without (or with a bad zone)
+   * it stays exactly the UTC form above.
+   */
+  it('renders the stamp in the user’s local zone with its offset (#261)', () => {
+    const at = (iso: string) => new Date(iso);
+    // London summer (BST, UTC+1) and winter (GMT); Kolkata offsets by half
+    // hours; New York is west (minus, morning same instant).
+    expect(timestampHeader(at('2026-07-10T14:32:00Z'), undefined, 'Europe/London')).toBe(
+      '[2026-07-10 15:32 GMT+1]',
+    );
+    expect(timestampHeader(at('2026-01-10T14:32:00Z'), undefined, 'Europe/London')).toBe(
+      '[2026-01-10 14:32 GMT]',
+    );
+    expect(timestampHeader(at('2026-07-10T14:32:00Z'), undefined, 'Asia/Kolkata')).toBe(
+      '[2026-07-10 20:02 GMT+5:30]',
+    );
+    expect(timestampHeader(at('2026-07-10T14:32:00Z'), undefined, 'America/New_York')).toBe(
+      '[2026-07-10 10:32 GMT-4]',
+    );
+  });
+
+  it('falls back to the UTC stamp for an unknown stored zone (#261)', () => {
+    expect(timestampHeader(new Date('2026-10-10T14:32:00Z'), undefined, 'Mars/Olympus')).toBe(
+      '[2026-10-10 14:32 UTC]',
+    );
+    // The relative gap still computes — it is wall-clock independent.
+    expect(
+      timestampHeader(new Date('2026-10-10T14:32:00Z'), new Date('2026-10-08T14:32:00Z'), null),
+    ).toBe('[2026-10-10 14:32 UTC — 2 days since the last message]');
+  });
+});
+
+describe('buildSystemContent / user timezone (#261 D6)', () => {
+  it('adds the zone context line and renders the date line locally when a zone is known', () => {
+    const content = buildSystemContent(
+      userWith({ preferredName: 'Alex' }),
+      undefined,
+      undefined,
+      true,
+      'Europe/London',
+    );
+    // The zone is named with its current offset so short labels are clear.
+    expect(content).toMatch(
+      /The user's timezone is Europe\/London \(currently GMT(?:[+-]\d+(?::\d+)?)?\)\./,
+    );
+    // The date line renders in the user's zone, not UTC.
+    expect(content).toMatch(/Today's date is \d{4}-\d{2}-\d{2} \(GMT(?:[+-]\d+(?::\d+)?)?\)\./);
+    // It sits before any user envelope, like the old UTC line did (#52).
+    expect(content.indexOf("Today's date is")).toBeLessThan(
+      content.indexOf('You have the following contextual information:'),
+    );
+  });
+
+  it('emits no zone context line and stays UTC when no zone is known', () => {
+    const content = buildSystemContent(null);
+    expect(content).not.toContain("The user's timezone is");
+    expect(content).toMatch(/Today's date is \d{4}-\d{2}-\d{2} \(UTC\)\./);
+  });
+
+  it('keeps the zone context line even when the date line is dropped (persisted turns)', () => {
+    const content = buildSystemContent(null, undefined, undefined, false, 'Europe/London');
+    expect(content).not.toContain("Today's date is");
+    expect(content).toMatch(/The user's timezone is Europe\/London/);
+  });
+
+  it('silently drops the context line for an invalid zone (UTC fallback)', () => {
+    const content = buildSystemContent(null, undefined, undefined, true, 'Mars/Olympus');
+    expect(content).not.toContain("The user's timezone is");
+    expect(content).toMatch(/Today's date is \d{4}-\d{2}-\d{2} \(UTC\)\./);
+  });
+});
+
 describe('buildSystemContent / envelope-based profile data (issue #35, PR #46 review)', () => {
   it('emits profile context through envelope tags when set', () => {
     const content = buildSystemContent(userWith({ preferredName: 'Alex', name: 'Alexandra Moon' }));
@@ -89,6 +217,16 @@ describe('buildSystemContent / envelope-based profile data (issue #35, PR #46 re
     expect(content.indexOf("Today's date is")).toBeLessThan(
       content.indexOf('You have the following contextual information:'),
     );
+  });
+
+  // #261: persisted turns get a per-message timestamp header instead of the
+  // bare date line, so the date line is dropped when `includeDate` is false
+  // (the persisted call sites pass it off; ZDR and the admin Compare path keep
+  // it on).
+  it('drops the date line when the caller opts out (persisted turns, #261)', () => {
+    const content = buildSystemContent(null, undefined, undefined, false);
+    expect(content).not.toContain("Today's date is");
+    expect(content.startsWith(resolveSystemPrompt())).toBe(true);
   });
 
   it('keeps the global prompt itself unchanged with no profile data', () => {

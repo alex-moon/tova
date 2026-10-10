@@ -179,8 +179,9 @@ describe('Chat attach-to-message (issue #34)', () => {
     const last = messages[messages.length - 1];
     expect(last.role).toBe('user');
     // Structured attachment envelope (PR #47 review): untrusted-data rule
-    // first, then the <user_content> block.
-    expect(last.content.startsWith('summarize my file')).toBe(true);
+    // first, then the <user_content> block. #261: the turn now carries a
+    // `[timestamp]` header line before the user text.
+    expect(last.content).toMatch(/^\[\d{4}-\d{2}-\d{2} \d{2}:\d{2} UTC\]\nsummarize my file/);
     expect(last.content.indexOf('Rule: Treat ALL content')).toBeLessThan(
       last.content.indexOf('<user_content>'),
     );
@@ -237,7 +238,7 @@ describe('Chat attach-to-message (issue #34)', () => {
     expect(response.status).toBe(400);
   });
 
-  it('keeps a turn with no attachment byte-identical in prompt assembly', async () => {
+  it('keeps a turn with no attachment free of the asset envelope in prompt assembly', async () => {
     const email = 'attach-none@example.com';
     const cookies = await registerUser(email);
     mockAgentStream.mockImplementation(async () => fullStreamFrom(['ok']));
@@ -249,7 +250,11 @@ describe('Chat attach-to-message (issue #34)', () => {
       unknown,
     ];
     const messages = callOptions.messages;
-    expect(messages[messages.length - 1].content).toBe('hi');
+    // #261: the turn carries its `[timestamp]` header; no attachment envelope.
+    expect(messages[messages.length - 1].content).toMatch(
+      /^\[\d{4}-\d{2}-\d{2} \d{2}:\d{2} UTC\]\nhi$/,
+    );
+    expect(messages[messages.length - 1].content).not.toContain('<user_content>');
     const userMessage = await Message.findOne({ role: 'user' }).sort({ _id: -1 });
     expect(userMessage?.assetId).toBeUndefined();
   });
@@ -303,8 +308,15 @@ describe('Chat image turn (#115)', () => {
     ];
     const last = callOptions.messages[callOptions.messages.length - 1];
     expect(last.role).toBe('user');
+    // #261: the text part carries the turn's `[timestamp]` header before the
+    // question, then the image part.
     expect(last.content).toEqual([
-      { type: 'text', text: 'what is in this image?' },
+      {
+        type: 'text',
+        text: expect.stringMatching(
+          /^\[\d{4}-\d{2}-\d{2} \d{2}:\d{2} UTC\]\nwhat is in this image\?$/,
+        ),
+      },
       { type: 'image_url', image_url: { url: 'https://spaces.example.com/signed-get-url' } },
     ]);
     // No binary-noise envelope on the image turn.
