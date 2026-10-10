@@ -1,6 +1,21 @@
 import { z } from 'zod';
 import { MAX_BULK_TOTAL_SIZE } from './services/assetLimits';
 
+// Node's canonical IANA zone list (418 entries) plus the UTC/GMT aliases a
+// browser may report that the list omits. Computed once at module load. The
+// list API is typed only from ES2022 lib onward — this target is older, hence
+// the local guard; an engine without it degrades to a shape check (and
+// prompt-side rendering still try/catches an unknown zone back to UTC).
+const supportedZones: string[] =
+  (Intl as { supportedValuesOf?: (kind: 'timeZone') => string[] }).supportedValuesOf?.(
+    'timeZone',
+  ) ?? [];
+const KNOWN_TIMEZONES = new Set<string>([...supportedZones, 'UTC', 'Etc/UTC', 'Etc/GMT', 'GMT']);
+const IANA_ZONE_SHAPE = /^[A-Za-z]+(\/[A-Za-z0-9_+-]+)+$/;
+
+export const isKnownTimezone = (zone: string): boolean =>
+  supportedZones.length > 0 ? KNOWN_TIMEZONES.has(zone) : IANA_ZONE_SHAPE.test(zone);
+
 export const registerSchema = z.object({
   email: z.email({ message: 'Email must be a valid email address' }).min(1, {
     message: 'Email is required',
@@ -72,6 +87,15 @@ export const profilePatchSchema = z.strictObject({
       chat: z.boolean().optional(),
       file: z.boolean().optional(),
     })
+    .optional(),
+  // Browser IANA timezone (#261): validated against the platform's own zone
+  // list so the prompt's `Intl.DateTimeFormat` call cannot throw on a garbage
+  // string. Aliases browsers legitimately report but the list omits (UTC/GMT)
+  // are accepted explicitly.
+  timezone: z
+    .string({ message: 'timezone must be a string' })
+    .max(64, { message: 'timezone must be 64 characters or fewer' })
+    .refine(isKnownTimezone, { message: 'timezone must be a valid IANA timezone' })
     .optional(),
 });
 

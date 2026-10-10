@@ -16,7 +16,7 @@ import {
 } from '../services/racingService';
 import { generateChatTitle } from '../services/titleService';
 import { hasPermission, ROUTING_PERMISSION } from '../services/userService';
-import { buildSystemContent } from '../services/promptAssembly';
+import { buildSystemContent, timestampHeader } from '../services/promptAssembly';
 import {
   isEntityInjectionEnabled,
   retrieveKnowledgeBlock,
@@ -434,13 +434,28 @@ const buildZdrMessages = (
   { role: 'user', content },
 ];
 
+/*
+ * #261: every persisted turn is prefixed with a `[timestamp]` header so the
+ * model can see when each turn happened and how long passed between them. The
+ * header is emitted at prompt-assembly time from the stored `Message.timestamp`
+ * (always UTC in the DB) and never persisted into `content` itself; `timezone`
+ * only shapes the rendered stamp. The docs arrive newest-first (the caller's
+ * `sort({ timestamp: -1 })`); after reversing them the previous turn's
+ * timestamp is the one immediately before.
+ */
 const messagesFromPersistedHistory = (
-  history: { role: string; content: string }[],
+  history: { role: string; content: string; timestamp?: Date }[],
+  timezone?: string | null,
 ): { role: 'system' | 'user' | 'assistant'; content: string | MessageContentPart[] }[] =>
-  history.reverse().map((m) => ({
-    role: m.role as 'user' | 'assistant',
-    content: m.content as string,
-  }));
+  history.reverse().map((m, i) => {
+    const header = m.timestamp
+      ? `${timestampHeader(m.timestamp, history[i - 1]?.timestamp, timezone)}\n`
+      : '';
+    return {
+      role: m.role as 'user' | 'assistant',
+      content: header + (m.content as string),
+    };
+  });
 
 /*
  * #238: the aux enrichment prompt wants plain text history, oldest first, and
@@ -646,7 +661,13 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
         const turnMessages = buildZdrMessages(zdrHistory.value, content);
         turnMessages.unshift({
           role: 'system',
-          content: buildSystemContent(userDoc, zdrEntityBlock, ''),
+          content: buildSystemContent(
+            userDoc,
+            zdrEntityBlock,
+            '',
+            true,
+            userDoc.settings?.timezone,
+          ),
         });
         appendAssetBlock(turnMessages, attachedAsset);
         return turnMessages;
@@ -735,7 +756,10 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
           userId as string,
         );
     const withSystemAndAsset = async (systemContent: string) => {
-      const next = messagesFromPersistedHistory(history as { role: string; content: string }[]);
+      const next = messagesFromPersistedHistory(
+        history as { role: string; content: string; timestamp?: Date }[],
+        userDoc.settings?.timezone,
+      );
       next.unshift({ role: 'system', content: systemContent });
       if (attachedAsset) {
         const imageAttached = hasImage ? await buildImageTurn(next, attachedAsset) : false;
@@ -754,7 +778,7 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
     const rosterPrePick = await pickRosterRoute(hasImage);
     if (!rosterPrePick) throw new AllModelsDisabledError();
     const turnMessages = await withSystemAndAsset(
-      buildSystemContent(userDoc, entityBlock, libraryBlock),
+      buildSystemContent(userDoc, entityBlock, libraryBlock, false, userDoc.settings?.timezone),
     );
     const raced = await routeAndComplete(
       {
@@ -989,13 +1013,26 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
 
       // Same image-turn gating as the non-streaming route (#115).
       routingResult = rosterRoute;
-      messages = messagesFromPersistedHistory(history as { role: string; content: string }[]);
+      messages = messagesFromPersistedHistory(
+        history as { role: string; content: string; timestamp?: Date }[],
+        streamUserDoc.settings?.timezone,
+      );
     }
 
     const streamEntityBlock = await knowledgeBlockFor(content, userId as string);
     messages.unshift({
       role: 'system',
-      content: buildSystemContent(streamUserDoc, streamEntityBlock, libraryBlock),
+      // #261: persisted turns carry per-message timestamps (no date line); ZDR
+      // turns are untimestamped and keep the date line as their only clock.
+      // Either way the date line / stamps render in the user's local zone when
+      // known (storage stays UTC).
+      content: buildSystemContent(
+        streamUserDoc,
+        streamEntityBlock,
+        libraryBlock,
+        zdr,
+        streamUserDoc.settings?.timezone,
+      ),
     });
     if (attachedAsset) {
       const imageAttached = hasImage ? await buildImageTurn(messages, attachedAsset) : false;

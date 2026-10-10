@@ -294,6 +294,50 @@ describe('PATCH /api/profile (issue #35)', () => {
     expect(user.settings?.startupChat ?? null).toBeNull();
   });
 
+  // Browser-reported IANA timezone (#261): persisted on settings so the chat
+  // prompt can render user-facing times in the user's local zone. Same
+  // wire conventions as theme/startupChat — absent until set.
+  it('saves the timezone, reports it on PATCH and /me, and leaves it untouched when absent (#261)', async () => {
+    const { app, cookie } = await registerUser('patch-tz@example.com');
+
+    const before = await request(app).get('/api/auth/me').set('Cookie', cookie);
+    expect(before.body.user).not.toHaveProperty('timezone');
+
+    const res = await patchProfile(app, cookie, { timezone: 'Europe/London' });
+    expect(res.status).toBe(200);
+    expect(res.body.user.timezone).toBe('Europe/London');
+
+    const me = await request(app).get('/api/auth/me').set('Cookie', cookie);
+    expect(me.body.user).toEqual(res.body.user);
+
+    const user = await getUser('patch-tz@example.com');
+    expect(user.settings?.timezone).toBe('Europe/London');
+
+    // Absent key = untouched; other settings survive alongside.
+    await patchProfile(app, cookie, { customInstructions: 'Be terse.' });
+    const other = await patchProfile(app, cookie, { preferredName: 'Alex' });
+    expect(other.body.user.timezone).toBe('Europe/London');
+    expect(other.body.user.customInstructions).toBe('Be terse.');
+  });
+
+  it('rejects invalid timezone values with 400 and never materializes settings (#261)', async () => {
+    const { app, cookie } = await registerUser('patch-tz-invalid@example.com');
+
+    for (const bad of ['Mars/Olympus', 'europe london', '', null, 42, 'X'.repeat(65)]) {
+      const res = await patchProfile(app, cookie, { timezone: bad });
+      expect(res.status).toBe(400);
+    }
+
+    // UTC/GMT aliases browsers legitimately report are accepted.
+    const ok = await patchProfile(app, cookie, { timezone: 'UTC' });
+    expect(ok.status).toBe(200);
+    expect(ok.body.user.timezone).toBe('UTC');
+
+    // A rejected body must never have materialized a settings doc.
+    const user = await getUser('patch-tz-invalid@example.com');
+    expect(user.settings?.timezone ?? null).toBe('UTC');
+  });
+
   it('saves the zdr preference and reports it on PATCH and /me (issue #116)', async () => {
     const { app, cookie } = await registerUser('patch-zdr@example.com');
 

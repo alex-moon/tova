@@ -431,6 +431,9 @@ export interface AuthUser {
   incognitoByDefault?: boolean;
   confirmDeletes?: { chat: boolean; file: boolean };
   location?: AuthUserLocation;
+  // IANA timezone from the browser (#261): omitted until captured, so the
+  // prompt falls back to UTC for users who have never reported one.
+  timezone?: string;
 }
 
 // User payload returned by POST /api/auth/login and /register.

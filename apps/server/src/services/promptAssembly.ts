@@ -158,17 +158,148 @@ export const fileLibraryIndex = (
   return lines.join('\n');
 };
 
+/*
+ * Per-message timestamp header (#261): every persisted turn is prefixed with a
+ * stamp so the model can see *when* each turn happened and *how long* passed
+ * between turns (seconds, an overnight sleep, a day at work). The relative gap
+ * is appended only when it exceeds an hour and is phrased in plain language at
+ * the largest whole unit that fits (hours → days → weeks → months → years).
+ * Pure so the gap arithmetic is unit-testable without a DB or provider.
+ */
+const GAP_UNITS: { unit: string; ms: number }[] = [
+  { unit: 'year', ms: 365 * 24 * 60 * 60 * 1000 },
+  { unit: 'month', ms: 30 * 24 * 60 * 60 * 1000 },
+  { unit: 'week', ms: 7 * 24 * 60 * 60 * 1000 },
+  { unit: 'day', ms: 24 * 60 * 60 * 1000 },
+  { unit: 'hour', ms: 60 * 60 * 1000 },
+];
+
+// Largest unit whose rounded value is ≥ 1; null when the gap is under an hour.
+const relativeGap = (gapMs: number): string | null => {
+  if (gapMs < 60 * 60 * 1000) return null;
+  for (const { unit, ms } of GAP_UNITS) {
+    const whole = Math.round(gapMs / ms);
+    if (whole >= 1) {
+      const plural = whole === 1 ? unit : `${unit}s`;
+      return `${whole} ${plural} since the last message`;
+    }
+  }
+  return null;
+};
+
+/*
+ * Local-clock rendering (#261 D5/D6). Storage is always UTC — this only shapes
+ * the user-facing prompt. With a known zone, `Intl.DateTimeFormat` renders the
+ * wall-clock time and its short offset (e.g. `GMT+1` — consistent across
+ * locales, unlike `short` names which vary by locale for some zones); the
+ * one-time context line names the IANA zone itself, so per-message labels stay
+ * unambiguous. Any invalid/missing zone falls back to a plain UTC stamp rather
+ * than throwing mid-turn.
+ */
+interface ClockStamp {
+  date: string;
+  time: string;
+  zoneName: string;
+}
+
+const utcStamp = (timestamp: Date): ClockStamp => {
+  const iso = timestamp.toISOString();
+  return { date: iso.slice(0, 10), time: iso.slice(11, 16), zoneName: 'UTC' };
+};
+
+// `shortOffset` renders a zero offset as the clunky 'GMT+0'; plain 'GMT'
+// reads better and means the same.
+const offsetLabel = (formatted: string): string => formatted.replace('GMT+0', 'GMT') || 'UTC';
+
+const clockIn = (timestamp: Date, timezone?: string | null): ClockStamp => {
+  if (!timezone) return utcStamp(timestamp);
+  try {
+    const parts = new Intl.DateTimeFormat('en-CA', {
+      timeZone: timezone,
+      hour12: false,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      timeZoneName: 'shortOffset',
+    }).formatToParts(timestamp);
+    const get = (type: Intl.DateTimeFormatPartTypes) =>
+      parts.find((p) => p.type === type)?.value ?? '';
+    // hour12:false can surface '24' for midnight in some zones; normalise.
+    const hour = get('hour') === '24' ? '00' : get('hour');
+    return {
+      date: `${get('year')}-${get('month')}-${get('day')}`,
+      time: `${hour}:${get('minute')}`,
+      zoneName: offsetLabel(get('timeZoneName')),
+    };
+  } catch {
+    // Unknown stored zone (or an engine without it): stay honest and use UTC.
+    return utcStamp(timestamp);
+  }
+};
+
+// `[2026-10-10 14:32 UTC]` — or with a gap: `[2026-10-10 14:32 UTC — 2 days
+// since the last message]`. `previous` is the prior turn's timestamp, absent
+// for the first message of the prompt window. With a known `timezone` the
+// stamp renders in the user's local zone instead (still UTC storage).
+export const timestampHeader = (
+  timestamp: Date,
+  previous?: Date | null,
+  timezone?: string | null,
+): string => {
+  const clock = clockIn(timestamp, timezone);
+  const stamp = `${clock.date} ${clock.time} ${clock.zoneName}`;
+  const gap = previous ? relativeGap(timestamp.getTime() - previous.getTime()) : null;
+  return gap ? `[${stamp} — ${gap}]` : `[${stamp}]`;
+};
+
+/*
+ * One-time zone context line (#261 D6): names the user's IANA zone and its
+ * current offset so the compact per-message offset labels (e.g. `GMT+1`) are
+ * unambiguous. Returns '' when no zone is known (the prompt then stays UTC).
+ */
+const timezoneContextLine = (timezone?: string | null): string => {
+  if (!timezone) return '';
+  try {
+    const raw = new Intl.DateTimeFormat('en-GB', {
+      timeZone: timezone,
+      timeZoneName: 'shortOffset',
+    })
+      .formatToParts(new Date())
+      .find((p) => p.type === 'timeZoneName')?.value;
+    const offset = raw ? offsetLabel(raw) : '';
+    return `The user's timezone is ${timezone}${offset ? ` (currently ${offset})` : ''}.`;
+  } catch {
+    return '';
+  }
+};
+
 export const buildSystemContent = (
   user: Pick<UserDocument, 'name' | 'preferredName' | 'location' | 'settings'> | null,
   knowledgeBlock: string | null | undefined = undefined,
   fileLibraryBlock: string | null | undefined = undefined,
+  // #261: persisted turns carry a per-message timestamp header, which now
+  // supplies both the day and the time-of-day, so the bare date line is
+  // redundant there (and was the thing flattening the model's sense of time).
+  // ZDR/incognito turns are never timestamped (their replay carries no clock),
+  // so they keep the date line as their only clock. Default true keeps the
+  // admin Compare path and any other bare caller on the old behaviour.
+  includeDate = true,
+  // #261 D6: the user's IANA zone (from the browser). The date line and the
+  // one-time zone context line render in it; absent = UTC.
+  timezone: string | null | undefined = null,
 ): string => {
+  const now = new Date();
+  const zoneLabel = clockIn(now, timezone).zoneName;
   const parts = [
     resolveSystemPrompt(),
     // Server-rendered constant from the process clock (issue #52): most
     // date questions care about the day, not clock ticks, so it rides in
     // the system prompt as a belt to the `current_datetime` tool braces.
-    `Today's date is ${new Date().toISOString().slice(0, 10)} (UTC).`,
+    // Rendered in the user's local zone when known (#261 D6), else UTC.
+    includeDate ? `Today's date is ${clockIn(now, timezone).date} (${zoneLabel}).` : '',
+    timezoneContextLine(timezone),
     profileContextBlock(user),
     entityGraphBlock(knowledgeBlock),
     libraryBlock(fileLibraryBlock),
