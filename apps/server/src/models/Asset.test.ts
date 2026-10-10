@@ -33,3 +33,40 @@ describe('Asset model origin (#66)', () => {
     await expect(createAsset('alien' as unknown as undefined)).rejects.toThrow();
   });
 });
+
+describe('Asset model provenance (#252)', () => {
+  const createWithProvenance = (provenance: unknown) =>
+    Asset.create({
+      userId: new mongoose.Types.ObjectId(),
+      filename: 'notes.md',
+      key: 'u/000000000000000000000000/notes.md',
+      contentType: 'text/markdown',
+      size: 1,
+      provenance,
+    });
+
+  it('reads back undefined when provenance is absent (absence preserved)', async () => {
+    const doc = await createAsset();
+    expect(doc.provenance).toBeUndefined();
+  });
+
+  it('round-trips a chat provenance with sessionId', async () => {
+    const sessionId = new mongoose.Types.ObjectId().toString();
+    const doc = await createWithProvenance({ kind: 'chat', sessionId });
+    expect(doc.provenance?.kind).toBe('chat');
+    expect(doc.provenance?.sessionId).toBe(sessionId);
+  });
+
+  it('round-trips an upload provenance', async () => {
+    expect((await createWithProvenance({ kind: 'upload' })).provenance?.kind).toBe('upload');
+  });
+
+  it('rejects a kind outside the enum', async () => {
+    await expect(createWithProvenance({ kind: 'alien' })).rejects.toThrow();
+  });
+
+  it('produces no per-subdoc _id', async () => {
+    const doc = await createWithProvenance({ kind: 'upload' });
+    expect((doc.provenance as unknown as { _id?: unknown })?._id).toBeUndefined();
+  });
+});

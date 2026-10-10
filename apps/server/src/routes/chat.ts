@@ -750,6 +750,9 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
         max_tokens: outputTokensFor(rosterPrePick.contextLength, promptCharsFrom(turnMessages)),
         userId,
         abortSignal: abortController.signal,
+        // #252: tool-execution session (distinct from the trace) so
+        // generate_file can stamp provenance on the file it produces.
+        sessionId: String(session!._id),
         trace: { sessionId: String(session!._id) },
       },
       hasImage,
@@ -1050,6 +1053,9 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
           // #224: attach the chat session to this turn's trace (ZDR turns have
           // no session — nothing durable can be joined).
           ...(zdr ? {} : { trace: { sessionId: String(session!._id) } }),
+          // #252: the tool-execution session rides outside the trace guard for
+          // the same reason (ZDR turns have no durable session to attribute to).
+          ...(zdr ? {} : { sessionId: String(session!._id) }),
         },
         hasImage,
       );
