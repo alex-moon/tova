@@ -17,10 +17,11 @@ import { finalizeMarkdown, withTimeout } from './markdownConversion';
 
 // Traineddata is vendored at build time; `langPath` has no trailing slash and
 // tesseract.js loads `${langPath}/eng.traineddata.gz` when `gzip: true`.
-// Resolution mirrors the client-build lookup in src/server/index.ts: relative
-// to this file, which lives next to the repo root in both `tsx` (src/) and the
-// compiled `dist/` layout.
-export const TESSDATA_DIR = path.join(__dirname, '../../../assets/tessdata');
+// Resolution mirrors the client-build lookup in src/index.ts: relative
+// to this file, which reaches the repo root in both `tsx`
+// (apps/server/src/services) and the compiled (apps/server/dist/services)
+// layouts.
+export const TESSDATA_DIR = path.join(__dirname, '../../../../assets/tessdata');
 
 // tesseract.js caches the *decompressed* traineddata to `cachePath`, which
 // otherwise defaults to the process cwd — littering the working directory with

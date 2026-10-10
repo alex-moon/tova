@@ -3,7 +3,7 @@ import crypto from 'crypto';
 import jwt from 'jsonwebtoken';
 import { User, UserDocument } from '../models/User';
 import { resolveOrCreateUser, toAuthUser } from '../services/userService';
-import { LoginUserPayload } from '../../shared/contracts';
+import { LoginUserPayload } from '@tova/shared';
 import { getJwtSecret } from '../config/jwt';
 import { loginSchema, registerSchema } from '../validation';
 import { authenticate, AuthRequest } from '../middleware/auth';

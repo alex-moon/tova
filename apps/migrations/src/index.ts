@@ -1,6 +1,6 @@
 import { mongoMigrateCli } from 'mongo-migrate-ts';
 import 'dotenv/config';
-import { buildMongoUri } from '../src/server/mongoUri';
+import { buildMongoUri } from '../../server/src/mongoUri';
 
 void mongoMigrateCli({
   uri: buildMongoUri(),

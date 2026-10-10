@@ -1,6 +1,6 @@
 import { ModelRoster } from '../models/ModelRoster';
 import { applyCostToStats, estimateCostUsd, pickPriceRow } from './traceStatsCost';
-import type { AdminLangsmithStatsPayload } from '../../shared/contracts';
+import type { AdminLangsmithStatsPayload } from '@tova/shared';
 
 const basePayload = (models: AdminLangsmithStatsPayload['models']): AdminLangsmithStatsPayload => ({
   since: '2026-09-20T00:00:00.000Z',

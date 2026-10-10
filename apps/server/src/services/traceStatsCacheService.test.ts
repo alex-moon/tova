@@ -6,7 +6,7 @@ import {
   startTraceStatsPoller,
   stopTraceStatsPoller,
 } from './traceStatsCacheService';
-import type { AdminLangsmithStatsPayload } from '../../shared/contracts';
+import type { AdminLangsmithStatsPayload } from '@tova/shared';
 
 jest.mock('./langsmithTracesService', () => ({
   ...jest.requireActual('./langsmithTracesService'),

@@ -1,6 +1,6 @@
 import crypto from 'crypto';
 import { User, UserDocument } from '../models/User';
-import { AuthUser } from '../../shared/contracts';
+import { AuthUser } from '@tova/shared';
 
 // Single projection from a user document to the GET /api/auth/me wire shape.
 // Shared with PATCH /api/profile so the two endpoints cannot drift (issue #35).

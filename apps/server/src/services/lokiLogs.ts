@@ -1,5 +1,5 @@
 import { config } from '../config';
-import type { AdminLogEntry } from '../../shared/contracts';
+import type { AdminLogEntry } from '@tova/shared';
 
 /*
  * #179 read half: query retained logs from Grafana Cloud (hosted Loki) for the

@@ -6,7 +6,7 @@ import type {
   AdminTraceRow,
   AdminTraceRun,
   AdminTracesPayload,
-} from '../../shared/contracts';
+} from '@tova/shared';
 
 /*
  * Read-only LangSmith query service for the admin Traces tab (#186).

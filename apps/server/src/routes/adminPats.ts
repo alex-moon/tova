@@ -5,7 +5,7 @@ import { authenticateBearerOrSession, requireRole, AuthRequest } from '../middle
 import { Pat } from '../models/Pat';
 import { User } from '../models/User';
 import { createPatSchema } from '../validation';
-import type { AdminPatsPayload } from '../../shared/contracts';
+import type { AdminPatsPayload } from '@tova/shared';
 
 const router = express.Router();
 

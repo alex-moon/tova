@@ -10,7 +10,7 @@ import type {
   AdminEvalRunDetail,
   AdminEvalRunSummary,
   AdminEvalScoreCounts,
-} from '../../shared/contracts';
+} from '@tova/shared';
 
 const DEFAULT_LIMIT = 30;
 export const MAX_LIMIT = 100;

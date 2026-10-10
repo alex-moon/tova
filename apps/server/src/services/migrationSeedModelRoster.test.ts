@@ -1,6 +1,6 @@
 import { Db } from 'mongodb';
 import mongoose from 'mongoose';
-import { SeedModelRoster } from '../../../migrations/20261008000000-seed-model-roster';
+import { SeedModelRoster } from '../../../migrations/src/20261008000000-seed-model-roster';
 import { ROSTER_SEED } from './rosterConfig';
 
 /*

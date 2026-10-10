@@ -1,4 +1,4 @@
-import type { AdminLangsmithModelStats, AdminLangsmithStatsPayload } from '../../shared/contracts';
+import type { AdminLangsmithModelStats, AdminLangsmithStatsPayload } from '@tova/shared';
 import { listRoster, type RosterModel } from './rosterConfig';
 
 /*

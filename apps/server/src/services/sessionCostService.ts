@@ -1,7 +1,7 @@
 import { Message } from '../models/Message';
 import { Session } from '../models/Session';
 import { estimateCostUsd, loadPriceIndex, priceFor } from './traceStatsCost';
-import type { AdminSessionCostRow, AdminSessionsCostPayload } from '../../shared/contracts';
+import type { AdminSessionCostRow, AdminSessionsCostPayload } from '@tova/shared';
 
 /*
  * Per-session cost breakdown for the admin Traces tab (#224). The model rollup

@@ -1,5 +1,5 @@
 {
-  "extends": "./tsconfig.json",
+  "extends": "./apps/server/tsconfig.json",
   "rootDir": null,
-  "include": ["src/**/*.ts", "scripts/**/*.ts"]
+  "include": ["apps/**/*.ts", "scripts/**/*.ts"]
 }

@@ -2,7 +2,7 @@ import express from 'express';
 import mongoose from 'mongoose';
 import { User, UserDocument } from '../models/User';
 import { authenticateBearerOrSession, requireRole, AuthRequest } from '../middleware/auth';
-import { AdminUser } from '../../shared/contracts';
+import { AdminUser } from '@tova/shared';
 import { ModelRoster } from '../models/ModelRoster';
 import { ModelRouteError } from '../models/ModelRouteError';
 import { LogLevel } from '../services/logService';
@@ -22,7 +22,7 @@ import type {
   AdminGraphEntitiesPayload,
   AdminGraphSourceRef,
   AdminModelLookup,
-} from '../../shared/contracts';
+} from '@tova/shared';
 
 const router = express.Router();
 

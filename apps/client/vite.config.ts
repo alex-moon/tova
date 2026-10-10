@@ -9,13 +9,13 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 // https://vite.dev/config/
 export default defineConfig(({ mode }) => {
-  const env = loadEnv(mode, path.resolve(__dirname, '../../'), '');
+  const env = loadEnv(mode, path.resolve(__dirname, '../../../'), '');
   return {
     plugins: [react(), tailwindcss()],
     resolve: {
       alias: {
         '@': path.resolve(__dirname, './src'),
-        '@shared': path.resolve(__dirname, '../shared'),
+        '@shared': path.resolve(__dirname, '../shared/src'),
       },
     },
     server: {
