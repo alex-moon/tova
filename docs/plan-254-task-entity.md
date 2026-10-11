@@ -587,7 +587,7 @@ Ordered; spike first, then the loop-ownership-independent foundation. Items mark
 - [x] `npm run ci` green on the client-view slice (server lint/format/typecheck/test, client
       lint/format/test/build) — 96 server suites / 1206 tests, 21 client files / 261 tests.
 - [x] PR opened against the **epic branch** (`epic/251-workspace`), plan doc linked
-      (`docs/workflow.md:48-50`).
+      (`docs/workflow.md:48-50`) — slice PR **#278**.
 - [ ] Plan archived to `docs/done/` after the slice PR merges into the epic branch.
 
 ## Review pass (2026-10-11)
