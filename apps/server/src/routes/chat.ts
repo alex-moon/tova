@@ -560,18 +560,22 @@ const knowledgeBlockFor = async (prompt: string, userId: string): Promise<string
  * `skipWorkspace` (ZDR turns, image turns) suppresses the memory read while
  * leaving the files vote intact; the library read is separately suppressed by
  * the caller for image turns via `skipFiles`.
+ *
+ * `excludeMessageId` drops the just-saved current turn from the workspace
+ * corpus (the routes run retrieval after persisting it, so without it the turn
+ * could be retrieved and injected back as its own "past work").
  */
 const enrichmentBlocksFor = async (
   prompt: string,
   history: { role: 'user' | 'assistant'; content: string }[],
   userId: string,
-  opts: { skipFiles?: boolean; skipWorkspace?: boolean } = {},
+  opts: { skipFiles?: boolean; skipWorkspace?: boolean; excludeMessageId?: string } = {},
 ): Promise<{ libraryBlock: string; workspaceBlock: string }> => {
   const votes = await enrichmentVotes(prompt, history);
   const libraryBlock = !opts.skipFiles && votes.files ? await libraryIndexFor(userId) : '';
   let workspaceBlock = '';
   if (!opts.skipWorkspace && votes.workspace && isWorkspaceMemoryEnabled()) {
-    workspaceBlock = await retrieveWorkspaceBlock(prompt, userId);
+    workspaceBlock = await retrieveWorkspaceBlock(prompt, userId, undefined, opts.excludeMessageId);
   }
   return { libraryBlock, workspaceBlock };
 };
@@ -783,7 +787,7 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
         userMessage._id,
       ),
       userId as string,
-      { skipFiles: hasImage, skipWorkspace: hasImage },
+      { skipFiles: hasImage, skipWorkspace: hasImage, excludeMessageId: String(userMessage._id) },
     );
     const withSystemAndAsset = async (systemContent: string) => {
       const next = messagesFromPersistedHistory(
@@ -1055,7 +1059,11 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
           userMessage._id,
         ),
         userId as string,
-        { skipFiles: hasImage, skipWorkspace: hasImage },
+        {
+          skipFiles: hasImage,
+          skipWorkspace: hasImage,
+          excludeMessageId: String(userMessage._id),
+        },
       );
       libraryBlock = blocks.libraryBlock;
       streamWorkspaceBlock = blocks.workspaceBlock;

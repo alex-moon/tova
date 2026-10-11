@@ -85,6 +85,15 @@ describe('workspaceRetrievalService', () => {
       expect(withCap.length).toBeLessThanOrEqual(80);
       expect(withoutCap.length).toBeGreaterThan(80);
     });
+
+    it('counts joining newlines against the cap (multi-slice)', () => {
+      const many = Array.from({ length: 6 }, (_, i) =>
+        slice({ id: String(i), title: `Move ${i}`, text: 'budget is twelve thousand' }),
+      );
+      for (const cap of [40, 80, 120, 200, 400]) {
+        expect(buildWorkspaceBlock('budget', many, 6, cap).length).toBeLessThanOrEqual(cap);
+      }
+    });
   });
 
   describe('isWorkspaceMemoryEnabled', () => {
@@ -122,6 +131,60 @@ describe('workspaceRetrievalService', () => {
       expect(block).toContain('Move');
       expect(block).not.toContain('Secret');
       expect(block).not.toContain('nine million');
+    });
+
+    it('is not starved by a busier other user (pool scoped session-first)', async () => {
+      // Regression: a global newest-first message scan would fill the window
+      // with `other`'s flood, leaving this user's own history out entirely.
+      const userId = String(new Types.ObjectId());
+      const other = String(new Types.ObjectId());
+      const session = await Session.create({ userId, title: 'Move' });
+      await Message.create({
+        sessionId: session._id,
+        role: 'user',
+        content: 'the moving budget is twelve thousand',
+        timestamp: new Date('2020-01-01'),
+      });
+      const otherSession = await Session.create({ userId: other, title: 'Noise' });
+      await Message.insertMany(
+        Array.from({ length: 30 }, () => ({
+          sessionId: otherSession._id,
+          role: 'user',
+          content: 'the budget budget budget filler',
+          timestamp: new Date(),
+        })),
+      );
+
+      const block = await retrieveWorkspaceBlock('what did we say about the budget', userId);
+      expect(block).toContain('Move');
+      expect(block).toContain('twelve thousand');
+      expect(block).not.toContain('filler');
+    });
+
+    it('excludes the just-saved current turn from the corpus', async () => {
+      const userId = String(new Types.ObjectId());
+      const session = await Session.create({ userId, title: 'Move' });
+      const current = await Message.create({
+        sessionId: session._id,
+        role: 'user',
+        content: 'the moving budget is twelve thousand',
+        timestamp: new Date(),
+      });
+      await Message.create({
+        sessionId: session._id,
+        role: 'user',
+        content: 'earlier we set the moving budget at nine thousand',
+        timestamp: new Date(Date.now() - 60_000),
+      });
+
+      const block = await retrieveWorkspaceBlock(
+        'what did we say about the budget',
+        userId,
+        undefined,
+        String(current._id),
+      );
+      expect(block).not.toContain('twelve thousand');
+      expect(block).toContain('nine thousand');
     });
 
     it('includes extracted asset text', async () => {

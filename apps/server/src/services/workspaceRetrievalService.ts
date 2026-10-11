@@ -99,9 +99,12 @@ export const buildWorkspaceBlock = (
     const date = new Date(slice.at).toISOString().slice(0, 10);
     const label = slice.kind === 'chat' ? `chat "${slice.title}"` : `file "${slice.title}"`;
     const line = `- ${label} (${date}) — ${oneLine(slice.text)}`;
-    if (used + line.length > cap) break;
+    // Count the joining newline too, so the rendered block stays within `cap`
+    // rather than exceeding it by up to n-1 separators.
+    const cost = line.length + (lines.length > 0 ? 1 : 0);
+    if (used + cost > cap) break;
     lines.push(line);
-    used += line.length;
+    used += cost;
   }
   return lines.join('\n');
 };
@@ -111,18 +114,45 @@ export const buildWorkspaceBlock = (
  * to their session titles) and extracted-asset text, scored against the prompt.
  * Empty block when nothing overlaps. Never throws — memory, like the entity
  * block, must not degrade a chat turn.
+ *
+ * Ownership is resolved session-first: `messages` is keyed by `sessionId`, not
+ * by `userId`, so the user's sessions are the join key. Fetching the sessions
+ * first (bounded, indexed by `{ userId, deletedAt, lastMessageAt }`) then
+ * filtering messages by `sessionId` keeps the pool owned by construction — a
+ * global `Message.find({ role: 'user' })` would be dominated by other users'
+ * recent turns and could starve this user's own history out of the window.
+ *
+ * `excludeMessageId` drops the just-saved current turn (the routes run
+ * retrieval after persisting it) so the turn is never retrieved and injected
+ * back as its own "past work".
  */
 export const retrieveWorkspaceBlock = async (
   prompt: string,
   userId: string,
   n = MAX_SLICES,
+  excludeMessageId?: string,
 ): Promise<string> => {
   try {
     const uid = new mongoose.Types.ObjectId(userId);
+    const sessions = await Session.find({ userId: uid, deletedAt: null })
+      .sort({ lastMessageAt: -1 })
+      .limit(MESSAGE_POOL)
+      .select('title')
+      .lean();
+
+    const titleById = new Map(sessions.map((s) => [String(s._id), s.title as string] as const));
+    const sessionIds = sessions.map((s) => s._id as mongoose.Types.ObjectId);
+
     const [messages, assets] = await Promise.all([
-      Message.find({ role: 'user' })
+      // An empty `$in` yields no rows, so a user with files but no chats still
+      // gets file retrieval (the asset read does not depend on sessions).
+      Message.find({
+        role: 'user',
+        sessionId: { $in: sessionIds },
+        _id: { $ne: excludeMessageId ?? null },
+      })
         .sort({ timestamp: -1 })
-        .limit(MESSAGE_POOL * 4)
+        .limit(MESSAGE_POOL)
         .select('sessionId content timestamp')
         .lean(),
       Asset.find({
@@ -136,26 +166,9 @@ export const retrieveWorkspaceBlock = async (
         .lean(),
     ]);
 
-    // The pool must belong to this user: messages are keyed by sessionId, not
-    // userId, so the user's session ids are the join key. Bounded by the
-    // message pool above.
-    const sessionIds = [
-      ...new Set(messages.map((m) => String(m.sessionId as mongoose.Types.ObjectId))),
-    ].slice(0, MESSAGE_POOL);
-    const sessions = await Session.find({
-      _id: { $in: sessionIds.map((id) => new mongoose.Types.ObjectId(id)) },
-      userId: uid,
-      deletedAt: null,
-    })
-      .select('title')
-      .lean();
-    const titleById = new Map(sessions.map((s) => [String(s._id), s.title as string] as const));
-    const ownedSessionIds = new Set(titleById.keys());
-
     const slices: WorkspaceSlice[] = [];
     for (const m of messages) {
       const sid = String(m.sessionId);
-      if (!ownedSessionIds.has(sid)) continue;
       const text = (m.content as string) ?? '';
       if (!text.trim()) continue;
       slices.push({
@@ -165,7 +178,6 @@ export const retrieveWorkspaceBlock = async (
         text,
         at: m.timestamp as Date,
       });
-      if (slices.length >= MESSAGE_POOL) break;
     }
     for (const a of assets) {
       const text = ((a.markdownExtracted as string) || (a.textExtracted as string) || '').trim();

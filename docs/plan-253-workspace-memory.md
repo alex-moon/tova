@@ -115,3 +115,14 @@ pollute every turn — so it must run on the same evidence path as routing chang
 - 2026-10-11 — slice opened: branch, this plan, and the design above (gate extension,
   in-process lexical retrieval, bounded block, ZDR contract, 1200-char default). Corpus
   and gate follow the ticket verbatim; task outputs and evals deferred.
+- 2026-10-11 — post-merge review hardening. Three defects fixed against the code and
+  ticket: (1) the message pool is now scoped *session-first* — the previous
+  `Message.find({ role: 'user' })` scan was global, so a busier user's recent turns could
+  fill the whole window and starve this user's own history (ownership now resolved by the
+  user's sessions before the message read); (2) the just-saved current turn is excluded
+  from the corpus by id, so a turn is never retrieved and injected back as its own "past
+  work"; (3) the block cap now counts joining newlines, so the rendered block truly stays
+  within `BLOCK_CAP` rather than exceeding it by up to n−1 separators. Added route-level
+  coverage proving the streaming route injects the block end-to-end (the plan's "both
+  routes inject" item was previously only service-level-tested), plus tests for the
+  starvation and self-retrieval fixes. `npm run ci` green (89 suites, 1125 tests).

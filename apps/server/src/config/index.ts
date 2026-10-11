@@ -111,8 +111,9 @@ export const config = {
 
   // #253: workspace memory (retrieval across chats and files). Off by default
   // — a wrong injection pollutes every turn, so the block ships opt-in until
-  // the gate evals exist. `blockCap` is the character budget for the injected
-  // block (below the entity block's 1500; the library index competes).
+  // the gate evals exist. The block's character budget is BLOCK_CAP in
+  // workspaceRetrievalService (below the entity block's 1500; the library
+  // index competes).
   workspaceMemory: {
     get enabled(): boolean {
       const raw = process.env.WORKSPACE_MEMORY_ENABLED;

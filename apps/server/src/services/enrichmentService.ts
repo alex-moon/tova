@@ -54,9 +54,9 @@ export const FILES_VOTE_PROMPT = ENRICHMENT_VOTE_PROMPT;
 
 /*
  * Extract the LAST balanced, JSON-parseable {...} object in the reply that
- * carries the `files` key. Ported from the retired guard's `parseGuardVotes`:
+ * carries a vote key. Ported from the retired guard's `parseGuardVotes`:
  * reasoning models emit chain-of-thought ahead of the answer, so the last
- * vote-shaped object wins; decoy objects without the key are skipped.
+ * vote-shaped object wins; decoy objects without a key are skipped.
  *
  * #253: the object now carries `files` and `workspace`; either key marks a
  * real vote object, and both are read from the same winning object below.

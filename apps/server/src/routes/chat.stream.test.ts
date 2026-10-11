@@ -229,6 +229,49 @@ describe('Chat streaming route', () => {
     );
   });
 
+  // #253: the workspace-memory block is injected only when the gate's
+  // `workspace` vote fires and the feature flag is on; the route wires the
+  // retrieved block into the system content on the persisted path.
+  it('injects the workspace-memory block when the vote fires and the flag is on (#253)', async () => {
+    const cookies = await registerUser('stream-workspace@example.com');
+    await mockStream(['ok']);
+
+    const { enrichmentVotes } = jest.requireMock('../services/enrichmentService') as {
+      enrichmentVotes: jest.Mock;
+    };
+    enrichmentVotes.mockResolvedValueOnce({ files: false, workspace: true });
+    const retrieve = jest
+      .spyOn(
+        jest.requireActual<typeof import('../services/workspaceRetrievalService')>(
+          '../services/workspaceRetrievalService',
+        ),
+        'retrieveWorkspaceBlock',
+      )
+      .mockResolvedValue('- chat "Move" (2026-10-01) — budget is twelve thousand');
+    process.env.WORKSPACE_MEMORY_ENABLED = '1';
+
+    try {
+      const userId = (await User.findOne({ email: 'stream-workspace@example.com' }))!._id;
+      const session = await Session.create({ userId, title: 'workspace' });
+      const app = createApp();
+      const response = await request(app)
+        .post('/api/chat/stream')
+        .set('Cookie', cookies)
+        .send({ sessionId: String(session._id), content: 'what did we decide about the budget' });
+
+      expect(response.status).toBe(200);
+      const [, options] = mockAgentStream.mock.calls[0] as unknown as [
+        unknown,
+        { instructions: string },
+      ];
+      expect(options.instructions).toContain('<user:workspace>');
+      expect(options.instructions).toContain('budget is twelve thousand');
+    } finally {
+      delete process.env.WORKSPACE_MEMORY_ENABLED;
+      retrieve.mockRestore();
+    }
+  });
+
   // #261: ZDR/incognito turns are untimestamped (the replay carries no clock),
   // so they keep the date line as their only clock.
   it('keeps the date line and leaves ZDR replay turns unstamped (#261)', async () => {
