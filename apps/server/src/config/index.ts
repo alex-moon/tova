@@ -100,17 +100,20 @@ export const config = {
     },
   },
 
-  entityGraph: {
-    get extractionEnabled(): boolean {
-      return Boolean(process.env.ENTITY_GRAPH_ENABLED);
-    },
-    get promptInjectionEnabled(): boolean {
-      return Boolean(process.env.ENTITY_GRAPH_PROMPT_INJECTION);
+  // #253: workspace memory (retrieval across chats and files). Off by default
+  // — a wrong injection pollutes every turn, so the block ships opt-in until
+  // the gate evals exist. The block's character budget is BLOCK_CAP in
+  // workspaceRetrievalService (the library index competes for the same budget).
+  workspaceMemory: {
+    get enabled(): boolean {
+      const raw = process.env.WORKSPACE_MEMORY_ENABLED;
+      if (raw === undefined || raw === '') return false;
+      return raw !== '0' && raw.toLowerCase() !== 'false';
     },
   },
 
   // #238: the aux model source for the small, latency-insensitive LLM calls
-  // (chat title, entity extraction, follow-ups, prompt metrics, enrichment).
+  // (chat title, follow-ups, prompt metrics, enrichment).
   // Replaces the tier-era `ROUTER_SMALL_MODEL`/`ROUTER_GUARD_MODEL` reads. The
   // owner retired small models for *chat routing* only; a single cheap fixed
   // aux model is kept. Default is the retired guard model on its old provider
@@ -134,6 +137,26 @@ export const config = {
   chat: {
     get maxOutputTokens(): string | undefined {
       return process.env.CHAT_MAX_OUTPUT_TOKENS;
+    },
+  },
+
+  // #254 (epic #251): the task sequencer's budget knobs. `maxSteps` is the
+  // step cap (above the chat cap of 12, below a runaway); `maxCostUsd` is the
+  // per-task spend ceiling. Both parse+fallback like `aux.enrichmentTimeoutMs`
+  // so a malformed env degrades to the default rather than a NaN budget.
+  task: {
+    get maxSteps(): number {
+      const raw = process.env.TASK_MAX_STEPS;
+      const parsed = raw === undefined || raw === '' ? NaN : Number(raw);
+      // Floor *before* the positivity guard: `0.5` is positive but floors to a
+      // zero-step budget, which must degrade to the default, not become 0.
+      const floored = Math.floor(parsed);
+      return Number.isFinite(parsed) && floored > 0 ? floored : 25;
+    },
+    get maxCostUsd(): number {
+      const raw = process.env.TASK_MAX_COST_USD;
+      const parsed = raw === undefined || raw === '' ? NaN : Number(raw);
+      return Number.isFinite(parsed) && parsed > 0 ? parsed : 5;
     },
   },
 

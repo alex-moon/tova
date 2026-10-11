@@ -114,6 +114,32 @@ export const feedbackValueSchema = z.object({
   value: z.enum(['up', 'down'], { message: 'value must be "up" or "down"' }),
 });
 
+// Task creation (#254 routes slice, D15): a direct-origin task is first-class
+// (D3), so `instruction` is optional and `origin` is an optional thin
+// reference. A task's *scope* is the workspace, not a chat (D3) — a chat-origin
+// task carries only the session id, never a Message FK.
+export const taskCreateSchema = z.strictObject({
+  instruction: z
+    .string({ message: 'instruction must be a string' })
+    .max(4000, { message: 'instruction must be 4000 characters or fewer' })
+    .optional(),
+  origin: z
+    .strictObject({
+      kind: z.enum(['chat', 'direct'], { message: 'origin.kind must be "chat" or "direct"' }),
+      sessionId: z.string({ message: 'origin.sessionId must be a string' }).optional(),
+    })
+    .optional(),
+});
+
+// POST /api/tasks/:id/instruction (D14): a steering turn / resume. Non-empty —
+// an empty steering turn has nothing to say.
+export const taskInstructionSchema = z.strictObject({
+  instruction: z
+    .string({ message: 'instruction is required' })
+    .min(1, { message: 'instruction must not be empty' })
+    .max(4000, { message: 'instruction must be 4000 characters or fewer' }),
+});
+
 // Asset uploads (issue #34): the browser sends the file directly to Spaces,
 // so the server only validates metadata at presign time. Size/type caps are
 // enforced again here (presign) and reconciled against the real object at

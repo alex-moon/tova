@@ -59,6 +59,22 @@ describe('#112 golden set', () => {
     });
   });
 
+  describe('#283 calculator case', () => {
+    const byId = Object.fromEntries(CASES.map((c) => [c.id, c]));
+
+    it('arithmetic asserts the calculator is used and no reflex retrieval happens', () => {
+      const testCase = byId['arithmetic-uses-calculator'];
+      expect(testCase).toBeDefined();
+      expect(testCase.assertions).toEqual([
+        { type: 'tool_called', tool: 'calculate' },
+        { type: 'tool_not_called', tool: 'web_search' },
+        { type: 'tool_not_called', tool: 'list_files' },
+        { type: 'tool_not_called', tool: 'read_file' },
+        { type: 'answer_contains', text: '900' },
+      ]);
+    });
+  });
+
   it('covers both #159 document-unit eval cases', () => {
     const ids = CASES.map((c) => c.id);
     expect(ids).toContain('manual-page-of-phone');

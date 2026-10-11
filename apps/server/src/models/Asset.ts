@@ -89,12 +89,39 @@ const assetSchema = new mongoose.Schema(
       enum: ['pending', 'ready', 'failed'],
       default: 'pending',
     },
-    // Issue #66: provenance. Legacy docs predate this field; Mongoose
-    // applies the default at read time, so no backfill is needed.
+    // Issue #66: origin flag ("did Tova make it?"). Legacy docs predate this
+    // field; Mongoose applies the default at read time, so no backfill is
+    // needed. This is a separate, boolean-ish axis from `provenance` below.
     origin: {
       type: String,
       enum: ['user-upload', 'system-generated'],
       default: 'user-upload',
+    },
+    // Issue #252 (epic #251): where the file came from — the vocabulary
+    // later slices (task artifacts, cross-chat memory) write into. Deliberately
+    // ODDBALL-FREE and ADDITIVE: it does not touch the scalar `origin` above.
+    // Absence policy: `provenance` is absent (undefined) on legacy rows and is
+    // never defaulted or faked — absent means "unknown", never "no source"
+    // (same rule as roster pricing, #199: missing ≠ free). There is no
+    // `default` here by design; a read-time `{}` would serialise to a
+    // non-null "unknown-but-present" value and break that invariant.
+    // `_id: false`: provenance is a singleton value object, so a per-row
+    // subdoc id is pure noise (cf. the `units` subdoc above).
+    provenance: {
+      required: false,
+      type: new mongoose.Schema(
+        {
+          kind: {
+            type: String,
+            enum: ['upload', 'chat', 'task'],
+            required: true,
+          },
+          sessionId: { type: String },
+          taskId: { type: String },
+          messageId: { type: String },
+        },
+        { _id: false },
+      ),
     },
     // Populated only when status is 'failed' (HEAD miss, oversize, stale).
     failureReason: {
@@ -124,5 +151,14 @@ assetSchema.index({ userId: 1, _id: 1 });
 assetSchema.index({ markdownExtracted: 1 });
 
 export type AssetDocument = mongoose.HydratedDocument<mongoose.InferSchemaType<typeof assetSchema>>;
+
+// Issue #252: the provenance vocabulary, re-exported so views/tools/client
+// types share exactly one shape. Optional fields are omitted, never faked.
+export interface AssetProvenance {
+  kind: 'upload' | 'chat' | 'task';
+  sessionId?: string;
+  taskId?: string;
+  messageId?: string;
+}
 
 export const Asset = mongoose.model('Asset', assetSchema);

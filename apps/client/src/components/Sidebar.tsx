@@ -1,5 +1,5 @@
 import React from 'react';
-import { Files, LogOut, Plus, Trash2, X } from 'lucide-react';
+import { Files, ListTree, LogOut, Plus, Trash2, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { useAuth } from '../hooks/useAuth';
@@ -78,6 +78,14 @@ const Sidebar: React.FC<SidebarProps> = ({
           >
             <Files className="size-4 shrink-0" />
             Files
+          </a>
+          {/* Issue #254 (epic #251): the tasks view lives at /tasks, beside /files. */}
+          <a
+            href="/tasks"
+            className="mt-1 flex h-9 w-full items-center justify-center gap-2 rounded-lg px-4 text-sm font-medium transition-colors hover:bg-accent"
+          >
+            <ListTree className="size-4 shrink-0" />
+            Tasks
           </a>
         </div>
         <div className="flex-1 overflow-y-auto px-4">

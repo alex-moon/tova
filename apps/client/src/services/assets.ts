@@ -1,9 +1,19 @@
 import axios from 'axios';
 
-// Asset connector (issue #34): the browser uploads file bytes directly to
-// Spaces with a presigned PUT; this service only talks to our own API for
-// presign/confirm/list/url/delete and performs the direct PUT with XHR so
-// upload progress can be reported.
+// Issue #252 (epic #251): where the file came from. Mirrors the server's
+// AssetProvenance. `kind` is the only required field; the ids are optional and
+// absent means unknown (never faked). Server serialises absent provenance as
+// explicit null so the client can distinguish "unknown" from a missing field.
+export interface AssetProvenance {
+  kind: 'upload' | 'chat' | 'task';
+  sessionId?: string;
+  taskId?: string;
+  messageId?: string;
+}
+
+// Issue #34: file bytes go direct-to-Spaces with a presigned PUT; this service
+// only talks to our own API for presign/confirm/list/url/delete and performs
+// the direct PUT with XHR so upload progress can be reported.
 export interface AssetSummary {
   id: string;
   filename: string;
@@ -20,6 +30,8 @@ export interface AssetSummary {
   // Issue #208: derived-thumbnail lifecycle ('none'|'pending'|'ready'|'failed');
   // the viewer waits for 'ready' before rendering an image preview.
   thumbnailStatus?: string;
+  // Issue #252: provenance, or null when unknown (legacy rows / untracked).
+  provenance?: AssetProvenance | null;
   createdAt: string;
 }
 
@@ -42,6 +54,8 @@ export interface AssetContent {
   markdownStatus?: string;
   markdownFailureReason?: string | null;
   thumbnailStatus?: string;
+  // Issue #252: provenance, or null when unknown.
+  provenance?: AssetProvenance | null;
   createdAt: string;
 }
 

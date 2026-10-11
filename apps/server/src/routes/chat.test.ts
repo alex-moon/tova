@@ -65,7 +65,8 @@ jest.mock('../services/titleService', () => ({
 // main completion's arguments, so stub enrichment to a no-op block and keep
 // it off `inferenceService.mock.calls`.
 jest.mock('../services/enrichmentService', () => ({
-  enrichmentLibraryBlock: jest.fn().mockResolvedValue(''),
+  enrichmentVotes: jest.fn().mockResolvedValue({ files: false, workspace: false }),
+  libraryIndexFor: jest.fn().mockResolvedValue(''),
   isEnrichmentEnabled: () => false,
 }));
 
@@ -311,6 +312,43 @@ describe('Chat route routing metadata', () => {
       const content = systemContentFromCall();
       expect(content).toMatch(/^You are Tova/);
       expect(content).toContain('<user:preferred_name>\nAlex\n</user:preferred_name>');
+    });
+
+    // #253: the non-streaming route injects the workspace-memory block when the
+    // gate's `workspace` vote fires and the flag is on — the same wiring the
+    // streaming route has, so the two cannot drift.
+    it('injects the workspace-memory block when the vote fires and the flag is on (#253)', async () => {
+      const app = createApp();
+      const cookies = await registerUser(app, 'prompt-workspace@example.com');
+
+      const { enrichmentVotes } = jest.requireMock('../services/enrichmentService') as {
+        enrichmentVotes: jest.Mock;
+      };
+      enrichmentVotes.mockResolvedValueOnce({ files: false, workspace: true });
+      const retrieve = jest
+        .spyOn(
+          jest.requireActual<typeof import('../services/workspaceRetrievalService')>(
+            '../services/workspaceRetrievalService',
+          ),
+          'retrieveWorkspaceBlock',
+        )
+        .mockResolvedValue('- chat "Move" (2026-10-01) — budget is twelve thousand');
+      process.env.WORKSPACE_MEMORY_ENABLED = '1';
+
+      try {
+        const response = await request(app)
+          .post('/api/chat')
+          .set('Cookie', Array.isArray(cookies) ? cookies : [cookies])
+          .send({ content: 'what did we decide about the budget' });
+
+        expect(response.status).toBe(200);
+        const content = systemContentFromCall();
+        expect(content).toContain('<user:workspace>');
+        expect(content).toContain('budget is twelve thousand');
+      } finally {
+        delete process.env.WORKSPACE_MEMORY_ENABLED;
+        retrieve.mockRestore();
+      }
     });
 
     it("never leaks one user's customInstructions into another user's request", async () => {

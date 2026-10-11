@@ -150,10 +150,10 @@ router.patch('/', authenticate, async (req: AuthRequest, res) => {
 // POST /api/profile/factory-reset (issue #143): the user-deliberate escape
 // hatch for a PII-storing app — a session-wide wipe of everything the account
 // holds (sessions, messages, assets + their Spaces bytes, chat-scoped
-// workspace files, asset-derived job rows, the entity graph, LangSmith
-// traces). Requires the typed confirmation string; nothing but the account
-// and its (non-data) preferences survives. `failedObjects` names any bucket
-// keys the Spaces sweep could not delete so the UI can warn.
+// workspace files, asset-derived job rows, LangSmith traces). Requires the
+// typed confirmation string; nothing but the account and its (non-data)
+// preferences survives. `failedObjects` names any bucket keys the Spaces sweep
+// could not delete so the UI can warn.
 router.post('/factory-reset', authenticate, async (req: AuthRequest, res) => {
   try {
     const parsed = factoryResetSchema.safeParse(req.body ?? {});

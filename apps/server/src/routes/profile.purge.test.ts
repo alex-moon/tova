@@ -6,17 +6,15 @@ import { Session } from '../models/Session';
 import { Message } from '../models/Message';
 import { Asset } from '../models/Asset';
 import { AssetJob } from '../models/AssetJob';
-import { Entity } from '../models/Entity';
-import { EntityEdge } from '../models/EntityEdge';
 import { McpServer } from '../models/McpServer';
 import { FACTORY_RESET_CONFIRM } from '../validation';
 
 // Route-level coverage for the factory reset (issue #143), superseding the
 // old purgeUserChats coverage (plan 136, T5): typed confirmation is required,
 // nothing PII-bearing survives the POST (sessions hard-deleted, messages,
-// assets, job rows and the entity graph all swept), the user's settings and
-// account survive, other users are untouched — and the removed ZDR
-// first-enable auto-purge truly no longer fires.
+// assets, job rows all swept), the user's settings and account survive, other
+// users are untouched — and the removed ZDR first-enable auto-purge truly no
+// longer fires.
 
 const registerUser = async (email: string) => {
   const app = createApp();
@@ -47,19 +45,6 @@ const seedUserWorkspace = async (uid: mongoose.Types.ObjectId, count = 2) => {
     status: 'ready',
   });
   await AssetJob.create({ assetId: asset._id });
-  const entity = await Entity.create({
-    userId: uid,
-    name: 'Ada Lovelace',
-    normalizedName: 'ada lovelace',
-    kind: 'person',
-  });
-  await EntityEdge.create({
-    userId: uid,
-    fromEntityId: entity._id,
-    toEntityId: entity._id,
-    kind: 'related-to',
-    summary: 'self-reference fixture',
-  });
   await McpServer.create({
     scope: 'user',
     userId: uid,
@@ -81,8 +66,6 @@ const expectNothingPIIBearingRemains = async (
   expect(await Asset.countDocuments({ userId: uid })).toBe(0);
   // AssetJob has no userId — it must have been swept via the user's asset ids.
   if (assetId) expect(await AssetJob.countDocuments({ assetId })).toBe(0);
-  expect(await Entity.countDocuments({ userId: uid })).toBe(0);
-  expect(await EntityEdge.countDocuments({ userId: uid })).toBe(0);
   // User-scoped MCP server configs carry urls + encrypted auth headers —
   // secret material at rest — so they must be swept too.
   expect(await McpServer.countDocuments({ scope: 'user', userId: uid })).toBe(0);

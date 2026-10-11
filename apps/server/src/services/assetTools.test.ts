@@ -34,6 +34,14 @@ const asCtx = (userId?: string) => {
   return { requestContext };
 };
 
+// #252: a context carrying a session id, to exercise provenance attribution.
+const asCtxWithSession = (userId: string, sessionId: string) => {
+  const requestContext = new RequestContext();
+  requestContext.set('userId', userId);
+  requestContext.set('sessionId', sessionId);
+  return { requestContext };
+};
+
 // `createTool` is the identity stub, so the tools keep their plain config
 // shape; pick the execute off it explicitly for direct invocation.
 const listExecute = (
@@ -129,6 +137,24 @@ describe('generate_file tool (#66)', () => {
     };
     expect(read.content).toBe(good.content);
     expect(read.hasText).toBe(true);
+  });
+
+  it('stamps chat provenance when a session rides on the context (#252)', async () => {
+    const user = await createUser('generate-provenance@example.com');
+    const sessionId = new Types.ObjectId().toString();
+    const out = (await generateExecute(good, asCtxWithSession(user.id, sessionId))) as {
+      file?: { id: string };
+    };
+    const stored = await Asset.findById(out.file?.id);
+    expect(stored?.provenance?.kind).toBe('chat');
+    expect(stored?.provenance?.sessionId).toBe(sessionId);
+  });
+
+  it('leaves provenance absent when no session is on the context (#252)', async () => {
+    const user = await createUser('generate-no-session@example.com');
+    const out = (await generateExecute(good, asCtx(user.id))) as { file?: { id: string } };
+    const stored = await Asset.findById(out.file?.id);
+    expect(stored?.provenance).toBeUndefined();
   });
 
   it('maps validation failures to typed errors without storage calls', async () => {

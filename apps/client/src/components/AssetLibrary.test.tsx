@@ -388,6 +388,42 @@ describe('AssetLibrary — conversion feedback (issue #83)', () => {
   });
 });
 
+describe('AssetLibrary — provenance display (issue #252)', () => {
+  afterEach(cleanup);
+  vi.mocked(AssetService.list).mockResolvedValue({ assets: [], nextCursor: null });
+
+  it.each([
+    ['upload', 'Uploaded'],
+    ['chat', 'From chat'],
+    ['task', 'From task'],
+  ] as const)('renders the label for kind %s', async (kind, label) => {
+    vi.mocked(AssetService.list).mockResolvedValue({
+      assets: [asset({ provenance: { kind } })],
+      nextCursor: null,
+    });
+    renderLibrary();
+    await screen.findByText('notes.txt');
+    expect(screen.getByTestId('asset-provenance')).toHaveTextContent(label);
+  });
+
+  it('renders nothing for null provenance (unknown)', async () => {
+    vi.mocked(AssetService.list).mockResolvedValue({
+      assets: [asset({ provenance: null })],
+      nextCursor: null,
+    });
+    renderLibrary();
+    await screen.findByText('notes.txt');
+    expect(screen.queryByTestId('asset-provenance')).not.toBeInTheDocument();
+  });
+
+  it('renders nothing when provenance is absent', async () => {
+    vi.mocked(AssetService.list).mockResolvedValue({ assets: [asset()], nextCursor: null });
+    renderLibrary();
+    await screen.findByText('notes.txt');
+    expect(screen.queryByTestId('asset-provenance')).not.toBeInTheDocument();
+  });
+});
+
 describe('AssetLibrary — inline delete confirm (issue #59)', () => {
   afterEach(cleanup);
   vi.mocked(AssetService.list).mockResolvedValue({ assets: [], nextCursor: null });

@@ -14,12 +14,15 @@ import adminLangsmithRoutes from './routes/adminLangsmith';
 import adminEvalsRoutes from './routes/adminEvals';
 import profileRoutes from './routes/profile';
 import assetRoutes from './routes/assets';
+import taskRoutes from './routes/tasks';
 import mcpServerRoutes from './routes/mcpServers';
 import { buildMongoUri } from './mongoUri';
 import { getJwtSecret } from './config/jwt';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import { startAssetJobPoller } from './services/assetJobService';
+import { startTaskPoller } from './services/taskService';
+import { processTaskJob } from './services/taskProcessor';
 import { startTraceStatsPoller } from './services/traceStatsCacheService';
 import { processAssetConversionJob } from './services/assetJobProcessor';
 import { startEvalScheduler } from './services/evalScheduler';
@@ -117,6 +120,7 @@ export const createApp = (): Express => {
   app.use('/api/admin', adminEvalsRoutes);
   app.use('/api/profile', profileRoutes);
   app.use('/api/assets', assetRoutes);
+  app.use('/api/tasks', taskRoutes);
   app.use('/api/mcp-servers', mcpServerRoutes);
 
   app.get('/api/health', (_req, res) => {
@@ -157,6 +161,11 @@ export const startServer = async (): Promise<Server> => {
   // don't inherit background polling.
   if (process.env.NODE_ENV !== 'test') {
     startAssetJobPoller(processAssetConversionJob);
+
+    // #254 (epic #251): the task sequencer poller. Same non-test gate; the
+    // processor is a stub until the sequencer slice lands (the foundation here
+    // is the queue/model/runtime, not the driver).
+    startTaskPoller(processTaskJob);
 
     // #225: daily eval suite. Off unless TOVA_EVAL_SCHEDULE=daily; started in
     // the same non-test block so tests never inherit a live provider job.

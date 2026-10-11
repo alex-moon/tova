@@ -32,6 +32,11 @@ const presignItemForUser = async (
     contentType,
     size,
     status: 'pending',
+    // #252: every upload is `kind: 'upload'`. Chat-composer uploads are
+    // deliberately the same: presign runs before the session may exist (#144),
+    // so there is no truthful session id to record — inventing one would break
+    // the absence policy (absent = unknown, never faked).
+    provenance: { kind: 'upload' },
     // ZDR chat attachments (#116): an ephemeral row is deleted together with
     // its Spaces object once the turn that consumes it completes.
     ...(opts.ephemeral ? { ephemeral: true } : {}),

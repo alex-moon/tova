@@ -17,25 +17,28 @@ import {
 import { generateChatTitle } from '../services/titleService';
 import { hasPermission, ROUTING_PERMISSION } from '../services/userService';
 import { buildSystemContent, timestampHeader } from '../services/promptAssembly';
-import {
-  isEntityInjectionEnabled,
-  retrieveKnowledgeBlock,
-} from '../services/entityRetrievalService';
 import { ensureUserLocation } from '../services/geoLocationService';
 import { outputTokensFor, promptCharsFrom } from '../services/outputTokenCap';
 import type { MessageContentPart, NeutralStreamChunk } from '../services/llmTypes';
 import { classifyAndPersistPromptDimensions, isTriviallyNeutral } from '../services/metricsService';
 import { computeDeterministicMetrics } from '../services/promptMetrics';
 import { generateFollowups } from '../services/followupService';
-import {
-  extractAndPersistFromTurn,
-  isEntityExtractionEnabled,
-} from '../services/entityExtractionService';
 import { zdrHistorySchema } from '../validation';
 import { redactForLog } from '../services/logRedaction';
 import { decideTurn } from '../services/zdrTurn';
 import { AllModelsDisabledError } from '../services/modelConfigService';
-import { enrichmentLibraryBlock } from '../services/enrichmentService';
+import { enrichmentVotes, libraryIndexFor } from '../services/enrichmentService';
+import {
+  isWorkspaceMemoryEnabled,
+  retrieveWorkspaceBlock,
+} from '../services/workspaceRetrievalService';
+import { TaskEvent } from '../models/TaskEvent';
+import type { TaskDocument } from '../models/Task';
+import {
+  completionNotificationLine,
+  markNotified,
+  pendingCompletionsFor,
+} from '../services/taskNotificationService';
 
 const router = express.Router();
 
@@ -339,11 +342,23 @@ export const paragraphBreakFor = (contentEnding: string): string => {
   return '\n\n'.slice(Math.min(trailingNewlines, 2));
 };
 
-const toolResultEvent = (result: { name: string; result: unknown }) => {
+// Exported (#254) so the task sequencer builds the same #196 tool chips the
+// chat path persists — one chip vocabulary for both streams. The optional
+// `args` lets a caller that has only the executed result (the non-streaming
+// sequencer step, which never sees a separate `toolCall` event) recover the
+// call's `query`, exactly as `toolCallEvent` derives it from a call's args.
+export const toolResultEvent = (result: {
+  name: string;
+  result: unknown;
+  args?: Record<string, unknown>;
+}) => {
   const base = {
     phase: 'result' as const,
     name: result.name,
     label: toolLabelFrom(result.name),
+    ...(typeof result.args?.query === 'string' && result.args.query
+      ? { query: result.args.query }
+      : {}),
   };
   if (result.name === 'web_search' || result.name === 'fetch_url') {
     const items = Array.isArray((result.result as { results?: unknown })?.results)
@@ -531,18 +546,89 @@ const saveUserMessageWithMetrics = async (
 };
 
 /*
- * Entity-graph retrieval (#138, plan task 4): read-only, bounded "what we
- * know about you" block for the system prompt, only when
- * ENTITY_GRAPH_PROMPT_INJECTION is set. Never throws — graph enrichment,
- * like extraction, must not degrade a chat turn.
+ * #238/#253: one aux vote, two reads. The gate decides whether the turn refers
+ * to a library file (`files`) and/or to past work (`workspace`); the reads are
+ * independent Mongo lookups. A negative vote skips its read; a disabled gate
+ * (or a timeout inside `enrichmentVotes`) yields both-false. Never throws —
+ * enrichment must not degrade a chat turn.
+ *
+ * `skipWorkspace` (ZDR turns, image turns) suppresses the memory read while
+ * leaving the files vote intact; the library read is separately suppressed by
+ * the caller for image turns via `skipFiles`.
+ *
+ * `excludeMessageId` drops the just-saved current turn from the workspace
+ * corpus (the routes run retrieval after persisting it, so without it the turn
+ * could be retrieved and injected back as its own "past work").
+ * `excludeAssetId` drops the current turn's attached file for the same reason:
+ * it is not past work, and its text already rides the `<user_content>` envelope
+ * (or the file-library index).
  */
-const knowledgeBlockFor = async (prompt: string, userId: string): Promise<string> => {
-  if (!isEntityInjectionEnabled()) return '';
+const enrichmentBlocksFor = async (
+  prompt: string,
+  history: { role: 'user' | 'assistant'; content: string }[],
+  userId: string,
+  opts: {
+    skipFiles?: boolean;
+    skipWorkspace?: boolean;
+    excludeMessageId?: string;
+    excludeAssetId?: string;
+  } = {},
+): Promise<{ libraryBlock: string; workspaceBlock: string }> => {
+  const votes = await enrichmentVotes(prompt, history);
+  const libraryBlock = !opts.skipFiles && votes.files ? await libraryIndexFor(userId) : '';
+  let workspaceBlock = '';
+  if (!opts.skipWorkspace && votes.workspace && isWorkspaceMemoryEnabled()) {
+    workspaceBlock = await retrieveWorkspaceBlock(
+      prompt,
+      userId,
+      undefined,
+      opts.excludeMessageId,
+      opts.excludeAssetId,
+    );
+  }
+  return { libraryBlock, workspaceBlock };
+};
+
+/*
+ * #255 (F4): read completed background tasks into this turn's context — the
+ * chat route is the chat stream's only writer, so the worker never writes it
+ * itself (single writer per stream). The notification is a *queued write*: it
+ * waits for the next user turn and never lands mid-turn. The final answer is the
+ * task's last non-empty assistant step.
+ *
+ * This function only *reads*: it returns the block to inject and the ids it
+ * covered, but never marks them. The caller marks them via `markNotified` once
+ * the turn's assistant message has actually persisted. Marking at read time
+ * would consume a completion on a turn that then failed (provider error, abort,
+ * geo block) — the user would never see it. Marking after persistence trades a
+ * wider exactly-once race window (two concurrent turns on one session could both
+ * surface the same task) for never losing a completion; a chat turn per session
+ * is user-driven and single-flight on the client, so the loss bug is the one
+ * worth avoiding.
+ *
+ * Returns an empty block when nothing is pending — the common case — so the turn
+ * is byte-identical when no background work finished.
+ */
+const taskCompletionBlockFor = async (
+  userId: string,
+  sessionId: string,
+): Promise<{ block: string; taskIds: TaskDocument['_id'][] }> => {
   try {
-    return await retrieveKnowledgeBlock(prompt, userId);
+    const pending = await pendingCompletionsFor(userId, sessionId);
+    if (pending.length === 0) return { block: '', taskIds: [] };
+    const lines: string[] = [];
+    for (const task of pending) {
+      const lastStep = await TaskEvent.findOne({
+        taskId: task._id,
+        role: 'assistant',
+        content: { $ne: '' },
+      }).sort({ seq: -1 });
+      lines.push(completionNotificationLine(task, lastStep?.content ?? ''));
+    }
+    return { block: lines.join('\n'), taskIds: pending.map((t) => t._id) };
   } catch (err) {
-    console.error('Entity graph retrieval error:', redactForLog(err));
-    return '';
+    console.error('Task completion drain error:', redactForLog(err));
+    return { block: '', taskIds: [] };
   }
 };
 
@@ -646,11 +732,16 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
         return res.status(400).json({ message: 'Invalid chat history' });
       }
       await ensureUserLocation(userDoc, req.ip);
-      // Plan task 8: ZDR/incognito turns DO retrieve the graph read-only
-      // (Alex, 2026-09-21) — but they write nothing, and this branch an early
-      // return before any persistence does exactly that. Extraction below
-      // never runs for ZDR.
-      const zdrEntityBlock = await knowledgeBlockFor(content, userId as string);
+      /*
+       * #253: matching the streaming route and plan decision 6, a ZDR turn MAY
+       * read the workspace (read-only) — it writes nothing, so it is absent from
+       * the corpus by construction. The library index is never injected on ZDR
+       * ("the write-nothing turn injects no index"), so `skipFiles` avoids the
+       * wasted read that the streaming route already skips.
+       */
+      const zdrBlocks = await enrichmentBlocksFor(content, zdrHistory.value, userId as string, {
+        skipFiles: true,
+      });
 
       /*
        * ZDR continuity is the client replay; the prompt is assembled once and
@@ -663,10 +754,10 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
           role: 'system',
           content: buildSystemContent(
             userDoc,
-            zdrEntityBlock,
             '',
             true,
             userDoc.settings?.timezone,
+            zdrBlocks.workspaceBlock,
           ),
         });
         appendAssetBlock(turnMessages, attachedAsset);
@@ -738,23 +829,27 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
     // country; cheap when cached (fresh/cooldown returns immediately) and the
     // service itself never throws, so chat cannot block hard on it.
     await ensureUserLocation(userDoc, req.ip);
-    const entityBlock = await knowledgeBlockFor(content, userId as string);
     /*
-     * #238: the enrichment pass (bounded serial) decides whether to inject the
-     * file-library index. Text-only: image turns skip it, matching the retired
-     * guard. `enrichmentHistoryFromDocs` is non-mutating so the same `history`
-     * array survives for `withSystemAndAsset`.
+     * #238/#253: the enrichment pass (bounded serial) decides whether to inject
+     * the file-library index and/or the workspace-memory block. Text-only:
+     * image turns skip both reads, matching the retired guard's files gating.
+     * `enrichmentHistoryFromDocs` is non-mutating so the same `history` array
+     * survives for `withSystemAndAsset`.
      */
-    const libraryBlock = hasImage
-      ? ''
-      : await enrichmentLibraryBlock(
-          content,
-          enrichmentHistoryFromDocs(
-            history as { _id: unknown; role: string; content: string }[],
-            userMessage._id,
-          ),
-          userId as string,
-        );
+    const { libraryBlock, workspaceBlock } = await enrichmentBlocksFor(
+      content,
+      enrichmentHistoryFromDocs(
+        history as { _id: unknown; role: string; content: string }[],
+        userMessage._id,
+      ),
+      userId as string,
+      {
+        skipFiles: hasImage,
+        skipWorkspace: hasImage,
+        excludeMessageId: String(userMessage._id),
+        excludeAssetId: attachedAsset ? String(attachedAsset._id) : undefined,
+      },
+    );
     const withSystemAndAsset = async (systemContent: string) => {
       const next = messagesFromPersistedHistory(
         history as { role: string; content: string; timestamp?: Date }[],
@@ -777,8 +872,19 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
      */
     const rosterPrePick = await pickRosterRoute(hasImage);
     if (!rosterPrePick) throw new AllModelsDisabledError();
+    // #255: completed background tasks ride this turn's context (queued write).
+    // The ids are marked notified only after the assistant message persists, so
+    // a failed turn does not consume the notification.
+    const taskCompletion = await taskCompletionBlockFor(userId as string, String(session!._id));
     const turnMessages = await withSystemAndAsset(
-      buildSystemContent(userDoc, entityBlock, libraryBlock, false, userDoc.settings?.timezone),
+      buildSystemContent(
+        userDoc,
+        libraryBlock,
+        false,
+        userDoc.settings?.timezone,
+        workspaceBlock,
+        taskCompletion.block,
+      ),
     );
     const raced = await routeAndComplete(
       {
@@ -786,6 +892,9 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
         max_tokens: outputTokensFor(rosterPrePick.contextLength, promptCharsFrom(turnMessages)),
         userId,
         abortSignal: abortController.signal,
+        // #252: tool-execution session (distinct from the trace) so
+        // generate_file can stamp provenance on the file it produces.
+        sessionId: String(session!._id),
         trace: { sessionId: String(session!._id) },
       },
       hasImage,
@@ -828,20 +937,15 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
     });
     await assistantMessage.save();
 
-    // Entity graph extraction (#138): one extra LLM call after the turn is
-    // served, fire-and-forget like title generation. Never runs for ZDR
-    // chats (handled above), and only when ENTITY_GRAPH_ENABLED is set —
-    // extraction is enrichment, so failures log and everything else
-    // continues from here.
-    if (isEntityExtractionEnabled()) {
-      extractAndPersistFromTurn({
-        userId: String(userDoc!._id),
-        sessionId: String(session!._id),
-        messageId: String(assistantMessage._id),
-        userText: content,
-        assistantText: assistantContent,
-      }).catch((err) => console.error('Entity extraction error:', redactForLog(err)));
-    }
+    // #255 (F4): the completion notification has now landed in the chat stream
+    // (this turn's assistant message persisted), so mark the drained tasks
+    // notified. Doing it here, not at read time, means a turn that throws before
+    // this point leaves the completion pending for the next turn. A failure to
+    // mark is swallowed: the turn already succeeded, and an unmarked completion
+    // simply re-surfaces next turn (at-least-once).
+    await markNotified(taskCompletion.taskIds).catch((err) =>
+      console.error('Task mark-notified error:', redactForLog(err)),
+    );
 
     res.json({
       sessionId: session!._id,
@@ -977,15 +1081,30 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
 
     await ensureUserLocation(streamUserDoc, req.ip);
     /*
-     * #238: the enrichment pass supplies the file-library block (empty on ZDR —
-     * the write-nothing turn injects no index, as before — and on image turns,
-     * which are text-only for enrichment).
+     * #238/#253: the enrichment pass supplies the file-library block and the
+     * workspace-memory block (empty on ZDR — the write-nothing turn injects no
+     * index, as before — and on image turns, which are text-only for
+     * enrichment). ZDR turns may still READ the workspace (read-only, matching
+     * plan task 8); they never write corpus items, so they are absent from the
+     * corpus by construction.
      */
     let libraryBlock = '';
+    let streamWorkspaceBlock = '';
+    // #255 (F4): completed background tasks for this session, drained into the
+    // persisted turn's context below (empty on ZDR — a ZDR turn cannot create a
+    // task, D7, so it has nothing to drain). The ids are marked notified only
+    // once the persisted assistant message lands, so a failed stream does not
+    // consume the notification.
+    let streamTaskBlock = '';
+    let streamTaskIds: TaskDocument['_id'][] = [];
     if (zdr) {
       // Continuity comes from the client replay (#116); nothing is read back.
       messages = buildZdrMessages(zdrHistory, content);
       routingResult = rosterRoute;
+      const zdrBlocks = await enrichmentBlocksFor(content, zdrHistory, userId as string, {
+        skipFiles: true,
+      });
+      streamWorkspaceBlock = zdrBlocks.workspaceBlock;
     } else {
       // Save user message
       const userMessage = await saveUserMessageWithMetrics(
@@ -1000,16 +1119,29 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
         .sort({ timestamp: -1 })
         .limit(10);
 
-      if (!hasImage) {
-        libraryBlock = await enrichmentLibraryBlock(
-          content,
-          enrichmentHistoryFromDocs(
-            history as { _id: unknown; role: string; content: string }[],
-            userMessage._id,
-          ),
-          userId as string,
-        );
-      }
+      const blocks = await enrichmentBlocksFor(
+        content,
+        enrichmentHistoryFromDocs(
+          history as { _id: unknown; role: string; content: string }[],
+          userMessage._id,
+        ),
+        userId as string,
+        {
+          skipFiles: hasImage,
+          skipWorkspace: hasImage,
+          excludeMessageId: String(userMessage._id),
+          excludeAssetId: attachedAsset ? String(attachedAsset._id) : undefined,
+        },
+      );
+      libraryBlock = blocks.libraryBlock;
+      streamWorkspaceBlock = blocks.workspaceBlock;
+      // #255: drain completed origin tasks (queued write) into this turn.
+      const streamTaskCompletion = await taskCompletionBlockFor(
+        userId as string,
+        String(session!._id),
+      );
+      streamTaskBlock = streamTaskCompletion.block;
+      streamTaskIds = streamTaskCompletion.taskIds;
 
       // Same image-turn gating as the non-streaming route (#115).
       routingResult = rosterRoute;
@@ -1019,7 +1151,6 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
       );
     }
 
-    const streamEntityBlock = await knowledgeBlockFor(content, userId as string);
     messages.unshift({
       role: 'system',
       // #261: persisted turns carry per-message timestamps (no date line); ZDR
@@ -1028,10 +1159,11 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
       // known (storage stays UTC).
       content: buildSystemContent(
         streamUserDoc,
-        streamEntityBlock,
         libraryBlock,
         zdr,
         streamUserDoc.settings?.timezone,
+        streamWorkspaceBlock,
+        streamTaskBlock,
       ),
     });
     if (attachedAsset) {
@@ -1099,6 +1231,9 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
           // #224: attach the chat session to this turn's trace (ZDR turns have
           // no session — nothing durable can be joined).
           ...(zdr ? {} : { trace: { sessionId: String(session!._id) } }),
+          // #252: the tool-execution session rides outside the trace guard for
+          // the same reason (ZDR turns have no durable session to attribute to).
+          ...(zdr ? {} : { sessionId: String(session!._id) }),
         },
         hasImage,
       );
@@ -1234,15 +1369,14 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
     });
     await assistantMessage.save();
 
-    if (isEntityExtractionEnabled()) {
-      extractAndPersistFromTurn({
-        userId: String(streamUserDoc!._id),
-        sessionId: String(session!._id),
-        messageId: String(assistantMessage._id),
-        userText: content,
-        assistantText: assistantContent,
-      }).catch((err) => console.error('Entity extraction error:', redactForLog(err)));
-    }
+    // #255 (F4): the notification landed with this persisted turn — mark the
+    // drained tasks notified now, not at read time, so a stream that errored
+    // before this point leaves the completion pending for the next turn. A
+    // marking failure is swallowed (the turn already succeeded; an unmarked
+    // completion re-surfaces next turn).
+    await markNotified(streamTaskIds).catch((err) =>
+      console.error('Task mark-notified error:', redactForLog(err)),
+    );
 
     // Follow-up suggestions (issue #33): generated with the cheap guard
     // model, reusing the title/classification service pattern. Skipped for

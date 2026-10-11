@@ -142,6 +142,20 @@ export const CASES: EvalCase[] = [
     ],
   },
   {
+    id: 'arithmetic-uses-calculator',
+    prompt: 'If I put away £25 a month, how much will that be after three years?',
+    description:
+      '#283: a calculation must go through the `calculate` tool (exact arithmetic) rather ' +
+      'than being worked out from weights, and must not trigger a web search or a file read.',
+    assertions: [
+      { type: 'tool_called', tool: 'calculate' },
+      { type: 'tool_not_called', tool: 'web_search' },
+      { type: 'tool_not_called', tool: 'list_files' },
+      { type: 'tool_not_called', tool: 'read_file' },
+      { type: 'answer_contains', text: '900' },
+    ],
+  },
+  {
     id: 'manual-page-of-phone',
     prompt: 'Which page of long-manual.md is the support phone number on?',
     description:

@@ -10,7 +10,9 @@ import { createTool } from '@mastra/core/tools';
 import { z } from 'zod';
 import mongoose from 'mongoose';
 import { Asset } from '../models/Asset';
+import { User } from '../models/User';
 import { truncateForPrompt } from './textExtraction';
+import { evaluateExpression } from './calculator';
 import { mcpToolsetsForUser } from './mcpService';
 import {
   degradedToolError,
@@ -212,7 +214,9 @@ const modelSettingsFrom = (options: CompletionOptions) => ({
  * per provider/model/mode so per-user state cannot live on them). Tool
  * `execute` receives this context as its second argument and reads
  * `requestContext.get('userId')` to scope per-user work (e.g. asset
- * library lookups).
+ * library lookups). Since #252 the caller's sessionId rides alongside it
+ * (`requestContext.get('sessionId')`) so provenance-writing tools can
+ * attribute files to their conversation.
  */
 /*
  * MCP toolsets (#36): when the caller is a user, resolve platform + personal
@@ -233,13 +237,20 @@ const callOptionsFrom = (
 ) => {
   const requestContext = new RequestContext();
   if (options.userId !== undefined) requestContext.set('userId', options.userId);
+  // #252: the chat session rides alongside userId so provenance-writing tools
+  // (generate_file) can attribute a file to its conversation without coupling
+  // to the LangSmith tracing switch (see CompletionOptions.sessionId).
+  if (options.sessionId !== undefined) requestContext.set('sessionId', options.sessionId);
   return {
     ...(options.abortSignal ? { abortSignal: options.abortSignal } : {}),
     // #198: the merged single system message rides in as a per-call override
     // (superseding the agent's default `instructions`, which Mastra would
     // otherwise inject as a second leading system message).
     ...(instructions ? { instructions } : {}),
-    maxSteps: mode === 'full' ? 12 : 1,
+    // #254: a caller may pin the agent's per-call step cap (the task sequencer
+    // sets 1 so one call is one driver-observable step). Absent falls back to
+    // the mode default, so every existing chat call site is byte-identical.
+    maxSteps: options.maxSteps ?? (mode === 'full' ? 12 : 1),
     modelSettings: modelSettingsFrom(options),
     ...traceOptionsFrom(options.trace),
     requestContext,
@@ -627,12 +638,17 @@ const generateFileExecute = async (
   const userId = requestContext.get('userId') as string | undefined;
   if (!userId) return { error: 'unavailable' };
   if (!spacesWorkspaceStorage.isConfigured()) return { error: 'unavailable' };
+  // #252: attribute the file to its conversation when a session is on the
+  // context; with no session we leave provenance absent (unknown) rather than
+  // inventing one (ZDR turns, raced calls, future non-chat callers).
+  const sessionId = requestContext.get('sessionId') as string | undefined;
   try {
     const result = await createSystemAsset(
       userId,
       filename,
       Buffer.from(content, 'utf8'),
       'text/markdown',
+      sessionId ? { kind: 'chat', sessionId } : undefined,
     );
     if (!result.ok) return { error: result.code };
     return {
@@ -674,6 +690,97 @@ export const currentDatetimeTool = createTool({
   execute: async () => ({ utc: new Date().toISOString(), timezoneOffsetMinutes: null }),
 });
 
+/*
+ * Calculator tool (#283, follow-up to #263). Arithmetic is not a weights task —
+ * the model gets multi-digit products and percentages wrong quietly — so it is
+ * a tool. The evaluation and its security lockdown live in `calculator.ts`;
+ * the tool is a thin, per-agent singleton with no per-user context, so it is
+ * always attached (no key gate, unlike `web_search`).
+ */
+export const calculateTool = createTool({
+  id: 'calculate',
+  description:
+    'Evaluate an arithmetic expression and return the exact numeric result. Use it for ' +
+    'any non-trivial calculation — percentages, products, multi-step sums — instead of ' +
+    'working it out in your head. Accepts a plain expression using + - * / % ^, ' +
+    'parentheses and numeric functions such as sqrt, log, sin, cos, abs, round, min, max ' +
+    '(for example "0.18 * 2450 + 137").',
+  inputSchema: z.object({
+    expression: z.string().describe('A plain arithmetic expression, e.g. "0.18 * 2450 + 137"'),
+  }),
+  outputSchema: z.object({
+    result: z.number().optional().describe('The exact numeric result'),
+    error: z.string().optional().describe('Why the expression could not be evaluated'),
+  }),
+  execute: async ({ expression }) => evaluateExpression(expression),
+});
+
+/*
+ * Delegate-to-worker tool (#255, epic #251; F2/F3). Creates a task — a
+ * first-class stream that runs offline over the workspace — with this chat as
+ * its thin origin (`origin: { kind: 'chat', sessionId }`). The task is *not* a
+ * chat's child: the chat only references it, and the task never writes the chat
+ * stream (single writer per stream). The tool reads `userId`/`sessionId` off the
+ * per-call `RequestContext`, exactly like `generateFileExecute` reads them for
+ * provenance.
+ *
+ * ZDR turns cannot delegate: a task is durable by definition (D7). A ZDR turn
+ * carries no `sessionId` on the context, and the tool refuses with a graceful
+ * result; it also re-reads `User.settings.zdr` (mirroring the creation route's
+ * refusal in `routes/tasks.ts`) so the two seams cannot disagree.
+ *
+ * `taskService` is imported lazily: a top-level import would close a module
+ * cycle (`taskService` -> `taskProcessor` -> `taskSequencer` -> `routes/chat` ->
+ * `racingService` -> `inferenceService` -> this module). The import happens at
+ * execution time, long after every module has loaded.
+ */
+export const delegateTaskTool = createTool({
+  id: 'delegate_task',
+  description:
+    'Hand a longer piece of agent work to a background worker (a "task") that runs ' +
+    'unattended over the user’s workspace: multi-step research, building a document, ' +
+    'anything needing more than a quick reply. Returns immediately with a task id; ' +
+    'the user can watch and steer it in the Tasks view, and its result is reported ' +
+    'back into this chat when it finishes. Use it when the request is substantial and ' +
+    'the user is happy for it to run in the background rather than replying now.',
+  inputSchema: z.object({
+    instruction: z
+      .string()
+      .min(1)
+      .describe('What the worker should accomplish, stated as a complete standalone instruction'),
+  }),
+  outputSchema: z.object({
+    taskId: z.string().optional(),
+    error: z.string().optional(),
+  }),
+  execute: async ({ instruction }, { requestContext }) => {
+    const userId = requestContext.get('userId') as string | undefined;
+    const sessionId = requestContext.get('sessionId') as string | undefined;
+    // A ZDR turn (or any non-persisted call) has no session to attribute or
+    // notify — and a durable task is exactly what ZDR forbids (D7).
+    if (!userId || !sessionId) {
+      return { error: 'Delegation is not available in this conversation.' };
+    }
+    try {
+      const user = await User.findById(userId);
+      if (!user || user.settings?.zdr) {
+        return { error: 'Delegation is not available with zero-data-retention enabled.' };
+      }
+      const { enqueueTask } = await import('./taskService');
+      const task = await enqueueTask({
+        userId,
+        instruction,
+        origin: { kind: 'chat', sessionId },
+        maxSteps: config.task.maxSteps,
+        maxCostUsd: config.task.maxCostUsd,
+      });
+      return { taskId: String(task._id) };
+    } catch {
+      return { error: 'Could not start that background task.' };
+    }
+  },
+});
+
 const TOOL_INSTRUCTIONS =
   'You may call the `web_search` tool to find current or external information. ' +
   'When the user message contains a complete http(s) URL, do not search — call ' +
@@ -682,6 +789,9 @@ const TOOL_INSTRUCTIONS =
   'When the user asks about the current date or time, call the `current_datetime` ' +
   'tool instead of guessing; it returns UTC, and the system prompt names the ' +
   'user’s local timezone and offset — state the time in the user’s local zone. ' +
+  'For any non-trivial arithmetic — a percentage, a product, a multi-step sum — ' +
+  'call the `calculate` tool with a plain numeric expression rather than ' +
+  'working it out yourself. ' +
   'Write the query as focused keywords. When search results arrive, answer with ' +
   'terse markdown links ([title](url)) for the claims you used; answer from your ' +
   'own knowledge when no search is needed. When the user refers to their files ' +
@@ -693,7 +803,11 @@ const TOOL_INSTRUCTIONS =
   're-read a long document end to end. When the user asks you to ' +
   'save, generate or create a new file, note or document, call `generate_file` ' +
   'with a filename (ending in .md) and the full markdown content; the file then ' +
-  'appears in their library and in `list_files` output.';
+  'appears in their library and in `list_files` output. When a request is ' +
+  'substantial background work — multi-step research, building a long document, ' +
+  'anything that would take many tool calls — call `delegate_task` with a ' +
+  'complete standalone instruction to hand it to the worker instead of doing it ' +
+  'inline; tell the user it is running in the background and will report back here.';
 
 /*
  * Agents are memoised per provider/model (creation is stateful — Mastra
@@ -739,9 +853,11 @@ const agentFor = (provider: LlmProvider, model: string, tools?: boolean): Agent 
             ...(hasSearchKey() ? { web_search: webSearchTool } : {}),
             fetch_url: fetchUrlTool,
             current_datetime: currentDatetimeTool,
+            calculate: calculateTool,
             list_files: listFilesTool,
             read_file: readFileTool,
             generate_file: generateFileTool,
+            delegate_task: delegateTaskTool,
           },
         }
       : {}),
@@ -869,10 +985,36 @@ const buildConnector = (provider: LlmProvider): LlmConnector => {
       );
       // Tool executions (issue #16): FullOutput.toolResults carries every
       // executed call with its structured result; surfaced so callers can
-      // persist sources. Empty/tool-less runs leave it undefined.
+      // persist sources. Empty/tool-less runs leave it undefined. #254: the
+      // entry's `args` (Mastra's `ToolResultPayload` carries them) ride across
+      // too, so the task sequencer can rebuild a step's tool chips and replay
+      // its own calls as history — the streaming path already exposes args.
+      //
+      // Mastra's `ToolResultChunk` nests everything under `payload`
+      // (`{ type, runId, from, payload: { toolName, args, result, toolCallId } }`),
+      // so the fields live on `entry.payload`, not on the entry itself. Reading
+      // the entry directly yielded `name: ''` and a missing `result` — the
+      // #254 sequencer's tool chips/replay were silently broken live. Unwrap
+      // `payload`, with an entry-level fallback so a future Mastra shape (or a
+      // bare payload in tests) still maps.
       const toolResults = (result as { toolResults?: unknown[] }).toolResults?.map((entry) => {
-        const r = entry as { name?: string; result?: unknown };
-        return { name: r.name ?? '', result: r.result };
+        const outer = entry as {
+          payload?: { toolName?: string; name?: string; args?: unknown; result?: unknown };
+          toolName?: string;
+          name?: string;
+          args?: unknown;
+          result?: unknown;
+        };
+        const r = outer.payload ?? outer;
+        const args =
+          r.args && typeof r.args === 'object' && !Array.isArray(r.args)
+            ? (r.args as Record<string, unknown>)
+            : undefined;
+        return {
+          name: r.toolName ?? r.name ?? '',
+          result: r.result,
+          ...(args ? { args } : {}),
+        };
       });
       // Token usage (#224): the turn total across all tool steps, falling back
       // to the last step's usage. Persisted on the assistant message.

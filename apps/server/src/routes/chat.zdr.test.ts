@@ -7,7 +7,6 @@ import { UserSettings } from '../models/User';
 import { User } from '../models/User';
 import { AssetJob } from '../models/AssetJob';
 import { Asset } from '../models/Asset';
-import { Entity } from '../models/Entity';
 
 const mockAgentStream = jest.fn();
 const mockPlainGenerate = jest.fn();
@@ -89,7 +88,8 @@ jest.mock('../services/titleService', () => ({
 // #238: stub the enrichment aux call so it does not occupy
 // `mockPlainGenerate.mock.calls[0]` in the trace assertions.
 jest.mock('../services/enrichmentService', () => ({
-  enrichmentLibraryBlock: jest.fn().mockResolvedValue(''),
+  enrichmentVotes: jest.fn().mockResolvedValue({ files: false, workspace: false }),
+  libraryIndexFor: jest.fn().mockResolvedValue(''),
   isEnrichmentEnabled: () => false,
 }));
 
@@ -141,10 +141,6 @@ const eventsFrom = (text: string) =>
     });
 
 describe('Zero-data retention chats (issue #116)', () => {
-  afterEach(() => {
-    delete process.env.ENTITY_GRAPH_PROMPT_INJECTION;
-  });
-
   beforeEach(() => {
     jest.clearAllMocks();
     mockAgentStream.mockImplementation(async () => fullStreamFrom(['Ephemeral answer']));
@@ -411,65 +407,78 @@ describe('Zero-data retention chats (issue #116)', () => {
     expect(mockDeleteObject).not.toHaveBeenCalled();
   });
 
-  // #138 task 8: incognito turns get the graph READ-ONLY (Alex, 2026-09-21)
-  // — the block is injected, but nothing is written, ever.
-  it('injects the knowledge block into a ZDR turn read-only (plain route)', async () => {
+  // #253 decision 6: a ZDR turn may READ the workspace (read-only) — the corpus
+  // is the user's own persisted chats/files, so the ZDR turn itself is absent
+  // from it by construction. Both routes must inject it identically.
+  const forceWorkspaceBlock = (block: string) => {
+    const { enrichmentVotes } = jest.requireMock('../services/enrichmentService') as {
+      enrichmentVotes: jest.Mock;
+    };
+    enrichmentVotes.mockResolvedValueOnce({ files: false, workspace: true });
+    const retrieve = jest
+      .spyOn(
+        jest.requireActual<typeof import('../services/workspaceRetrievalService')>(
+          '../services/workspaceRetrievalService',
+        ),
+        'retrieveWorkspaceBlock',
+      )
+      .mockResolvedValue(block);
+    process.env.WORKSPACE_MEMORY_ENABLED = '1';
+    return retrieve;
+  };
+
+  it('injects the workspace block into a ZDR turn read-only (plain route)', async () => {
     mockPlainGenerate.mockResolvedValue({
       choices: [{ message: { content: 'Plain ephemeral answer' } }],
     });
-    process.env.ENTITY_GRAPH_PROMPT_INJECTION = 'on';
-    const email = 'zdr-graph@example.com';
+    const email = 'zdr-workspace@example.com';
     const cookies = await registerUser(email);
     await enableZdr(email);
-    const doc = await User.findOne({ email });
-    await Entity.create({
-      userId: doc!._id,
-      name: 'Taj Hotel',
-      normalizedName: 'taj hotel',
-      kind: 'place',
-      confidence: 0.9, // above HIGH_CONFIDENCE so it passes the gate
-    });
+    const retrieve = forceWorkspaceBlock('- chat "Move" (2026-10-01) — budget is twelve thousand');
 
-    const response = await plainMessage(cookies, { content: 'restaurants near taj hotel' });
-    expect(response.status).toBe(200);
-    const system = mockPlainGenerate.mock.calls[0][0].messages.find(
-      (m: { role: string }) => m.role === 'system',
-    );
-    expect(system.content).toContain('<user:knowledge_graph>');
-    expect(system.content).toContain('place: Taj Hotel');
-    // Read-only: no session, message, entity, or edge writes from a ZDR turn.
-    expect(await Session.countDocuments()).toBe(0);
-    expect(await Message.countDocuments()).toBe(0);
-    expect(await Entity.countDocuments()).toBe(1);
+    try {
+      const response = await plainMessage(cookies, {
+        content: 'what did we decide about the budget',
+      });
+      expect(response.status).toBe(200);
+      const system = mockPlainGenerate.mock.calls[0][0].messages.find(
+        (m: { role: string }) => m.role === 'system',
+      );
+      expect(system.content).toContain('<user:workspace>');
+      expect(system.content).toContain('budget is twelve thousand');
+      // Read-only: the ZDR turn writes no session or message rows.
+      expect(await Session.countDocuments()).toBe(0);
+      expect(await Message.countDocuments()).toBe(0);
+    } finally {
+      delete process.env.WORKSPACE_MEMORY_ENABLED;
+      retrieve.mockRestore();
+    }
   });
 
-  it('injects the knowledge block into a ZDR streaming turn and writes nothing', async () => {
-    process.env.ENTITY_GRAPH_PROMPT_INJECTION = 'on';
-    const email = 'zdr-graph-stream@example.com';
+  it('injects the workspace block into a ZDR streaming turn and writes nothing', async () => {
+    const email = 'zdr-workspace-stream@example.com';
     const cookies = await registerUser(email);
     await enableZdr(email);
-    const doc = await User.findOne({ email });
-    await Entity.create({
-      userId: doc!._id,
-      name: 'Taj Hotel',
-      normalizedName: 'taj hotel',
-      kind: 'place',
-      confidence: 0.9,
-    });
+    const retrieve = forceWorkspaceBlock('- chat "Move" (2026-10-01) — budget is twelve thousand');
 
-    const response = await streamMessage(cookies, {
-      content: 'restaurants near taj hotel',
-      history: [],
-    });
-    expect(response.status).toBe(200);
-    const streamOpts = mockAgentStream.mock.calls[0][0];
-    const system = (streamOpts.messages as { role: string; content: string }[]).find(
-      (m) => m.role === 'system',
-    );
-    expect(system?.content).toContain('<user:knowledge_graph>');
-    expect(await Session.countDocuments()).toBe(0);
-    expect(await Message.countDocuments()).toBe(0);
-    expect(await Entity.countDocuments()).toBe(1);
+    try {
+      const response = await streamMessage(cookies, {
+        content: 'what did we decide about the budget',
+        history: [],
+      });
+      expect(response.status).toBe(200);
+      const streamOpts = mockAgentStream.mock.calls[0][0];
+      const system = (streamOpts.messages as { role: string; content: string }[]).find(
+        (m) => m.role === 'system',
+      );
+      expect(system?.content).toContain('<user:workspace>');
+      expect(system?.content).toContain('budget is twelve thousand');
+      expect(await Session.countDocuments()).toBe(0);
+      expect(await Message.countDocuments()).toBe(0);
+    } finally {
+      delete process.env.WORKSPACE_MEMORY_ENABLED;
+      retrieve.mockRestore();
+    }
   });
 
   describe('ephemeral cleanup on rejected/failed turns', () => {

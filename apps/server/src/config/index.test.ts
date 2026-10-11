@@ -17,8 +17,6 @@ const keys = [
   'LANGSMITH_PROJECT',
   'LANGCHAIN_PROJECT',
   'BRAVE_SEARCH_API_KEY',
-  'ENTITY_GRAPH_ENABLED',
-  'ENTITY_GRAPH_PROMPT_INJECTION',
   'CHAT_MAX_OUTPUT_TOKENS',
   'PORT',
   'TRUST_PROXY_HOPS',
@@ -30,6 +28,8 @@ const keys = [
   'TOVA_EVAL_MODELS',
   'TOVA_EVAL_MODEL',
   'TOVA_EVAL_PROVIDER',
+  'TASK_MAX_STEPS',
+  'TASK_MAX_COST_USD',
 ] as const;
 
 const backup: Record<string, string | undefined> = {};
@@ -63,8 +63,6 @@ describe('config/index', () => {
       process.env.LANGSMITH_API_KEY = 'ls-key';
       process.env.LANGSMITH_PROJECT = 'tova-dev';
       process.env.BRAVE_SEARCH_API_KEY = 'brave';
-      process.env.ENTITY_GRAPH_ENABLED = 'true';
-      process.env.ENTITY_GRAPH_PROMPT_INJECTION = 'true';
       process.env.CHAT_MAX_OUTPUT_TOKENS = '2048';
       process.env.PORT = '4000';
       process.env.TRUST_PROXY_HOPS = '1';
@@ -91,8 +89,6 @@ describe('config/index', () => {
       expect(config.langsmith.apiKey).toBe('ls-key');
       expect(config.langsmith.project).toBe('tova-dev');
       expect(config.search.braveApiKey).toBe('brave');
-      expect(config.entityGraph.extractionEnabled).toBe(true);
-      expect(config.entityGraph.promptInjectionEnabled).toBe(true);
       expect(config.chat.maxOutputTokens).toBe('2048');
       expect(config.runtime.port).toBe('4000');
       expect(config.runtime.trustProxyHops).toBe('1');
@@ -132,10 +128,7 @@ describe('config/index', () => {
       expect(config.safeBrowsing.apiKey).toBe('gk');
     });
 
-    it('booleans are truthiness checks, not string comparisons', () => {
-      expect(config.entityGraph.extractionEnabled).toBe(false);
-      process.env.ENTITY_GRAPH_ENABLED = 'false';
-      expect(config.entityGraph.extractionEnabled).toBe(true);
+    it('storage configuration is a truthiness check, not a string comparison', () => {
       process.env.DO_SPACES_KEY = 'k';
       process.env.DO_SPACES_SECRET = 's';
       process.env.DO_SPACES_BUCKET = '';
@@ -157,6 +150,34 @@ describe('config/index', () => {
     it('raw string accessors stay raw (no parsing in the module)', () => {
       process.env.CHAT_MAX_OUTPUT_TOKENS = 'garbage';
       expect(config.chat.maxOutputTokens).toBe('garbage');
+    });
+
+    it('task budgets default when unset, malformed, empty, or non-positive (#254)', () => {
+      expect(config.task.maxSteps).toBe(25);
+      expect(config.task.maxCostUsd).toBe(5);
+      for (const bad of ['garbage', '', '0', '-3', 'Infinity']) {
+        process.env.TASK_MAX_STEPS = bad;
+        process.env.TASK_MAX_COST_USD = bad;
+        expect(config.task.maxSteps).toBe(25);
+        expect(config.task.maxCostUsd).toBe(5);
+      }
+    });
+
+    it('floors the step cap and defaults a value that floors to zero (#254)', () => {
+      // `0.5` is positive but floors to a zero-step budget; it must degrade to
+      // the default rather than become 0. A fractional cost is legitimate, so
+      // the two getters deliberately differ here.
+      process.env.TASK_MAX_STEPS = '0.5';
+      process.env.TASK_MAX_COST_USD = '0.5';
+      expect(config.task.maxSteps).toBe(25);
+      expect(config.task.maxCostUsd).toBe(0.5);
+    });
+
+    it('task budgets parse a positive env value, flooring the step cap (#254)', () => {
+      process.env.TASK_MAX_STEPS = '40.9';
+      process.env.TASK_MAX_COST_USD = '2.5';
+      expect(config.task.maxSteps).toBe(40);
+      expect(config.task.maxCostUsd).toBe(2.5);
     });
   });
 
