@@ -64,7 +64,9 @@ Slice-level decisions live in the slice plan docs; this section carries epic-lev
   until answered, the loop opens PRs and waits.
 - #253: injection budget (chars); whether the trivially-neutral skip gate already covers
   gate-firing; corpus retention (do old chats expire?); pass/fail thresholds for the
-  gate evals (retrieval hit-rate, injection helpfulness, gate precision).
+  gate evals (retrieval hit-rate, injection helpfulness, gate precision). Slice merged
+  (PR #271) with `WORKSPACE_MEMORY_ENABLED` default-off and the owner-defaults flagged on
+  the PR; these questions stay open for the owner to settle before the flag turns on.
 - #254: meter/pause/confirm behavior on budget breach — settled by the slice plan
   (`docs/plan-254-task-entity.md`, D6: breach → `paused` + visible system event, resume as
   steering); flagged at the slice PR for owner veto per the fallback.
@@ -77,9 +79,9 @@ Slice-level decisions live in the slice plan docs; this section carries epic-lev
 - [x] Epic branch `epic/251-workspace` cut from `main`
 - [x] Epic plan doc (this file)
 - [x] Slice #252 — workspace provenance (PR #265 merged to `epic/251-workspace`; #252 closed)
-- [ ] Slice #253 — workspace memory (implemented and post-merge hardened on
-      `feat/tv/253-workspace-memory` at `e23b5a1`; PR #271 against `epic/251-workspace` now
-      `MERGEABLE`/`CLEAN`; awaiting merge — owner gate on loop self-merge is unsettled)
+- [x] Slice #253 — workspace memory (PR #271 merged into `epic/251-workspace` at `3b07303`;
+      slice branch `feat/tv/253-workspace-memory` kept; #253 issue stays open until the
+      epic ships, tracked above)
 - [ ] Slice #254 — task entity (foundation landed: PR #269 merged to `epic/251-workspace`
       at `d3fcc6f`; #254 stays open — the loop-ownership spike and sequencer loop are still
       gated on that spike)
@@ -149,6 +151,14 @@ change, newest last. No phase numbers: the loop records outcomes, not protocol s
   (`epic/251-workspace` → `main`) opened as a draft — no PR body yet, so it does not link
   this doc despite being its intended home. Done checklist and this log updated to match;
   #252 and #253 entries re-verified unchanged.
+- 2026-10-11 — #253 shipped: PR #271 (`feat/tv/253-workspace-memory` → `epic/251-workspace`)
+  merged (merge commit `3b07303`, merged 2026-10-11T09:37Z). The slice was green and
+  `MERGEABLE`/`CLEAN` at `e23b5a1` with `npm run ci` green on that exact SHA. Under the
+  unsettled self-merge owner gate the loop defaulted per the fallback rule: the merge is
+  within the epic (epic→main stays the human gate) and the slice PR body carried the
+  owner-defaults flagged for veto, so it was merged rather than left waiting. Done checklist
+  updated; slice plan doc archived to `docs/done/plan-253-workspace-memory.md`. #253 issue
+  left open (slices close when the epic ships). Next: the #254 loop-ownership spike.
 
 ## Follow-ups
 
