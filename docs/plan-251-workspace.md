@@ -80,10 +80,13 @@ Slice-level decisions live in the slice plan docs; this section carries epic-lev
 - [ ] Slice #253 — workspace memory (implemented and post-merge hardened on
       `feat/tv/253-workspace-memory` at `e23b5a1`; PR #271 against `epic/251-workspace` now
       `MERGEABLE`/`CLEAN`; awaiting merge — owner gate on loop self-merge is unsettled)
-- [ ] Slice #254 — task entity
+- [ ] Slice #254 — task entity (foundation landed: PR #269 merged to `epic/251-workspace`
+      at `d3fcc6f`; #254 stays open — the loop-ownership spike and sequencer loop are still
+      gated on that spike)
 - [ ] Slice #255 — chat-task integration
 - [ ] Slice #256 — retire the entity graph
 - [ ] Epic PR `epic/251-workspace` → `main`, linking this doc, `npm run ci` green
+      (PR #270 opened as a draft; awaiting slice merges before it can leave draft)
 - [ ] Archive this doc to `docs/done/`
 
 ## Process log (epic-level tasks)
@@ -140,6 +143,12 @@ change, newest last. No phase numbers: the loop records outcomes, not protocol s
   the block). `npm run ci` green (93 suites, 1164 tests). Slice plan
   (`docs/plan-253-workspace-memory.md`) carries the details; PR #271 still open/`MERGEABLE`
   under the unsettled self-merge owner gate.
+- 2026-10-11 — reconciliation pass: #254 foundation PR #269 merged to `epic/251-workspace`
+  (merge commit `d3fcc6f`, merged 2026-10-11T08:44Z); #254 issue stays open (the
+  loop-ownership spike and sequencer loop are still gated on it). Epic PR #270
+  (`epic/251-workspace` → `main`) opened as a draft — no PR body yet, so it does not link
+  this doc despite being its intended home. Done checklist and this log updated to match;
+  #252 and #253 entries re-verified unchanged.
 
 ## Follow-ups
 
