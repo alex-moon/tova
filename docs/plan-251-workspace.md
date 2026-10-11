@@ -101,6 +101,14 @@ change, newest last. No phase numbers: the loop records outcomes, not protocol s
   done via merged PR #265 and closed issue; #253–#256 open; no epic PR yet) — no drift.
   Open questions re-checked; the #254 budget-breach question is settled by its slice plan
   (D6) and annotated as such.
+- 2026-10-11 — #254 foundation hardened before the gate: a review pass over the committed
+  Task-entity foundation (commit `e262171` on `feat/tv/254-task-foundation`) fixed the
+  `runTaskTick` failure path clobbering a settled task, the `Message.schema` invariant
+  test, `config.task` env parse/floor and test isolation, and a redundant `TaskEvent`
+  clock. Flagged out-of-window: `chat.stream.test.ts` (#261) had a rotted fixed-date seed
+  that was already failing `npm run ci`; seeds made relative. `npm run ci` green on the
+  slice branch; the slice PR against the epic branch is opened this pass. Slice plan doc
+  (`docs/plan-254-task-entity.md`) carries the review findings.
 
 ## Follow-ups
 
