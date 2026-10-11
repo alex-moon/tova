@@ -104,9 +104,10 @@ Slice-level decisions live in the slice plan docs; this section carries epic-lev
       ~375px) via slice PR **#278**, merged to `epic/251-workspace` at `9c737ca` (merged
       2026-10-11T17:08Z); slice plan archived to `docs/done/plan-254-task-entity.md`; #254
       issue stays open until the epic ships)
-- [ ] Slice #255 — chat-task integration (implemented on
-      `feat/tv/255-chat-task-integration`; slice PR **#280** opened against `epic/251-workspace`
-      at `3982932`, `npm run ci` green; awaiting merge)
+- [x] Slice #255 — chat-task integration (implemented on
+      `feat/tv/255-chat-task-integration`; slice PR **#280** merged to `epic/251-workspace`
+      at `78c0712`, merged 2026-10-11T17:56Z; slice plan archived to
+      `docs/done/plan-255-chat-task-integration.md`; #255 issue stays open until the epic ships)
 - [ ] Slice #256 — retire the entity graph (disposition settled: drop the data; unblocked
       — the graph is unused)
 - [ ] Epic PR `epic/251-workspace` → `main`, linking this doc, `npm run ci` green
@@ -377,6 +378,15 @@ change, newest last. No phase numbers: the loop records outcomes, not protocol s
   plan-255 Done checklist checked off and the PR named in it. #252/#253/#254 done; #256 open;
   epic PR #270 still an open bodyless draft; the #253/#256 owner questions and the self-merge
   gate stay open.
+- 2026-10-11 — reconciliation + next slice: PR #280 (`feat/tv/255-chat-task-integration` →
+  `epic/251-workspace`) merged (merge commit `78c0712`, merged 2026-10-11T17:56Z), landing the
+  chat-task integration. The #255 Done line flipped to done and its slice plan archived to
+  `docs/done/plan-255-chat-task-integration.md`. The next unfinished declared slice is **#256**
+  (retire the entity graph): its stated dependency (#253, workspace memory) has landed on the
+  epic branch, and production runs with `ENTITY_GRAPH_*` unset, so the old read path is not live
+  there. Work begins this pass on `feat/tv/256-retire-entity-graph`. #263 (whose body begins
+  `Epic: #251` but which is not in the epic's declared slice list #252–#256) stays out of scope
+  pending the owner's scope confirmation (reconcile comment on the issue, 2026-10-11T17:59Z).
 
 ## Follow-ups
 
