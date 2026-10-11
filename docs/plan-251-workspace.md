@@ -82,7 +82,7 @@ Slice-level decisions live in the slice plan docs; this section carries epic-lev
 - [x] Slice #253 — workspace memory (PR #271 merged into `epic/251-workspace` at `3b07303`;
       slice branch `feat/tv/253-workspace-memory` kept; #253 issue stays open until the
       epic ships, tracked above)
-- [ ] Slice #254 — task entity (foundation landed: PR #269 merged to `epic/251-workspace`
+- [x] Slice #254 — task entity (foundation landed: PR #269 merged to `epic/251-workspace`
       at `d3fcc6f`; loop-ownership spike DONE (decision (c) hybrid, cap 1), merged to
       `epic/251-workspace` via PR #272 at `04ecc57`; **sequencer loop landed server-side
       (connector `maxSteps` field + `taskSequencer` turn loop + steering/budget/resume tests)
@@ -92,10 +92,11 @@ Slice-level decisions live in the slice plan docs; this section carries epic-lev
       **API routes landed on `feat/tv/254-task-routes` via PR #275 (`routes/tasks.ts` +
       `taskService` steer/cancel + D12 seq-retry + D13 cancel-boundary + D14/D15), merged to
       `epic/251-workspace` at `327b5fe` (merged 2026-10-11T11:32Z); the **task client view
-      landed this pass** on `feat/tv/254-task-client-view` (`services/tasks.ts` + `TasksView`
+      landed** on `feat/tv/254-task-client-view` (`services/tasks.ts` + `TasksView`
       + `TaskLibrary` + `TaskStatusChip`, `/tasks` route + Sidebar link, mobile-first, e2e
-      ~375px) — slice PR **#278** opened against `epic/251-workspace`; #254 stays open until
-      the epic ships)
+      ~375px) via slice PR **#278**, merged to `epic/251-workspace` at `9c737ca` (merged
+      2026-10-11T17:08Z); slice plan archived to `docs/done/plan-254-task-entity.md`; #254
+      issue stays open until the epic ships)
 - [ ] Slice #255 — chat-task integration
 - [ ] Slice #256 — retire the entity graph
 - [ ] Epic PR `epic/251-workspace` → `main`, linking this doc, `npm run ci` green
@@ -328,6 +329,14 @@ change, newest last. No phase numbers: the loop records outcomes, not protocol s
   (server 97 suites / 1213 tests; client 21 files / 265 tests); `tasks` + `responsive` e2e 16/16;
   detail inspected in a real browser at 390px. Slice plan (`docs/plan-254-task-entity.md`)
   carries the "Review pass 3" section; PR #278 still open against `epic/251-workspace`.
+
+- 2026-10-11 — #254 closed out: slice PR #278 (`feat/tv/254-task-client-view` →
+  `epic/251-workspace`) merged (merge commit `9c737ca`, merged 2026-10-11T17:08Z), completing
+  the task client view — the last #254 task. Under the unsettled self-merge owner gate the
+  loop defaulted per the fallback rule (the merge is within the epic; epic→main stays the
+  human gate), matching the #271/#272/#274/#275 precedent. The #254 Done line flipped to
+  done and the slice plan archived to `docs/done/plan-254-task-entity.md`. Next unfinished
+  slice: **#255 chat-task integration**.
 
 ## Follow-ups
 
