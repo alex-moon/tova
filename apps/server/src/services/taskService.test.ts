@@ -230,4 +230,36 @@ describe('steerTask / cancelTask (#254 routes slice)', () => {
     await cancelTask((await latestTask(String(active._id)))!);
     expect((await latestTask(String(active._id)))?.status).toBe('done');
   });
+
+  // Race: the route reads the task, then the poller settles/cancels it before
+  // the steer lands. The doc argument is stale; the live status must win so a
+  // terminal task is never resurrected to `queued` (cancel-clobber).
+  it('refuses a stale steer when the task settled to a terminal status meanwhile', async () => {
+    const task = await createTask('race-steer');
+    await Task.updateOne({ _id: task._id }, { $set: { status: 'paused' } });
+    const stalePaused = await latestTask(String(task._id));
+    // Concurrent settle: the task is cancelled after the route's read.
+    await Task.updateOne({ _id: task._id }, { $set: { status: 'cancelled' } });
+
+    const result = await steerTask(stalePaused!, 'resurrect me');
+
+    expect(result).toEqual({ status: 'refused' });
+    expect((await latestTask(String(task._id)))?.status).toBe('cancelled');
+    // No steering event is appended to a stream that is already terminal.
+    expect(await TaskEvent.countDocuments({ taskId: task._id })).toBe(1);
+  });
+
+  // Race: the route reads a `running` task, then the processor finishes it to
+  // `done` before the cancel lands. The cancel must not clobber the completion.
+  it('does not clobber a concurrently-completed task on a stale cancel', async () => {
+    const task = await createTask('race-cancel');
+    await Task.updateOne({ _id: task._id }, { $set: { status: 'running' } });
+    const staleRunning = await latestTask(String(task._id));
+    // Concurrent completion: the loop settles the task to done.
+    await Task.updateOne({ _id: task._id }, { $set: { status: 'done' } });
+
+    await cancelTask(staleRunning!);
+
+    expect((await latestTask(String(task._id)))?.status).toBe('done');
+  });
 });

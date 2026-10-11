@@ -819,6 +819,72 @@ for one task no longer carries into the next). Verified in the browser at 375px 
 overflow; paging cursor fires; detail poll settles at one request per interval). `npm run ci`
 green (server 96 suites / 1207 tests; client 21 files / 263 tests).
 
+## Review pass 3 (2026-10-11) — sequencer + API + client hardening
+
+A review of the landed work against the code and the tickets (#251/#254), driven by a **live
+end-to-end run of the real sequencer** (a task created through the API and watched in the
+browser). One defect was a live functional break; the rest are correctness/contract fixes.
+
+### The live break: Mastra tool results were read at the wrong nesting level
+
+Running a real task with a tool-forcing prompt (`list_files`) exposed it: every persisted
+tool chip was `{ phase: 'result', name: '', label: 'Tool run' }` — **no tool name, no result,
+no args** — so `renderToolReplay` replayed `[tool tool]` with no output and the model re-ran
+the same tool **blind for all 25 steps** until the budget paused the task. The root cause was
+in the non-streaming connector (`mastraService.ts`): Mastra's `FullOutput.toolResults` entries
+are `ToolResultChunk`s shaped `{ type, runId, from, payload: { toolName, args, result,
+toolCallId } }`, but the mapping read `toolName`/`args`/`result` **off the entry** instead of
+`entry.payload`. Every field came back `undefined`/`''`. Review-pass-2 believed it had fixed
+this path; it had widened the *destinations* (`parseStepOutcome` → chip → schema) but read the
+*source* one level too shallow. The connector now unwraps `payload` (with an entry-level
+fallback). Verified live: the same task now completes in 2 steps with a chip of
+`{ name: 'list_files', label: 'Listed your files', resultCount: 1 }`. Pinned by
+`mastraToolResults.test.ts` against the captured real shape.
+
+### Cancel/status races (the "single writer / status" invariants)
+
+- **`steerTask` could resurrect a terminal task.** The route reads the task, then `steerTask`
+  re-queued from `paused` with an unconditional `{ _id }` write, so a cancel landing in
+  between was clobbered (`cancelled → queued`). It now re-reads the **live** status (refusing
+  terminal) and guards the re-queue on `status: 'paused'`.
+- **`cancelTask` could clobber a completion.** Same shape: a `running` task that settled to
+  `done` between the read and the write was overwritten to `cancelled`. The write is now
+  guarded with `status: { $nin: [done, failed, cancelled] }`.
+- **The processor wrote a false "Task completed." after a cancel.** The completion branch
+  appended the `system` notice *unconditionally* and only guarded the status write, so a
+  cancel during the final step left "Task completed." on a `cancelled` stream. It now settles
+  first and announces only when the guarded update actually matched a `running` task.
+- Regression tests added for all three (`taskService.test.ts`, `taskProcessor.test.ts`).
+
+### API contract
+
+- **Malformed `:id` returned 500, not 404.** `Task.findOne({ _id: 'not-an-objectid' })` throws
+  a Mongoose cast error, which the handler turned into a 500 — against D15's "unknown id →
+  404, no oracle". `ownedTask` now short-circuits a non-ObjectId to `null` (404). Test added.
+
+### Client
+
+- **Pagination was wiped by the active poll.** Review-pass-2 added "Show more", but the 3s
+  silent poll refetched page 1 and replaced the list, dropping every appended page and
+  re-showing "Show more" on each tick while any task was active (the normal case). The poll
+  now refetches **all** loaded pages via a cursor chain (`pagesLoaded` ref), so appended pages
+  survive. The existing pagination test was strengthened to advance past a poll tick.
+- **Silent-poll failures were swallowed forever.** A task deleted mid-poll 404'd on every
+  silent tick; the UI stayed frozen on a stale `running` frame and kept hammering a dead
+  endpoint. `TaskError` now carries the HTTP `status`; a 404 on a (silent or not) load
+  surfaces the error and stops polling.
+- **Cancel showed no in-flight state.** A cancel is observed server-side only at the next step
+  boundary (D13), so the POST response still reports `running`; the button flipped back to an
+  enabled "Cancel" and invited a second tap. A `cancelPending` (derived) state now holds a
+  disabled "Cancelling…" until the status is terminal.
+- **The `/tasks` responsive e2e only checked the list.** It now opens the task **detail** (the
+  actual new surface: stream, chips, budget line, composer) and re-asserts no overflow at both
+  viewports.
+
+`npm run ci` green (server 97 suites / 1213 tests; client 21 files / 265 tests); the
+`tasks` + `responsive` e2e suites pass in both projects (16/16), and the detail pane was
+inspected in a real browser at 390px.
+
 ## Follow-ups
 
 - Interrupt as a sequencing override (D8) — its own ticket after steering lands.

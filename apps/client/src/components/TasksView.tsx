@@ -8,6 +8,7 @@ import TaskLibrary from './TaskLibrary';
 import TaskStatusChip from './TaskStatusChip';
 import TaskService, {
   isTerminalTask,
+  isTaskNotFound,
   type TaskDetail,
   type TaskStreamEvent,
   type TaskSummary,
@@ -135,6 +136,12 @@ const TasksView: React.FC = () => {
   const [instruction, setInstruction] = useState('');
   const [sending, setSending] = useState(false);
   const [cancelling, setCancelling] = useState(false);
+  // Set once a cancel has been requested, and held until the task reaches a
+  // terminal state. The server accepts a cancel immediately but the processor
+  // only observes it at its next step boundary (D13), so the cancel response
+  // still reports `running`; without this the button would flip back from a
+  // spinner to an enabled "Cancel" and invite a second tap.
+  const [cancelRequested, setCancelRequested] = useState(false);
 
   // The id the in-flight load belongs to; compared after await so a response
   // for a task the user has already navigated away from is discarded rather
@@ -149,7 +156,17 @@ const TasksView: React.FC = () => {
       setDetail(next);
       setError(null);
     } catch (err) {
-      if (selectedIdRef.current !== taskId || opts.silent) return;
+      if (selectedIdRef.current !== taskId) return;
+      // A 404 means the task is gone (deleted/reassigned): surface it and stop
+      // polling — a silent failure the previous code swallowed, leaving the UI
+      // frozen on a stale "running" frame forever. Non-404 silent failures are
+      // still swallowed (the poll retries next tick) to avoid flashing errors.
+      if (isTaskNotFound(err)) {
+        setDetail(null);
+        setError(err.message);
+        return;
+      }
+      if (opts.silent) return;
       setError(err instanceof Error ? err.message : 'Could not load this task');
     } finally {
       if (!opts.silent && selectedIdRef.current === taskId) setLoading(false);
@@ -164,6 +181,8 @@ const TasksView: React.FC = () => {
     setDetail(null);
     setError(null);
     setInstruction('');
+    setCancelling(false);
+    setCancelRequested(false);
   }, []);
 
   useEffect(() => {
@@ -177,15 +196,22 @@ const TasksView: React.FC = () => {
   // the first detail response lands.
   const summary = detail?.task ?? seed;
   const terminal = summary != null && isTerminalTask(summary.status);
+  // A task reported gone (404) is not polled any more.
+  const gone = error != null && detail == null;
 
   // Poll while the task is still active so the stream advances in place; stop
   // once it reaches a terminal state (the worker is the only writer then).
-  const active = selectedId != null && summary != null && !terminal;
+  const active = selectedId != null && summary != null && !terminal && !gone;
   useEffect(() => {
     if (!active || !selectedId) return;
     const timer = setInterval(() => void loadDetail(selectedId, { silent: true }), POLL_MS);
     return () => clearInterval(timer);
   }, [active, selectedId, loadDetail]);
+
+  // Once the task reaches a terminal state (the cancel landed, or it settled on
+  // its own) the pending cancel state is spent — derived rather than stored, so
+  // no clearing effect is needed.
+  const cancelPending = cancelRequested && !terminal;
 
   const handleInstruct = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -205,12 +231,18 @@ const TasksView: React.FC = () => {
   };
 
   const handleCancel = async () => {
-    if (!selectedId || cancelling || terminal) return;
+    if (!selectedId || cancelling || cancelRequested || terminal) return;
     setCancelling(true);
+    setCancelRequested(true);
     try {
       await TaskService.cancel(selectedId);
+      // The server accepts the cancel but still reports `running` (D13: observed
+      // at the next step boundary), so the header does not flip yet. The poll
+      // keeps the "Cancelling…" state until the status actually leaves running.
       await loadDetail(selectedId, { silent: true });
     } catch (err) {
+      // The cancel did not take; clear the pending state so the button is usable.
+      setCancelRequested(false);
       toast.error(err instanceof Error ? err.message : 'Could not cancel task');
     } finally {
       setCancelling(false);
@@ -275,16 +307,16 @@ const TasksView: React.FC = () => {
                     variant="outline"
                     size="sm"
                     onClick={() => void handleCancel()}
-                    disabled={cancelling}
+                    disabled={cancelling || cancelPending}
                     data-testid="task-cancel"
                     className="shrink-0"
                   >
-                    {cancelling ? (
+                    {cancelling || cancelPending ? (
                       <Loader2 className="size-3.5 animate-spin" />
                     ) : (
                       <Square className="size-3.5" />
                     )}
-                    Cancel
+                    {cancelPending ? 'Cancelling…' : 'Cancel'}
                   </Button>
                 )}
               </div>

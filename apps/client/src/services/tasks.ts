@@ -58,19 +58,35 @@ export interface TaskDetail {
 }
 
 export class TaskError extends Error {
-  constructor(message = 'Something went wrong with that task', options?: { cause?: unknown }) {
-    super(message, options);
+  // The HTTP status, when the failure came from a response. Lets callers treat
+  // a 404 (the task is gone) differently from a transient/5xx failure.
+  readonly status?: number;
+
+  constructor(
+    message = 'Something went wrong with that task',
+    options?: { cause?: unknown; status?: number },
+  ) {
+    super(message, { cause: options?.cause });
     this.name = 'TaskError';
+    this.status = options?.status;
   }
 }
 
 const toTaskError = (err: unknown): TaskError => {
   if (axios.isAxiosError(err)) {
     const message = (err.response?.data as { message?: string } | undefined)?.message;
-    if (message) return new TaskError(message, { cause: err });
+    if (message) return new TaskError(message, { cause: err, status: err.response?.status });
+    return new TaskError('Something went wrong with that task', {
+      cause: err,
+      status: err.response?.status,
+    });
   }
   return new TaskError('Something went wrong with that task', { cause: err });
 };
+
+// A task that no longer exists (deleted, or a foreign id) is a 404.
+export const isTaskNotFound = (err: unknown): err is TaskError =>
+  err instanceof TaskError && err.status === 404;
 
 // A status is "active" while the worker can still make progress; terminal
 // states (done/failed/cancelled, D14) close the stream, and `paused` is a

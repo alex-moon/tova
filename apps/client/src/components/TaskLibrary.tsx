@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Loader2, ListTree } from 'lucide-react';
 import { toast } from 'sonner';
 import TaskService, { isTerminalTask, type TaskSummary } from '@/services/tasks';
@@ -37,20 +37,49 @@ const TaskLibrary: React.FC<TaskLibraryProps> = ({ selectedId = null, onSelect }
   const [error, setError] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
 
-  const load = useCallback(async (opts: { silent?: boolean } = {}) => {
-    try {
-      if (!opts.silent) setLoading(true);
-      const page = await TaskService.list();
-      setTasks(page.tasks);
-      setNextCursor(page.nextCursor);
-      setError(false);
-    } catch (err) {
-      console.error('Error listing tasks:', err);
-      if (!opts.silent) setError(true);
-    } finally {
-      if (!opts.silent) setLoading(false);
+  // How many pages are loaded (1 for the first page, N after N-1 "Show more"s).
+  // A silent poll must refetch *all* loaded pages: fetching page 1 alone and
+  // replacing the list would wipe every appended page and re-show "Show more"
+  // on each 3s tick while any task is active — the normal case while you watch
+  // a running task. The cursor chain is rebuilt from page 1 forward.
+  const pagesLoaded = useRef(1);
+
+  const fetchAll = useCallback(async (): Promise<{
+    tasks: TaskSummary[];
+    nextCursor: string | null;
+  }> => {
+    const collected: TaskSummary[] = [];
+    let cursor: string | null = null;
+    for (let page = 0; page < pagesLoaded.current; page += 1) {
+      const res = await TaskService.list(cursor);
+      collected.push(...res.tasks);
+      cursor = res.nextCursor;
+      if (!cursor) {
+        // The chain shrank (rows deleted): fewer pages now exist than we held.
+        pagesLoaded.current = page + 1;
+        break;
+      }
     }
+    return { tasks: collected, nextCursor: cursor };
   }, []);
+
+  const load = useCallback(
+    async (opts: { silent?: boolean } = {}) => {
+      try {
+        if (!opts.silent) setLoading(true);
+        const page = await fetchAll();
+        setTasks(page.tasks);
+        setNextCursor(page.nextCursor);
+        setError(false);
+      } catch (err) {
+        console.error('Error listing tasks:', err);
+        if (!opts.silent) setError(true);
+      } finally {
+        if (!opts.silent) setLoading(false);
+      }
+    },
+    [fetchAll],
+  );
 
   const loadMore = useCallback(async () => {
     if (!nextCursor || loadingMore) return;
@@ -59,6 +88,7 @@ const TaskLibrary: React.FC<TaskLibraryProps> = ({ selectedId = null, onSelect }
       const page = await TaskService.list(nextCursor);
       setTasks((prev) => [...prev, ...page.tasks]);
       setNextCursor(page.nextCursor);
+      pagesLoaded.current += 1;
     } catch (err) {
       console.error('Error loading more tasks:', err);
       toast.error('Could not load more tasks');

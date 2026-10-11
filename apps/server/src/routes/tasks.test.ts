@@ -133,6 +133,12 @@ describe('GET /api/tasks/:id (#254 routes)', () => {
     expect(res.status).toBe(404);
   });
 
+  it('404s a malformed id rather than 500ing on a cast error (D15)', async () => {
+    const cookie = await registerUser(OWNER);
+    const res = await getTask(cookie, 'not-an-objectid');
+    expect(res.status).toBe(404);
+  });
+
   // The persisted tool chip carries the executed call's raw `result` (the
   // sequencer's resume payload, D10). The browser must never receive it: the
   // serializer strips it while keeping the #196 chip summary the client renders.

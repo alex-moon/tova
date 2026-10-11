@@ -89,9 +89,13 @@ const serializeEvent = (event: TaskEventDocument) => ({
 });
 
 // Ownership-scoped lookup: a task the caller does not own is indistinguishable
-// from one that does not exist.
+// from one that does not exist. A malformed id (not an ObjectId) is treated the
+// same way — a 404, not a Mongoose cast error surfacing as a 500 (D15: unknown
+// id → 404, no oracle).
 const ownedTask = (req: AuthRequest): Promise<TaskDocument | null> =>
-  Task.findOne({ _id: req.params.id, userId: req.user?.id });
+  isValidObjectId(req.params.id)
+    ? Task.findOne({ _id: req.params.id, userId: req.user?.id })
+    : Promise.resolve(null);
 
 // POST /api/tasks — create a task. ZDR refusal (D7): tasks are durable by
 // definition, so an account with `settings.zdr` (or its `incognitoByDefault`
