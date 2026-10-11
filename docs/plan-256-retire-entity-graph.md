@@ -60,7 +60,7 @@ injection wiring. No new behaviour.
 - [x] `userDataPurge` entity references removed; purge tests updated
 - [x] `.env.example` / `.env` `ENTITY_GRAPH_*` removed
 - [x] `npm run ci` green
-- [ ] Slice PR opened against `epic/251-workspace`
+- [x] Slice PR **#281** opened against `epic/251-workspace`
 
 ## Follow-ups
 
