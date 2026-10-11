@@ -77,7 +77,8 @@ Slice-level decisions live in the slice plan docs; this section carries epic-lev
 - [x] Epic branch `epic/251-workspace` cut from `main`
 - [x] Epic plan doc (this file)
 - [x] Slice #252 — workspace provenance (PR #265 merged to `epic/251-workspace`; #252 closed)
-- [ ] Slice #253 — workspace memory
+- [ ] Slice #253 — workspace memory (implemented on `feat/tv/253-workspace-memory`, PR opened
+      against `epic/251-workspace`; not yet merged)
 - [ ] Slice #254 — task entity
 - [ ] Slice #255 — chat-task integration
 - [ ] Slice #256 — retire the entity graph
@@ -109,6 +110,17 @@ change, newest last. No phase numbers: the loop records outcomes, not protocol s
   that was already failing `npm run ci`; seeds made relative. `npm run ci` green on the
   slice branch; the slice PR against the epic branch is opened this pass. Slice plan doc
   (`docs/plan-254-task-entity.md`) carries the review findings.
+- 2026-10-11 — #253 workspace memory implemented on `feat/tv/253-workspace-memory` (commits
+  `9ab2af9` feature, `b4ea1f2` post-merge hardening): the #238 enrichment vote extended from
+  `files` to `files`+`workspace` on the same aux call, a bounded in-process lexical+recency
+  retrieval over the user's own messages and asset text (no vector infra, epic invariant),
+  and a capped `<user:workspace>` block injected via `buildSystemContent` on both chat
+  routes (ZDR reads stay read-only; ZDR turns never enter the corpus). Ships opt-in
+  (`WORKSPACE_MEMORY_ENABLED`, default off until gate evals exist). Hardening fixed
+  session-first pool scoping (starvation), self-retrieval of the just-saved turn, and the
+  newline-accounted block cap. `npm run ci` green (89 suites, 1125 tests). Slice plan
+  (`docs/plan-253-workspace-memory.md`) carries the decisions and owner-defaults; slice PR
+  opened against `epic/251-workspace` this pass, not yet merged.
 
 ## Follow-ups
 

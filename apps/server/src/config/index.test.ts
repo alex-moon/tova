@@ -30,6 +30,8 @@ const keys = [
   'TOVA_EVAL_MODELS',
   'TOVA_EVAL_MODEL',
   'TOVA_EVAL_PROVIDER',
+  'TASK_MAX_STEPS',
+  'TASK_MAX_COST_USD',
 ] as const;
 
 const backup: Record<string, string | undefined> = {};
@@ -157,6 +159,34 @@ describe('config/index', () => {
     it('raw string accessors stay raw (no parsing in the module)', () => {
       process.env.CHAT_MAX_OUTPUT_TOKENS = 'garbage';
       expect(config.chat.maxOutputTokens).toBe('garbage');
+    });
+
+    it('task budgets default when unset, malformed, empty, or non-positive (#254)', () => {
+      expect(config.task.maxSteps).toBe(25);
+      expect(config.task.maxCostUsd).toBe(5);
+      for (const bad of ['garbage', '', '0', '-3', 'Infinity']) {
+        process.env.TASK_MAX_STEPS = bad;
+        process.env.TASK_MAX_COST_USD = bad;
+        expect(config.task.maxSteps).toBe(25);
+        expect(config.task.maxCostUsd).toBe(5);
+      }
+    });
+
+    it('floors the step cap and defaults a value that floors to zero (#254)', () => {
+      // `0.5` is positive but floors to a zero-step budget; it must degrade to
+      // the default rather than become 0. A fractional cost is legitimate, so
+      // the two getters deliberately differ here.
+      process.env.TASK_MAX_STEPS = '0.5';
+      process.env.TASK_MAX_COST_USD = '0.5';
+      expect(config.task.maxSteps).toBe(25);
+      expect(config.task.maxCostUsd).toBe(0.5);
+    });
+
+    it('task budgets parse a positive env value, flooring the step cap (#254)', () => {
+      process.env.TASK_MAX_STEPS = '40.9';
+      process.env.TASK_MAX_COST_USD = '2.5';
+      expect(config.task.maxSteps).toBe(40);
+      expect(config.task.maxCostUsd).toBe(2.5);
     });
   });
 
