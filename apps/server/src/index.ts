@@ -14,6 +14,7 @@ import adminLangsmithRoutes from './routes/adminLangsmith';
 import adminEvalsRoutes from './routes/adminEvals';
 import profileRoutes from './routes/profile';
 import assetRoutes from './routes/assets';
+import taskRoutes from './routes/tasks';
 import mcpServerRoutes from './routes/mcpServers';
 import { buildMongoUri } from './mongoUri';
 import { getJwtSecret } from './config/jwt';
@@ -119,6 +120,7 @@ export const createApp = (): Express => {
   app.use('/api/admin', adminEvalsRoutes);
   app.use('/api/profile', profileRoutes);
   app.use('/api/assets', assetRoutes);
+  app.use('/api/tasks', taskRoutes);
   app.use('/api/mcp-servers', mcpServerRoutes);
 
   app.get('/api/health', (_req, res) => {

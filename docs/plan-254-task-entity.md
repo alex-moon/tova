@@ -91,6 +91,37 @@ here. Where this plan adds concrete shapes, it does so to make them implementabl
   `maxSteps: 1` call that chose a tool returns `text: ""` (spike); a call that returned
   non-empty text **and** no tool calls is the model's final answer and settles the task
   `done`. A tool step always continues the loop to let the model act on the result.
+- **D12 — The task stream has two writers inside one task, and seq allocation is now
+  made safe for them (routes slice).** The epic's "single writer per stream" invariant is
+  *cross-stream* (a chat stream and a task stream never write each other, `Message` never
+  gains a `taskId`); within a task stream, the poller writes assistant/system events and
+  the API writes steering `user` events — D2's "a steering message is just the next
+  queued user turn". The pre-API `appendTaskEvent` read-max-seq-then-insert assumed a
+  single writer; with the instruction route that is no longer true, so it now retries on
+  the `{taskId, seq}` duplicate-key error and re-reads. The unique index remains the
+  guard; the retry is what makes concurrent append correct rather than merely loud.
+- **D13 — Cancel is observed at a step boundary, so the loop re-reads task status each
+  iteration (routes slice).** `POST /api/tasks/:id/cancel` writes `status: 'cancelled'`
+  (guarding terminal states), which is a header write, not a stream write. A `running`
+  task's processor would otherwise keep stepping to completion and its settle guards
+  (`status: 'running'`) would silently no-op. The processor loop now re-reads the task
+  **before each step** and returns as soon as the status is no longer `running` — the
+  same boundary steering is drained at. Cancel therefore stops a running task within one
+  step, consistent with the parked interrupt (D8) degrading to the per-model-step
+  boundary. No new primitive; the header status is the signal.
+- **D14 — Terminal tasks are terminal (routes slice).** `POST /:id/instruction` appends a
+  steering turn and, from `paused`, re-queues (`paused → queued`, D6 resume-as-steering).
+  From `done`/`failed`/`cancelled` it is refused (409) — a terminal stream is not
+  reopened by a late instruction. ZDR refusal (D7) is checked at **creation** only
+  (OQ8 v1), from `User.settings.zdr`, mirroring how the chat routes read the flag
+  (`chat.ts:657`); the API slice is the first place the refusal has a seam.
+- **D15 — Route surface (routes slice).** `POST /api/tasks` (create; body
+  `{ instruction?, origin? }`), `GET /api/tasks` (cursor-paged summaries, like
+  `GET /api/assets`), `GET /api/tasks/:id` (owned task + its ordered stream),
+  `POST /api/tasks/:id/instruction` (steer/resume), `POST /api/tasks/:id/cancel`. All
+  behind `authenticate`; every read/write scoped by `userId` (foreign id → 404, no oracle).
+  The create route snapshots the budget from `config.task` (`maxSteps`/`maxCostUsd`), the
+  same config the poller reads.
 
 ## Current state (re-verified against the working tree, 2026-10-10)
 
@@ -527,7 +558,12 @@ Ordered; spike first, then the loop-ownership-independent foundation. Items mark
       the cost-meter variant is still deferred — see the budget item above).
 
 ### API + client **[gated on the spike for interactive parts]**
-- [ ] Task routes (`create/list/get/instruction/cancel`), ownership + ZDR tests.
+- [x] Task routes (`create/list/get/instruction/cancel`), ownership + ZDR tests — landed
+      this pass (D12–D15): `routes/tasks.ts` + `taskService` read/steer/cancel helpers +
+      `app.use('/api/tasks', ...)` in `index.ts`; `appendTaskEvent` seq-retry on duplicate
+      (D12); the processor loop re-reads status each step so cancel is observed at the
+      boundary (D13); instruction re-queues a `paused` task, refuses terminal (D14); ZDR
+      refusal at creation (D7/OQ8), all behind `authenticate` and `userId`-scoped.
 - [ ] Task detail client view, mobile-first; read-only stream first.
 - [ ] Queued turn-taking composer per the frozen UX.
 - [ ] Playwright at ~375px; `npm run test:e2e` backstop (per standing client rules).
@@ -535,9 +571,9 @@ Ordered; spike first, then the loop-ownership-independent foundation. Items mark
 ### Gate
 - [x] Plan doc moved to `docs/plan-254-task-entity.md` on the slice branch (OQ6 resolved;
       `.iteration/` is scratch, not the convention).
-- [ ] `npm run ci` green (server lint/format/typecheck/test, client
-      lint/format/test/build).
-- [ ] PR opened against the **epic branch** (`epic/251-workspace`), plan doc linked
+- [x] `npm run ci` green on the routes slice (server lint/format/typecheck/test, client
+      lint/format/test/build) — 96 suites, 1206 tests.
+- [x] PR opened against the **epic branch** (`epic/251-workspace`), plan doc linked
       (`docs/workflow.md:48-50`).
 - [ ] Plan archived to `docs/done/` after the slice PR merges into the epic branch.
 
@@ -662,12 +698,48 @@ for the API slice, not fixed here (per the cleanup-scope policy: do not silently
    refusal is checked only at creation, or re-checked on every step (a user could flip
    `zdr` mid-task), is undecided. The plan assumes creation-only for v1; flagged because
    it is a privacy guarantee, not a nicety. **Not blocking, but should be an explicit
-   test either way.**
+   test either way.** **RESOLVED this pass (routes slice): creation-only for v1, with an
+   explicit test (`routes/tasks.test.ts` — a ZDR account gets 403 and writes no task).
+   Re-checking per step stays open as a follow-up; a task creating user cannot currently
+   flip the flag mid-run in any way the loop observes, so creation-only is the honest
+   v1 scope.**
 
 (Answered while planning, hence not open: breach behaviour — `paused` + visible event +
 resume-as-steering, settled under D6; ZDR policy — refusal, settled under D7; interrupt —
 parked, D8. At planning time the ticket had no issue comments; it now carries two — the
 binding #261 time contract and the loop-ownership spike decision recorded above.)
+
+## Routes slice pass (2026-10-11)
+
+The API surface (#254's "API + client" section, server half). What landed:
+
+- **`routes/tasks.ts`** — `POST /api/tasks` (create; ZDR refusal, D7), `GET /api/tasks`
+  (cursor-paged summaries, `_id`-descending like `GET /api/assets`), `GET /api/tasks/:id`
+  (owned task + ordered stream), `POST /api/tasks/:id/instruction` (steer/resume),
+  `POST /api/tasks/:id/cancel`. Registered as `app.use('/api/tasks', taskRoutes)` in
+  `index.ts`; all behind `authenticate` and scoped by `userId` (foreign id → 404).
+- **`taskService` read/steer/cancel helpers** — `steerTask` (append steering `user` event;
+  `paused → queued` resume; terminal refused) and `cancelTask` (header write, idempotent).
+- **D12 — seq allocation hardened for two writers.** `appendTaskEvent` now retries on the
+  `{taskId, seq}` duplicate-key error. The prior single-writer assumption (poller only)
+  no longer holds once the API appends steering events; the retry is what makes the
+  concurrent append correct rather than merely loud.
+- **D13 — cancel observed at a step boundary.** The processor loop re-reads the task
+  header before each step and returns when the status is no longer `running`, so a
+  `cancelled` running task stops within one step instead of stepping to completion under
+  a settle guard that would no longer match.
+- **D14 — instruction semantics.** Active task: append + consume at next boundary.
+  `paused`: append + re-queue (D6 resume-as-steering). `done`/`failed`/`cancelled`: 409.
+- **D15 — route surface** (recorded above). `taskCreateSchema`/`taskInstructionSchema` in
+  `validation.ts` (`strictObject`, so an unknown key is a 400 not a silent drop).
+- **Tests:** `routes/tasks.test.ts` (16: create/budget/instruction-event, direct-origin,
+  ZDR refusal, list scoping, ownership 404s, steer, paused-resume, terminal 409, cancel
+  idempotency) + `steerTask`/`cancelTask` unit cases in `taskService.test.ts` + the D12
+  collision-retry and D13 cancel-boundary cases in `taskProcessor.test.ts`.
+
+**Deferred (the client half, next pass):** the task detail view (read-only stream first),
+the queued turn-taking composer, and the Playwright ~375px backstop — per the standing
+client rules and `docs/plan-254-task-entity.md`'s API + client checklist.
 
 ## Follow-ups
 
