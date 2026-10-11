@@ -90,9 +90,9 @@ Slice-level decisions live in the slice plan docs; this section carries epic-lev
       the post-merge hardening (`e305649`, tool-result + chip-query persistence) missed that
       merge and landed via follow-up PR #274, merged to `epic/251-workspace` at `cf2f93e`;
       **API routes landed on `feat/tv/254-task-routes` via PR #275 (`routes/tasks.ts` +
-      `taskService` steer/cancel + D12 seq-retry + D13 cancel-boundary + D14/D15), pending
-      merge to `epic/251-workspace`; the **task client view** remains**; #254 stays open
-      until the epic ships)
+      `taskService` steer/cancel + D12 seq-retry + D13 cancel-boundary + D14/D15), merged to
+      `epic/251-workspace` at `327b5fe` (merged 2026-10-11T11:32Z); the **task client view**
+      remains**; #254 stays open until the epic ships)
 - [ ] Slice #255 — chat-task integration
 - [ ] Slice #256 — retire the entity graph
 - [ ] Epic PR `epic/251-workspace` → `main`, linking this doc, `npm run ci` green
@@ -260,6 +260,15 @@ change, newest last. No phase numbers: the loop records outcomes, not protocol s
   green (96 suites, 1206 tests). Slice PR **#275** opened against `epic/251-workspace`. The
   task **client view** (read-only stream, queued composer, Playwright ~375px) is the
   remaining #254 work.
+- 2026-10-11 — reconciliation pass: the #254 Done line still read PR #275 as "pending merge",
+  but #275 is merged — merge commit `327b5fe` (merged 2026-10-11T11:32Z), the routes slice
+  (`routes/tasks.ts` + `taskService` steer/cancel + D12/D13/D14/D15) now on
+  `epic/251-workspace` and `app.use('/api/tasks', ...)` wired in `index.ts`. Done line
+  corrected. The remaining #254 work is unchanged: the **task client view** (no client
+  task component/route exists yet). #252/#253 done; #255/#256 open; epic PR #270 still an
+  open bodyless draft (`MERGEABLE`/`CLEAN`); open-question list re-verified — the #253 and
+  #256 owner questions and the self-merge gate stay open, #254's budget question stays
+  settled by its slice plan (D6).
 
 ## Follow-ups
 
