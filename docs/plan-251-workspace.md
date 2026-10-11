@@ -91,8 +91,11 @@ Slice-level decisions live in the slice plan docs; this section carries epic-lev
       merge and landed via follow-up PR #274, merged to `epic/251-workspace` at `cf2f93e`;
       **API routes landed on `feat/tv/254-task-routes` via PR #275 (`routes/tasks.ts` +
       `taskService` steer/cancel + D12 seq-retry + D13 cancel-boundary + D14/D15), merged to
-      `epic/251-workspace` at `327b5fe` (merged 2026-10-11T11:32Z); the **task client view**
-      remains**; #254 stays open until the epic ships)
+      `epic/251-workspace` at `327b5fe` (merged 2026-10-11T11:32Z); the **task client view
+      landed this pass** on `feat/tv/254-task-client-view` (`services/tasks.ts` + `TasksView`
+      + `TaskLibrary` + `TaskStatusChip`, `/tasks` route + Sidebar link, mobile-first, e2e
+      ~375px) — slice PR **#278** opened against `epic/251-workspace`; #254 stays open until
+      the epic ships)
 - [ ] Slice #255 — chat-task integration
 - [ ] Slice #256 — retire the entity graph
 - [ ] Epic PR `epic/251-workspace` → `main`, linking this doc, `npm run ci` green
@@ -269,6 +272,41 @@ change, newest last. No phase numbers: the loop records outcomes, not protocol s
   open bodyless draft (`MERGEABLE`/`CLEAN`); open-question list re-verified — the #253 and
   #256 owner questions and the self-merge gate stay open, #254's budget question stays
   settled by its slice plan (D6).
+- 2026-10-11 — #254 task client view implemented on `feat/tv/254-task-client-view` (cut from
+  the epic branch) — the last unfinished #254 task, per the epic doc's own "the task client
+  view remains" note. New client files: `services/tasks.ts` (the `/api/tasks` browser
+  contract, mirroring `serializeTask`/`serializeEvent`, with a `TaskError` normaliser and an
+  `isTerminalTask` predicate), `TasksView.tsx` (a `/tasks` master/detail like `AssetsView`:
+  ordered stream rendered read-only — user turns, assistant steps with #196 tool chips +
+  markdown, `system` notices as neutral rows — plus the queued turn-taking composer (D2),
+  which relabels to "Resume" from `paused` (D6/D14), is disabled for terminal tasks, and
+  carries a Cancel button only while active (D13), and a status chip / budget-step line),
+  `TaskLibrary.tsx` (list pane, silent poll while any task is active), and
+  `TaskStatusChip.tsx` (the shared six-status enum chip). Routing/nav: `isTasksRoute()` in
+  `App.tsx` and a "Tasks" link in `Sidebar.tsx` beside "Files". Mobile-first and verified in
+  a real browser via `playwright-cli` at 375×667 and 1280×800 (the detail swaps in place on a
+  phone, no horizontal overflow, paused/running/terminal all render their expected
+  affordances). Tests: 14 new client unit tests (`services/tasks.test.ts` +
+  `TasksView.test.tsx`), `e2e/tasks.spec.ts` (both projects) and `/tasks` added to
+  `e2e/responsive.spec.ts` with a seeded task. `npm run ci` green (96 server suites / 1206
+  tests; 21 client files / 261 tests). Slice plan (`docs/plan-254-task-entity.md`) carries
+  the "Client-view slice pass" section; slice PR **#278** opened against `epic/251-workspace`.
+  #252/#253 done; #255/#256 open; epic PR #270 still an open bodyless draft; the #253/#256
+  owner questions and the self-merge gate stay open.
+- 2026-10-11 — #254 client-view hardening on `feat/tv/254-task-client-view` (commit `aab09e0`,
+  pushed; carried in PR #278). A post-landing review of the slice against the routes contract
+  and the plan found three defects: an **unbounded detail-fetch loop** (`TasksView` keyed its
+  loader on the selected `TaskSummary` *object*, so a fresh object per `GET /api/tasks/:id` poll
+  re-triggered it — ~396 req/s measured; selection is now the task id, the header derived, with
+  a `selectedIdRef` guard), **raw tool `result` leaked to the browser** (`serializeEvent`
+  returned `event.tools` verbatim, so the D10 resume payload shipped on every 3s poll; it now
+  rebuilds only the #196 chip summary via `serializeToolEvent`), and the **task list dropped
+  server pagination** (`TaskLibrary` ignored `nextCursor`, so tasks past page 1 were
+  unreachable; a "Show more" affordance now mirrors `AssetLibrary`). Also clears the steering
+  draft when switching tasks. Verified in the browser at 375px; `npm run ci` green (server 96
+  suites / 1207 tests; client 21 files / 263 tests). Slice plan
+  (`docs/plan-254-task-entity.md`) carries the "Client-view hardening pass" section; PR #278
+  still open against `epic/251-workspace`.
 
 ## Follow-ups
 
