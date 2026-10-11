@@ -20,6 +20,8 @@ import { getJwtSecret } from './config/jwt';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import { startAssetJobPoller } from './services/assetJobService';
+import { startTaskPoller } from './services/taskService';
+import { processTaskJob } from './services/taskProcessor';
 import { startTraceStatsPoller } from './services/traceStatsCacheService';
 import { processAssetConversionJob } from './services/assetJobProcessor';
 import { startEvalScheduler } from './services/evalScheduler';
@@ -157,6 +159,11 @@ export const startServer = async (): Promise<Server> => {
   // don't inherit background polling.
   if (process.env.NODE_ENV !== 'test') {
     startAssetJobPoller(processAssetConversionJob);
+
+    // #254 (epic #251): the task sequencer poller. Same non-test gate; the
+    // processor is a stub until the sequencer slice lands (the foundation here
+    // is the queue/model/runtime, not the driver).
+    startTaskPoller(processTaskJob);
 
     // #225: daily eval suite. Off unless TOVA_EVAL_SCHEDULE=daily; started in
     // the same non-test block so tests never inherit a live provider job.
