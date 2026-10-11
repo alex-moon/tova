@@ -65,7 +65,9 @@ Slice-level decisions live in the slice plan docs; this section carries epic-lev
 - #253: injection budget (chars); whether the trivially-neutral skip gate already covers
   gate-firing; corpus retention (do old chats expire?); pass/fail thresholds for the
   gate evals (retrieval hit-rate, injection helpfulness, gate precision).
-- #254: meter/pause/confirm behavior on budget breach.
+- #254: meter/pause/confirm behavior on budget breach — settled by the slice plan
+  (`docs/plan-254-task-entity.md`, D6: breach → `paused` + visible system event, resume as
+  steering); flagged at the slice PR for owner veto per the fallback.
 - #256: entity-graph data disposition (keep read-only, archive, or drop).
 
 ## Done (epic)
@@ -95,6 +97,10 @@ change, newest last. No phase numbers: the loop records outcomes, not protocol s
   Done checklist updated to match.
 - 2026-10-11 — removed the four-phase operating protocol from this doc (it now lives in
   `workspace.sh`); doc rewritten as epic state only.
+- 2026-10-11 — reconciliation pass: Done checklist re-verified against git/GitHub (#252
+  done via merged PR #265 and closed issue; #253–#256 open; no epic PR yet) — no drift.
+  Open questions re-checked; the #254 budget-breach question is settled by its slice plan
+  (D6) and annotated as such.
 
 ## Follow-ups
 
