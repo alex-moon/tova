@@ -97,7 +97,9 @@ Slice-level decisions live in the slice plan docs; this section carries epic-lev
       ~375px) via slice PR **#278**, merged to `epic/251-workspace` at `9c737ca` (merged
       2026-10-11T17:08Z); slice plan archived to `docs/done/plan-254-task-entity.md`; #254
       issue stays open until the epic ships)
-- [ ] Slice #255 — chat-task integration
+- [ ] Slice #255 — chat-task integration (implemented on
+      `feat/tv/255-chat-task-integration`; slice PR **#280** opened against `epic/251-workspace`
+      at `3982932`, `npm run ci` green; awaiting merge)
 - [ ] Slice #256 — retire the entity graph
 - [ ] Epic PR `epic/251-workspace` → `main`, linking this doc, `npm run ci` green
       (PR #270 opened as a draft; awaiting slice merges before it can leave draft)
@@ -337,6 +339,32 @@ change, newest last. No phase numbers: the loop records outcomes, not protocol s
   human gate), matching the #271/#272/#274/#275 precedent. The #254 Done line flipped to
   done and the slice plan archived to `docs/done/plan-254-task-entity.md`. Next unfinished
   slice: **#255 chat-task integration**.
+- 2026-10-11 — #255 chat-task integration implemented on `feat/tv/255-chat-task-integration`
+  (cut from the epic branch tip `3d0b208`) — the join between the chat and task streams, and
+  the next unfinished slice. Plan doc `docs/plan-255-chat-task-integration.md` settles the
+  seam shapes before code (F1–F7, binding design from the epic). Landed: `Task.notifiedAt`
+  (the chat route's drain marker, not a chat-stream write); `delegate_task` chat tool
+  (`services/mastraService.ts`, creates a task with `origin: { kind: 'chat', sessionId }`,
+  refuses on ZDR / missing session mirroring the creation route's refusal, F2/F3);
+  `services/taskNotificationService.ts` (`pendingCompletionsFor`/`markNotified`, pure data +
+  marker, F4); both persisted chat routes drain pending completions into the next turn's
+  context and mark notified **only after that turn's assistant message persists** (a failed
+  turn leaves it pending); task list `originSessionId` filter (user-scoped); client
+  `TaskService.create`/`listForSession` + `TaskCard` (status chip + `/tasks` link, `MAX_CARDS`
+  cap, silent poll) + ChatWindow "Send to worker" composer control (ZDR/new-chat disabled);
+  `e2e/chat-task.spec.ts` (mobile + desktop). The slice's own hardening pass (same commit
+  `3982932`) fixed the notification being consumed before the turn succeeds, clipped the
+  task **instruction** (not just the summary) in `completionNotificationLine`, capped the
+  card list, and keyed the card's poll effect on the derived `active` boolean rather than the
+  tasks array. Owner-defaults flagged on the slice PR per the fallback: F4/F5 — the
+  notification rides the **next user turn**, not an autonomous server-triggered turn (v1
+  avoids a second writer on the chat stream; the autonomous turn is deferred to a follow-up
+  ticket on the owner's call); F3 — ZDR turns cannot delegate. `npm run ci` green on `3982932`
+  (server 100 suites / 1233 tests; client build green), re-verified this pass; mobile checked
+  at 360px via `playwright-cli`. Slice PR **#280** opened against `epic/251-workspace`; the
+  plan-255 Done checklist checked off and the PR named in it. #252/#253/#254 done; #256 open;
+  epic PR #270 still an open bodyless draft; the #253/#256 owner questions and the self-merge
+  gate stay open.
 
 ## Follow-ups
 
