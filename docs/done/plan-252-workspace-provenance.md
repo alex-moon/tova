@@ -1,5 +1,10 @@
 # Plan — #252 Workspace provenance on generated files
 
+> **Status: not done.** The merged PR #265 was a preliminary pass; this slice is still
+> open. The Done checklist below records that pass only. Next phase: 2 — criticise and
+> harden this plan, re-deriving the checklist against
+> [#252](https://github.com/alex-moon/tova/issues/252), before implementing more.
+
 ## Motivation
 
 Per GitHub issue [alex-moon/tova#252](https://github.com/alex-moon/tova/issues/252),
@@ -83,3 +88,9 @@ into.
   `messageId` into this vocabulary.
 - If an admin asset view is added later, it should read provenance from the existing
   `assetViews` serialisation rather than re-deriving it.
+
+## Process log
+
+- Owner correction (2026-10-10): PR #265 was preliminary; the slice is **not done**. The
+  Done checklist above records the preliminary pass only — phase 2 must re-derive the
+  remaining work against the ticket before implementing further.
