@@ -473,6 +473,80 @@ describe('Zero-data retention chats (issue #116)', () => {
     expect(await Entity.countDocuments()).toBe(1);
   });
 
+  // #253 decision 6: a ZDR turn may READ the workspace (read-only) — the corpus
+  // is the user's own persisted chats/files, so the ZDR turn itself is absent
+  // from it by construction. Both routes must inject it identically.
+  const forceWorkspaceBlock = (block: string) => {
+    const { enrichmentVotes } = jest.requireMock('../services/enrichmentService') as {
+      enrichmentVotes: jest.Mock;
+    };
+    enrichmentVotes.mockResolvedValueOnce({ files: false, workspace: true });
+    const retrieve = jest
+      .spyOn(
+        jest.requireActual<typeof import('../services/workspaceRetrievalService')>(
+          '../services/workspaceRetrievalService',
+        ),
+        'retrieveWorkspaceBlock',
+      )
+      .mockResolvedValue(block);
+    process.env.WORKSPACE_MEMORY_ENABLED = '1';
+    return retrieve;
+  };
+
+  it('injects the workspace block into a ZDR turn read-only (plain route)', async () => {
+    mockPlainGenerate.mockResolvedValue({
+      choices: [{ message: { content: 'Plain ephemeral answer' } }],
+    });
+    const email = 'zdr-workspace@example.com';
+    const cookies = await registerUser(email);
+    await enableZdr(email);
+    const retrieve = forceWorkspaceBlock('- chat "Move" (2026-10-01) — budget is twelve thousand');
+
+    try {
+      const response = await plainMessage(cookies, {
+        content: 'what did we decide about the budget',
+      });
+      expect(response.status).toBe(200);
+      const system = mockPlainGenerate.mock.calls[0][0].messages.find(
+        (m: { role: string }) => m.role === 'system',
+      );
+      expect(system.content).toContain('<user:workspace>');
+      expect(system.content).toContain('budget is twelve thousand');
+      // Read-only: the ZDR turn writes no session or message rows.
+      expect(await Session.countDocuments()).toBe(0);
+      expect(await Message.countDocuments()).toBe(0);
+    } finally {
+      delete process.env.WORKSPACE_MEMORY_ENABLED;
+      retrieve.mockRestore();
+    }
+  });
+
+  it('injects the workspace block into a ZDR streaming turn and writes nothing', async () => {
+    const email = 'zdr-workspace-stream@example.com';
+    const cookies = await registerUser(email);
+    await enableZdr(email);
+    const retrieve = forceWorkspaceBlock('- chat "Move" (2026-10-01) — budget is twelve thousand');
+
+    try {
+      const response = await streamMessage(cookies, {
+        content: 'what did we decide about the budget',
+        history: [],
+      });
+      expect(response.status).toBe(200);
+      const streamOpts = mockAgentStream.mock.calls[0][0];
+      const system = (streamOpts.messages as { role: string; content: string }[]).find(
+        (m) => m.role === 'system',
+      );
+      expect(system?.content).toContain('<user:workspace>');
+      expect(system?.content).toContain('budget is twelve thousand');
+      expect(await Session.countDocuments()).toBe(0);
+      expect(await Message.countDocuments()).toBe(0);
+    } finally {
+      delete process.env.WORKSPACE_MEMORY_ENABLED;
+      retrieve.mockRestore();
+    }
+  });
+
   describe('ephemeral cleanup on rejected/failed turns', () => {
     const ephemeralAssetFor = async (email: string, filename: string) => {
       const user = await User.findOne({ email });

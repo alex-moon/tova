@@ -5,6 +5,7 @@ import { Session } from '../models/Session';
 import {
   buildWorkspaceBlock,
   isWorkspaceMemoryEnabled,
+  matchSnippet,
   pickTopSlices,
   retrieveWorkspaceBlock,
   scoreSlice,
@@ -60,6 +61,38 @@ describe('workspaceRetrievalService', () => {
     });
   });
 
+  describe('matchSnippet', () => {
+    it('returns short text unchanged', () => {
+      expect(matchSnippet('the lease has a pets clause', 'pets')).toBe(
+        'the lease has a pets clause',
+      );
+    });
+
+    it('centres a long text on the first matched keyword', () => {
+      const text = `${'intro '.repeat(200)}pets clause ${'outro '.repeat(200)}`;
+      const snippet = matchSnippet(text, 'pets clause', 80);
+      expect(snippet.length).toBeLessThanOrEqual(80);
+      expect(snippet).toContain('pets clause');
+      expect(snippet.startsWith('…')).toBe(true);
+    });
+
+    it('falls back to the head when the match is at the very start', () => {
+      const text = `pets ${'tail '.repeat(200)}`;
+      const snippet = matchSnippet(text, 'pets', 40);
+      expect(snippet.length).toBeLessThanOrEqual(40);
+      expect(snippet.startsWith('pets')).toBe(true);
+    });
+
+    it('never exceeds the cap for any match position', () => {
+      const text = `alpha ${'filler '.repeat(100)} omega`;
+      for (const cap of [10, 20, 40, 80, 160]) {
+        for (const prompt of ['alpha', 'omega', 'filler']) {
+          expect(matchSnippet(text, prompt, cap).length).toBeLessThanOrEqual(cap);
+        }
+      }
+    });
+  });
+
   describe('buildWorkspaceBlock', () => {
     it('returns empty when nothing overlaps (no prompt drift)', () => {
       expect(buildWorkspaceBlock('birds', [slice()])).toBe('');
@@ -69,6 +102,14 @@ describe('workspaceRetrievalService', () => {
       const block = buildWorkspaceBlock('budget', [slice({ title: 'Move planning' })]);
       expect(block).toContain('chat "Move planning"');
       expect(block).toContain('budget');
+    });
+
+    it('shows the matched region of a long slice, not just its head', () => {
+      const text = `${'intro '.repeat(300)}the pets clause allows one cat`;
+      const block = buildWorkspaceBlock('pets clause', [
+        slice({ kind: 'file', title: 'lease.pdf', text }),
+      ]);
+      expect(block).toContain('pets clause allows one cat');
     });
 
     it('labels file slices as files', () => {

@@ -685,6 +685,16 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
       // return before any persistence does exactly that. Extraction below
       // never runs for ZDR.
       const zdrEntityBlock = await knowledgeBlockFor(content, userId as string);
+      /*
+       * #253: matching the streaming route and plan decision 6, a ZDR turn MAY
+       * read the workspace (read-only) — it writes nothing, so it is absent from
+       * the corpus by construction. The library index is never injected on ZDR
+       * ("the write-nothing turn injects no index"), so `skipFiles` avoids the
+       * wasted read that the streaming route already skips.
+       */
+      const zdrBlocks = await enrichmentBlocksFor(content, zdrHistory.value, userId as string, {
+        skipFiles: true,
+      });
 
       /*
        * ZDR continuity is the client replay; the prompt is assembled once and
@@ -701,6 +711,7 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
             '',
             true,
             userDoc.settings?.timezone,
+            zdrBlocks.workspaceBlock,
           ),
         });
         appendAssetBlock(turnMessages, attachedAsset);
@@ -1035,7 +1046,7 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
       messages = buildZdrMessages(zdrHistory, content);
       routingResult = rosterRoute;
       const zdrBlocks = await enrichmentBlocksFor(content, zdrHistory, userId as string, {
-        skipFiles: hasImage,
+        skipFiles: true,
       });
       streamWorkspaceBlock = zdrBlocks.workspaceBlock;
     } else {

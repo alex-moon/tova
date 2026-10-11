@@ -74,9 +74,31 @@ export const pickTopSlices = (
     .sort((a, b) => b.score - a.score)
     .slice(0, n);
 
-const oneLine = (text: string, cap = 160): string => {
+/*
+ * A bounded snippet centred on where the prompt actually matched, so the model
+ * sees the region that caused the retrieval rather than the head of the source
+ * (a lease's pets clause may sit thousands of characters into the document; the
+ * head-160 window would show the title page and nothing that supports the
+ * answer). Falls back to the head when the match is at the very start, and is
+ * always `<= cap` characters so the block-cap accounting below stays exact.
+ */
+export const matchSnippet = (text: string, prompt: string, cap = 160): string => {
   const line = text.replace(/\s+/g, ' ').trim();
-  return line.length > cap ? `${line.substring(0, cap - 1)}…` : line;
+  if (line.length <= cap) return line;
+  const words = [...promptWords(prompt)];
+  const lower = line.toLowerCase();
+  let at = -1;
+  for (const word of words) {
+    const idx = lower.indexOf(word);
+    if (idx !== -1 && (at === -1 || idx < at)) at = idx;
+  }
+  // Reserve room for a leading and/or trailing ellipsis.
+  const body = cap - 2;
+  if (at <= 0) return `${line.slice(0, body)}…`;
+  const start = Math.max(0, Math.min(at - Math.floor(body / 3), line.length - body));
+  const head = start > 0 ? '…' : '';
+  const tail = start + body < line.length ? '…' : '';
+  return `${head}${line.slice(start, start + body)}${tail}`;
 };
 
 /*
@@ -98,7 +120,7 @@ export const buildWorkspaceBlock = (
   for (const { slice } of picked) {
     const date = new Date(slice.at).toISOString().slice(0, 10);
     const label = slice.kind === 'chat' ? `chat "${slice.title}"` : `file "${slice.title}"`;
-    const line = `- ${label} (${date}) — ${oneLine(slice.text)}`;
+    const line = `- ${label} (${date}) — ${matchSnippet(slice.text, prompt)}`;
     // Count the joining newline too, so the rendered block stays within `cap`
     // rather than exceeding it by up to n-1 separators.
     const cost = line.length + (lines.length > 0 ? 1 : 0);

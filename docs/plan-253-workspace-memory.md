@@ -126,3 +126,16 @@ pollute every turn — so it must run on the same evidence path as routing chang
   coverage proving the streaming route injects the block end-to-end (the plan's "both
   routes inject" item was previously only service-level-tested), plus tests for the
   starvation and self-retrieval fixes. `npm run ci` green (89 suites, 1125 tests).
+- 2026-10-11 — merge-integration hardening. The #253 branch was merged with
+  `epic/251-workspace` (PR #271). Review of the integrated state found four issues:
+  (1) the two routes had drifted on ZDR — the streaming route read the workspace while
+  the non-streaming route injected nothing, contradicting decision 6's "a ZDR turn may
+  still read"; the non-streaming path now computes and injects the same read-only block,
+  so the routes agree again. (2) the streaming ZDR branch computed the library index and
+  discarded it (the index is never injected on ZDR) — it now passes `skipFiles: true`,
+  dropping a wasted Mongo read. (3) the snippet shown per slice was the *head* of the
+  source, so a match deep in a long document (a lease's pets clause) was retrieved but
+  the injected line did not contain it; `matchSnippet` now centres the window on the
+  first matched keyword, bounded by the same cap. (4) route-level coverage was
+  streaming-only; the non-streaming route and both ZDR routes now assert the block
+  end-to-end. `npm run ci` green (93 suites, 1164 tests).
