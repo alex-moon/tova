@@ -50,6 +50,32 @@ describe('TaskEvent model (#254)', () => {
     expect(doc.usage).toBeUndefined();
   });
 
+  it('round-trips a tool chip with its raw result (#254 resume payload)', async () => {
+    const id = taskId();
+    await TaskEvent.create({
+      taskId: id,
+      seq: 1,
+      role: 'assistant',
+      content: '',
+      step: 0,
+      tools: [
+        {
+          phase: 'result',
+          name: 'web_search',
+          label: 'Searched the web',
+          status: 'ok',
+          query: 'groq pricing',
+          result: { results: [{ url: 'https://example.com' }] },
+        },
+      ],
+    });
+    const doc = await TaskEvent.findOne({ taskId: id, seq: 1 });
+    // The raw result must survive persistence — without it the next step's
+    // history replay loses the tool output the model needs to continue.
+    expect(doc?.tools?.[0].result).toEqual({ results: [{ url: 'https://example.com' }] });
+    expect(doc?.tools?.[0].query).toBe('groq pricing');
+  });
+
   it('reads events back in { taskId, seq } order', async () => {
     const id = taskId();
     for (const seq of [2, 0, 1]) {

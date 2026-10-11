@@ -56,11 +56,14 @@ export const appendTaskEvent = async (
 
 // A visible system notice (budget breach, completion), rendered like content
 // but never fed back as model context (`assembleTaskHistory` skips `system`).
-const appendNotice = (task: TaskDocument, content: string): Promise<void> =>
-  appendTaskEvent(task._id, {
+// `step` is the step the notice belongs to (the last-completed step ordinal),
+// passed explicitly — the `Task` document's own `stepCount` is the value read
+// at claim time and is stale once the loop has run.
+const appendNotice = (taskId: TaskDocument['_id'], content: string, step: number): Promise<void> =>
+  appendTaskEvent(taskId, {
     role: 'system',
     content: content.slice(0, MAX_NOTICE_CHARS),
-    step: task.stepCount,
+    step,
   });
 
 export const processTaskJob = async (task: TaskDocument): Promise<void> =>
@@ -85,7 +88,11 @@ export const makeTaskProcessor =
 
     for (;;) {
       if (stepCount >= maxSteps) {
-        await appendNotice(current, `Task paused: reached its step budget (${maxSteps} steps).`);
+        await appendNotice(
+          current._id,
+          `Task paused: reached its step budget (${maxSteps} steps).`,
+          stepCount,
+        );
         await Task.updateOne(
           { _id: current._id, status: 'running' },
           { $set: { status: 'paused', stepCount, lastError: 'step budget reached' } },
@@ -113,7 +120,7 @@ export const makeTaskProcessor =
       // and the loop continues to let the model act on the results. A step
       // with text and no tool calls is the model's final answer.
       if (outcome.text.trim() !== '' && outcome.tools.length === 0) {
-        await appendNotice(current, 'Task completed.');
+        await appendNotice(current._id, 'Task completed.', stepCount);
         await Task.updateOne(
           { _id: current._id, status: 'running' },
           { $set: { status: 'done', stepCount } },

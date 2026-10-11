@@ -52,6 +52,8 @@ describe('processTaskJob sequencer loop (#254)', () => {
     expect(events[1].tools?.[0].name).toBe('read_file');
     expect(events[2].content).toBe('all done');
     expect(events[3].content).toMatch(/completed/i);
+    // The notice belongs to the last-completed step (2), not the claim-time 0.
+    expect(events[3].step).toBe(2);
   });
 
   it('pauses at the step budget with a visible system event', async () => {
@@ -69,6 +71,7 @@ describe('processTaskJob sequencer loop (#254)', () => {
     const events = await eventsOf(task._id);
     expect(events.at(-1)?.role).toBe('system');
     expect(events.at(-1)?.content).toMatch(/budget/);
+    expect(events.at(-1)?.step).toBe(2);
   });
 
   it('feeds queued steering to the next step boundary (D2)', async () => {

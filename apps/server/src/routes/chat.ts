@@ -344,12 +344,22 @@ export const paragraphBreakFor = (contentEnding: string): string => {
 };
 
 // Exported (#254) so the task sequencer builds the same #196 tool chips the
-// chat path persists — one chip vocabulary for both streams.
-export const toolResultEvent = (result: { name: string; result: unknown }) => {
+// chat path persists — one chip vocabulary for both streams. The optional
+// `args` lets a caller that has only the executed result (the non-streaming
+// sequencer step, which never sees a separate `toolCall` event) recover the
+// call's `query`, exactly as `toolCallEvent` derives it from a call's args.
+export const toolResultEvent = (result: {
+  name: string;
+  result: unknown;
+  args?: Record<string, unknown>;
+}) => {
   const base = {
     phase: 'result' as const,
     name: result.name,
     label: toolLabelFrom(result.name),
+    ...(typeof result.args?.query === 'string' && result.args.query
+      ? { query: result.args.query }
+      : {}),
   };
   if (result.name === 'web_search' || result.name === 'fetch_url') {
     const items = Array.isArray((result.result as { results?: unknown })?.results)
