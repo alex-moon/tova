@@ -80,7 +80,8 @@ things and how to work" layer, authored as one constitution with it (the two are
 - [x] `evals/cases.ts`: add `arithmetic-no-search` (weights side of the split).
 - [x] `evals/cases.test.ts`: pin the new case.
 - [x] `npm run ci` green (96 suites, 1194 tests; client lint/format/test/build).
-- [ ] PR opened against `epic/251-workspace`.
+- [x] PR [#282](https://github.com/alex-moon/tova/pull/282) opened against
+      `epic/251-workspace`.
 
 ## Verification
 
