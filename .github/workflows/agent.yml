@@ -103,4 +103,6 @@ jobs:
           - In the PR body, summarise what you changed and why, and reference the triggering issue if there is one.
           EOF
           } > task.txt
-          goose run --headless -t "$(cat task.txt)"
+          # goose run is non-interactive by default and exits when done; --no-session
+          # skips session-file state, which is what the docs recommend for CI one-offs.
+          goose run --no-session -t "$(cat task.txt)"
