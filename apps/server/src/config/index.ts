@@ -100,20 +100,10 @@ export const config = {
     },
   },
 
-  entityGraph: {
-    get extractionEnabled(): boolean {
-      return Boolean(process.env.ENTITY_GRAPH_ENABLED);
-    },
-    get promptInjectionEnabled(): boolean {
-      return Boolean(process.env.ENTITY_GRAPH_PROMPT_INJECTION);
-    },
-  },
-
   // #253: workspace memory (retrieval across chats and files). Off by default
   // — a wrong injection pollutes every turn, so the block ships opt-in until
   // the gate evals exist. The block's character budget is BLOCK_CAP in
-  // workspaceRetrievalService (below the entity block's 1500; the library
-  // index competes).
+  // workspaceRetrievalService (the library index competes for the same budget).
   workspaceMemory: {
     get enabled(): boolean {
       const raw = process.env.WORKSPACE_MEMORY_ENABLED;
@@ -123,7 +113,7 @@ export const config = {
   },
 
   // #238: the aux model source for the small, latency-insensitive LLM calls
-  // (chat title, entity extraction, follow-ups, prompt metrics, enrichment).
+  // (chat title, follow-ups, prompt metrics, enrichment).
   // Replaces the tier-era `ROUTER_SMALL_MODEL`/`ROUTER_GUARD_MODEL` reads. The
   // owner retired small models for *chat routing* only; a single cheap fixed
   // aux model is kept. Default is the retired guard model on its old provider

@@ -8,8 +8,6 @@ import type {
   AdminPatCreated,
   AdminPatsPayload,
   ModelComparisonRun,
-  AdminGraphEntitiesPayload,
-  AdminGraphEntityDetail,
   AdminTracesPayload,
   AdminTraceDetail,
   AdminLangsmithStatsPayload,
@@ -183,31 +181,6 @@ const listLogs = async (params: ListLogsParams = {}): Promise<AdminLogsPayload> 
 
 const AdminLogsService = { listLogs };
 
-// Per-user entity graph read view (issue #138, plan task 5): the Graph tab
-// picks a user, lists their nodes paginated, and drills into one node for
-// its edges with the other endpoint's name already resolved by the server.
-const listGraphEntities = async (userId: string, page = 1): Promise<AdminGraphEntitiesPayload> => {
-  try {
-    const res = await axios.get<AdminGraphEntitiesPayload>('/api/admin/graph/entities', {
-      params: { userId, page },
-    });
-    return res.data;
-  } catch (err) {
-    throw toAdminError(err, 'Failed to load graph entities.');
-  }
-};
-
-const getGraphEntity = async (id: string): Promise<AdminGraphEntityDetail> => {
-  try {
-    const res = await axios.get<AdminGraphEntityDetail>(`/api/admin/graph/entities/${id}`);
-    return res.data;
-  } catch (err) {
-    throw toAdminError(err, 'Failed to load graph entity.');
-  }
-};
-
-const AdminGraphService = { listGraphEntities, getGraphEntity };
-
 // PAT management (#184): the Access tab's list/generate/revoke. The create
 // response carries the plaintext token exactly once — nothing here ever
 // stores or re-fetches it.
@@ -335,7 +308,6 @@ const AdminEvalsService = { listEvalRuns, getEvalRun, runEvalsNow };
 export {
   AdminModelsService,
   AdminLogsService,
-  AdminGraphService,
   AdminPatsService,
   AdminLangsmithService,
   AdminEvalsService,

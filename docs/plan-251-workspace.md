@@ -108,8 +108,10 @@ Slice-level decisions live in the slice plan docs; this section carries epic-lev
       `feat/tv/255-chat-task-integration`; slice PR **#280** merged to `epic/251-workspace`
       at `78c0712`, merged 2026-10-11T17:56Z; slice plan archived to
       `docs/done/plan-255-chat-task-integration.md`; #255 issue stays open until the epic ships)
-- [ ] Slice #256 — retire the entity graph (disposition settled: drop the data; unblocked
-      — the graph is unused)
+- [ ] Slice #256 — retire the entity graph (implemented on
+      `feat/tv/256-retire-entity-graph`; slice PR **#281** opened against
+      `epic/251-workspace`, `npm run ci` green; disposition settled: drop the data;
+      awaiting merge)
 - [ ] Epic PR `epic/251-workspace` → `main`, linking this doc, `npm run ci` green
       (PR #270 opened as a draft; awaiting slice merges before it can leave draft)
 - [ ] Archive this doc to `docs/done/`
@@ -387,6 +389,14 @@ change, newest last. No phase numbers: the loop records outcomes, not protocol s
   there. Work begins this pass on `feat/tv/256-retire-entity-graph`. #263 (whose body begins
   `Epic: #251` but which is not in the epic's declared slice list #252–#256) stays out of scope
   pending the owner's scope confirmation (reconcile comment on the issue, 2026-10-11T17:59Z).
+- 2026-10-11 — #256 retire the entity graph implemented on
+  `feat/tv/256-retire-entity-graph`: the extraction pipeline and injection wiring are
+  deleted (services, models, admin Graph tab, `ENTITY_GRAPH_*` envs, `knowledgeBlock`
+  prompt parameter), `promptWords` moved into `workspaceRetrievalService`, and a
+  forwards-only migration drops the `entities`/`entityedges` collections. Slice plan
+  `docs/plan-256-retire-entity-graph.md`; slice PR **#281** opened against
+  `epic/251-workspace`; `npm run ci` green and the migration verified up/down against the
+  local Mongo. #252–#255 done; #256 awaiting merge; epic PR #270 still a draft.
 
 - 2026-10-11 — CI fix on the epic branch: PR #270's `epic/251-workspace` failed the gate
   with `no-undef` on `chat.stream.test.ts`. Root cause was a merge artefact, not a logic bug:

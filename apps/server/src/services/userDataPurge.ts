@@ -3,8 +3,6 @@ import { Session } from '../models/Session';
 import { Message } from '../models/Message';
 import { Asset } from '../models/Asset';
 import { AssetJob } from '../models/AssetJob';
-import { Entity } from '../models/Entity';
-import { EntityEdge } from '../models/EntityEdge';
 import { spacesWorkspaceStorage } from './workspaceStorage';
 import { purgeUserTraces } from './tracePurge';
 import { McpServer } from '../models/McpServer';
@@ -20,9 +18,9 @@ import { McpServer } from '../models/McpServer';
  *
  * Under factory reset NOTHING survives: sessions are HARD-deleted (including
  * already-soft-deleted ones), asset docs and their Spaces bytes, chat-scoped
- * workspace files, asset-derived job rows, the entity graph and user-scoped
- * MCP server configs (their urls plus AES-256-GCM-encrypted auth header
- * envelopes are secret material at rest, critic pass 2026-09-23) all go.
+ * workspace files, asset-derived job rows, and user-scoped MCP server configs
+ * (their urls plus AES-256-GCM-encrypted auth header envelopes are secret
+ * material at rest, critic pass 2026-09-23) all go.
  * Exceptions: user *settings* (customInstructions, theme, startupChat,
  * confirmDeletes, zdr) are preferences, not data — intentionally NOT wiped
  * here; and the account itself stays (the user is still logged in and can
@@ -53,14 +51,11 @@ export const purgeAllUserData = async (
   const assetKeys = assets.map((a) => a.key);
 
   // Mongo sweep — every collection enumerated explicitly (issue #143):
-  // messages, the entity graph (free-text names/summaries/edges pointing back
-  // into messages), asset docs, the job rows keyed by assetId (AssetJob has
-  // no userId, so it is swept via the pre-fetched asset ids), and the
+  // messages, asset docs, the job rows keyed by assetId (AssetJob has no
+  // userId, so it is swept via the pre-fetched asset ids), and the
   // user-scoped MCP server configs — platform servers are left alone.
   await Promise.all([
     Message.deleteMany({ sessionId: { $in: sessionIds } }),
-    Entity.deleteMany({ userId }),
-    EntityEdge.deleteMany({ userId }),
     Asset.deleteMany({ userId }),
     AssetJob.deleteMany({ assetId: { $in: assetIds } }),
     McpServer.deleteMany({ scope: 'user', userId }),

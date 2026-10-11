@@ -7,6 +7,7 @@ import {
   isWorkspaceMemoryEnabled,
   matchSnippet,
   pickTopSlices,
+  promptWords,
   retrieveWorkspaceBlock,
   scoreSlice,
   type WorkspaceSlice,
@@ -28,6 +29,18 @@ const slice = (over: Partial<WorkspaceSlice> = {}): WorkspaceSlice => ({
 });
 
 describe('workspaceRetrievalService', () => {
+  describe('promptWords', () => {
+    it('keeps content words and drops stopwords and single characters', () => {
+      const words = promptWords('Give me recommendations for restaurants near the hotel');
+      expect(words.has('restaurants')).toBe(true);
+      expect(words.has('hotel')).toBe(true);
+      expect(words.has('the')).toBe(false);
+      expect(words.has('near')).toBe(false);
+      expect(words.has('me')).toBe(false);
+      expect(words.has('a')).toBe(false);
+    });
+  });
+
   describe('scoreSlice', () => {
     it('scores zero on no keyword overlap even for a fresh slice', () => {
       expect(scoreSlice('unrelated question about birds', slice())).toBe(0);

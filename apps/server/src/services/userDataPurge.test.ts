@@ -3,8 +3,6 @@ import { Session } from '../models/Session';
 import { Message } from '../models/Message';
 import { Asset } from '../models/Asset';
 import { AssetJob } from '../models/AssetJob';
-import { Entity } from '../models/Entity';
-import { EntityEdge } from '../models/EntityEdge';
 import { McpServer } from '../models/McpServer';
 import { purgeAllUserData } from './userDataPurge';
 
@@ -54,7 +52,7 @@ const seedUserWorkspace = async (uid: mongoose.Types.ObjectId, count = 2) => {
   }
 };
 
-const seedAssetsAndGraph = async (uid: mongoose.Types.ObjectId) => {
+const seedAssetsAndMcp = async (uid: mongoose.Types.ObjectId) => {
   const asset = await Asset.create({
     userId: uid,
     filename: 'notes.md',
@@ -64,19 +62,6 @@ const seedAssetsAndGraph = async (uid: mongoose.Types.ObjectId) => {
     status: 'ready',
   });
   await AssetJob.create({ assetId: asset._id });
-  const entity = await Entity.create({
-    userId: uid,
-    name: 'Ada Lovelace',
-    normalizedName: 'ada lovelace',
-    kind: 'person',
-  });
-  await EntityEdge.create({
-    userId: uid,
-    fromEntityId: entity._id,
-    toEntityId: entity._id,
-    kind: 'related-to',
-    summary: 'self-reference fixture',
-  });
   const mcpServer = await McpServer.create({
     scope: 'user',
     userId: uid,
@@ -115,8 +100,8 @@ describe('purgeAllUserData (issue #143: factory reset)', () => {
     });
     await seedUserWorkspace(owner);
     await seedUserWorkspace(other);
-    await seedAssetsAndGraph(owner);
-    const otherAsset = await seedAssetsAndGraph(other);
+    await seedAssetsAndMcp(owner);
+    const otherAsset = await seedAssetsAndMcp(other);
     mockedIsConfigured.mockReturnValue(true);
     mockedDeleteByKey.mockResolvedValue(true);
     mockedListKeys.mockResolvedValue([]);
@@ -129,8 +114,6 @@ describe('purgeAllUserData (issue #143: factory reset)', () => {
     expect(await Asset.countDocuments({ userId: owner })).toBe(0);
     // AssetJob has no userId: swept by the owner's asset ids only.
     expect(await AssetJob.countDocuments({ assetId: otherAsset.asset._id })).toBe(1);
-    expect(await Entity.countDocuments({ userId: owner })).toBe(0);
-    expect(await EntityEdge.countDocuments({ userId: owner })).toBe(0);
     // User-scoped MCP server configs (urls + encrypted auth headers) die too.
     expect(await McpServer.countDocuments({ scope: 'user', userId: owner })).toBe(0);
     // The ownerless platform server is untouched.
@@ -141,8 +124,6 @@ describe('purgeAllUserData (issue #143: factory reset)', () => {
     expect(otherSessions).toHaveLength(2);
     expect(await Message.countDocuments({ sessionId: otherSessions[0]._id })).toBe(2);
     expect(await Asset.countDocuments({ userId: other })).toBe(1);
-    expect(await Entity.countDocuments({ userId: other })).toBe(1);
-    expect(await EntityEdge.countDocuments({ userId: other })).toBe(1);
   });
 
   it('fires the trace purge with the user’s session ids (read before deletion)', async () => {
@@ -176,7 +157,7 @@ describe('purgeAllUserData (issue #143: factory reset)', () => {
   it('deletes Spaces asset objects and sweeps each chat file prefix by key', async () => {
     const uid = userId();
     const session = await Session.create({ userId: uid, title: 'with files' });
-    await seedAssetsAndGraph(uid);
+    await seedAssetsAndMcp(uid);
     mockedIsConfigured.mockReturnValue(true);
     mockedListKeys
       .mockResolvedValueOnce([`${uid}/chats/${session._id}/script.txt`])
@@ -192,7 +173,7 @@ describe('purgeAllUserData (issue #143: factory reset)', () => {
   it('reports nothing failed when Spaces is unconfigured (no bucket ever held the keys)', async () => {
     const uid = userId();
     await Session.create({ userId: uid, title: 'with files' });
-    await seedAssetsAndGraph(uid);
+    await seedAssetsAndMcp(uid);
     mockedIsConfigured.mockReturnValue(false);
 
     // Storage never configured → no bucket could hold the user's files, so
@@ -206,7 +187,7 @@ describe('purgeAllUserData (issue #143: factory reset)', () => {
   it('reports a sentinel key when the workspace file sweep fails wholesale', async () => {
     const uid = userId();
     await Session.create({ userId: uid, title: 'with files' });
-    await seedAssetsAndGraph(uid);
+    await seedAssetsAndMcp(uid);
     mockedIsConfigured.mockReturnValue(true);
     mockedDeleteByKey.mockResolvedValue(true);
     // mockReset drops the previous test's queued `Once` implementations.
