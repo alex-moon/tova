@@ -10,6 +10,7 @@ import { createTool } from '@mastra/core/tools';
 import { z } from 'zod';
 import mongoose from 'mongoose';
 import { Asset } from '../models/Asset';
+import { User } from '../models/User';
 import { truncateForPrompt } from './textExtraction';
 import { mcpToolsetsForUser } from './mcpService';
 import {
@@ -688,6 +689,72 @@ export const currentDatetimeTool = createTool({
   execute: async () => ({ utc: new Date().toISOString(), timezoneOffsetMinutes: null }),
 });
 
+/*
+ * Delegate-to-worker tool (#255, epic #251; F2/F3). Creates a task — a
+ * first-class stream that runs offline over the workspace — with this chat as
+ * its thin origin (`origin: { kind: 'chat', sessionId }`). The task is *not* a
+ * chat's child: the chat only references it, and the task never writes the chat
+ * stream (single writer per stream). The tool reads `userId`/`sessionId` off the
+ * per-call `RequestContext`, exactly like `generateFileExecute` reads them for
+ * provenance.
+ *
+ * ZDR turns cannot delegate: a task is durable by definition (D7). A ZDR turn
+ * carries no `sessionId` on the context, and the tool refuses with a graceful
+ * result; it also re-reads `User.settings.zdr` (mirroring the creation route's
+ * refusal in `routes/tasks.ts`) so the two seams cannot disagree.
+ *
+ * `taskService` is imported lazily: a top-level import would close a module
+ * cycle (`taskService` -> `taskProcessor` -> `taskSequencer` -> `routes/chat` ->
+ * `racingService` -> `inferenceService` -> this module). The import happens at
+ * execution time, long after every module has loaded.
+ */
+export const delegateTaskTool = createTool({
+  id: 'delegate_task',
+  description:
+    'Hand a longer piece of agent work to a background worker (a "task") that runs ' +
+    'unattended over the user’s workspace: multi-step research, building a document, ' +
+    'anything needing more than a quick reply. Returns immediately with a task id; ' +
+    'the user can watch and steer it in the Tasks view, and its result is reported ' +
+    'back into this chat when it finishes. Use it when the request is substantial and ' +
+    'the user is happy for it to run in the background rather than replying now.',
+  inputSchema: z.object({
+    instruction: z
+      .string()
+      .min(1)
+      .describe('What the worker should accomplish, stated as a complete standalone instruction'),
+  }),
+  outputSchema: z.object({
+    taskId: z.string().optional(),
+    error: z.string().optional(),
+  }),
+  execute: async ({ instruction }, { requestContext }) => {
+    const userId = requestContext.get('userId') as string | undefined;
+    const sessionId = requestContext.get('sessionId') as string | undefined;
+    // A ZDR turn (or any non-persisted call) has no session to attribute or
+    // notify — and a durable task is exactly what ZDR forbids (D7).
+    if (!userId || !sessionId) {
+      return { error: 'Delegation is not available in this conversation.' };
+    }
+    try {
+      const user = await User.findById(userId);
+      if (!user || user.settings?.zdr) {
+        return { error: 'Delegation is not available with zero-data-retention enabled.' };
+      }
+      const { enqueueTask } = await import('./taskService');
+      const task = await enqueueTask({
+        userId,
+        instruction,
+        origin: { kind: 'chat', sessionId },
+        maxSteps: config.task.maxSteps,
+        maxCostUsd: config.task.maxCostUsd,
+      });
+      return { taskId: String(task._id) };
+    } catch {
+      return { error: 'Could not start that background task.' };
+    }
+  },
+});
+
 const TOOL_INSTRUCTIONS =
   'You may call the `web_search` tool to find current or external information. ' +
   'When the user message contains a complete http(s) URL, do not search — call ' +
@@ -707,7 +774,11 @@ const TOOL_INSTRUCTIONS =
   're-read a long document end to end. When the user asks you to ' +
   'save, generate or create a new file, note or document, call `generate_file` ' +
   'with a filename (ending in .md) and the full markdown content; the file then ' +
-  'appears in their library and in `list_files` output.';
+  'appears in their library and in `list_files` output. When a request is ' +
+  'substantial background work — multi-step research, building a long document, ' +
+  'anything that would take many tool calls — call `delegate_task` with a ' +
+  'complete standalone instruction to hand it to the worker instead of doing it ' +
+  'inline; tell the user it is running in the background and will report back here.';
 
 /*
  * Agents are memoised per provider/model (creation is stateful — Mastra
@@ -756,6 +827,7 @@ const agentFor = (provider: LlmProvider, model: string, tools?: boolean): Agent 
             list_files: listFilesTool,
             read_file: readFileTool,
             generate_file: generateFileTool,
+            delegate_task: delegateTaskTool,
           },
         }
       : {}),

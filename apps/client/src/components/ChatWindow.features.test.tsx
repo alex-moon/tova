@@ -12,6 +12,23 @@ vi.mock('../services/assets', async (importOriginal) => {
   };
 });
 
+// #255: the embedded TaskCard mounts with a sessionId and calls the task
+// service; mock it so these feature tests never touch axios.
+vi.mock('../services/tasks', async (importOriginal) => {
+  const original = await importOriginal<typeof import('../services/tasks')>();
+  return {
+    ...original,
+    default: {
+      list: vi.fn(),
+      listForSession: vi.fn().mockResolvedValue([]),
+      create: vi.fn(),
+      get: vi.fn(),
+      instruct: vi.fn(),
+      cancel: vi.fn(),
+    },
+  };
+});
+
 import ChatWindow from './ChatWindow';
 import AssetService from '../services/assets';
 import type { AssetSummary } from '../services/assets';
@@ -600,5 +617,42 @@ describe('Composer attach menu (issue #214)', () => {
     openMenu();
     fireEvent.mouseDown(document.body);
     expect(screen.queryByTestId('attach-menu')).not.toBeInTheDocument();
+  });
+});
+
+describe('Send to worker (#255)', () => {
+  afterEach(cleanup);
+
+  const renderWithWorker = (extra: Partial<ComponentProps<typeof ChatWindow>> = {}) =>
+    renderChat([], false, { sessionId: 's1', onSendToWorker: vi.fn(), ...extra });
+
+  it('offers the worker button on a persisted, non-incognito chat', () => {
+    renderWithWorker();
+    expect(screen.getByTestId('chat-send-to-worker')).toBeInTheDocument();
+  });
+
+  it('hides the worker button on a new chat (no session id)', () => {
+    renderChat([], false, { sessionId: null, onSendToWorker: vi.fn() });
+    expect(screen.queryByTestId('chat-send-to-worker')).toBeNull();
+  });
+
+  it('hides the worker button on an incognito chat', () => {
+    renderWithWorker({ incognito: true });
+    expect(screen.queryByTestId('chat-send-to-worker')).toBeNull();
+  });
+
+  it('is disabled until there is text, then hands the text to the worker and clears it', async () => {
+    const onSendToWorker = vi.fn();
+    renderWithWorker({ onSendToWorker });
+    const button = screen.getByTestId('chat-send-to-worker');
+    expect(button).toBeDisabled();
+
+    const input = screen.getByTestId('chat-input');
+    fireEvent.change(input, { target: { value: 'research the market' } });
+    expect(button).not.toBeDisabled();
+
+    fireEvent.click(button);
+    expect(onSendToWorker).toHaveBeenCalledWith('research the market');
+    await waitFor(() => expect((input as HTMLTextAreaElement).value).toBe(''));
   });
 });

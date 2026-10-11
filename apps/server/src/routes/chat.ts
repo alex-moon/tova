@@ -40,6 +40,13 @@ import {
   isWorkspaceMemoryEnabled,
   retrieveWorkspaceBlock,
 } from '../services/workspaceRetrievalService';
+import { TaskEvent } from '../models/TaskEvent';
+import type { TaskDocument } from '../models/Task';
+import {
+  completionNotificationLine,
+  markNotified,
+  pendingCompletionsFor,
+} from '../services/taskNotificationService';
 
 const router = express.Router();
 
@@ -606,6 +613,49 @@ const enrichmentBlocksFor = async (
   return { libraryBlock, workspaceBlock };
 };
 
+/*
+ * #255 (F4): read completed background tasks into this turn's context — the
+ * chat route is the chat stream's only writer, so the worker never writes it
+ * itself (single writer per stream). The notification is a *queued write*: it
+ * waits for the next user turn and never lands mid-turn. The final answer is the
+ * task's last non-empty assistant step.
+ *
+ * This function only *reads*: it returns the block to inject and the ids it
+ * covered, but never marks them. The caller marks them via `markNotified` once
+ * the turn's assistant message has actually persisted. Marking at read time
+ * would consume a completion on a turn that then failed (provider error, abort,
+ * geo block) — the user would never see it. Marking after persistence trades a
+ * wider exactly-once race window (two concurrent turns on one session could both
+ * surface the same task) for never losing a completion; a chat turn per session
+ * is user-driven and single-flight on the client, so the loss bug is the one
+ * worth avoiding.
+ *
+ * Returns an empty block when nothing is pending — the common case — so the turn
+ * is byte-identical when no background work finished.
+ */
+const taskCompletionBlockFor = async (
+  userId: string,
+  sessionId: string,
+): Promise<{ block: string; taskIds: TaskDocument['_id'][] }> => {
+  try {
+    const pending = await pendingCompletionsFor(userId, sessionId);
+    if (pending.length === 0) return { block: '', taskIds: [] };
+    const lines: string[] = [];
+    for (const task of pending) {
+      const lastStep = await TaskEvent.findOne({
+        taskId: task._id,
+        role: 'assistant',
+        content: { $ne: '' },
+      }).sort({ seq: -1 });
+      lines.push(completionNotificationLine(task, lastStep?.content ?? ''));
+    }
+    return { block: lines.join('\n'), taskIds: pending.map((t) => t._id) };
+  } catch (err) {
+    console.error('Task completion drain error:', redactForLog(err));
+    return { block: '', taskIds: [] };
+  }
+};
+
 // Chat endpoint (non-streaming, preserved for compatibility)
 router.post('/', authenticate, async (req: AuthRequest, res) => {
   // Held outside try so the catch can erase a throwaway attachment on any
@@ -853,6 +903,10 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
      */
     const rosterPrePick = await pickRosterRoute(hasImage);
     if (!rosterPrePick) throw new AllModelsDisabledError();
+    // #255: completed background tasks ride this turn's context (queued write).
+    // The ids are marked notified only after the assistant message persists, so
+    // a failed turn does not consume the notification.
+    const taskCompletion = await taskCompletionBlockFor(userId as string, String(session!._id));
     const turnMessages = await withSystemAndAsset(
       buildSystemContent(
         userDoc,
@@ -861,6 +915,7 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
         false,
         userDoc.settings?.timezone,
         workspaceBlock,
+        taskCompletion.block,
       ),
     );
     const raced = await routeAndComplete(
@@ -913,6 +968,16 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
       metrics: await buildMessageMetrics(String(session!._id), assistantContent),
     });
     await assistantMessage.save();
+
+    // #255 (F4): the completion notification has now landed in the chat stream
+    // (this turn's assistant message persisted), so mark the drained tasks
+    // notified. Doing it here, not at read time, means a turn that throws before
+    // this point leaves the completion pending for the next turn. A failure to
+    // mark is swallowed: the turn already succeeded, and an unmarked completion
+    // simply re-surfaces next turn (at-least-once).
+    await markNotified(taskCompletion.taskIds).catch((err) =>
+      console.error('Task mark-notified error:', redactForLog(err)),
+    );
 
     // Entity graph extraction (#138): one extra LLM call after the turn is
     // served, fire-and-forget like title generation. Never runs for ZDR
@@ -1072,6 +1137,13 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
      */
     let libraryBlock = '';
     let streamWorkspaceBlock = '';
+    // #255 (F4): completed background tasks for this session, drained into the
+    // persisted turn's context below (empty on ZDR — a ZDR turn cannot create a
+    // task, D7, so it has nothing to drain). The ids are marked notified only
+    // once the persisted assistant message lands, so a failed stream does not
+    // consume the notification.
+    let streamTaskBlock = '';
+    let streamTaskIds: TaskDocument['_id'][] = [];
     if (zdr) {
       // Continuity comes from the client replay (#116); nothing is read back.
       messages = buildZdrMessages(zdrHistory, content);
@@ -1110,6 +1182,13 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
       );
       libraryBlock = blocks.libraryBlock;
       streamWorkspaceBlock = blocks.workspaceBlock;
+      // #255: drain completed origin tasks (queued write) into this turn.
+      const streamTaskCompletion = await taskCompletionBlockFor(
+        userId as string,
+        String(session!._id),
+      );
+      streamTaskBlock = streamTaskCompletion.block;
+      streamTaskIds = streamTaskCompletion.taskIds;
 
       // Same image-turn gating as the non-streaming route (#115).
       routingResult = rosterRoute;
@@ -1133,6 +1212,7 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
         zdr,
         streamUserDoc.settings?.timezone,
         streamWorkspaceBlock,
+        streamTaskBlock,
       ),
     });
     if (attachedAsset) {
@@ -1337,6 +1417,15 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
       metrics: await buildMessageMetrics(String(session!._id), assistantContent),
     });
     await assistantMessage.save();
+
+    // #255 (F4): the notification landed with this persisted turn — mark the
+    // drained tasks notified now, not at read time, so a stream that errored
+    // before this point leaves the completion pending for the next turn. A
+    // marking failure is swallowed (the turn already succeeded; an unmarked
+    // completion re-surfaces next turn).
+    await markNotified(streamTaskIds).catch((err) =>
+      console.error('Task mark-notified error:', redactForLog(err)),
+    );
 
     if (isEntityExtractionEnabled()) {
       extractAndPersistFromTurn({

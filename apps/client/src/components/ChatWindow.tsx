@@ -8,6 +8,7 @@ import {
   EyeOff,
   FileImage,
   FileText,
+  ListTree,
   Loader2,
   Menu,
   Paperclip,
@@ -21,6 +22,7 @@ import MarkdownContent from './MarkdownContent';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import AssetService, { type AssetSummary } from '@/services/assets';
+import TaskCard from './TaskCard';
 // Tolerant context read (not the throwing useAuth hook): standalone renders
 // of ChatWindow (tests, storybook-style usage) have no AuthProvider.
 import { AuthContext } from '../context/AuthContext';
@@ -29,6 +31,13 @@ import type { Message, ToolEvent } from '../App';
 interface ChatWindowProps {
   messages: Message[];
   onSendMessage: (content: string, assetId?: string, assetFilename?: string) => void;
+  // #255 (F7): hand the composer text to the background worker instead of
+  // sending a chat turn. Only offered on a persisted chat (a task's origin
+  // needs a session id) and never on ZDR.
+  onSendToWorker?: (content: string) => void;
+  // #255 (F6): bumped when a task is created so the embedded card refetches
+  // immediately (an empty card does not poll).
+  taskRefreshSignal?: number;
   isLoading: boolean;
   onOpenSidebar: () => void;
   // Active persisted chat id (null on a new chat); the incognito toggle is
@@ -280,6 +289,8 @@ const FollowupChips: React.FC<{ suggestions: string[]; onPick: (value: string) =
 const ChatWindow: React.FC<ChatWindowProps> = ({
   messages,
   onSendMessage,
+  onSendToWorker,
+  taskRefreshSignal,
   isLoading,
   onOpenSidebar,
   sessionId,
@@ -429,6 +440,16 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
       setAttachment(null);
       if (textareaRef.current) textareaRef.current.style.height = 'auto';
     }
+  };
+
+  // #255 (F7): hand the composer text to the background worker. Same composer
+  // state as a send (clears the input), but the turn never goes into the chat
+  // stream — the task reports back via the completion drain on a later turn.
+  const handleSendToWorker = () => {
+    if (!input.trim() || isLoading || !onSendToWorker) return;
+    onSendToWorker(input);
+    setInput('');
+    if (textareaRef.current) textareaRef.current.style.height = 'auto';
   };
 
   const handleAttachFile = async (files: FileList | null) => {
@@ -691,6 +712,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
         )}
       </div>
       <footer className="pointer-events-auto shrink-0 border-t border-border panel-surface p-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] md:px-6">
+        {sessionId && <TaskCard sessionId={sessionId} refreshSignal={taskRefreshSignal} />}
         {!isLoading && followups.length > 0 && (
           <FollowupChips suggestions={followups} onPick={(value) => setInput(value)} />
         )}
@@ -857,6 +879,24 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
                   </div>
                 )}
               </div>
+              {/* #255 (F7): send to the background worker instead of the chat.
+                  A persisted, non-incognito chat only — a task needs an origin
+                  session, and persistence is what ZDR forbids. */}
+              {sessionId && !incognito && onSendToWorker && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  aria-label="Send to background worker"
+                  title="Run this as a background task"
+                  disabled={isLoading || !input.trim()}
+                  onClick={handleSendToWorker}
+                  data-testid="chat-send-to-worker"
+                  className="h-8 w-8 text-muted-foreground hover:text-foreground"
+                >
+                  <ListTree className="size-4" />
+                </Button>
+              )}
               <Button
                 type="submit"
                 size="sm"
