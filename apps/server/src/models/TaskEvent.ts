@@ -37,7 +37,13 @@ const taskEventSchema = new mongoose.Schema({
   // Set on assistant events: the model/provider that served the step.
   model: { type: String },
   provider: { type: String },
-  // Reactive tool chips for the step, in the #196 shape.
+  // Reactive tool chips for the step, in the #196 shape, plus the executed
+  // call's raw `result` (Mixed). The chip summary fields feed the client; the
+  // raw result is the *resume* payload — a `maxSteps: 1` step that chose a tool
+  // returns `text: ""` (spike), so the next step must replay the results it
+  // produced or the model re-runs the call blind (D10/D4). Stored raw and
+  // clipped only at render time (`renderToolReplay`), so the stream stays the
+  // faithful record.
   tools: {
     type: [
       {
@@ -50,6 +56,7 @@ const taskEventSchema = new mongoose.Schema({
         resultCount: Number,
         domains: [String],
         filename: String,
+        result: { type: mongoose.Schema.Types.Mixed, required: false },
       },
     ],
     default: undefined,
@@ -86,7 +93,9 @@ export type TaskEventDocument = mongoose.HydratedDocument<
 >;
 
 // The task stream reuses the #196 tool-event shape; this alias exists so
-// callers import one name rather than reaching into the route module.
-export type TaskToolEvent = PersistedToolEvent;
+// callers import one name rather than reaching into the route module. It adds
+// the executed call's raw `result` (the resume payload, absent from the chat
+// chip which never needs it — see `tools` above).
+export type TaskToolEvent = PersistedToolEvent & { result?: unknown };
 
 export const TaskEvent = mongoose.model('TaskEvent', taskEventSchema);

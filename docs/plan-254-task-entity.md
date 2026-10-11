@@ -82,7 +82,11 @@ here. Where this plan adds concrete shapes, it does so to make them implementabl
   **assistant narration** (`[tool name (query)] → {result}`, clipped) — the structured
   `TaskEvent.tools` chips remain the authoritative record; the narration is only what the
   next call's prompt sees. The non-streaming connector now carries each `toolResults`
-  entry's `args` (with a `toolName ?? name` fallback) so those chips can be built.
+  entry's `args` (with a `toolName ?? name` fallback) so those chips can be built, **and the
+  executed call's raw `result` rides the chip so the next step can replay what the tool
+  returned** — the step that chose a tool returns `text: ""` (spike), so without the result
+  in the stream the model would re-run the call blind (the resume payload of D4). The chip's
+  `result` is `Mixed` and clipped only at render time (`renderToolReplay`).
 - **D11 — A step is "done" when it answers, not when it uses a tool (this pass).** A
   `maxSteps: 1` call that chose a tool returns `text: ""` (spike); a call that returned
   non-empty text **and** no tool calls is the model's final answer and settles the task
@@ -372,7 +376,8 @@ Against decision (c)-at-cap-1, a **step** is one `maxSteps: 1` roster call. The
 - Tool **results** are part of the same `assistant` event's `tools` (Mastra returns
   call+result together); there is no separate driver-executed `tool` event in (c),
   because the driver does not execute tools. A `tool`-role event stays reserved for
-  any future (b) path.
+  any future (b) path. The chip carries both the client-facing summary fields *and*
+  the executed call's raw `result` (the resume payload — see D10).
 - A `system` event records steering consumption and budget breaches (D6).
 - The next driver step's history is reassembled from all prior `TaskEvent` rows
   (D5: full task history, not a 10-message window), with the tool-result content
@@ -400,9 +405,10 @@ items are conditional and grouped under "Sequencer (gated on the spike)".
   `budget` (`{ maxSteps?, maxCostUsd?, spentUsd? }`), `lastError`, timestamps.
 - `models/TaskEvent.ts` — the stream. One row per event in order: role
   (`user | assistant | tool`), content, `model`/`provider`, reusable
-  `PersistedToolEvent`-shaped `tools`, `usage`, `step`, `timestamp`. Ordered by
-  `{ taskId, seq }` with a compound index. A steering message is a `user` row appended at
-  a step boundary (D2).
+  `PersistedToolEvent`-shaped `tools` plus the executed call's raw `result` (Mixed; the
+  resume payload, absent from the chat chip which never needs it), `usage`, `step`,
+  `timestamp`. Ordered by `{ taskId, seq }` with a compound index. A steering message is a
+  `user` row appended at a step boundary (D2).
 - **No change to `Message` or `Session`** — this is a hard invariant of the slice.
 
 ### Sequencer runtime (D4), generalised from `assetJobService`
@@ -566,6 +572,42 @@ A hardening pass over the foundation before the `npm run ci` gate. Findings and 
   it was already failing `npm run ci` on this branch. Seeds are now relative to `Date.now()`.
   This is genuinely outside this slice; raised here so the epic owner can see the scope was
   stepped into only to keep the required gate green.
+
+## Review pass 2 (2026-10-11) — sequencer-loop hardening
+
+A second pass over the landed sequencer loop, checked against the code and the tickets
+(#251/#254). The pre-fix `npm run ci` was green (95 suites / 1179 tests) but the loop had a
+**functional break and two metadata defects that no test covered**:
+
+- **The raw tool result was never persisted, so the (c) loop could not work.** `parseStepOutcome`
+  built chips via `toolResultEvent({ name, result })`, which returns only the client summary
+  fields (`phase`/`name`/`label`/`status`/`resultCount`/`domains`/`filename`) — **not** the raw
+  `result`. `renderToolReplay` read `tool.result`, which Mongoose silently stripped on save
+  (the schema had no `result` field). So the next step's history replayed `[tool web_search]`
+  with **no output**. Under decision (c) a tool step returns `text: ""` (spike), so the model
+  would re-run the call blind or hallucinate — the loop was broken in exactly the case it was
+  built for. **Fix:** the task tool event gained a `Mixed` `result` (the D4 resume payload),
+  `parseStepOutcome` now attaches `r.result`, and the model-tool schema/type were widened.
+  `renderToolReplay`'s clipping now finally applies. Pinned by a `TaskEvent` round-trip test
+  and a `taskSequencer` replay test.
+- **The chip's `query` was never populated (D10's `(query)` was unimplemented).** The
+  non-streaming path has no separate `toolCall` event from which the streaming path derives
+  `query` (`toolCallEvent` reads `args.query`); `parseStepOutcome` dropped the `args` the
+  connector work deliberately threaded through. `toolResultEvent` now takes an optional `args`
+  and derives `query` from it (mirroring `toolCallEvent`), and the sequencer forwards `r.args`.
+  Without it a task's web-search chip rendered no query (a visible regression vs chat chips)
+  and the replay lost `(query)`. Pinned by `parseStepOutcome` tests.
+- **The `system` notice carried a stale `step`.** `appendNotice` used the `Task` document's
+  `stepCount`, read once at claim time — so the completion/budget notice was stamped step 0
+  regardless of how many steps ran. Now the loop passes its local `stepCount` explicitly.
+  Pinned in `taskProcessor.test.ts`.
+
+**Not fixed, recorded deliberately:** the loop reads the task once and does not re-check
+`status`, so a future `cancelled` transition would not stop an in-flight task, and the
+per-step `stepCount` write is unguarded on status. No producer of `cancelled` exists yet (the
+cancel route is the API slice), so adding the check now would be speculative; the loop's own
+completion/pause writes are correctly guarded on `status: 'running'` by `runTaskTick`. Raised
+for the API slice, not fixed here (per the cleanup-scope policy: do not silently expand).
 
 ## Open questions
 

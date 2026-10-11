@@ -28,7 +28,7 @@ const model = (overrides: Partial<RosterModel> = {}): RosterModel => ({
 const events = async (taskId: unknown) => TaskEvent.find({ taskId }).sort({ seq: 1 });
 
 describe('renderToolReplay (#254)', () => {
-  it('renders the tool name, query, and a clipped result', () => {
+  it('renders the tool name and query', () => {
     expect(
       renderToolReplay({
         phase: 'result',
@@ -38,6 +38,20 @@ describe('renderToolReplay (#254)', () => {
         query: 'x',
       }),
     ).toContain('[tool read_file (x)]');
+  });
+
+  it('renders the result and clips it to the step-text cap', () => {
+    const line = renderToolReplay({
+      phase: 'result',
+      name: 'read_file',
+      label: 'r',
+      status: 'ok',
+      result: { content: 'x'.repeat(5000) },
+    });
+    expect(line).toContain('[tool read_file]');
+    expect(line).toContain('→');
+    expect(line).toContain('…');
+    expect(line.length).toBeLessThan(2100);
   });
 });
 
@@ -83,6 +97,41 @@ describe('assembleTaskHistory (#254)', () => {
     const messages = assembleTaskHistory(await events(task._id));
     expect(messages).toEqual([{ role: 'assistant', content: '[tool list_files]' }]);
   });
+
+  it('replays the tool query and result so the next step sees the output (D10)', async () => {
+    const task = await enqueueTask({
+      userId: '000000000000000000000000',
+      instruction: 'search for groq pricing',
+      maxSteps: 5,
+      maxCostUsd: 5,
+    });
+    // A step that chose a tool returns text: "" — the driver must replay the
+    // executed call's query and result or the model re-runs it blind.
+    await TaskEvent.create({
+      taskId: task._id,
+      seq: 1,
+      role: 'assistant',
+      content: '',
+      step: 0,
+      tools: [
+        {
+          phase: 'result',
+          name: 'web_search',
+          label: 'Searched the web',
+          status: 'ok',
+          query: 'groq pricing',
+          result: { results: [{ url: 'https://groq.com/pricing' }] },
+        },
+      ],
+    });
+
+    const messages = assembleTaskHistory(await events(task._id));
+    expect(messages[1]).toEqual({
+      role: 'assistant',
+      content:
+        '[tool web_search (groq pricing)] → {"results":[{"url":"https://groq.com/pricing"}]}',
+    });
+  });
 });
 
 describe('parseStepOutcome (#254)', () => {
@@ -104,6 +153,43 @@ describe('parseStepOutcome (#254)', () => {
     expect(outcome.text).toBe('');
     expect(outcome.tools[0]).toMatchObject({ phase: 'result', name: 'read_file' });
     expect(outcome.usage).toEqual({ inputTokens: 1, outputTokens: 2, totalTokens: 3 });
+  });
+
+  it('recovers the chip query from the call args (D10)', () => {
+    const outcome = parseStepOutcome({
+      result: {
+        model: model(),
+        provider: { provider: 'deepinfra', modelId: 'di' },
+        completion: {
+          choices: [{ message: { content: '' } }],
+          toolResults: [
+            { name: 'web_search', result: { results: [] }, args: { query: 'groq pricing' } },
+          ],
+        },
+      },
+      attempts: 1,
+    });
+    // Without the args passthrough the chip silently loses its query.
+    expect(outcome.tools[0]).toMatchObject({
+      phase: 'result',
+      name: 'web_search',
+      query: 'groq pricing',
+    });
+  });
+
+  it('omits the query when the call carried no string query arg', () => {
+    const outcome = parseStepOutcome({
+      result: {
+        model: model(),
+        provider: { provider: 'deepinfra', modelId: 'di' },
+        completion: {
+          choices: [{ message: { content: '' } }],
+          toolResults: [{ name: 'read_file', result: {}, args: { fileId: 'abc' } }],
+        },
+      },
+      attempts: 1,
+    });
+    expect(outcome.tools[0].query).toBeUndefined();
   });
 });
 

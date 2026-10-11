@@ -222,6 +222,16 @@ change, newest last. No phase numbers: the loop records outcomes, not protocol s
   (loop/steering/resume/budget). `npm run ci` green (95 suites, 1179 tests). Slice plan
   (`docs/plan-254-task-entity.md`) carries D10/D11; slice PR **#273** opened against
   `epic/251-workspace` this pass.
+- 2026-10-11 — #254 sequencer-loop hardening pass on `feat/tv/254-sequencer-loop` (PR #273),
+  checked against the code and #251/#254. Found and fixed a **functional break**: the raw tool
+  result was never persisted on a step's tool chip (Mongoose stripped an undeclared field), so
+  `renderToolReplay` replayed `[tool web_search]` with no output — under decision (c) a tool
+  step returns `text: ""`, so the next step lost the tool's results entirely. The task tool
+  event gained a `Mixed` `result` (the D4 resume payload); `parseStepOutcome` attaches it. Also
+  fixed the chip's `query` (D10's `(query)`): the sequencer dropped the `args` the connector
+  change threaded through, so the streaming-only query derivation never ran for tasks —
+  `toolResultEvent` now takes `args`; and the `system` notice's `step` (stale claim-time value).
+  `npm run ci` green (95 suites, 1184 tests). See the slice plan's "Review pass 2".
 
 ## Follow-ups
 

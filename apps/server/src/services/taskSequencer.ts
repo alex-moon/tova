@@ -96,13 +96,19 @@ export const assembleTaskHistory = (events: TaskEventDocument[]): CompletionOpti
  * empty when it chose a tool (spike: `text = ""` at cap 1); tool results carry
  * `name` + optional `args`, mapped to the #196 `PersistedToolEvent` chip shape
  * (phase 'result' — under (c) the driver never executes a call itself, so there
- * is no separate live 'call' chip).
+ * is no separate live 'call' chip). `args` is forwarded so `toolResultEvent`
+ * recovers the call's `query` the way the streaming path's `toolCallEvent`
+ * does; without it the chip would silently lose its query and history replay
+ * would render a bare `[tool name]`.
  */
 export const parseStepOutcome = (outcome: CompletionOutcome): TaskStepOutcome => {
   const completion = outcome.result.completion;
-  const tools: TaskToolEvent[] = (completion.toolResults ?? []).map((r) =>
-    toolResultEvent({ name: r.name, result: r.result }),
-  );
+  const tools: TaskToolEvent[] = (completion.toolResults ?? []).map((r) => ({
+    ...toolResultEvent({ name: r.name, result: r.result, ...(r.args ? { args: r.args } : {}) }),
+    // The raw result rides the chip so the next step can replay what the tool
+    // returned (D10). It is clipped only when the prompt is assembled.
+    ...(r.result !== undefined ? { result: r.result } : {}),
+  }));
   return {
     model: outcome.result.model.modelId,
     provider: outcome.result.provider.provider,
