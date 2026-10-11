@@ -156,24 +156,24 @@ notified) and for completed tasks not yet drained.
 
 ## Done
 
-- [ ] `Task.notifiedAt` field + schema-comment update; model test (default null, round-trips).
-- [ ] `delegate_task` tool (schema, execute, ZDR/session refusal) + attached in `agentFor`
+- [x] `Task.notifiedAt` field + schema-comment update; model test (default null, round-trips).
+- [x] `delegate_task` tool (schema, execute, ZDR/session refusal) + attached in `agentFor`
       + `TOOL_INSTRUCTIONS` blurb; unit tests (creates task with origin session; ZDR refuses;
       no-session refuses).
-- [ ] `taskNotificationService` (`pendingCompletionsFor`, `markNotified`) + unit tests.
-- [ ] Chat routes drain pending completions into the next turn's context (both routes) +
+- [x] `taskNotificationService` (`pendingCompletionsFor`, `markNotified`) + unit tests.
+- [x] Chat routes drain pending completions into the next turn's context (both routes) +
       mark notified **after the turn's assistant message persists**; route tests (a
       completed origin task surfaces on the next turn; a non-origin task does not; a
       second turn does not re-surface; a failed turn leaves it pending).
-- [ ] Task list route: `originSessionId` filter + tests (filters to origin tasks; scoped
+- [x] Task list route: `originSessionId` filter + tests (filters to origin tasks; scoped
       by user).
-- [ ] Client: `TaskService.create` + origin list; `TaskCard`; ChatWindow wiring (card +
+- [x] Client: `TaskService.create` + origin list; `TaskCard`; ChatWindow wiring (card +
       "Send to worker"); unit tests (card renders status + link; send-to-worker calls
       create with origin).
-- [ ] Mobile-first verification in a real browser via `playwright-cli` (~375px) + e2e
+- [x] Mobile-first verification in a real browser via `playwright-cli` (~375px) + e2e
       (`e2e/tasks.spec.ts` extension or a new `e2e/chat-task.spec.ts`).
-- [ ] `npm run ci` green.
-- [ ] PR against `epic/251-workspace`, plan doc linked.
+- [x] `npm run ci` green.
+- [x] PR against `epic/251-workspace`, plan doc linked — slice PR **#280** opened.
 
 ## Follow-ups
 
