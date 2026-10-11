@@ -307,6 +307,27 @@ change, newest last. No phase numbers: the loop records outcomes, not protocol s
   suites / 1207 tests; client 21 files / 263 tests). Slice plan
   (`docs/plan-254-task-entity.md`) carries the "Client-view hardening pass" section; PR #278
   still open against `epic/251-workspace`.
+- 2026-10-11 — #254 review-pass-3 hardening on `feat/tv/254-task-client-view` (commit `d9e1cd9`,
+  pushed; carried in PR #278). A review of the landed slice against the code and the tickets,
+  driven by a **live end-to-end run of the real sequencer** (a task created through the API and
+  watched in the browser), found one live functional break plus correctness/contract fixes.
+  **Sequencer (live break):** the non-streaming connector read Mastra's `FullOutput.toolResults`
+  fields off the entry, but they live under `entry.payload` (`{ toolName, args, result }`), so
+  every persisted chip was `{ name: '', label: 'Tool run' }` with no result — the replay fed the
+  model `[tool tool]` and it re-ran the same tool blind until the step budget paused the task;
+  the mapping now unwraps `payload` (entry-level fallback), the same task completes in 2 steps
+  with a real chip, pinned by `mastraToolResults.test.ts`. **API races:** `steerTask` could
+  resurrect a `cancelled` task (`cancelled → queued`) and `cancelTask` could clobber a `done`
+  one (`done → cancelled`) — both writes are now status-guarded; the processor no longer appends
+  a false "Task completed." when a cancel landed during the final step; malformed `:id` now 404s
+  instead of 500ing (D15). **Client:** the 3s active poll refetched page 1 and wiped appended
+  "Show more" pages (now refetches all loaded pages via a cursor chain); silent-poll 404s were
+  swallowed forever (`TaskError` now carries the HTTP status and a 404 stops polling); Cancel
+  showed no in-flight state (a derived `cancelPending` holds a disabled "Cancelling…"); the
+  `/tasks` responsive e2e now opens the detail pane, not just the list. `npm run ci` green
+  (server 97 suites / 1213 tests; client 21 files / 265 tests); `tasks` + `responsive` e2e 16/16;
+  detail inspected in a real browser at 390px. Slice plan (`docs/plan-254-task-entity.md`)
+  carries the "Review pass 3" section; PR #278 still open against `epic/251-workspace`.
 
 ## Follow-ups
 
