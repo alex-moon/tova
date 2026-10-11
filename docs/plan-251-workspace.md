@@ -77,8 +77,9 @@ Slice-level decisions live in the slice plan docs; this section carries epic-lev
 - [x] Epic branch `epic/251-workspace` cut from `main`
 - [x] Epic plan doc (this file)
 - [x] Slice #252 — workspace provenance (PR #265 merged to `epic/251-workspace`; #252 closed)
-- [ ] Slice #253 — workspace memory (implemented on `feat/tv/253-workspace-memory`, PR opened
-      against `epic/251-workspace`; not yet merged)
+- [ ] Slice #253 — workspace memory (implemented on `feat/tv/253-workspace-memory`; PR #271
+      against `epic/251-workspace` now `MERGEABLE`/`CLEAN` after the #254 foundation merge
+      conflict was resolved; awaiting merge — owner gate on loop self-merge is unsettled)
 - [ ] Slice #254 — task entity
 - [ ] Slice #255 — chat-task integration
 - [ ] Slice #256 — retire the entity graph
@@ -121,6 +122,13 @@ change, newest last. No phase numbers: the loop records outcomes, not protocol s
   newline-accounted block cap. `npm run ci` green (89 suites, 1125 tests). Slice plan
   (`docs/plan-253-workspace-memory.md`) carries the decisions and owner-defaults; slice PR
   opened against `epic/251-workspace` this pass, not yet merged.
+- 2026-10-11 — #253 unblocked for merge: PR #271 had gone `CONFLICTING`/`DIRTY` once the #254
+  foundation (#269) and epic doc commits landed on `epic/251-workspace` after it was opened.
+  Merged `epic/251-workspace` into `feat/tv/253-workspace-memory`, resolving the single
+  conflict in `chat.stream.test.ts` (two independent fixes had landed for the same #261
+  rotted fixed-date seed — kept the slice branch's `stamp()`-helper form). `npm run ci`
+  green on the merged branch (93 suites, 1156 tests). PR #271 now `MERGEABLE`/`CLEAN`; still
+  awaiting merge under the unsettled self-merge owner gate.
 
 ## Follow-ups
 
