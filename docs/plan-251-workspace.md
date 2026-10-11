@@ -83,9 +83,11 @@ Slice-level decisions live in the slice plan docs; this section carries epic-lev
       slice branch `feat/tv/253-workspace-memory` kept; #253 issue stays open until the
       epic ships, tracked above)
 - [ ] Slice #254 — task entity (foundation landed: PR #269 merged to `epic/251-workspace`
-      at `d3fcc6f`; **loop-ownership spike DONE (decision (c) hybrid, cap 1), merged to
-      `epic/251-workspace` via PR #272 at `04ecc57`; sequencer loop + connector field next**;
-      #254 stays open until the sequencer lands)
+      at `d3fcc6f`; loop-ownership spike DONE (decision (c) hybrid, cap 1), merged to
+      `epic/251-workspace` via PR #272 at `04ecc57`; **sequencer loop landed server-side on
+      `feat/tv/254-sequencer-loop` (connector `maxSteps` field + `taskSequencer` turn loop +
+      steering/budget/resume tests); API routes + task client view remain**; #254 stays open
+      until the epic ships)
 - [ ] Slice #255 — chat-task integration
 - [ ] Slice #256 — retire the entity graph
 - [ ] Epic PR `epic/251-workspace` → `main`, linking this doc, `npm run ci` green
@@ -202,6 +204,24 @@ change, newest last. No phase numbers: the loop records outcomes, not protocol s
   #255/#256, epic PR #270 (still a bodyless draft), and the open-question list re-verified
   unchanged; the self-merge owner gate stays formally unsettled (the loop continues to
   default-and-flag under the fallback, most recently on #271 and this docs-only #272).
+- 2026-10-11 — #254 sequencer loop implemented server-side on `feat/tv/254-sequencer-loop`
+  (cut from `epic/251-workspace`), the first pass unblocked by the spike decision (c).
+  Three parts: (1) the one-field connector change the spike named — `CompletionOptions.maxSteps`,
+  forwarded by `callOptionsFrom` (absent keeps the 12/1 mode default, so every chat call site
+  is byte-identical); (2) the neutral non-streaming completion now carries each
+  `toolResults` entry's `args`, with a `toolName ?? name` fallback, so the sequencer can build
+  #196 tool chips and replay its own calls as history; (3) `taskSequencer.runTaskStep` (assemble
+  full task history from `TaskEvent`, size `max_tokens` via `outputTokensFor` against the picked
+  model's window, race the roster at `maxSteps: 1`) and the real turn loop in
+  `taskProcessor.makeTaskProcessor` — steps record one `assistant` event each, steering is
+  consumed at the call boundary by construction, a text-only answer settles `done`, and the step
+  budget settles `paused` + a visible `system` event (D6). OQ5 defaulted to race-no-guard
+  (matches post-#232 chat routing) per the fallback, flagged on the slice PR. `taskService.enqueueTask`
+  now also writes the initial instruction as the stream's first `user` event (D1: stream is the
+  source of truth). Tests: `mastraStepCap`, `taskSequencer`, rewritten `taskProcessor`
+  (loop/steering/resume/budget). `npm run ci` green (95 suites, 1179 tests). Slice plan
+  (`docs/plan-254-task-entity.md`) carries D10/D11; slice PR opened against `epic/251-workspace`
+  this pass.
 
 ## Follow-ups
 

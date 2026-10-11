@@ -343,7 +343,9 @@ export const paragraphBreakFor = (contentEnding: string): string => {
   return '\n\n'.slice(Math.min(trailingNewlines, 2));
 };
 
-const toolResultEvent = (result: { name: string; result: unknown }) => {
+// Exported (#254) so the task sequencer builds the same #196 tool chips the
+// chat path persists — one chip vocabulary for both streams.
+export const toolResultEvent = (result: { name: string; result: unknown }) => {
   const base = {
     phase: 'result' as const,
     name: result.name,

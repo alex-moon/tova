@@ -1,4 +1,5 @@
 import { Task, type TaskDocument } from '../models/Task';
+import { TaskEvent } from '../models/TaskEvent';
 
 // Task sequencer runtime (#254, epic #251), generalised from `assetJobService`:
 // enqueue, an atomic oldest-first claim (`queued -> running` + attempts bump),
@@ -31,20 +32,35 @@ const clampError = (err: unknown): string => {
 
 // Create a queued task. `budget` is snapshotted at creation (D6) so a mid-task
 // env change cannot move the goalposts; the caller supplies the config values.
+// The initial instruction is *also* written as the task stream's first `user`
+// event (D1: the stream is the source of truth; `instruction` is the listing
+// seed). A direct-origin task with no instruction starts with an empty stream
+// and marks step 0 as a `system` row only when the loop runs.
 export const enqueueTask = async (input: {
   userId: string;
   instruction?: string;
   origin?: { kind: 'chat' | 'direct'; sessionId?: string };
   maxSteps: number;
   maxCostUsd: number;
-}): Promise<TaskDocument> =>
-  Task.create({
+}): Promise<TaskDocument> => {
+  const task = await Task.create({
     userId: input.userId,
     status: 'queued',
     ...(input.instruction !== undefined ? { instruction: input.instruction } : {}),
     ...(input.origin ? { origin: input.origin } : {}),
     budget: { maxSteps: input.maxSteps, maxCostUsd: input.maxCostUsd, spentUsd: 0 },
   });
+  if (input.instruction) {
+    await TaskEvent.create({
+      taskId: task._id,
+      seq: 0,
+      role: 'user',
+      content: input.instruction,
+      step: 0,
+    });
+  }
+  return task;
+};
 
 // Atomic claim: status + attempts bump in one findOneAndUpdate, oldest-queued
 // first. Single consumer in-process; multiple server processes would still not

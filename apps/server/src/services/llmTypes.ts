@@ -61,6 +61,15 @@ export interface CompletionOptions {
   temperature?: number;
   max_tokens?: number;
   /*
+   * Per-call cap on the agent's own tool loop (#254, epic #251). The chat
+   * path leaves it unset and gets the connector default (12 with tools, 1
+   * without); the task sequencer pins it to `1` so a single roster call is one
+   * *driver step* the driver can observe and drain steering at (the spike's
+   * decision (c), `docs/plan-254-task-entity.md`). Another value is a middle
+   * ground the driver does not need yet; it is forwarded verbatim.
+   */
+  maxSteps?: number;
+  /*
    * Client-disconnect signal (wired by `routes/chat.ts` from `req.on('close')`).
    * Optional: only the streaming call site supplies it today.
    */
@@ -92,7 +101,7 @@ export interface NeutralCompletion {
    * with the tool's own structured result. `result` is provider-shape-agnostic;
    * the `web_search` tool returns `{ results: { title, snippet, url }[] }`.
    */
-  toolResults?: Array<{ name: string; result: unknown }>;
+  toolResults?: Array<{ name: string; result: unknown; args?: Record<string, unknown> }>;
   /**
    * Token usage for the turn (issue #224). Absent when the provider reported
    * nothing; callers persist it for the per-message cost view.
