@@ -146,13 +146,23 @@ export const buildWorkspaceBlock = (
  *
  * `excludeMessageId` drops the just-saved current turn (the routes run
  * retrieval after persisting it) so the turn is never retrieved and injected
- * back as its own "past work".
+ * back as its own "past work". `excludeAssetId` does the same for the file
+ * attached to the current turn: an attachment under discussion is not past
+ * work, and its contents already ride the `<user_content>` envelope (or the
+ * file-library index), so re-listing it as a retrieved slice would only
+ * duplicate it.
+ *
+ * Ephemeral assets (ZDR chat-composer uploads, `ephemeral: true`) are filtered
+ * out of the corpus entirely, matching decision 6 / the epic invariant that
+ * incognito artifacts never become workspace items — the durable-library reads
+ * (the assets page) exclude them for the same reason.
  */
 export const retrieveWorkspaceBlock = async (
   prompt: string,
   userId: string,
   n = MAX_SLICES,
   excludeMessageId?: string,
+  excludeAssetId?: string,
 ): Promise<string> => {
   try {
     const uid = new mongoose.Types.ObjectId(userId);
@@ -180,6 +190,8 @@ export const retrieveWorkspaceBlock = async (
       Asset.find({
         userId: uid,
         status: 'ready',
+        ephemeral: { $ne: true },
+        _id: { $ne: excludeAssetId ?? null },
         $or: [{ textExtracted: { $ne: null } }, { markdownExtracted: { $ne: null } }],
       })
         .sort({ _id: -1 })

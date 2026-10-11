@@ -243,6 +243,54 @@ describe('workspaceRetrievalService', () => {
       expect(block).toContain('notes.txt');
     });
 
+    it('excludes ephemeral (ZDR) assets from the corpus entirely', async () => {
+      const userId = String(new Types.ObjectId());
+      await Asset.create({
+        userId,
+        filename: 'throwaway.txt',
+        key: 'k',
+        contentType: 'text/plain',
+        size: 1,
+        status: 'ready',
+        ephemeral: true,
+        textExtracted: 'the lease pets clause allows one cat',
+      });
+      const block = await retrieveWorkspaceBlock('lease pets clause', userId);
+      expect(block).not.toContain('throwaway.txt');
+      expect(block).not.toContain('one cat');
+    });
+
+    it("excludes the current turn's attached asset (not past work)", async () => {
+      const userId = String(new Types.ObjectId());
+      const attached = await Asset.create({
+        userId,
+        filename: 'lease.pdf',
+        key: 'k',
+        contentType: 'application/pdf',
+        size: 1,
+        status: 'ready',
+        textExtracted: 'the lease pets clause allows one cat',
+      });
+      await Asset.create({
+        userId,
+        filename: 'old-lease.pdf',
+        key: 'k2',
+        contentType: 'application/pdf',
+        size: 1,
+        status: 'ready',
+        textExtracted: 'the earlier lease pets clause allowed two cats',
+      });
+      const block = await retrieveWorkspaceBlock(
+        'lease pets clause',
+        userId,
+        undefined,
+        undefined,
+        String(attached._id),
+      );
+      expect(block).not.toContain('file "lease.pdf"');
+      expect(block).toContain('file "old-lease.pdf"');
+    });
+
     it('returns empty when nothing overlaps and never throws', async () => {
       const userId = String(new Types.ObjectId());
       expect(await retrieveWorkspaceBlock('birds', userId)).toBe('');

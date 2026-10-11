@@ -159,6 +159,16 @@ change, newest last. No phase numbers: the loop records outcomes, not protocol s
   owner-defaults flagged for veto, so it was merged rather than left waiting. Done checklist
   updated; slice plan doc archived to `docs/done/plan-253-workspace-memory.md`. #253 issue
   left open (slices close when the epic ships). Next: the #254 loop-ownership spike.
+- 2026-10-11 — post-merge review of #253 found the asset side of the corpus breach two
+  rules: it had no `ephemeral` filter (so a ZDR composer upload live during its own turn
+  could enter `<user:workspace>`, against the epic's "incognito never becomes a workspace
+  item") and it did not exclude the current turn's own attachment from the file corpus (an
+  attachment is not past work; its text already rides the envelope/library index).
+  `retrieveWorkspaceBlock` now filters `ephemeral: { $ne: true }` and takes an
+  `excludeAssetId`, threaded from both persisted routes. Also recorded, as a clarification
+  not a change, that the chat corpus reads `role: 'user'` only — widening to assistant turns
+  is a gate-eval question left to the owner. `npm run ci` green. Slice plan carries the
+  detail.
 
 ## Follow-ups
 

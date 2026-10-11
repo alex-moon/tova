@@ -564,18 +564,32 @@ const knowledgeBlockFor = async (prompt: string, userId: string): Promise<string
  * `excludeMessageId` drops the just-saved current turn from the workspace
  * corpus (the routes run retrieval after persisting it, so without it the turn
  * could be retrieved and injected back as its own "past work").
+ * `excludeAssetId` drops the current turn's attached file for the same reason:
+ * it is not past work, and its text already rides the `<user_content>` envelope
+ * (or the file-library index).
  */
 const enrichmentBlocksFor = async (
   prompt: string,
   history: { role: 'user' | 'assistant'; content: string }[],
   userId: string,
-  opts: { skipFiles?: boolean; skipWorkspace?: boolean; excludeMessageId?: string } = {},
+  opts: {
+    skipFiles?: boolean;
+    skipWorkspace?: boolean;
+    excludeMessageId?: string;
+    excludeAssetId?: string;
+  } = {},
 ): Promise<{ libraryBlock: string; workspaceBlock: string }> => {
   const votes = await enrichmentVotes(prompt, history);
   const libraryBlock = !opts.skipFiles && votes.files ? await libraryIndexFor(userId) : '';
   let workspaceBlock = '';
   if (!opts.skipWorkspace && votes.workspace && isWorkspaceMemoryEnabled()) {
-    workspaceBlock = await retrieveWorkspaceBlock(prompt, userId, undefined, opts.excludeMessageId);
+    workspaceBlock = await retrieveWorkspaceBlock(
+      prompt,
+      userId,
+      undefined,
+      opts.excludeMessageId,
+      opts.excludeAssetId,
+    );
   }
   return { libraryBlock, workspaceBlock };
 };
@@ -798,7 +812,12 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
         userMessage._id,
       ),
       userId as string,
-      { skipFiles: hasImage, skipWorkspace: hasImage, excludeMessageId: String(userMessage._id) },
+      {
+        skipFiles: hasImage,
+        skipWorkspace: hasImage,
+        excludeMessageId: String(userMessage._id),
+        excludeAssetId: attachedAsset ? String(attachedAsset._id) : undefined,
+      },
     );
     const withSystemAndAsset = async (systemContent: string) => {
       const next = messagesFromPersistedHistory(
@@ -1074,6 +1093,7 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
           skipFiles: hasImage,
           skipWorkspace: hasImage,
           excludeMessageId: String(userMessage._id),
+          excludeAssetId: attachedAsset ? String(attachedAsset._id) : undefined,
         },
       );
       libraryBlock = blocks.libraryBlock;

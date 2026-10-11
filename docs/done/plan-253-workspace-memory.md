@@ -139,3 +139,22 @@ pollute every turn — so it must run on the same evidence path as routing chang
   first matched keyword, bounded by the same cap. (4) route-level coverage was
   streaming-only; the non-streaming route and both ZDR routes now assert the block
   end-to-end. `npm run ci` green (93 suites, 1164 tests).
+- 2026-10-11 — corpus-contract hardening. Review of the merged slice found the asset side of
+  the corpus did not honour decision 6's ZDR rule and admitted the current turn's own
+  attachment as "past work": (1) the asset read had no `ephemeral` filter, so a ZDR
+  chat-composer upload (`ephemeral: true`, still alive for the duration of its own turn)
+  could be retrieved into `<user:workspace>` — a contract break, since decision 6 and the
+  epic invariant say incognito artifacts never become workspace items (the durable-library
+  reads exclude ephemeral assets for exactly this reason); the query now filters
+  `ephemeral: { $ne: true }`. (2) the file attached to the current turn was not excluded
+  from the file corpus, so an attachment under discussion could be re-listed as a retrieved
+  slice even though its text already rides the `<user_content>` envelope / library index;
+  `retrieveWorkspaceBlock` gained an `excludeAssetId` (threaded through
+  `enrichmentBlocksFor` from both persisted routes) alongside the existing
+  `excludeMessageId`. Added service tests for both. `npm run ci` green.
+- 2026-10-11 — clarification recorded (no behaviour change): the chat corpus currently
+  reads `role: 'user'` messages only. This keeps "what did I say" faithful and the pool
+  small, but it means an answer that lives in an assistant turn ("as I explained, the
+  budget is …") is not retrievable; whether to widen the chat corpus to assistant turns is
+  a gate-eval question (hit-rate vs injection noise), not a v1 default — left to the owner
+  per the epic's evidence-first rule.
