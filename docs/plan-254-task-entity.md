@@ -46,7 +46,7 @@ here. Where this plan adds concrete shapes, it does so to make them implementabl
   turn-taking. A steering message is just the next queued user turn.
 - **D3 — Scope: the workspace, via the existing security model.** Tools run under the
   user's `userId`/`RequestContext` exactly as chat tools do (per-call `RequestContext`,
-  `mastraService.ts:234`), so a task needs no chat — its scope was never conversational.
+  `mastraService.ts:236`), so a task needs no chat — its scope was never conversational.
   **Direct-origin tasks** (user starts with an initial instruction, no chat) are
   first-class; the origin reference is optional.
 - **D4 — Runtime: generalise `assetJobService`'s claim/retry/poller.** In-process is
@@ -56,7 +56,7 @@ here. Where this plan adds concrete shapes, it does so to make them implementabl
 - **D5 — Routing: per-step roster racing via `raceRosterCompletion`.** Non-streaming
   completion per step is fine; the client gets progress from the task stream, not the LLM
   stream. Steps assemble from **full task history**, not the chat path's 10-message window
-  (`routes/chat.ts:963-965`), and size `max_tokens` against the picked model's
+  (`routes/chat.ts:791-793`), and size `max_tokens` against the picked model's
   `contextLength` as today (`outputTokenCap.ts:30-40`).
 - **D6 — Budgets.** `TASK_MAX_STEPS` env (no magic constants); a per-task running cost
   meter from per-step usage (#224) × roster prices (#235), hard-stopped at a configurable
@@ -81,28 +81,33 @@ here. Where this plan adds concrete shapes, it does so to make them implementabl
 
 ## Current state (re-verified against the working tree, 2026-10-10)
 
-Each claim below was checked against the tree this pass; file:line references are live.
+Describes the tree **as it was before the foundation landed** (the snapshot that motivated
+D9's stub). File:line references below were re-pointed to the current tree on 2026-10-11 to
+stay live; the one claim the foundation has since invalidated is called out inline.
 
 - **The chat agent loop is owned by Mastra, not the route.** The route
   (`routes/chat.ts`) only *observes* neutral chunks (delta / tool-call / tool-result) and
-  reconciles them (`chat.ts:1059-1086`); tool **execution is inside Mastra's agent loop**.
+  reconciles them (`chat.ts:1202-1224`); tool **execution is inside Mastra's agent loop**.
   `maxSteps` is set in exactly two places: `12` for chat tools mode, `1` for plain
-  (`mastraService.ts:242`), and tool-free completions pin `maxSteps: 1`
-  (`mastraService.ts:917`). There is **no `TASK_MAX_STEPS`** anywhere (confirmed by grep).
-- **Tools are baked into the agent at construction** (`mastraService.ts:730-743`), while
-  the per-call `RequestContext` carries `userId` (`mastraService.ts:229-247`). This is the
+  (`mastraService.ts:248`), and tool-free completions pin `maxSteps: 1`
+  (`mastraService.ts:931`). At this snapshot there was **no `TASK_MAX_STEPS`** anywhere
+  (confirmed by grep); the foundation has since added it as `config.task.maxSteps`
+  (`config/index.ts:158`, see the Foundation checklist below), so that claim is now only
+  true of the pre-foundation tree.
+- **Tools are baked into the agent at construction** (`mastraService.ts:713-752`), while
+  the per-call `RequestContext` carries `userId` (`mastraService.ts:231-247`). This is the
   exact seam a task worker must replicate: agents are memoised, per-user state rides on
   the call, never the agent.
-- **`PersistedToolEvent`** is defined at `routes/chat.ts:299` as
+- **`PersistedToolEvent`** is defined at `routes/chat.ts:303` as
   `(ToolCallEvent | ToolResultEvent) & { query?: string }`, reconciled by
-  `reconcileToolEvent` (`chat.ts:310-328`), and persisted on `Message.tools`
+  `reconcileToolEvent` (`chat.ts:314`), and persisted on `Message.tools`
   (`models/Message.ts:75-89`). The task stream reuses this shape; it does **not** go into
   `Message`.
 - **Per-step routing for tasks is `raceRosterCompletion`** (`racingService.ts:370-432`).
   The chat routes call the wrappers `routeAndStream`/`routeAndComplete`/`pickRosterRoute`;
   a task worker can call `raceRosterCompletion` directly. `contextLength` → `max_tokens`
   is `outputTokensFor` (`outputTokenCap.ts:30`), already used by the non-streaming chat
-  path (`chat.ts:747-750`).
+  path (`chat.ts:857`, `:1185`).
 - **Poller template is `assetJobService`** (`assetJobService.ts`): `enqueueAssetJob`
   (`:27`), atomic `claimNextAssetJob` (`:41`, `pending → processing` + attempts bump),
   `runAssetJobTick` (`:53`, retry to `MAX_JOB_ATTEMPTS=3`), `requeueStaleAssetJobs`
@@ -114,32 +119,32 @@ Each claim below was checked against the tree this pass; file:line references ar
   `EntityEdge`, `ErrorLog`, `EvalRunRecord`, `McpServer`, `Message`, `ModelRoster`,
   `ModelRouteError`, `Pat`, `SafeBrowsingCache`, `Session`, `TraceStatsCache`, `User`.
   The task stream collections are net-new.
-- **ZDR is `User.settings.zdr`** (`models/User.ts:76,142`), read per turn via
+- **ZDR is `User.settings.zdr`** (`models/User.ts:76,150`), read per turn via
   `decideTurn` (`zdrTurn.ts:30-37`); chat reads `Boolean(userDoc.settings?.zdr)` at
-  `chat.ts:570,868`. D7 uses this same flag to refuse task creation.
+  `chat.ts:645,978`. D7 uses this same flag to refuse task creation.
 - **Config is central and lazy** (`config/index.ts`), with a parse+fallback pattern for
-  numeric envs (`aux.enrichmentTimeoutMs` at `:127-131`). `TASK_MAX_STEPS` belongs here,
+  numeric envs (`aux.enrichmentTimeoutMs` at `:140`). `TASK_MAX_STEPS` belongs here,
   not read ad hoc.
 - **Cost precedent exists.** Per-session usage × prices is computed in
   `sessionCostService.ts` (`sessionCostBreakdown`, `:55`); roster prices are
   `inputPrice`/`outputPrice` in `rosterConfig.ts` (#235). Per-step usage is
-  `NeutralCompletion.usage` (`llmTypes.ts:88-92`), normalised in
+  `NeutralCompletion.usage` (`llmTypes.ts:100`), normalised in
   `mastraService.normaliseUsage` (`:138`).
 
 - **The non-streaming path already executes tools internally.** `createCompletion`
-  (`mastraService.ts:858`) calls `agent.generate(...)`, and the only tool information it
-  surfaces is `FullOutput.toolResults` (`:870`) — i.e. **already-executed** calls with
+  (`mastraService.ts:872`) calls `agent.generate(...)`, and the only tool information it
+  surfaces is `FullOutput.toolResults` (`:884`) — i.e. **already-executed** calls with
   their results. It returns `toolResults`, *never* a bare tool-call for a caller to run.
   The `tool-call` vs `tool-result` distinction lives only in `toNeutralStream`
-  (`:156-186`), which is consumed solely by `createStreamingCompletion` (`:898`). So
+  (`:156-186`), which is consumed solely by `createStreamingCompletion` (`:900`). So
   today, on both neutral completion channels, tool execution happens **inside Mastra** —
   there is no existing return path that hands a driver an unexecuted call.
 - **`maxSteps` is not a call-site knob.** It is hardcoded in `callOptionsFrom`
-  (`mastraService.ts:242`) as `mode === 'full' ? 12 : 1`, and `callOptionsFrom` is not
+  (`mastraService.ts:248`) as `mode === 'full' ? 12 : 1`, and `callOptionsFrom` is not
   exported. Option (a) ("`maxSteps: TASK_MAX_STEPS`") therefore **cannot be set by a task
   worker alone** — it requires changing `callOptionsFrom` and/or `CompletionOptions`.
   `createToolFreeCompletion` is the only call that pins a literal `maxSteps: 1`
-  (`:917`), and it uses a *tool-free* agent, so it cannot be the driver-owned executor.
+  (`:931`), and it uses a *tool-free* agent, so it cannot be the driver-owned executor.
 - **`raceRosterCompletion` inherits the tool-executing path.** It calls
   `inferenceService.createCompletion` (`racingService.ts:379`), i.e. full-mode
   `createCompletion` with tools baked into the agent (`agentFor`, `:713-752`). Whatever a
@@ -169,7 +174,7 @@ suspected a task worker calling `raceRosterCompletion` would skip a guard the ch
 applies. **That is wrong and worth recording as a checked assumption:** since #232 the chat
 path itself no longer uses the guard classifier — the chat routes call `pickRosterRoute`
 then `routeAndComplete`/`routeAndStream`, and the code says plainly "Racing never calls the
-guard" (`chat.ts:630`, `:933`). `routeAndComplete`/`pickRosterRoute` (`racingService.ts:480`,
+guard" (`chat.ts:715`, `:1043`). `routeAndComplete`/`pickRosterRoute` (`racingService.ts:480`,
 `:528`) add **no policy** beyond racing and shaping the `RosterRoutingResult`; they are thin
 wrappers over `raceRosterCompletion`/`raceRoster`. So a task worker calling
 `raceRosterCompletion` directly is **consistent** with how the chat path routes today, not a
@@ -219,9 +224,12 @@ wrapper is the thing suspected of hiding the answer (see "Not verified" above).
    `tool-call` chunk without a following `tool-result`, (b) is reachable. Confirm against
    the LangSmith trace (project `tova-dev`) — the trace's span tree shows whether a tool
    span is a child of the model call (Mastra executed) or absent (driver would execute).
-3. **Run against both providers of one roster model** (DeepInfra + Groq for the same
-   model id, via the roster config) to confirm the call-vs-execute behaviour is not a
-   provider quirk. Record any divergence.
+3. **Run against both providers of one roster model** (the roster's `ROSTER_PROVIDERS`
+   are DeepInfra + Fireworks, `rosterConfig.ts:19`; e.g. both providers of DeepSeek V4.1
+   Flash) to confirm the call-vs-execute behaviour is not a provider quirk. Record any
+   divergence. (An earlier draft of this method named Groq as the second provider; the
+   roster does not serve this model on Groq, so the executed probe used DeepInfra +
+   Fireworks — see "Spike result".)
 4. **Check the driver-owned shape is buildable without forking Mastra.** If (b) is
    reachable, determine the smallest change that lets the driver receive a tool call and
    feed a result back as the next message. Two candidate shapes, both probed in the same
@@ -230,7 +238,8 @@ wrapper is the thing suspected of hiding the answer (see "Not verified" above).
    workspace tools (`read_file`, `list_files`, `fetch_url`, `generate_file`,
    `current_datetime`, `web_search`), which are Mastra-side tools, so the driver would have
    to re-implement them; (ii) add a new `LlmConnector` method that returns unexecuted
-   calls (the neutral boundary is `llmTypes.ts:115-124`). Report which, if either, is
+   calls (the neutral boundary is `llmTypes.ts:103-133`, the `NeutralStreamChunk` /
+   `LlmConnector` shapes). Report which, if either, is
    viable and its blast radius.
 5. **Decide and record.** Post the decision (a | b | c) with the raw evidence and the
    LangSmith trace link to #254. The step schema and steering UX in the sections below are
@@ -570,7 +579,7 @@ A hardening pass over the foundation before the `npm run ci` gate. Findings and 
    there) is unresolved and can be additive later. **Not blocking.**
 5. **Should a task step reintroduce the guard/tier decision?** The epic's router picks
    models "based on prompt complexity", but since #232 the *chat* path no longer runs the
-   guard classifier — it races the roster directly (`chat.ts:630,933`;
+   guard classifier — it races the roster directly (`chat.ts:715,1043`;
    `routeAndComplete`/`pickRosterRoute` add no policy, `racingService.ts:480,528`). A task
    worker calling `raceRosterCompletion` therefore matches current chat routing and is not
    a regression. The open question is whether tasks **should** diverge by applying the
@@ -592,7 +601,7 @@ A hardening pass over the foundation before the `npm run ci` gate. Findings and 
    whole task or resume mid-stream, is **not settled** and affects the resume design
    (OQ1-gated). **Not blocking the model/poller foundation.**
 8. **ZDR refusal check placement.** D7 refuses task creation for `settings.zdr` users.
-   Chat reads the flag per turn (`chat.ts:570,868`) and `decideTurn` (`zdrTurn.ts:30`)
+   Chat reads the flag per turn (`chat.ts:645,978`) and `decideTurn` (`zdrTurn.ts:30`)
    reads it per turn too, but a task is **durable and outlives the turn**. Whether the
    refusal is checked only at creation, or re-checked on every step (a user could flip
    `zdr` mid-task), is undecided. The plan assumes creation-only for v1; flagged because
@@ -601,8 +610,8 @@ A hardening pass over the foundation before the `npm run ci` gate. Findings and 
 
 (Answered while planning, hence not open: breach behaviour — `paused` + visible event +
 resume-as-steering, settled under D6; ZDR policy — refusal, settled under D7; interrupt —
-parked, D8. The ticket currently has **no issue comments**; nothing in this plan was
-pre-answered by reviewers, so no item moved here from the issue.)
+parked, D8. At planning time the ticket had no issue comments; it now carries two — the
+binding #261 time contract and the loop-ownership spike decision recorded above.)
 
 ## Follow-ups
 
