@@ -4,7 +4,6 @@ import AdminService, {
   AdminError,
   AdminModelsService,
   AdminLogsService,
-  AdminGraphService,
   AdminPatsService,
   type ModelInput,
 } from '../services/admin';
@@ -18,8 +17,6 @@ import type {
   AdminPat,
   AdminUser,
   ModelComparisonRun,
-  AdminGraphEntitiesPayload,
-  AdminGraphEntityDetail,
 } from '../types/admin';
 
 const KNOWN_PERMISSIONS = ['routing'];
@@ -70,7 +67,7 @@ const AdminView = () => {
   const [logsError, setLogsError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [activeSection, setActiveSection] = useState<
-    'users' | 'models' | 'logs' | 'compare' | 'graph' | 'traces' | 'evals' | 'access'
+    'users' | 'models' | 'logs' | 'compare' | 'traces' | 'evals' | 'access'
   >('users');
   // PATs (#184): Access-tab rows, the generate form, and the one-time
   // plaintext shown right after creation (cleared on reload/navigation —
@@ -442,59 +439,13 @@ const AdminView = () => {
     setPatCopied(true);
   };
 
-  // Per-user entity graph (issue #138 plan task 5): pick a user, list their
-  // nodes paginated, drill into one node for its edges. Load-on-demand and
-  // read-only — writes come from extraction, never this tab.
-  const [graphUserId, setGraphUserId] = useState<string | null>(null);
-  const [graphEntities, setGraphEntities] = useState<AdminGraphEntitiesPayload | null>(null);
-  const [graphPage, setGraphPage] = useState(1);
-  const [graphDetail, setGraphDetail] = useState<AdminGraphEntityDetail | null>(null);
-  const [graphLoading, setGraphLoading] = useState(false);
-  const [graphError, setGraphError] = useState<string | null>(null);
-
-  const loadGraphEntities = useCallback(async (userId: string, page: number) => {
-    setGraphLoading(true);
-    try {
-      const res = await AdminGraphService.listGraphEntities(userId, page);
-      setGraphEntities(res);
-      setGraphPage(page);
-      setGraphError(null);
-    } catch (err) {
-      setGraphError(err instanceof AdminError ? err.message : 'Something went wrong.');
-    } finally {
-      setGraphLoading(false);
-    }
-  }, []);
-
-  const openGraphDetail = useCallback(
-    async (id: string) => {
-      setGraphDetail(null);
-      setGraphLoading(true);
-      try {
-        setGraphDetail(await AdminGraphService.getGraphEntity(id));
-      } catch (err) {
-        setGraphError(err instanceof AdminError ? err.message : 'Something went wrong.');
-      } finally {
-        setGraphLoading(false);
-      }
-    },
-    [setGraphDetail],
-  );
-
-  const selectGraphUser = (userId: string) => {
-    setGraphUserId(userId);
-    setGraphDetail(null);
-    if (userId) void loadGraphEntities(userId, 1);
-  };
-
   const sectionContent: {
-    id: 'users' | 'models' | 'logs' | 'compare' | 'graph' | 'traces' | 'evals' | 'access';
+    id: 'users' | 'models' | 'logs' | 'compare' | 'traces' | 'evals' | 'access';
     label: string;
   }[] = [
     { id: 'users', label: 'Users' },
     { id: 'models', label: 'Models' },
     { id: 'compare', label: 'Compare' },
-    { id: 'graph', label: 'Graph' },
     { id: 'traces', label: 'Traces' },
     { id: 'evals', label: 'Evals' },
     { id: 'logs', label: 'Logs' },
@@ -1086,189 +1037,6 @@ const AdminView = () => {
                   </div>
                 )}
               </div>
-            </section>
-          )}
-          {activeSection === 'graph' && (
-            <section data-testid="admin-graph-section">
-              <h3 className="font-heading text-lg font-semibold">Graph</h3>
-              <p className="text-xs text-muted-foreground">
-                Per-user entity graph (issue #138) — nodes and edges extracted across chats, with
-                source links for audit.
-              </p>
-              <div className="mt-4">
-                <label className="text-sm">
-                  <span className="mr-2 text-muted-foreground">User</span>
-                  <select
-                    data-testid="graph-user-select"
-                    value={graphUserId ?? ''}
-                    onChange={(e) => selectGraphUser(e.target.value)}
-                    className="rounded-lg border border-border bg-background px-2 py-1"
-                  >
-                    <option value="">Select a user…</option>
-                    {users?.map((user) => (
-                      <option key={user.id} value={user.id}>
-                        {user.email}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              </div>
-              {graphError && (
-                <div
-                  data-testid="graph-error"
-                  className="mt-4 rounded-lg border border-destructive bg-destructive/10 p-3 text-sm text-destructive"
-                >
-                  {graphError}
-                </div>
-              )}
-              {graphLoading && <p className="mt-4 text-sm text-muted-foreground">Loading graph…</p>}
-              {graphEntities && (
-                <div
-                  data-testid="admin-graph-entities"
-                  className="mt-4 overflow-x-auto rounded-xl border border-border bg-card"
-                >
-                  <table className="responsive-table w-full text-sm">
-                    <thead>
-                      <tr className="border-b border-border text-left text-muted-foreground">
-                        <th className="px-4 py-3 font-medium">Name</th>
-                        <th className="px-4 py-3 font-medium">Kind</th>
-                        <th className="px-4 py-3 font-medium">Mentions</th>
-                        <th className="px-4 py-3 font-medium">Confidence</th>
-                        <th className="px-4 py-3 font-medium">Sources</th>
-                        <th className="px-4 py-3">
-                          {graphEntities.total > graphEntities.limit && (
-                            <span className="text-muted-foreground">
-                              page {graphEntities.page} /{' '}
-                              {Math.ceil(graphEntities.total / graphEntities.limit)}
-                            </span>
-                          )}
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {graphEntities.entities.map((entity) => (
-                        <tr key={entity.id} className="border-b border-border last:border-b-0">
-                          <td
-                            className="px-4 py-3"
-                            data-label="Name"
-                            data-testid={`graph-entity-${entity.id}`}
-                          >
-                            {entity.name}
-                          </td>
-                          <td className="px-4 py-3 text-muted-foreground" data-label="Kind">
-                            {entity.kind}
-                          </td>
-                          <td className="px-4 py-3" data-label="Mentions">
-                            {entity.mentionCount}
-                          </td>
-                          <td className="px-4 py-3 text-muted-foreground" data-label="Confidence">
-                            {entity.confidence.toFixed(2)}
-                            {entity.salience === 'high' ? ' · salient' : ''}
-                          </td>
-                          <td className="px-4 py-3 text-muted-foreground" data-label="Sources">
-                            {entity.sourceRefs.length}
-                          </td>
-                          <td className="px-4 py-3">
-                            <button
-                              data-testid={`graph-open-${entity.id}`}
-                              onClick={() => openGraphDetail(entity.id)}
-                              className="rounded-lg border border-border px-2 py-1 text-xs transition-colors hover:bg-accent"
-                            >
-                              Detail
-                            </button>
-                          </td>
-                        </tr>
-                      ))}
-                      {graphEntities.entities.length === 0 && (
-                        <tr>
-                          <td className="px-4 py-3 text-muted-foreground" colSpan={6}>
-                            No entities for this user yet.
-                          </td>
-                        </tr>
-                      )}
-                    </tbody>
-                  </table>
-                  {graphEntities.total > graphEntities.limit && (
-                    <div className="flex gap-2 px-4 py-3">
-                      <button
-                        data-testid="graph-page-prev"
-                        disabled={graphEntities.page <= 1}
-                        onClick={() => graphUserId && loadGraphEntities(graphUserId, graphPage - 1)}
-                        className="rounded-lg border border-border px-2 py-1 text-xs disabled:opacity-50"
-                      >
-                        Prev
-                      </button>
-                      <button
-                        data-testid="graph-page-next"
-                        disabled={
-                          graphEntities.page >= Math.ceil(graphEntities.total / graphEntities.limit)
-                        }
-                        onClick={() => graphUserId && loadGraphEntities(graphUserId, graphPage + 1)}
-                        className="rounded-lg border border-border px-2 py-1 text-xs disabled:opacity-50"
-                      >
-                        Next
-                      </button>
-                    </div>
-                  )}
-                </div>
-              )}
-              {graphDetail && (
-                <div
-                  data-testid="admin-graph-detail"
-                  className="mt-4 rounded-xl border border-border bg-card p-4"
-                >
-                  <div className="flex items-start justify-between">
-                    <div>
-                      <h4
-                        className="font-heading text-base font-semibold"
-                        data-testid="graph-detail-name"
-                      >
-                        {graphDetail.entity.name}
-                      </h4>
-                      <p className="text-xs text-muted-foreground">{graphDetail.entity.kind}</p>
-                    </div>
-                    <button
-                      data-testid="graph-detail-close"
-                      onClick={() => setGraphDetail(null)}
-                      className="rounded-lg border border-border px-2 py-1 text-xs hover:bg-accent"
-                    >
-                      Close
-                    </button>
-                  </div>
-                  {graphDetail.entity.summary && (
-                    <p className="mt-2 text-sm">{graphDetail.entity.summary}</p>
-                  )}
-                  {graphDetail.entity.sourceRefs.length > 0 && (
-                    <p
-                      className="mt-2 text-xs text-muted-foreground"
-                      data-testid="graph-detail-sources"
-                    >
-                      {graphDetail.entity.sourceRefs.length} source
-                      {graphDetail.entity.sourceRefs.length === 1 ? '' : 's'} — first session{' '}
-                      {graphDetail.entity.sourceRefs[0].sessionId.slice(-6)}
-                    </p>
-                  )}
-                  <h5 className="mt-4 text-sm font-medium">Edges</h5>
-                  {graphDetail.edges.length === 0 ? (
-                    <p className="text-xs text-muted-foreground">No edges.</p>
-                  ) : (
-                    <ul data-testid="graph-detail-edges" className="mt-2 divide-y divide-border">
-                      {graphDetail.edges.map((edge) => (
-                        <li key={edge.id} className="py-2 text-sm">
-                          {edge.fromName} —{' '}
-                          <span className="rounded-full border border-border px-2 py-0.5 text-xs">
-                            {edge.kind}
-                          </span>{' '}
-                          → {edge.toName}
-                          {edge.summary && (
-                            <span className="text-muted-foreground"> · {edge.summary}</span>
-                          )}
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </div>
-              )}
             </section>
           )}
           {activeSection === 'traces' && <AdminLangsmithView />}

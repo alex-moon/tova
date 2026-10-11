@@ -24,13 +24,16 @@ activity stays out of the map by contract. This supersedes #138's entity-graph d
 reconceives the closed #166 as the task entity.
 
 Slices, in dependency order (#252 lands first as the prerequisite vocabulary; #256 is
-subtractive and lands only after #253 proves out):
+subtractive and unblocked — the entity graph is unused, so there is no read pattern to
+wait for #253 to replace, and its data is droppable):
 
 - #252 — workspace provenance on generated files (prerequisite vocabulary; tiny)
 - #253 — workspace memory: retrieval across chats and files (flagship)
 - #254 — task entity: offline agent sequencer over the workspace
 - #255 — chat-task integration
 - #256 — retire the entity graph
+- #263 — workspace-era system prompt (companion to #259; the "how to know things and how
+  to work" constitution — added to the epic by owner decision, 2026-10-11)
 
 ## Binding invariants (from #251; binding on all slices)
 
@@ -56,6 +59,10 @@ Slice-level decisions live in the slice plan docs; this section carries epic-lev
   below), the loop picks a conservative default, records it in the slice plan doc's
   Decisions, and flags it at the top of the slice PR for the owner to veto. The loop
   never silently blocks on an absent owner.
+- **#256 retires the entity graph and drops its data.** Owner decision, 2026-10-11: the
+  entity graph is not used, so #256 is purely subtractive and its existing data (the
+  `entities` and `entityedges` collections) can be wiped — nothing needs to be preserved.
+  No archive or read-only retention is required.
 
 ### Open owner questions (settle, or default-and-flag per the fallback)
 
@@ -70,7 +77,9 @@ Slice-level decisions live in the slice plan docs; this section carries epic-lev
 - #254: meter/pause/confirm behavior on budget breach — settled by the slice plan
   (`docs/plan-254-task-entity.md`, D6: breach → `paused` + visible system event, resume as
   steering); flagged at the slice PR for owner veto per the fallback.
-- #256: entity-graph data disposition (keep read-only, archive, or drop).
+- #256: entity-graph data disposition — **settled (2026-10-11): drop.** The graph is
+  unused; the `entities`/`entityedges` data can be wiped with nothing preserved (see
+  Decisions).
 
 ## Done (epic)
 
@@ -97,10 +106,17 @@ Slice-level decisions live in the slice plan docs; this section carries epic-lev
       ~375px) via slice PR **#278**, merged to `epic/251-workspace` at `9c737ca` (merged
       2026-10-11T17:08Z); slice plan archived to `docs/done/plan-254-task-entity.md`; #254
       issue stays open until the epic ships)
-- [ ] Slice #255 — chat-task integration
-- [ ] Slice #256 — retire the entity graph
+- [x] Slice #255 — chat-task integration (implemented on
+      `feat/tv/255-chat-task-integration`; slice PR **#280** merged to `epic/251-workspace`
+      at `78c0712`, merged 2026-10-11T17:56Z; slice plan archived to
+      `docs/done/plan-255-chat-task-integration.md`; #255 issue stays open until the epic ships)
+- [x] Slice #256 — retire the entity graph (implemented on
+      `feat/tv/256-retire-entity-graph`; slice PR **#281** merged to `epic/251-workspace`
+      at `72ab5cb`, merged 2026-10-11T18:38Z; disposition settled: drop the data; slice plan
+      archived to `docs/done/plan-256-retire-entity-graph.md`; #256 issue stays open until
+      the epic ships)
 - [ ] Epic PR `epic/251-workspace` → `main`, linking this doc, `npm run ci` green
-      (PR #270 opened as a draft; awaiting slice merges before it can leave draft)
+      (PR #270 opened as a draft; all slices #252–#256 merged — ready to leave draft)
 - [ ] Archive this doc to `docs/done/`
 
 ## Process log (epic-level tasks)
@@ -337,9 +353,109 @@ change, newest last. No phase numbers: the loop records outcomes, not protocol s
   human gate), matching the #271/#272/#274/#275 precedent. The #254 Done line flipped to
   done and the slice plan archived to `docs/done/plan-254-task-entity.md`. Next unfinished
   slice: **#255 chat-task integration**.
+- 2026-10-11 — owner decision on #256: the entity graph is unused, so retirement is
+  unblocked (no read pattern to wait for #253 to replace) and its data is droppable — the
+  `entities`/`entityedges` collections can be wiped, nothing preserved. Recorded in
+  Decisions and the open-question list; the #256 Done line annotated.
+- 2026-10-11 — #255 chat-task integration implemented on `feat/tv/255-chat-task-integration`
+  (cut from the epic branch tip `3d0b208`) — the join between the chat and task streams, and
+  the next unfinished slice. Plan doc `docs/plan-255-chat-task-integration.md` settles the
+  seam shapes before code (F1–F7, binding design from the epic). Landed: `Task.notifiedAt`
+  (the chat route's drain marker, not a chat-stream write); `delegate_task` chat tool
+  (`services/mastraService.ts`, creates a task with `origin: { kind: 'chat', sessionId }`,
+  refuses on ZDR / missing session mirroring the creation route's refusal, F2/F3);
+  `services/taskNotificationService.ts` (`pendingCompletionsFor`/`markNotified`, pure data +
+  marker, F4); both persisted chat routes drain pending completions into the next turn's
+  context and mark notified **only after that turn's assistant message persists** (a failed
+  turn leaves it pending); task list `originSessionId` filter (user-scoped); client
+  `TaskService.create`/`listForSession` + `TaskCard` (status chip + `/tasks` link, `MAX_CARDS`
+  cap, silent poll) + ChatWindow "Send to worker" composer control (ZDR/new-chat disabled);
+  `e2e/chat-task.spec.ts` (mobile + desktop). The slice's own hardening pass (same commit
+  `3982932`) fixed the notification being consumed before the turn succeeds, clipped the
+  task **instruction** (not just the summary) in `completionNotificationLine`, capped the
+  card list, and keyed the card's poll effect on the derived `active` boolean rather than the
+  tasks array. Owner-defaults flagged on the slice PR per the fallback: F4/F5 — the
+  notification rides the **next user turn**, not an autonomous server-triggered turn (v1
+  avoids a second writer on the chat stream; the autonomous turn is deferred to a follow-up
+  ticket on the owner's call); F3 — ZDR turns cannot delegate. `npm run ci` green on `3982932`
+  (server 100 suites / 1233 tests; client build green), re-verified this pass; mobile checked
+  at 360px via `playwright-cli`. Slice PR **#280** opened against `epic/251-workspace`; the
+  plan-255 Done checklist checked off and the PR named in it. #252/#253/#254 done; #256 open;
+  epic PR #270 still an open bodyless draft; the #253/#256 owner questions and the self-merge
+  gate stay open.
+- 2026-10-11 — reconciliation + next slice: PR #280 (`feat/tv/255-chat-task-integration` →
+  `epic/251-workspace`) merged (merge commit `78c0712`, merged 2026-10-11T17:56Z), landing the
+  chat-task integration. The #255 Done line flipped to done and its slice plan archived to
+  `docs/done/plan-255-chat-task-integration.md`. The next unfinished declared slice is **#256**
+  (retire the entity graph): its stated dependency (#253, workspace memory) has landed on the
+  epic branch, and production runs with `ENTITY_GRAPH_*` unset, so the old read path is not live
+  there. Work begins this pass on `feat/tv/256-retire-entity-graph`. #263 (whose body begins
+  `Epic: #251` but which is not in the epic's declared slice list #252–#256) stays out of scope
+  pending the owner's scope confirmation (reconcile comment on the issue, 2026-10-11T17:59Z).
+- 2026-10-11 — #256 retire the entity graph implemented on
+  `feat/tv/256-retire-entity-graph`: the extraction pipeline and injection wiring are
+  deleted (services, models, admin Graph tab, `ENTITY_GRAPH_*` envs, `knowledgeBlock`
+  prompt parameter), `promptWords` moved into `workspaceRetrievalService`, and a
+  forwards-only migration drops the `entities`/`entityedges` collections. Slice plan
+  `docs/plan-256-retire-entity-graph.md`; slice PR **#281** opened against
+  `epic/251-workspace`; `npm run ci` green and the migration verified up/down against the
+  local Mongo. #252–#255 done; #256 awaiting merge; epic PR #270 still a draft.
+
+- 2026-10-11 — CI fix on the epic branch: PR #270's `epic/251-workspace` failed the gate
+  with `no-undef` on `chat.stream.test.ts`. Root cause was a merge artefact, not a logic bug:
+  merging `main`'s #261 date-rot fix (`ab6b116`, which dropped the helper and asserted a
+  literal) into #253's relative-seeding rewrite (`9ab2af9`) left the test calling an undefined
+  `stamp()` on the first turn while asserting a hard-coded `[2026-10-08 14:33 UTC]` on the
+  assistant turn — the latter also wrong now the seed is relative. Restored the local
+  `stamp` helper and stamped both seeded turns from their relative timestamps, keeping main's
+  clock-independent shape assertion for the live turn (commit `81c9249`, pushed to
+  `epic/251-workspace`, updating PR #270). `npm run ci` green (server 100 suites / 1233 tests;
+  client 276 tests + build), plus `format:check`, semgrep (0 findings) and the responsive e2e
+  suite (52) run locally for the full CI parity.
+- 2026-10-11 — #256 landed: PR **#281** (`feat/tv/256-retire-entity-graph` →
+  `epic/251-workspace`) merged at merge commit `72ab5cb` (merged 2026-10-11T18:38Z),
+  completing the entity-graph retirement. The #256 Done line flipped to done and its slice
+  plan archived to `docs/done/plan-256-retire-entity-graph.md`. All declared slices
+  #252–#256 are now merged to the epic branch; #256 (like #252–#255) stays open until the
+  epic ships. Epic PR #270 remains a draft, now unblocked to leave draft.
+
+- 2026-10-11 — #263 workspace-era system prompt added to the epic (owner decision): #263
+  was raised as a companion to #259 (whose body begins `Epic: #251` but which was not in
+  the declared #252–#256 slice list), and the owner folded it in. Implemented on
+  `feat/tv/263-workspace-prompt` (cut from `epic/251-workspace`): `SYSTEM_PROMPT` extended
+  from ~412 to ~800 words with five layers — workspace identity + memory honesty,
+  grounding-as-offer, absence-as-information, the weights/world epistemic split, and
+  conversation shape (help conversations finish) — composed around the #259 stance and
+  emotional paragraphs (verbatim) with the brevity rule last. The three ticket owner
+  decisions are settled in the slice plan (`docs/done/plan-263-workspace-prompt.md`): size
+  budget ~2× the prior prompt; state vocabulary stays in the envelope intros (no separate
+  state tag); no client-side conversation-shape follow-up. Unit pins added to
+  `promptAssembly.test.ts`; a deterministic "no reflex search" golden case
+  (`arithmetic-no-search`) added to `evals/cases.ts` + pinned in `cases.test.ts`.
+  `npm run ci` green (96 suites, 1194 tests). Slice PR **#282** opened against
+  `epic/251-workspace`; the slice plan archived to `docs/done/`. The completed non-epic plan
+  docs (#257, #259, #260, #261, #262) were archived to `docs/done/` in the same PR.
+  Owner review of #282 caught a defect: the layer-4 list named **arithmetic** as
+  weights-side (transcribed from the ticket without challenge), which is wrong. Arithmetic
+  was dropped from the "trust yourself" list in #282; a **calculator tool** (mathjs
+  number-only, locked down) is a separate follow-up slice that will add the tool and point
+  arithmetic at it. See the slice plan's correction entry.
+- 2026-10-11 — #283 calculator tool (follow-up to #263) implemented on
+  `feat/tv/283-calculator` (stacked on the #263 branch so it builds on the corrected
+  prompt): a built-in `calculate` tool over **`mathjs/number`** (the maintained number-only
+  build; `@pmndrs/math` was considered and rejected — it is a graphics/geometry engine with
+  no expression parser), locked down three ways (the documented `limitedEvaluate`
+  lockdown, a strict arithmetic-only character allowlist that makes the range-operator DoS
+  unreachable, and a length + finite-result check). Arithmetic moved to the tools side of
+  `SYSTEM_PROMPT`, `TOOL_INSTRUCTIONS` names `calculate`, and the #263 golden case was
+  repointed (`arithmetic-no-search` → `arithmetic-uses-calculator`). Slice plan
+  `docs/done/plan-283-calculator.md`; slice PR **#284** opened against `epic/251-workspace`
+  (stacked on the #263 branch, PR #282).
 
 ## Follow-ups
 
 - Embeddings / vector search as a later #253 upgrade — only on eval evidence.
 - ZDR task carve-out (#254) — later owner decision; default is no tasks for ZDR users.
+- Semantic eval cases for the #263 judgement-only clauses (intent invitation, clean
+  conversation close) — needs an LLM-judge; see `docs/done/plan-263-workspace-prompt.md`.
 

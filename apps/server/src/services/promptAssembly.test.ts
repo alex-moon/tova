@@ -47,6 +47,63 @@ describe('resolveSystemPrompt', () => {
     }
   });
 
+  it('commits to the workspace identity and memory honesty (#263)', () => {
+    const prompt = resolveSystemPrompt();
+    expect(prompt).toContain('personal assistant');
+    expect(prompt).toContain(
+      "their files, the conversations you've had with them, and work you've run on their behalf",
+    );
+    // Never pretend to remember what wasn't given; never hide where it came from.
+    expect(prompt).toContain("Never pretend to remember something you weren't given");
+    expect(prompt).toContain('never hide where something came from');
+    expect(prompt).toContain(
+      'Attribution is what makes memory feel like being known rather than watched',
+    );
+  });
+
+  it('treats retrieved context as an offer and absence as information (#263)', () => {
+    const prompt = resolveSystemPrompt();
+    expect(prompt).toContain('as an offer, not a fact');
+    expect(prompt).toContain('forcing a fragment in is worse than leaving it out');
+    expect(prompt).toContain('the live conversation always outranks stale material');
+    expect(prompt).toContain('that is information, not failure');
+    // The anti-reflex guard: invite intent only when it would change what you do.
+    expect(prompt).toContain('knowing more would genuinely change what you do');
+    expect(prompt).toContain('intake interview');
+  });
+
+  it('draws the weights/world epistemic line (#263)', () => {
+    const prompt = resolveSystemPrompt();
+    expect(prompt).toContain('Trust yourself for what lives in you');
+    expect(prompt).toContain('Trust tools for what lives in the world');
+    // Arithmetic is a tool case, not a weights case (#283): the calculator.
+    expect(prompt).toContain('work it through the calculator rather than trusting your head');
+    expect(prompt).toContain('"Let me check" is a virtue, not a stall');
+    expect(prompt).toContain('say so plainly rather than papering over it');
+  });
+
+  it('lets conversations finish, because memory lives in the workspace (#263)', () => {
+    const prompt = resolveSystemPrompt();
+    expect(prompt).toContain('Memory lives in the workspace, not in the transcript');
+    expect(prompt).toContain('help it finish');
+    expect(prompt).toContain('Starting fresh loses nothing');
+  });
+
+  it('places every #263 disposition before the brevity rule', () => {
+    const prompt = resolveSystemPrompt();
+    const brevityRule = prompt.indexOf('Keep answers focused');
+    expect(brevityRule).toBeGreaterThan(-1);
+    for (const phrase of [
+      "Never pretend to remember something you weren't given",
+      'as an offer, not a fact',
+      'Trust tools for what lives in the world',
+      'help it finish',
+    ]) {
+      expect(prompt.indexOf(phrase)).toBeGreaterThan(-1);
+      expect(prompt.indexOf(phrase)).toBeLessThan(brevityRule);
+    }
+  });
+
   it('introduces no mechanical trigger conditions (D7)', () => {
     // Dispositions generalise, conditions fire wrongly: the stance layer must
     // stay free of "when the user …, then …" trigger constructions. The guard
@@ -146,7 +203,6 @@ describe('buildSystemContent / user timezone (#261 D6)', () => {
     const content = buildSystemContent(
       userWith({ preferredName: 'Alex' }),
       undefined,
-      undefined,
       true,
       'Europe/London',
     );
@@ -169,13 +225,13 @@ describe('buildSystemContent / user timezone (#261 D6)', () => {
   });
 
   it('keeps the zone context line even when the date line is dropped (persisted turns)', () => {
-    const content = buildSystemContent(null, undefined, undefined, false, 'Europe/London');
+    const content = buildSystemContent(null, undefined, false, 'Europe/London');
     expect(content).not.toContain("Today's date is");
     expect(content).toMatch(/The user's timezone is Europe\/London/);
   });
 
   it('silently drops the context line for an invalid zone (UTC fallback)', () => {
-    const content = buildSystemContent(null, undefined, undefined, true, 'Mars/Olympus');
+    const content = buildSystemContent(null, undefined, true, 'Mars/Olympus');
     expect(content).not.toContain("The user's timezone is");
     expect(content).toMatch(/Today's date is \d{4}-\d{2}-\d{2} \(UTC\)\./);
   });
@@ -185,7 +241,6 @@ describe('buildSystemContent / workspace memory (#253)', () => {
   it('injects the workspace block when supplied', () => {
     const content = buildSystemContent(
       null,
-      undefined,
       undefined,
       true,
       null,
@@ -198,7 +253,7 @@ describe('buildSystemContent / workspace memory (#253)', () => {
 
   it('is a no-op when the block is empty (no prompt drift)', () => {
     const bare = buildSystemContent(null);
-    expect(buildSystemContent(null, undefined, undefined, true, null, '')).toBe(bare);
+    expect(buildSystemContent(null, undefined, true, null, '')).toBe(bare);
     expect(bare).not.toContain('<user:workspace>');
   });
 });
@@ -246,7 +301,7 @@ describe('buildSystemContent / envelope-based profile data (issue #35, PR #46 re
   // (the persisted call sites pass it off; ZDR and the admin Compare path keep
   // it on).
   it('drops the date line when the caller opts out (persisted turns, #261)', () => {
-    const content = buildSystemContent(null, undefined, undefined, false);
+    const content = buildSystemContent(null, undefined, false);
     expect(content).not.toContain("Today's date is");
     expect(content.startsWith(resolveSystemPrompt())).toBe(true);
   });
@@ -296,33 +351,10 @@ describe('buildSystemContent / coarse location (issue #50)', () => {
     ).toHaveLength(1);
   });
 
-  describe('buildSystemContent / entity-graph knowledge block (issue #138, plan task 4)', () => {
-    it('rides in its own envelope when the caller retrieved a non-empty block', () => {
-      const content = buildSystemContent(
-        userWith({ preferredName: 'Alex' }),
-        '- place: Mumbai — mentioned 3 times',
-      );
-      expect(content).toContain('<user:knowledge_graph>');
-      expect(content).toContain('- place: Mumbai — mentioned 3 times');
-      expect(content).toContain('</user:knowledge_graph>');
-      expect(content).toContain('Use it only where relevant');
-    });
-
-    it('emits no graph envelope when the block is empty, whitespace, or not requested', () => {
-      expect(buildSystemContent(userWith({})).split('<user:knowledge_graph>')).toHaveLength(1);
-      expect(buildSystemContent(userWith({}), '').split('<user:knowledge_graph>')).toHaveLength(1);
-      expect(
-        buildSystemContent(userWith({}), '   \n').split('<user:knowledge_graph>'),
-      ).toHaveLength(1);
-      expect(buildSystemContent(null, undefined).split('<user:knowledge_graph>')).toHaveLength(1);
-    });
-  });
-
   describe('buildSystemContent / file library block (#214 preliminary)', () => {
     it('rides in its own envelope when the caller supplies a library index', () => {
       const content = buildSystemContent(
         userWith({ preferredName: 'Alex' }),
-        undefined,
         '- CV.pdf (application/pdf, added 2026-09-01) [id: abc123]',
       );
       expect(content).toContain('<user:file_library>');
@@ -333,18 +365,11 @@ describe('buildSystemContent / coarse location (issue #50)', () => {
 
     it('emits no library envelope when the block is empty, whitespace, or not requested', () => {
       expect(buildSystemContent(userWith({})).split('<user:file_library>')).toHaveLength(1);
-      expect(buildSystemContent(userWith({}), '', '').split('<user:file_library>')).toHaveLength(1);
-      expect(
-        buildSystemContent(userWith({}), undefined, '   \n').split('<user:file_library>'),
-      ).toHaveLength(1);
-      expect(buildSystemContent(null, undefined).split('<user:file_library>')).toHaveLength(1);
-    });
-
-    it('renders both context blocks in a stable order when both are present', () => {
-      const content = buildSystemContent(userWith({}), 'graph-data', 'library-data');
-      expect(content.indexOf('<user:knowledge_graph>')).toBeLessThan(
-        content.indexOf('<user:file_library>'),
+      expect(buildSystemContent(userWith({}), '').split('<user:file_library>')).toHaveLength(1);
+      expect(buildSystemContent(userWith({}), '   \n').split('<user:file_library>')).toHaveLength(
+        1,
       );
+      expect(buildSystemContent(null, undefined).split('<user:file_library>')).toHaveLength(1);
     });
   });
 

@@ -73,6 +73,18 @@ const taskSchema = new mongoose.Schema(
       type: String,
       default: null,
     },
+    // #255 (F4): the chat route's drain marker for the completion notification.
+    // The task worker never writes the chat stream (single writer per stream);
+    // on completion it leaves this null. The chat route — the chat stream's only
+    // writer — surfaces a completed origin task on the next turn and sets this
+    // here, so a notification is delivered exactly once and never mid-turn.
+    // Null on every task with no origin session (direct-origin tasks are never
+    // notified). Not a `Message` link: the task->session join stays one-way and
+    // thin (`origin.sessionId`), and `Message` never gains a `taskId` (F1).
+    notifiedAt: {
+      type: Date,
+      default: null,
+    },
   },
   {
     timestamps: true,

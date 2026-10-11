@@ -101,6 +101,37 @@ describe('GET /api/tasks (#254 routes)', () => {
     expect(res.body.tasks[0].instruction).toBe('owner second');
     expect(res.body.nextCursor).toBeNull();
   });
+
+  it("filters to a chat's origin tasks with `originSessionId` (#255)", async () => {
+    const cookie = await registerUser(OWNER);
+    await createTask(cookie, { instruction: 'from s1', origin: { kind: 'chat', sessionId: 's1' } });
+    await createTask(cookie, { instruction: 'from s2', origin: { kind: 'chat', sessionId: 's2' } });
+    await createTask(cookie, { instruction: 'direct' });
+
+    const res = await request(app)
+      .get('/api/tasks')
+      .query({ originSessionId: 's1' })
+      .set('Cookie', [cookie]);
+
+    expect(res.status).toBe(200);
+    expect(res.body.tasks).toHaveLength(1);
+    expect(res.body.tasks[0].instruction).toBe('from s1');
+  });
+
+  it('scopes the origin filter by user (no cross-user leak)', async () => {
+    const owner = await registerUser(OWNER);
+    const other = await registerUser(OTHER);
+    await createTask(other, { instruction: 'foreign', origin: { kind: 'chat', sessionId: 's1' } });
+    await createTask(owner, { instruction: 'own', origin: { kind: 'chat', sessionId: 's1' } });
+
+    const res = await request(app)
+      .get('/api/tasks')
+      .query({ originSessionId: 's1' })
+      .set('Cookie', [owner]);
+
+    expect(res.body.tasks).toHaveLength(1);
+    expect(res.body.tasks[0].instruction).toBe('own');
+  });
 });
 
 describe('GET /api/tasks/:id (#254 routes)', () => {

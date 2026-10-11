@@ -66,6 +66,31 @@ describe('TaskService', () => {
     expect(axiosPost).toHaveBeenCalledWith('/api/tasks/t1/cancel', {});
   });
 
+  it('lists the tasks a session started, filtered by originSessionId (#255)', async () => {
+    axiosGet.mockResolvedValue({ data: { tasks: [task], nextCursor: null } });
+    await expect(TaskService.listForSession('s1')).resolves.toEqual([task]);
+    expect(axiosGet).toHaveBeenCalledWith('/api/tasks', {
+      params: { originSessionId: 's1' },
+    });
+  });
+
+  it('creates a task with a chat origin (#255)', async () => {
+    axiosPost.mockResolvedValue({ data: { task } });
+    await expect(TaskService.create('do it', { kind: 'chat', sessionId: 's1' })).resolves.toEqual(
+      task,
+    );
+    expect(axiosPost).toHaveBeenCalledWith('/api/tasks', {
+      instruction: 'do it',
+      origin: { kind: 'chat', sessionId: 's1' },
+    });
+  });
+
+  it('creates a task without an origin when none is given (#255)', async () => {
+    axiosPost.mockResolvedValue({ data: { task } });
+    await TaskService.create('do it');
+    expect(axiosPost).toHaveBeenCalledWith('/api/tasks', { instruction: 'do it' });
+  });
+
   it('surfaces the server message on an axios error (e.g. a 409 terminal refusal)', async () => {
     const err = new Error('Request failed with status code 409') as Error & {
       isAxiosError: boolean;
