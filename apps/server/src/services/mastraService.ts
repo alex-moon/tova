@@ -245,7 +245,10 @@ const callOptionsFrom = (
     // (superseding the agent's default `instructions`, which Mastra would
     // otherwise inject as a second leading system message).
     ...(instructions ? { instructions } : {}),
-    maxSteps: mode === 'full' ? 12 : 1,
+    // #254: a caller may pin the agent's per-call step cap (the task sequencer
+    // sets 1 so one call is one driver-observable step). Absent falls back to
+    // the mode default, so every existing chat call site is byte-identical.
+    maxSteps: options.maxSteps ?? (mode === 'full' ? 12 : 1),
     modelSettings: modelSettingsFrom(options),
     ...traceOptionsFrom(options.trace),
     requestContext,
@@ -880,10 +883,26 @@ const buildConnector = (provider: LlmProvider): LlmConnector => {
       );
       // Tool executions (issue #16): FullOutput.toolResults carries every
       // executed call with its structured result; surfaced so callers can
-      // persist sources. Empty/tool-less runs leave it undefined.
+      // persist sources. Empty/tool-less runs leave it undefined. #254: the
+      // entry's `args` (Mastra's `ToolResultPayload` carries them) ride across
+      // too, so the task sequencer can rebuild a step's tool chips and replay
+      // its own calls as history — the streaming path already exposes args.
       const toolResults = (result as { toolResults?: unknown[] }).toolResults?.map((entry) => {
-        const r = entry as { name?: string; result?: unknown };
-        return { name: r.name ?? '', result: r.result };
+        const r = entry as {
+          toolName?: string;
+          name?: string;
+          args?: unknown;
+          result?: unknown;
+        };
+        const args =
+          r.args && typeof r.args === 'object' && !Array.isArray(r.args)
+            ? (r.args as Record<string, unknown>)
+            : undefined;
+        return {
+          name: r.toolName ?? r.name ?? '',
+          result: r.result,
+          ...(args ? { args } : {}),
+        };
       });
       // Token usage (#224): the turn total across all tool steps, falling back
       // to the last step's usage. Persisted on the assistant message.

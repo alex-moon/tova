@@ -67,17 +67,26 @@ here. Where this plan adds concrete shapes, it does so to make them implementabl
   *sequencing override* ("abort the in-flight call, act like a chat for one turn"); the
   abort plumbing exists (racing's per-provider `AbortController`s,
   `racingService.ts:206-235`). **Not a deliverable of this slice.**
-- **D9 — This pass ships the foundation only, with an honest stub driver.** The
-  queue/model/runtime (D1/D4 data layer + poller) lands now; the sequencer turn loop
-  stays blocked on the loop-ownership spike (OQ9's `maxSteps`-pinning). **The spike
-  has since answered this (decision (c), cap 1; see "Spike result"): the loop is
-  unblocked in principle and needs one connector field (`CompletionOptions.maxSteps`)
-  before it can be built — the first item of the next pass.** Rather than lose
-  claimed tasks or fake their completion, the wired `processTaskJob` transitions a
-  claimed task to **`paused`** with a visible `system` stream event (the same
-  mechanism D6 uses for a budget breach). This keeps the runtime real and
-  self-healing while the driver is a separate slice; resumption is a queued
-  instruction once the sequencer lands.
+- **D9 — The foundation shipped with an honest stub driver; the sequencer loop has
+  since landed (this pass, server-side).** The queue/model/runtime (D1/D4 data layer +
+  poller) shipped first; the spike then answered loop ownership (decision (c), cap 1)
+  and the follow-up pass landed the connector field (`CompletionOptions.maxSteps`) and
+  the real turn loop (`taskSequencer.runTaskStep` + `taskProcessor.makeTaskProcessor`).
+  A claimed task now runs model steps until it produces a text-only answer (`done`) or
+  reaches its `maxSteps` budget (`paused` + visible `system` event, D6). Resumption after
+  a budget pause is a queued steering instruction.
+- **D10 — Task history replay (this pass).** Under (c) Mastra executes tools inside each
+  `maxSteps: 1` call and returns `toolResults` with their `args`; the driver never sees an
+  unexecuted call. Our neutral message shape is system/user/assistant only (the chat path
+  never sends a native `tool` role), so the driver replays its own past tool usage as
+  **assistant narration** (`[tool name (query)] → {result}`, clipped) — the structured
+  `TaskEvent.tools` chips remain the authoritative record; the narration is only what the
+  next call's prompt sees. The non-streaming connector now carries each `toolResults`
+  entry's `args` (with a `toolName ?? name` fallback) so those chips can be built.
+- **D11 — A step is "done" when it answers, not when it uses a tool (this pass).** A
+  `maxSteps: 1` call that chose a tool returns `text: ""` (spike); a call that returned
+  non-empty text **and** no tool calls is the model's final answer and settles the task
+  `done`. A tool step always continues the loop to let the model act on the result.
 
 ## Current state (re-verified against the working tree, 2026-10-10)
 
@@ -476,12 +485,13 @@ Ordered; spike first, then the loop-ownership-independent foundation. Items mark
       `processTaskJob` (the sequencer driver seam); lifecycle test + `isTaskPollerRunning`.
       The processor is an honest stub this slice: it pauses a claimed task with a visible
       system event rather than faking completion (see D9 below).
-- [ ] Per-step routing helper: assemble history from `TaskEvent`, call
+- [x] Per-step routing helper: assemble history from `TaskEvent`, call
       `raceRosterCompletion`, size `max_tokens` via `outputTokensFor`; unit test with an
       injected roster/stream (mirror `racingService` test deps at `racingService.ts:93`).
-      **OQ9 resolved (spike): the call shape is a per-step `maxSteps: 1` race — frozen.
-      Still needs the `CompletionOptions.maxSteps` connector field and OQ5's
-      guard-vs-race decision before the helper is written (next pass).**
+      **OQ9 resolved (spike): the call shape is a per-step `maxSteps: 1` race — frozen.**
+      **Landed this pass:** `CompletionOptions.maxSteps` connector field (forwarded by
+      `callOptionsFrom`), `taskSequencer.runTaskStep` (history reassembly + roster race +
+      `outputTokensFor` sizing), OQ5 defaulted to race-no-guard (see Decisions).
 - [ ] ZDR refusal: creating a task for a `settings.zdr` user is rejected (test). Per OQ8,
       v1 checks at creation only; the test pins that scope explicitly. **Deferred: no task
       creation route exists yet** (API is a later slice), so the refusal has no seam to
@@ -489,21 +499,26 @@ Ordered; spike first, then the loop-ownership-independent foundation. Items mark
 - [ ] Budget meter + breach → `paused` transition with a visible system event (test).
       Meter source of truth settled by OQ3 first; the breach *behaviour* is already
       settled (D6), so only the storage shape is open. **The `paused`+event mechanism is
-      built and exercised by the processor stub (D9); the spend meter itself is deferred
-      until the sequencer emits per-step usage.**
+      now exercised by the real sequencer's step-budget stop (D6 step cap); the spend
+      meter itself is still deferred until per-step usage is accumulated across steps.**
 
-### Sequencer loop **[unblocked by the spike; next pass]**
+### Sequencer loop **[landed this pass, server-side]**
 - [x] Freeze the step schema (assistant event / tool event / usage) against the chosen
       architecture — **frozen above: one step = one `maxSteps: 1` roster call; call+result
       live together in the step's `assistant` event's `tools`; no driver-executed `tool`
       event under (c)**.
-- [ ] Implement the turn loop with steering drained at **call boundaries** (the frozen
+- [x] Implement the turn loop with steering drained at **call boundaries** (the frozen
       (c) granularity: one model call per driver step), per the decision. **Granularity is
       per-model-step, not per-tool-call — raised on #251 (spike step 5), see the process
-      log.**
-- [ ] Resume-after-crash test: kill mid-run, re-queue, reassemble from stream, continue
-      (see OQ7 on cap interaction).
-- [ ] Steering integration test: a queued instruction is consumed at the next boundary.
+      log. Steering is consumed by construction: every queued `user` event is in the
+      history the next step assembles.**
+      **Bar for "done": the model returns non-empty text AND no tool calls → task `done`.**
+- [x] Resume-after-crash test: kill mid-run, re-queue, reassemble from stream, continue
+      (see OQ7 on cap interaction). **`taskProcessor.test.ts` pins that a pre-crash
+      assistant step is not re-run and the loop continues from `Task.stepCount`.**
+- [x] Steering integration test: a queued instruction is consumed at the next boundary.
+- [x] Step-budget stop → `paused` + visible `system` event, resumable as steering (D6;
+      the cost-meter variant is still deferred — see the budget item above).
 
 ### API + client **[gated on the spike for interactive parts]**
 - [ ] Task routes (`create/list/get/instruction/cancel`), ownership + ZDR tests.
@@ -583,11 +598,10 @@ A hardening pass over the foundation before the `npm run ci` gate. Findings and 
    `routeAndComplete`/`pickRosterRoute` add no policy, `racingService.ts:480,528`). A task
    worker calling `raceRosterCompletion` therefore matches current chat routing and is not
    a regression. The open question is whether tasks **should** diverge by applying the
-   complexity tier (the epic's stated intent), or stay on the roster race. Not a
-   loop-ownership question, so the spike does not answer it. **Not blocking the
-   model/poller foundation, but it blocks the per-step routing helper item** (see Done
-   foundation, per-step routing) — that helper's call shape cannot be frozen until this is
-   decided.
+   complexity tier (the epic's stated intent), or stay on the roster race. **DEFAULTED
+   this pass (per the epic's owner-decision fallback): the step races the roster with no
+   guard, matching current chat routing.** Flagged at the slice PR for owner veto; a
+   later pass can add the guard if the owner wants tasks to diverge.
 6. **Where does the plan doc physically live?** `.iteration/docs/` (draft) vs the
    convention `docs/plan-254-task-entity.md` on the epic branch (`docs/workflow.md:40`,
    Epics §3). Resolved by moving the file before the first commit; recorded here only so
