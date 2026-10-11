@@ -222,10 +222,12 @@ describe('Chat streaming route', () => {
     // turn is whatever unit that (ever-growing) gap rounds to. Assert the
     // shape, not a fixed value: the previous assertion hard-coded "2 days"
     // from the seeded date and rotted as wall time moved past it.
+    const stamp = (d: Date) =>
+      `[${d.toISOString().slice(0, 10)} ${d.toISOString().slice(11, 16)} UTC]`;
     const userTurns = turns.filter((m) => m.role === 'user');
     expect(userTurns[0].content).toBe(`${stamp(firstTurnAt)}\nfirst turn`);
     const assistantTurn = turns.find((m) => m.role === 'assistant');
-    expect(assistantTurn?.content).toBe('[2026-10-08 14:33 UTC]\nfirst reply');
+    expect(assistantTurn?.content).toBe(`${stamp(firstReplyAt)}\nfirst reply`);
     const now = new Date();
     const pad = (n: number) => String(n).padStart(2, '0');
     const currentStamp = `${now.toISOString().slice(0, 10)} ${pad(now.getUTCHours())}:${pad(now.getUTCMinutes())}`;
