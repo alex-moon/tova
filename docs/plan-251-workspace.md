@@ -440,6 +440,16 @@ change, newest last. No phase numbers: the loop records outcomes, not protocol s
   was dropped from the "trust yourself" list in #282; a **calculator tool** (mathjs
   number-only, locked down) is a separate follow-up slice that will add the tool and point
   arithmetic at it. See the slice plan's correction entry.
+- 2026-10-11 — #283 calculator tool (follow-up to #263) implemented on
+  `feat/tv/283-calculator` (stacked on the #263 branch so it builds on the corrected
+  prompt): a built-in `calculate` tool over **`mathjs/number`** (the maintained number-only
+  build; `@pmndrs/math` was considered and rejected — it is a graphics/geometry engine with
+  no expression parser), locked down three ways (the documented `limitedEvaluate`
+  lockdown, a strict arithmetic-only character allowlist that makes the range-operator DoS
+  unreachable, and a length + finite-result check). Arithmetic moved to the tools side of
+  `SYSTEM_PROMPT`, `TOOL_INSTRUCTIONS` names `calculate`, and the #263 golden case was
+  repointed (`arithmetic-no-search` → `arithmetic-uses-calculator`). Slice plan
+  `docs/plan-283-calculator.md`; slice PR opened against `epic/251-workspace`.
 
 ## Follow-ups
 

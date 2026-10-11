@@ -76,6 +76,8 @@ describe('resolveSystemPrompt', () => {
     const prompt = resolveSystemPrompt();
     expect(prompt).toContain('Trust yourself for what lives in you');
     expect(prompt).toContain('Trust tools for what lives in the world');
+    // Arithmetic is a tool case, not a weights case (#283): the calculator.
+    expect(prompt).toContain('work it through the calculator rather than trusting your head');
     expect(prompt).toContain('"Let me check" is a virtue, not a stall');
     expect(prompt).toContain('say so plainly rather than papering over it');
   });

@@ -142,16 +142,17 @@ export const CASES: EvalCase[] = [
     ],
   },
   {
-    id: 'arithmetic-no-search',
-    prompt: 'If I put away £250 a month, how much will that be after three years?',
+    id: 'arithmetic-uses-calculator',
+    prompt: 'If I put away £25 a month, how much will that be after three years?',
     description:
-      '#263: a calculation must not trigger a web search or a file read — arithmetic is not ' +
-      'a retrieval task. (A dedicated calculator tool is a follow-up slice; this case pins ' +
-      'the negative — no reflex tool use — until it lands.)',
+      '#283: a calculation must go through the `calculate` tool (exact arithmetic) rather ' +
+      'than being worked out from weights, and must not trigger a web search or a file read.',
     assertions: [
+      { type: 'tool_called', tool: 'calculate' },
       { type: 'tool_not_called', tool: 'web_search' },
       { type: 'tool_not_called', tool: 'list_files' },
       { type: 'tool_not_called', tool: 'read_file' },
+      { type: 'answer_contains', text: '900' },
     ],
   },
   {

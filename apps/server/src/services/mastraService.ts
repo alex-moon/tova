@@ -12,6 +12,7 @@ import mongoose from 'mongoose';
 import { Asset } from '../models/Asset';
 import { User } from '../models/User';
 import { truncateForPrompt } from './textExtraction';
+import { evaluateExpression } from './calculator';
 import { mcpToolsetsForUser } from './mcpService';
 import {
   degradedToolError,
@@ -690,6 +691,31 @@ export const currentDatetimeTool = createTool({
 });
 
 /*
+ * Calculator tool (#283, follow-up to #263). Arithmetic is not a weights task —
+ * the model gets multi-digit products and percentages wrong quietly — so it is
+ * a tool. The evaluation and its security lockdown live in `calculator.ts`;
+ * the tool is a thin, per-agent singleton with no per-user context, so it is
+ * always attached (no key gate, unlike `web_search`).
+ */
+export const calculateTool = createTool({
+  id: 'calculate',
+  description:
+    'Evaluate an arithmetic expression and return the exact numeric result. Use it for ' +
+    'any non-trivial calculation — percentages, products, multi-step sums — instead of ' +
+    'working it out in your head. Accepts a plain expression using + - * / % ^, ' +
+    'parentheses and numeric functions such as sqrt, log, sin, cos, abs, round, min, max ' +
+    '(for example "0.18 * 2450 + 137").',
+  inputSchema: z.object({
+    expression: z.string().describe('A plain arithmetic expression, e.g. "0.18 * 2450 + 137"'),
+  }),
+  outputSchema: z.object({
+    result: z.number().optional().describe('The exact numeric result'),
+    error: z.string().optional().describe('Why the expression could not be evaluated'),
+  }),
+  execute: async ({ expression }) => evaluateExpression(expression),
+});
+
+/*
  * Delegate-to-worker tool (#255, epic #251; F2/F3). Creates a task — a
  * first-class stream that runs offline over the workspace — with this chat as
  * its thin origin (`origin: { kind: 'chat', sessionId }`). The task is *not* a
@@ -763,6 +789,9 @@ const TOOL_INSTRUCTIONS =
   'When the user asks about the current date or time, call the `current_datetime` ' +
   'tool instead of guessing; it returns UTC, and the system prompt names the ' +
   'user’s local timezone and offset — state the time in the user’s local zone. ' +
+  'For any non-trivial arithmetic — a percentage, a product, a multi-step sum — ' +
+  'call the `calculate` tool with a plain numeric expression rather than ' +
+  'working it out yourself. ' +
   'Write the query as focused keywords. When search results arrive, answer with ' +
   'terse markdown links ([title](url)) for the claims you used; answer from your ' +
   'own knowledge when no search is needed. When the user refers to their files ' +
@@ -824,6 +853,7 @@ const agentFor = (provider: LlmProvider, model: string, tools?: boolean): Agent 
             ...(hasSearchKey() ? { web_search: webSearchTool } : {}),
             fetch_url: fetchUrlTool,
             current_datetime: currentDatetimeTool,
+            calculate: calculateTool,
             list_files: listFilesTool,
             read_file: readFileTool,
             generate_file: generateFileTool,

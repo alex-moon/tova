@@ -142,3 +142,8 @@ things and how to work" layer, authored as one constitution with it (the two are
   separate follow-up slice that will add the tool and point arithmetic at it. The
   `arithmetic-no-search` case description was corrected to state the negative only (no
   reflex search/file read), not the wrong "comes from the model" claim.
+- 2026-10-11 — the calculator follow-up (#283, `docs/done/plan-283-calculator.md`) landed on
+  a branch stacked on this one: it adds the `calculate` tool (mathjs number-only, locked
+  down), moves arithmetic to the tools side of the prompt, and renames the golden case
+  `arithmetic-no-search` → `arithmetic-uses-calculator` (now asserting the tool is called).
+  The case name in the entries above is the pre-rename name.
