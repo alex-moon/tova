@@ -388,6 +388,18 @@ change, newest last. No phase numbers: the loop records outcomes, not protocol s
   `Epic: #251` but which is not in the epic's declared slice list #252–#256) stays out of scope
   pending the owner's scope confirmation (reconcile comment on the issue, 2026-10-11T17:59Z).
 
+- 2026-10-11 — CI fix on the epic branch: PR #270's `epic/251-workspace` failed the gate
+  with `no-undef` on `chat.stream.test.ts`. Root cause was a merge artefact, not a logic bug:
+  merging `main`'s #261 date-rot fix (`ab6b116`, which dropped the helper and asserted a
+  literal) into #253's relative-seeding rewrite (`9ab2af9`) left the test calling an undefined
+  `stamp()` on the first turn while asserting a hard-coded `[2026-10-08 14:33 UTC]` on the
+  assistant turn — the latter also wrong now the seed is relative. Restored the local
+  `stamp` helper and stamped both seeded turns from their relative timestamps, keeping main's
+  clock-independent shape assertion for the live turn (commit `81c9249`, pushed to
+  `epic/251-workspace`, updating PR #270). `npm run ci` green (server 100 suites / 1233 tests;
+  client 276 tests + build), plus `format:check`, semgrep (0 findings) and the responsive e2e
+  suite (52) run locally for the full CI parity.
+
 ## Follow-ups
 
 - Embeddings / vector search as a later #253 upgrade — only on eval evidence.
