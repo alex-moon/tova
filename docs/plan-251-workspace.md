@@ -77,9 +77,9 @@ Slice-level decisions live in the slice plan docs; this section carries epic-lev
 - [x] Epic branch `epic/251-workspace` cut from `main`
 - [x] Epic plan doc (this file)
 - [x] Slice #252 — workspace provenance (PR #265 merged to `epic/251-workspace`; #252 closed)
-- [ ] Slice #253 — workspace memory (implemented on `feat/tv/253-workspace-memory`; PR #271
-      against `epic/251-workspace` now `MERGEABLE`/`CLEAN` after the #254 foundation merge
-      conflict was resolved; awaiting merge — owner gate on loop self-merge is unsettled)
+- [ ] Slice #253 — workspace memory (implemented and post-merge hardened on
+      `feat/tv/253-workspace-memory` at `e23b5a1`; PR #271 against `epic/251-workspace` now
+      `MERGEABLE`/`CLEAN`; awaiting merge — owner gate on loop self-merge is unsettled)
 - [ ] Slice #254 — task entity
 - [ ] Slice #255 — chat-task integration
 - [ ] Slice #256 — retire the entity graph
@@ -129,6 +129,17 @@ change, newest last. No phase numbers: the loop records outcomes, not protocol s
   rotted fixed-date seed — kept the slice branch's `stamp()`-helper form). `npm run ci`
   green on the merged branch (93 suites, 1156 tests). PR #271 now `MERGEABLE`/`CLEAN`; still
   awaiting merge under the unsettled self-merge owner gate.
+- 2026-10-11 — #253 post-merge hardening: a review of the branch merged with the epic
+  (`e23b5a1` on `feat/tv/253-workspace-memory`, pushed) fixed four issues the merge exposed
+  — the two routes had drifted on ZDR (the non-streaming route injected no workspace block
+  while the streaming route read one, against decision 6's "a ZDR turn may still read"; both
+  now inject the same read-only block), the streaming ZDR branch computed and discarded the
+  library index (now `skipFiles: true`), the per-slice snippet showed the head of the source
+  rather than the matched region (`matchSnippet` now centres on the first keyword, same cap),
+  and route-level coverage was streaming-only (non-streaming and both ZDR routes now assert
+  the block). `npm run ci` green (93 suites, 1164 tests). Slice plan
+  (`docs/plan-253-workspace-memory.md`) carries the details; PR #271 still open/`MERGEABLE`
+  under the unsettled self-merge owner gate.
 
 ## Follow-ups
 
