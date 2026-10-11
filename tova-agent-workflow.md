@@ -78,9 +78,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
-      contents: write          # push the fix branch / open the PR
-      pull-requests: write     # open + comment on PRs
-      issues: write            # comment back on the trigger issue
+      contents: write # push the fix branch / open the PR
+      pull-requests: write # open + comment on PRs
+      issues: write # comment back on the trigger issue
     env:
       OPENAI_API_KEY: ${{ secrets.DEEPINFRA_API_KEY }}
       OPENAI_HOST: https://api.deepinfra.com
