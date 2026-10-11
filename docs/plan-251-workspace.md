@@ -293,6 +293,20 @@ change, newest last. No phase numbers: the loop records outcomes, not protocol s
   the "Client-view slice pass" section; slice PR **#278** opened against `epic/251-workspace`.
   #252/#253 done; #255/#256 open; epic PR #270 still an open bodyless draft; the #253/#256
   owner questions and the self-merge gate stay open.
+- 2026-10-11 — #254 client-view hardening on `feat/tv/254-task-client-view` (commit `aab09e0`,
+  pushed; carried in PR #278). A post-landing review of the slice against the routes contract
+  and the plan found three defects: an **unbounded detail-fetch loop** (`TasksView` keyed its
+  loader on the selected `TaskSummary` *object*, so a fresh object per `GET /api/tasks/:id` poll
+  re-triggered it — ~396 req/s measured; selection is now the task id, the header derived, with
+  a `selectedIdRef` guard), **raw tool `result` leaked to the browser** (`serializeEvent`
+  returned `event.tools` verbatim, so the D10 resume payload shipped on every 3s poll; it now
+  rebuilds only the #196 chip summary via `serializeToolEvent`), and the **task list dropped
+  server pagination** (`TaskLibrary` ignored `nextCursor`, so tasks past page 1 were
+  unreachable; a "Show more" affordance now mirrors `AssetLibrary`). Also clears the steering
+  draft when switching tasks. Verified in the browser at 375px; `npm run ci` green (server 96
+  suites / 1207 tests; client 21 files / 263 tests). Slice plan
+  (`docs/plan-254-task-entity.md`) carries the "Client-view hardening pass" section; PR #278
+  still open against `epic/251-workspace`.
 
 ## Follow-ups
 
