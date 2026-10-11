@@ -132,6 +132,49 @@ describe('GET /api/tasks/:id (#254 routes)', () => {
     const res = await getTask(cookie, new Types.ObjectId().toString());
     expect(res.status).toBe(404);
   });
+
+  it('404s a malformed id rather than 500ing on a cast error (D15)', async () => {
+    const cookie = await registerUser(OWNER);
+    const res = await getTask(cookie, 'not-an-objectid');
+    expect(res.status).toBe(404);
+  });
+
+  // The persisted tool chip carries the executed call's raw `result` (the
+  // sequencer's resume payload, D10). The browser must never receive it: the
+  // serializer strips it while keeping the #196 chip summary the client renders.
+  it('serializes the tool chip summary but strips the raw resume result', async () => {
+    const cookie = await registerUser(OWNER);
+    const created = await createTask(cookie, { instruction: 'list things' });
+    const id = created.body.task.id as string;
+    await TaskEvent.create({
+      taskId: id,
+      seq: 1,
+      role: 'assistant',
+      content: '',
+      step: 0,
+      tools: [
+        {
+          phase: 'result',
+          name: 'list_files',
+          label: 'Listing files',
+          resultCount: 2,
+          result: { files: [{ filename: 'a.txt' }, { filename: 'b.txt' }] },
+        },
+      ],
+    });
+
+    const res = await getTask(cookie, id);
+
+    expect(res.status).toBe(200);
+    const assistant = res.body.events.find((e: { role: string }) => e.role === 'assistant');
+    expect(assistant.tools[0]).toMatchObject({
+      phase: 'result',
+      name: 'list_files',
+      label: 'Listing files',
+      resultCount: 2,
+    });
+    expect(assistant.tools[0].result).toBeUndefined();
+  });
 });
 
 describe('POST /api/tasks/:id/instruction (#254 routes)', () => {

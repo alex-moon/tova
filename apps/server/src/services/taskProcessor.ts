@@ -142,11 +142,18 @@ export const makeTaskProcessor =
       // and the loop continues to let the model act on the results. A step
       // with text and no tool calls is the model's final answer.
       if (outcome.text.trim() !== '' && outcome.tools.length === 0) {
-        await appendNotice(current._id, 'Task completed.', stepCount);
-        await Task.updateOne(
+        // Settle first, then announce: only a task still `running` is settled
+        // to `done`, and only a task we actually settled gets the completion
+        // notice. A cancel (or any external status change) that landed during
+        // this step leaves the stream without a false "Task completed."
+        // — the previous unconditional append wrote it onto a cancelled task.
+        const settled = await Task.updateOne(
           { _id: current._id, status: 'running' },
           { $set: { status: 'done', stepCount } },
         );
+        if (settled.modifiedCount) {
+          await appendNotice(current._id, 'Task completed.', stepCount);
+        }
         return;
       }
     }

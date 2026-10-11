@@ -887,13 +887,23 @@ const buildConnector = (provider: LlmProvider): LlmConnector => {
       // entry's `args` (Mastra's `ToolResultPayload` carries them) ride across
       // too, so the task sequencer can rebuild a step's tool chips and replay
       // its own calls as history — the streaming path already exposes args.
+      //
+      // Mastra's `ToolResultChunk` nests everything under `payload`
+      // (`{ type, runId, from, payload: { toolName, args, result, toolCallId } }`),
+      // so the fields live on `entry.payload`, not on the entry itself. Reading
+      // the entry directly yielded `name: ''` and a missing `result` — the
+      // #254 sequencer's tool chips/replay were silently broken live. Unwrap
+      // `payload`, with an entry-level fallback so a future Mastra shape (or a
+      // bare payload in tests) still maps.
       const toolResults = (result as { toolResults?: unknown[] }).toolResults?.map((entry) => {
-        const r = entry as {
+        const outer = entry as {
+          payload?: { toolName?: string; name?: string; args?: unknown; result?: unknown };
           toolName?: string;
           name?: string;
           args?: unknown;
           result?: unknown;
         };
+        const r = outer.payload ?? outer;
         const args =
           r.args && typeof r.args === 'object' && !Array.isArray(r.args)
             ? (r.args as Record<string, unknown>)

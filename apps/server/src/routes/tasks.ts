@@ -48,22 +48,54 @@ const serializeTask = (task: TaskDocument) => ({
 
 // One stream event, in the shape the chat client already renders for a turn
 // (role/content/tools/usage/model/provider), plus the task stream's `seq`/`step`.
+//
+// The persisted tool chip carries the executed call's raw `result` — the resume
+// payload the *sequencer* replays from the stream (D10), not something the
+// browser ever renders. Strip it here by rebuilding only the #196 chip summary
+// fields (a mongoose subdoc must be converted to a plain object first; spreading
+// a subdoc leaks its internals instead of its fields). Shipping raw tool output
+// on every polled detail GET would balloon the response and leak tool internals
+// into the page.
+const serializeToolEvent = (tool: unknown) => {
+  const plain = (
+    typeof (tool as { toObject?: unknown }).toObject === 'function'
+      ? (tool as { toObject: () => Record<string, unknown> }).toObject()
+      : (tool as Record<string, unknown>)
+  ) as Record<string, unknown>;
+  return {
+    phase: plain.phase,
+    name: plain.name,
+    label: plain.label,
+    ...(plain.query ? { query: plain.query } : {}),
+    ...(plain.status ? { status: plain.status } : {}),
+    ...(plain.resultCount !== undefined && plain.resultCount !== null
+      ? { resultCount: plain.resultCount }
+      : {}),
+    ...(plain.domains ? { domains: plain.domains } : {}),
+    ...(plain.filename ? { filename: plain.filename } : {}),
+  };
+};
+
 const serializeEvent = (event: TaskEventDocument) => ({
   seq: event.seq,
   role: event.role,
   content: event.content,
   ...(event.model ? { model: event.model } : {}),
   ...(event.provider ? { provider: event.provider } : {}),
-  ...(event.tools ? { tools: event.tools } : {}),
+  ...(event.tools ? { tools: event.tools.map(serializeToolEvent) } : {}),
   ...(event.usage ? { usage: event.usage } : {}),
   ...(event.step !== undefined && event.step !== null ? { step: event.step } : {}),
   timestamp: event.timestamp,
 });
 
 // Ownership-scoped lookup: a task the caller does not own is indistinguishable
-// from one that does not exist.
+// from one that does not exist. A malformed id (not an ObjectId) is treated the
+// same way — a 404, not a Mongoose cast error surfacing as a 500 (D15: unknown
+// id → 404, no oracle).
 const ownedTask = (req: AuthRequest): Promise<TaskDocument | null> =>
-  Task.findOne({ _id: req.params.id, userId: req.user?.id });
+  isValidObjectId(req.params.id)
+    ? Task.findOne({ _id: req.params.id, userId: req.user?.id })
+    : Promise.resolve(null);
 
 // POST /api/tasks — create a task. ZDR refusal (D7): tasks are durable by
 // definition, so an account with `settings.zdr` (or its `incognitoByDefault`

@@ -18,6 +18,13 @@ import { appendTaskEvent } from './taskProcessor';
 
 export const MAX_TASK_ATTEMPTS = 3;
 
+// Terminal statuses are never reopened: cancel leaves them alone (D14) and a
+// steering instruction is refused against them. One shared predicate so the
+// steer/cancel guards cannot drift from the model enum.
+const TERMINAL_TASK_STATUSES = ['done', 'failed', 'cancelled'] as const;
+const isTerminalTaskStatus = (status: string): boolean =>
+  (TERMINAL_TASK_STATUSES as readonly string[]).includes(status);
+
 const POLL_INTERVAL_MS = 5000;
 
 const MAX_STORED_ERROR_CHARS = 500;
@@ -174,21 +181,28 @@ export const steerTask = async (
   task: TaskDocument,
   instruction: string,
 ): Promise<SteeringResult> => {
-  if (task.status === 'done' || task.status === 'failed' || task.status === 'cancelled') {
+  // Re-read the live status: the caller's document was read by the route and
+  // the poller may have settled or cancelled the task in between. A terminal
+  // task is refused against the *current* status, not the caller's snapshot.
+  const current = await Task.findById(task._id);
+  if (!current || isTerminalTaskStatus(current.status)) {
     return { status: 'refused' };
   }
 
-  await appendTaskEvent(task._id, {
+  await appendTaskEvent(current._id, {
     role: 'user',
     content: instruction,
-    step: task.stepCount,
+    step: current.stepCount,
   });
 
   // From `paused` the instruction is the resume: move the header back to the
-  // queue so the poller re-claims it. From `queued`/`running` the status is
-  // already live; the event alone steers.
-  if (task.status === 'paused') {
-    await Task.updateOne({ _id: task._id }, { $set: { status: 'queued' } });
+  // queue so the poller re-claims it. The update is *guarded* on `paused` so a
+  // concurrent settle (a cancel or a completion landing between the read above
+  // and here) is never resurrected — an unconditional `{_id}` write could flip
+  // a just-`cancelled` task back to `queued` (the cancel-clobber race). From
+  // `queued`/`running` the status is already live; the event alone steers.
+  if (current.status === 'paused') {
+    await Task.updateOne({ _id: current._id, status: 'paused' }, { $set: { status: 'queued' } });
   }
   return { status: 'queued' };
 };
@@ -197,6 +211,12 @@ export const steerTask = async (
 // `running` task's processor observes the status change at its next step
 // boundary (D13) and returns without settling it back to `done`.
 export const cancelTask = async (task: TaskDocument): Promise<void> => {
-  if (task.status === 'done' || task.status === 'failed' || task.status === 'cancelled') return;
-  await Task.updateOne({ _id: task._id }, { $set: { status: 'cancelled' } });
+  // The write is *guarded* on non-terminal status: a `running` task may settle
+  // itself to `done` between the route's read and here, and an unconditional
+  // `{_id}` write would clobber that completion to `cancelled`. The `$nin`
+  // makes the transition idempotent and race-safe without a pre-read.
+  await Task.updateOne(
+    { _id: task._id, status: { $nin: ['done', 'failed', 'cancelled'] } },
+    { $set: { status: 'cancelled' } },
+  );
 };

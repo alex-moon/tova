@@ -564,17 +564,30 @@ Ordered; spike first, then the loop-ownership-independent foundation. Items mark
       (D12); the processor loop re-reads status each step so cancel is observed at the
       boundary (D13); instruction re-queues a `paused` task, refuses terminal (D14); ZDR
       refusal at creation (D7/OQ8), all behind `authenticate` and `userId`-scoped.
-- [ ] Task detail client view, mobile-first; read-only stream first.
-- [ ] Queued turn-taking composer per the frozen UX.
-- [ ] Playwright at ~375px; `npm run test:e2e` backstop (per standing client rules).
+- [x] Task detail client view, mobile-first; read-only stream first. **Landed this pass:**
+      `apps/client/src/services/tasks.ts` mirrors the `/api/tasks` contract; `TasksView.tsx`
+      (master/detail at `/tasks`, mirroring `AssetsView`) renders the ordered stream
+      read-only — user turns, assistant steps with #196 tool chips + markdown, and `system`
+      notices as neutral rows — with a status chip and the budget/step line. `TaskLibrary.tsx`
+      lists tasks and polls while any is active; `TaskStatusChip.tsx` is the shared enum chip.
+- [x] Queued turn-taking composer per the frozen UX. The composer explains it queues until
+      the next step boundary (D2), relabels to "Resume" from `paused` (D6/D14), is disabled
+      for terminal tasks, and Cancel is offered only while active (the header write D13
+      observes at the boundary).
+- [x] Playwright at ~375px; `npm run test:e2e` backstop (per standing client rules).
+      `e2e/tasks.spec.ts` runs in the mobile+desktop projects; `/tasks` added to
+      `e2e/responsive.spec.ts`'s overflow route set with a seeded task so the assertion is
+      not vacuous. Unit cover: `services/tasks.test.ts` + `TasksView.test.tsx`.
 
 ### Gate
 - [x] Plan doc moved to `docs/plan-254-task-entity.md` on the slice branch (OQ6 resolved;
       `.iteration/` is scratch, not the convention).
 - [x] `npm run ci` green on the routes slice (server lint/format/typecheck/test, client
       lint/format/test/build) — 96 suites, 1206 tests.
+- [x] `npm run ci` green on the client-view slice (server lint/format/typecheck/test, client
+      lint/format/test/build) — 96 server suites / 1206 tests, 21 client files / 261 tests.
 - [x] PR opened against the **epic branch** (`epic/251-workspace`), plan doc linked
-      (`docs/workflow.md:48-50`).
+      (`docs/workflow.md:48-50`) — slice PR **#278**.
 - [ ] Plan archived to `docs/done/` after the slice PR merges into the epic branch.
 
 ## Review pass (2026-10-11)
@@ -737,9 +750,140 @@ The API surface (#254's "API + client" section, server half). What landed:
   idempotency) + `steerTask`/`cancelTask` unit cases in `taskService.test.ts` + the D12
   collision-retry and D13 cancel-boundary cases in `taskProcessor.test.ts`.
 
-**Deferred (the client half, next pass):** the task detail view (read-only stream first),
-the queued turn-taking composer, and the Playwright ~375px backstop — per the standing
-client rules and `docs/plan-254-task-entity.md`'s API + client checklist.
+**Deferred at the routes slice, landed in the next pass (the client half):** the task
+detail view (read-only stream first), the queued turn-taking composer, and the Playwright
+~375px backstop — see "Client-view slice pass" below.
+
+## Client-view slice pass (2026-10-11)
+
+The client half of #254's "API + client" section. New files under `apps/client/src`:
+
+- **`services/tasks.ts`** — the browser contract for `/api/tasks` (D15): `TaskSummary`,
+  `TaskStreamEvent`, `TaskDetail`, `TaskListPage`, plus `isTerminalTask`/`TERMINAL_TASK_STATUSES`.
+  Mirrors the server's `serializeTask`/`serializeEvent` field-for-field and normalises
+  axios errors to a `TaskError` so a 409/404 message surfaces verbatim.
+- **`components/TasksView.tsx`** — mounted at `/tasks`, a master/detail like `AssetsView`.
+  The detail renders the ordered stream **read-only** (the worker is the sole writer):
+  user turns right-aligned, assistant steps left with the #196 tool-chip summary + markdown,
+  and `system` notices (D6) as neutral rows. A status chip (from `TaskStatusChip`) and the
+  `$spent / $budget · steps` line head the pane. The composer is the **queued turn-taking**
+  affordance (D2): its note says steering queues until the next step, it relabels to
+  "Resume" from `paused` (D6/D14), is disabled for terminal tasks, and a Cancel button is
+  offered only while active (D13's header write).
+- **`components/TaskLibrary.tsx`** — the list pane; polls silently while any task is active
+  (queued/running/paused), the same poll-while-pending idiom as `AssetLibrary`.
+- **`components/TaskStatusChip.tsx`** — the shared status→icon/tone mapping for all six
+  server enum values, reused by the list row and the detail header.
+- **Routing/nav** — `isTasksRoute()` in `App.tsx` (pathname-based, like `/files`) and a
+  "Tasks" link in `Sidebar.tsx` beside "Files". `/tasks` was deliberately chosen over
+  `/assets`-style collisions; it is a plain pathname route, served by the SPA fallback like
+  the other views.
+
+**Mobile-first, verified in a real browser.** Rendered at 375×667 (mobile) and 1280×800
+(desktop) via the `playwright-cli` skill against the local stack; the detail swaps in place
+on a phone (Back affordance `md:hidden`), the document does not overflow horizontally, and
+the paused/running/terminal states all render their expected composer/cancel affordances.
+
+**Tests.** `services/tasks.test.ts` (request contract + error normalisation + the terminal
+predicate) and `TasksView.test.tsx` (list→detail, tool-chip + system rendering, steering
+POST, terminal composer/cancel) — 14 new client unit tests. e2e: `e2e/tasks.spec.ts`
+(list/detail/steer/empty, both projects) + `/tasks` added to `e2e/responsive.spec.ts` with a
+seeded task so the overflow backstop is non-vacuous.
+
+### Client-view hardening pass (2026-10-11)
+
+A post-landing review of the slice against the routes contract and the plan turned up three
+defects, fixed here:
+
+- **Unbounded detail-fetch loop.** `TasksView` keyed its loader effect on the selected
+  `TaskSummary` *object* and pushed each polled response back into that object. A real
+  `GET /api/tasks/:id` returns a fresh object every call, so every response re-triggered the
+  loader — measured at ~396 requests/second in a browser (`399`-call unit probe), and the
+  original unit test masked it by mocking a stable reference. Selection is now the task **id**
+  (`selectedId`), the header is derived (`detail?.task ?? seed`), and a `selectedIdRef` guard
+  drops responses for a task the user has navigated away from. A regression test mocks a
+  fresh object per call and asserts the fetch settles (≤2), which fails against the old code.
+- **Raw tool `result` leaked to the browser.** The API's `serializeEvent` returned
+  `event.tools` verbatim; the task stream's chips carry the executed call's raw `result` (the
+  sequencer's resume payload, D10 — never rendered by the client). `GET /api/tasks/:id` was
+  therefore shipping tool internals on every 3s poll. `serializeEvent` now rebuilds only the
+  #196 chip summary fields via `serializeToolEvent` (a subdoc must `toObject()` first), with a
+  route test pinning that `result` is absent while the chip survives.
+- **Task list dropped server pagination.** `GET /api/tasks` is cursor-paged (20/page) and the
+  client service already accepted a cursor, but `TaskLibrary` ignored `nextCursor`, so tasks
+  past the first page were unreachable. Added a "Show more" affordance mirroring
+  `AssetLibrary`, with a client test for the cursor round-trip.
+
+Also: `select` now clears the steering draft and stream when switching tasks (a draft typed
+for one task no longer carries into the next). Verified in the browser at 375px (no horizontal
+overflow; paging cursor fires; detail poll settles at one request per interval). `npm run ci`
+green (server 96 suites / 1207 tests; client 21 files / 263 tests).
+
+## Review pass 3 (2026-10-11) — sequencer + API + client hardening
+
+A review of the landed work against the code and the tickets (#251/#254), driven by a **live
+end-to-end run of the real sequencer** (a task created through the API and watched in the
+browser). One defect was a live functional break; the rest are correctness/contract fixes.
+
+### The live break: Mastra tool results were read at the wrong nesting level
+
+Running a real task with a tool-forcing prompt (`list_files`) exposed it: every persisted
+tool chip was `{ phase: 'result', name: '', label: 'Tool run' }` — **no tool name, no result,
+no args** — so `renderToolReplay` replayed `[tool tool]` with no output and the model re-ran
+the same tool **blind for all 25 steps** until the budget paused the task. The root cause was
+in the non-streaming connector (`mastraService.ts`): Mastra's `FullOutput.toolResults` entries
+are `ToolResultChunk`s shaped `{ type, runId, from, payload: { toolName, args, result,
+toolCallId } }`, but the mapping read `toolName`/`args`/`result` **off the entry** instead of
+`entry.payload`. Every field came back `undefined`/`''`. Review-pass-2 believed it had fixed
+this path; it had widened the *destinations* (`parseStepOutcome` → chip → schema) but read the
+*source* one level too shallow. The connector now unwraps `payload` (with an entry-level
+fallback). Verified live: the same task now completes in 2 steps with a chip of
+`{ name: 'list_files', label: 'Listed your files', resultCount: 1 }`. Pinned by
+`mastraToolResults.test.ts` against the captured real shape.
+
+### Cancel/status races (the "single writer / status" invariants)
+
+- **`steerTask` could resurrect a terminal task.** The route reads the task, then `steerTask`
+  re-queued from `paused` with an unconditional `{ _id }` write, so a cancel landing in
+  between was clobbered (`cancelled → queued`). It now re-reads the **live** status (refusing
+  terminal) and guards the re-queue on `status: 'paused'`.
+- **`cancelTask` could clobber a completion.** Same shape: a `running` task that settled to
+  `done` between the read and the write was overwritten to `cancelled`. The write is now
+  guarded with `status: { $nin: [done, failed, cancelled] }`.
+- **The processor wrote a false "Task completed." after a cancel.** The completion branch
+  appended the `system` notice *unconditionally* and only guarded the status write, so a
+  cancel during the final step left "Task completed." on a `cancelled` stream. It now settles
+  first and announces only when the guarded update actually matched a `running` task.
+- Regression tests added for all three (`taskService.test.ts`, `taskProcessor.test.ts`).
+
+### API contract
+
+- **Malformed `:id` returned 500, not 404.** `Task.findOne({ _id: 'not-an-objectid' })` throws
+  a Mongoose cast error, which the handler turned into a 500 — against D15's "unknown id →
+  404, no oracle". `ownedTask` now short-circuits a non-ObjectId to `null` (404). Test added.
+
+### Client
+
+- **Pagination was wiped by the active poll.** Review-pass-2 added "Show more", but the 3s
+  silent poll refetched page 1 and replaced the list, dropping every appended page and
+  re-showing "Show more" on each tick while any task was active (the normal case). The poll
+  now refetches **all** loaded pages via a cursor chain (`pagesLoaded` ref), so appended pages
+  survive. The existing pagination test was strengthened to advance past a poll tick.
+- **Silent-poll failures were swallowed forever.** A task deleted mid-poll 404'd on every
+  silent tick; the UI stayed frozen on a stale `running` frame and kept hammering a dead
+  endpoint. `TaskError` now carries the HTTP `status`; a 404 on a (silent or not) load
+  surfaces the error and stops polling.
+- **Cancel showed no in-flight state.** A cancel is observed server-side only at the next step
+  boundary (D13), so the POST response still reports `running`; the button flipped back to an
+  enabled "Cancel" and invited a second tap. A `cancelPending` (derived) state now holds a
+  disabled "Cancelling…" until the status is terminal.
+- **The `/tasks` responsive e2e only checked the list.** It now opens the task **detail** (the
+  actual new surface: stream, chips, budget line, composer) and re-asserts no overflow at both
+  viewports.
+
+`npm run ci` green (server 97 suites / 1213 tests; client 21 files / 265 tests); the
+`tasks` + `responsive` e2e suites pass in both projects (16/16), and the detail pane was
+inspected in a real browser at 390px.
 
 ## Follow-ups
 

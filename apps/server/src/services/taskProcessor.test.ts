@@ -147,6 +147,25 @@ describe('processTaskJob sequencer loop (#254)', () => {
     expect(runStep).toHaveBeenCalledTimes(1);
     expect((await Task.findById(task._id))?.status).toBe('cancelled');
   });
+
+  it('does not write a false completion notice when a cancel lands during the final step', async () => {
+    const task = await enqueue();
+    const claimed = await claimNextTask();
+    const runStep: TaskStepRunner = jest.fn().mockImplementation(async () => {
+      // The cancel arrives while the *final* (text-only) step is in flight, so
+      // the loop never gets another top-of-loop re-read to observe it. The
+      // completion branch must settle-and-announce guardedly, not append a
+      // "Task completed." onto a task that was cancelled.
+      await Task.updateOne({ _id: task._id }, { $set: { status: 'cancelled' } });
+      return blankStep({ text: 'finished anyway' });
+    });
+
+    await makeTaskProcessor(runStep)(claimed!);
+
+    expect((await Task.findById(task._id))?.status).toBe('cancelled');
+    const events = await eventsOf(task._id);
+    expect(events.some((e) => e.role === 'system' && /completed/i.test(e.content))).toBe(false);
+  });
 });
 
 describe('appendTaskEvent seq allocation (#254)', () => {

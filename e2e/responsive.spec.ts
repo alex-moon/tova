@@ -184,10 +184,62 @@ const clippedElements = (page: Page) =>
     return offenders;
   });
 
+/*
+ * The /tasks route (#254) renders an empty list state when the API is
+ * unmocked (401), which makes the "no overflow" assertion vacuous. Seed one
+ * task with a realistically long instruction so the list row and its wrapping
+ * are actually exercised at phone width — and stub the detail endpoint so the
+ * test can open the *detail* pane (the actual new surface: the read-only
+ * stream, tool chips, budget line and the flex composer), not just the list.
+ */
+const mockTasks = async (page: Page) => {
+  const task = {
+    id: 'e2e-task-1',
+    status: 'running',
+    instruction: 'Summarise the newest file and leave a short note with every action item you find',
+    origin: { kind: 'direct' },
+    stepCount: 2,
+    budget: { maxSteps: 25, maxCostUsd: 5, spentUsd: 0.0123 },
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  };
+  const events = [
+    { seq: 0, role: 'user', content: task.instruction, step: 0, timestamp: '' },
+    {
+      seq: 1,
+      role: 'assistant',
+      content: 'I listed the files and found a few action items worth noting in detail.',
+      step: 1,
+      model: 'e2e-mock/model',
+      provider: 'deepinfra',
+      timestamp: '',
+      tools: [{ phase: 'result', name: 'list_files', label: 'Listing files', resultCount: 3 }],
+    },
+    { seq: 2, role: 'system', content: 'Step budget reached — task paused.', timestamp: '' },
+  ];
+  await page.route('**/api/tasks', async (route) => {
+    if (route.request().method() !== 'GET') return route.continue();
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ tasks: [task], nextCursor: null }),
+    });
+  });
+  await page.route('**/api/tasks/*', async (route) => {
+    if (route.request().method() !== 'GET') return route.continue();
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ task, events }),
+    });
+  });
+};
+
 const routes: Array<{ path: string; ready: string }> = [
   { path: '/', ready: '[data-testid="chat-input"]' },
   { path: '/profile', ready: '[data-testid="profile-view"]' },
   { path: '/files', ready: '[data-testid="assets-view"]' },
+  { path: '/tasks', ready: '[data-testid="tasks-view"]' },
   { path: '/admin', ready: '[data-testid="admin-view"]' },
 ];
 
@@ -195,11 +247,23 @@ for (const { path, ready } of routes) {
   test(`no horizontal overflow: ${path}`, async ({ page }) => {
     await mockAuth(page);
     if (path === '/admin') await mockAdminData(page);
+    if (path === '/tasks') await mockTasks(page);
     await page.goto(path);
     await expect(page.locator(ready)).toBeVisible();
 
     expect(await documentOverflows(page)).toBe(false);
     expect(await clippedElements(page)).toEqual([]);
+
+    // #254: open the task detail so the *detail* pane (stream rows, tool
+    // chips, budget line, flex composer) is the surface checked for overflow,
+    // not just the list. Its flex/grid layout is where a phone-width regression
+    // would land, so checking only the list would be vacuous.
+    if (path === '/tasks') {
+      await page.locator('[data-testid="task-row-e2e-task-1"]').click();
+      await expect(page.locator('[data-testid="task-tool-summary-toggle"]')).toBeVisible();
+      expect(await documentOverflows(page)).toBe(false);
+      expect(await clippedElements(page)).toEqual([]);
+    }
 
     // #220 headline: on a phone the admin tables must fit, not scroll inside
     // their wrapper. Prove the table actually rendered first, so the check
