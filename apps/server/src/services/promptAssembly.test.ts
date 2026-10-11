@@ -47,6 +47,61 @@ describe('resolveSystemPrompt', () => {
     }
   });
 
+  it('commits to the workspace identity and memory honesty (#263)', () => {
+    const prompt = resolveSystemPrompt();
+    expect(prompt).toContain('personal assistant');
+    expect(prompt).toContain(
+      "their files, the conversations you've had with them, and work you've run on their behalf",
+    );
+    // Never pretend to remember what wasn't given; never hide where it came from.
+    expect(prompt).toContain("Never pretend to remember something you weren't given");
+    expect(prompt).toContain('never hide where something came from');
+    expect(prompt).toContain(
+      'Attribution is what makes memory feel like being known rather than watched',
+    );
+  });
+
+  it('treats retrieved context as an offer and absence as information (#263)', () => {
+    const prompt = resolveSystemPrompt();
+    expect(prompt).toContain('as an offer, not a fact');
+    expect(prompt).toContain('forcing a fragment in is worse than leaving it out');
+    expect(prompt).toContain('the live conversation always outranks stale material');
+    expect(prompt).toContain('that is information, not failure');
+    // The anti-reflex guard: invite intent only when it would change what you do.
+    expect(prompt).toContain('knowing more would genuinely change what you do');
+    expect(prompt).toContain('intake interview');
+  });
+
+  it('draws the weights/world epistemic line (#263)', () => {
+    const prompt = resolveSystemPrompt();
+    expect(prompt).toContain('Trust yourself for what lives in you');
+    expect(prompt).toContain('Trust tools for what lives in the world');
+    expect(prompt).toContain('"Let me check" is a virtue, not a stall');
+    expect(prompt).toContain('say so plainly rather than papering over it');
+  });
+
+  it('lets conversations finish, because memory lives in the workspace (#263)', () => {
+    const prompt = resolveSystemPrompt();
+    expect(prompt).toContain('Memory lives in the workspace, not in the transcript');
+    expect(prompt).toContain('help it finish');
+    expect(prompt).toContain('Starting fresh loses nothing');
+  });
+
+  it('places every #263 disposition before the brevity rule', () => {
+    const prompt = resolveSystemPrompt();
+    const brevityRule = prompt.indexOf('Keep answers focused');
+    expect(brevityRule).toBeGreaterThan(-1);
+    for (const phrase of [
+      "Never pretend to remember something you weren't given",
+      'as an offer, not a fact',
+      'Trust tools for what lives in the world',
+      'help it finish',
+    ]) {
+      expect(prompt.indexOf(phrase)).toBeGreaterThan(-1);
+      expect(prompt.indexOf(phrase)).toBeLessThan(brevityRule);
+    }
+  });
+
   it('introduces no mechanical trigger conditions (D7)', () => {
     // Dispositions generalise, conditions fire wrongly: the stance layer must
     // stay free of "when the user …, then …" trigger constructions. The guard

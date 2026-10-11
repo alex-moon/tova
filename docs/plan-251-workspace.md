@@ -32,6 +32,8 @@ wait for #253 to replace, and its data is droppable):
 - #254 — task entity: offline agent sequencer over the workspace
 - #255 — chat-task integration
 - #256 — retire the entity graph
+- #263 — workspace-era system prompt (companion to #259; the "how to know things and how
+  to work" constitution — added to the epic by owner decision, 2026-10-11)
 
 ## Binding invariants (from #251; binding on all slices)
 
@@ -417,8 +419,27 @@ change, newest last. No phase numbers: the loop records outcomes, not protocol s
   #252–#256 are now merged to the epic branch; #256 (like #252–#255) stays open until the
   epic ships. Epic PR #270 remains a draft, now unblocked to leave draft.
 
+- 2026-10-11 — #263 workspace-era system prompt added to the epic (owner decision): #263
+  was raised as a companion to #259 (whose body begins `Epic: #251` but which was not in
+  the declared #252–#256 slice list), and the owner folded it in. Implemented on
+  `feat/tv/263-workspace-prompt` (cut from `epic/251-workspace`): `SYSTEM_PROMPT` extended
+  from ~412 to ~800 words with five layers — workspace identity + memory honesty,
+  grounding-as-offer, absence-as-information, the weights/world epistemic split, and
+  conversation shape (help conversations finish) — composed around the #259 stance and
+  emotional paragraphs (verbatim) with the brevity rule last. The three ticket owner
+  decisions are settled in the slice plan (`docs/plan-263-workspace-prompt.md`): size
+  budget ~2× the prior prompt; state vocabulary stays in the envelope intros (no separate
+  state tag); no client-side conversation-shape follow-up. Unit pins added to
+  `promptAssembly.test.ts`; a deterministic weights-side golden case
+  (`arithmetic-no-search`) added to `evals/cases.ts` + pinned in `cases.test.ts`.
+  `npm run ci` green (96 suites, 1194 tests). Slice PR opened against `epic/251-workspace`;
+  the slice plan archived to `docs/done/`. The completed non-epic plan docs (#257, #259,
+  #260, #261, #262) were archived to `docs/done/` in the same PR.
+
 ## Follow-ups
 
 - Embeddings / vector search as a later #253 upgrade — only on eval evidence.
 - ZDR task carve-out (#254) — later owner decision; default is no tasks for ZDR users.
+- Semantic eval cases for the #263 judgement-only clauses (intent invitation, clean
+  conversation close) — needs an LLM-judge; see `docs/done/plan-263-workspace-prompt.md`.
 

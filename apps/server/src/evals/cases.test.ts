@@ -59,6 +59,20 @@ describe('#112 golden set', () => {
     });
   });
 
+  describe('#263 weights/world case', () => {
+    const byId = Object.fromEntries(CASES.map((c) => [c.id, c]));
+
+    it('pure arithmetic asserts no tool is reached for', () => {
+      const testCase = byId['arithmetic-no-search'];
+      expect(testCase).toBeDefined();
+      expect(testCase.assertions).toEqual([
+        { type: 'tool_not_called', tool: 'web_search' },
+        { type: 'tool_not_called', tool: 'list_files' },
+        { type: 'tool_not_called', tool: 'read_file' },
+      ]);
+    });
+  });
+
   it('covers both #159 document-unit eval cases', () => {
     const ids = CASES.map((c) => c.id);
     expect(ids).toContain('manual-page-of-phone');

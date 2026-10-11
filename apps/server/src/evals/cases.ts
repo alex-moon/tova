@@ -142,6 +142,18 @@ export const CASES: EvalCase[] = [
     ],
   },
   {
+    id: 'arithmetic-no-search',
+    prompt: 'If I put away £250 a month, how much will that be after three years?',
+    description:
+      '#263 weights/world split: pure arithmetic and reasoning come from the model, not a ' +
+      'tool — the agent must not reflexively search the web or reach for files to answer it.',
+    assertions: [
+      { type: 'tool_not_called', tool: 'web_search' },
+      { type: 'tool_not_called', tool: 'list_files' },
+      { type: 'tool_not_called', tool: 'read_file' },
+    ],
+  },
+  {
     id: 'manual-page-of-phone',
     prompt: 'Which page of long-manual.md is the support phone number on?',
     description:
