@@ -71,7 +71,8 @@ jest.mock('../services/titleService', () => ({
 // #238: the enrichment pass is a separate aux call; the route tests pin the
 // main completion's arguments, so stub enrichment to a no-op block.
 jest.mock('../services/enrichmentService', () => ({
-  enrichmentLibraryBlock: jest.fn().mockResolvedValue(''),
+  enrichmentVotes: jest.fn().mockResolvedValue({ files: false, workspace: false }),
+  libraryIndexFor: jest.fn().mockResolvedValue(''),
   isEnrichmentEnabled: () => false,
 }));
 
@@ -184,13 +185,11 @@ describe('Chat streaming route', () => {
 
     const userId = (await User.findOne({ email: 'stream-timestamps@example.com' }))!._id;
     const session = await Session.create({ userId, title: 'timestamps' });
-    // Seed relative to now so the "2 days since" gap stays fixed regardless of
-    // the wall-clock date the suite runs on; absolute stamps below are derived
-    // from these instants.
-    const firstTurnAt = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000);
+    // Seeds are relative to now so the asserted relative gap ("2 days") does
+    // not rot as the wall clock advances (#261 follow-up; the current turn is
+    // stamped Date.now() by the route).
+    const firstTurnAt = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000 - 60 * 1000);
     const firstReplyAt = new Date(firstTurnAt.getTime() + 60 * 1000);
-    const firstTurnStamp = firstTurnAt.toISOString().slice(0, 16).replace('T', ' ');
-    const firstReplyStamp = firstReplyAt.toISOString().slice(0, 16).replace('T', ' ');
     await Message.create({
       sessionId: session._id,
       role: 'user',
@@ -219,13 +218,58 @@ describe('Chat streaming route', () => {
     expect(options.instructions).not.toContain("Today's date is");
     // Seeded turns carry absolute stamps; the assistant reply 1 minute later
     // gets no relative line (sub-hour), and the 2-day gap to the new turn does.
+    const stamp = (d: Date) =>
+      `[${d.toISOString().slice(0, 10)} ${d.toISOString().slice(11, 16)} UTC]`;
     const userTurns = turns.filter((m) => m.role === 'user');
-    expect(userTurns[0].content).toBe(`[${firstTurnStamp} UTC]\nfirst turn`);
+    expect(userTurns[0].content).toBe(`${stamp(firstTurnAt)}\nfirst turn`);
     const assistantTurn = turns.find((m) => m.role === 'assistant');
-    expect(assistantTurn?.content).toBe(`[${firstReplyStamp} UTC]\nfirst reply`);
+    expect(assistantTurn?.content).toBe(`${stamp(firstReplyAt)}\nfirst reply`);
     expect(userTurns[1].content).toMatch(
       /^\[\d{4}-\d{2}-\d{2} \d{2}:\d{2} UTC — 2 days since the last message\]\nsecond turn$/,
     );
+  });
+
+  // #253: the workspace-memory block is injected only when the gate's
+  // `workspace` vote fires and the feature flag is on; the route wires the
+  // retrieved block into the system content on the persisted path.
+  it('injects the workspace-memory block when the vote fires and the flag is on (#253)', async () => {
+    const cookies = await registerUser('stream-workspace@example.com');
+    await mockStream(['ok']);
+
+    const { enrichmentVotes } = jest.requireMock('../services/enrichmentService') as {
+      enrichmentVotes: jest.Mock;
+    };
+    enrichmentVotes.mockResolvedValueOnce({ files: false, workspace: true });
+    const retrieve = jest
+      .spyOn(
+        jest.requireActual<typeof import('../services/workspaceRetrievalService')>(
+          '../services/workspaceRetrievalService',
+        ),
+        'retrieveWorkspaceBlock',
+      )
+      .mockResolvedValue('- chat "Move" (2026-10-01) — budget is twelve thousand');
+    process.env.WORKSPACE_MEMORY_ENABLED = '1';
+
+    try {
+      const userId = (await User.findOne({ email: 'stream-workspace@example.com' }))!._id;
+      const session = await Session.create({ userId, title: 'workspace' });
+      const app = createApp();
+      const response = await request(app)
+        .post('/api/chat/stream')
+        .set('Cookie', cookies)
+        .send({ sessionId: String(session._id), content: 'what did we decide about the budget' });
+
+      expect(response.status).toBe(200);
+      const [, options] = mockAgentStream.mock.calls[0] as unknown as [
+        unknown,
+        { instructions: string },
+      ];
+      expect(options.instructions).toContain('<user:workspace>');
+      expect(options.instructions).toContain('budget is twelve thousand');
+    } finally {
+      delete process.env.WORKSPACE_MEMORY_ENABLED;
+      retrieve.mockRestore();
+    }
   });
 
   // #261: ZDR/incognito turns are untimestamped (the replay carries no clock),

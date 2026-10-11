@@ -109,6 +109,19 @@ export const config = {
     },
   },
 
+  // #253: workspace memory (retrieval across chats and files). Off by default
+  // — a wrong injection pollutes every turn, so the block ships opt-in until
+  // the gate evals exist. The block's character budget is BLOCK_CAP in
+  // workspaceRetrievalService (below the entity block's 1500; the library
+  // index competes).
+  workspaceMemory: {
+    get enabled(): boolean {
+      const raw = process.env.WORKSPACE_MEMORY_ENABLED;
+      if (raw === undefined || raw === '') return false;
+      return raw !== '0' && raw.toLowerCase() !== 'false';
+    },
+  },
+
   // #238: the aux model source for the small, latency-insensitive LLM calls
   // (chat title, entity extraction, follow-ups, prompt metrics, enrichment).
   // Replaces the tier-era `ROUTER_SMALL_MODEL`/`ROUTER_GUARD_MODEL` reads. The

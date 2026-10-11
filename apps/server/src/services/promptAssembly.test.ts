@@ -181,6 +181,28 @@ describe('buildSystemContent / user timezone (#261 D6)', () => {
   });
 });
 
+describe('buildSystemContent / workspace memory (#253)', () => {
+  it('injects the workspace block when supplied', () => {
+    const content = buildSystemContent(
+      null,
+      undefined,
+      undefined,
+      true,
+      null,
+      '- chat "Move" (2026-10-01) — budget is twelve thousand',
+    );
+    expect(content).toContain('<user:workspace>');
+    expect(content).toContain('past work');
+    expect(content).toContain('budget is twelve thousand');
+  });
+
+  it('is a no-op when the block is empty (no prompt drift)', () => {
+    const bare = buildSystemContent(null);
+    expect(buildSystemContent(null, undefined, undefined, true, null, '')).toBe(bare);
+    expect(bare).not.toContain('<user:workspace>');
+  });
+});
+
 describe('buildSystemContent / envelope-based profile data (issue #35, PR #46 review)', () => {
   it('emits profile context through envelope tags when set', () => {
     const content = buildSystemContent(userWith({ preferredName: 'Alex', name: 'Alexandra Moon' }));

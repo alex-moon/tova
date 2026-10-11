@@ -121,6 +121,22 @@ const LIBRARY_INTRO =
   'relevant file and call `read_file` with its id before quoting any contents; if ' +
   'more exist than are shown, say so rather than assuming the list is complete.';
 
+// #253: pre-retrieved workspace memory. The caller does the gate and the Mongo
+// read; this function only decides layout and the empty-no-op guard, so an
+// empty block never shifts an otherwise identical prompt (same posture as the
+// entity and library blocks).
+const WORKSPACE_INTRO =
+  'Below is context from the user’s own past work — earlier chats and files. Use it ' +
+  'only where it is relevant to the current question, to connect what they are asking ' +
+  'with what they already worked on; it may be stale or superseded, so do not assert ' +
+  'it as fact if the current chat contradicts it, and never read it back verbatim.';
+
+const workspaceBlock = (block: string | null | undefined): string => {
+  const trimmed = block?.trim();
+  if (!trimmed) return '';
+  return ['<user:workspace>', WORKSPACE_INTRO, '', trimmed, '</user:workspace>'].join('\n');
+};
+
 // #214 preliminary: bounded library index injected only when the guard's AUX
 // `files` vote fired. The caller does the Mongo read; this function decides
 // layout and the empty-no-op guard (an empty block must not shift an otherwise
@@ -289,6 +305,9 @@ export const buildSystemContent = (
   // #261 D6: the user's IANA zone (from the browser). The date line and the
   // one-time zone context line render in it; absent = UTC.
   timezone: string | null | undefined = null,
+  // #253: pre-retrieved workspace memory block (chats + files). Optional and
+  // last so existing callers keep compiling; absent = no block.
+  workspaceMemoryBlock: string | null | undefined = undefined,
 ): string => {
   const now = new Date();
   const zoneLabel = clockIn(now, timezone).zoneName;
@@ -302,6 +321,7 @@ export const buildSystemContent = (
     timezoneContextLine(timezone),
     profileContextBlock(user),
     entityGraphBlock(knowledgeBlock),
+    workspaceBlock(workspaceMemoryBlock),
     libraryBlock(fileLibraryBlock),
     customInstructionsBlock(user?.settings ?? null),
   ].filter(Boolean);

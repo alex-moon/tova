@@ -2,8 +2,10 @@ import { Types } from 'mongoose';
 import { Asset } from '../models/Asset';
 import {
   enrichmentLibraryBlock as enrich,
+  enrichmentVotes,
   filesVoteFromReply,
   parseFilesVote,
+  workspaceVoteFromReply,
 } from './enrichmentService';
 
 /*
@@ -63,6 +65,40 @@ describe('enrichmentService', () => {
     it('treats a missing/unparseable vote as false (missing key is a no)', () => {
       expect(filesVoteFromReply('{"reasoning":"yes"}')).toBe(false);
       expect(filesVoteFromReply('garbage')).toBe(false);
+    });
+  });
+
+  describe('workspaceVoteFromReply', () => {
+    it('reads the workspace key with the same no-is-false posture', () => {
+      expect(workspaceVoteFromReply('{"workspace":"yes"}')).toBe(true);
+      expect(workspaceVoteFromReply('{"workspace":"no"}')).toBe(false);
+      expect(workspaceVoteFromReply('{"files":"yes"}')).toBe(false);
+      expect(workspaceVoteFromReply('garbage')).toBe(false);
+    });
+
+    it('reads both keys from the same vote object', () => {
+      const raw = '{"files":"no","workspace":"yes"}';
+      expect(filesVoteFromReply(raw)).toBe(false);
+      expect(workspaceVoteFromReply(raw)).toBe(true);
+    });
+  });
+
+  describe('enrichmentVotes', () => {
+    it('returns both signals from the single aux call', async () => {
+      mockCreateToolFree.mockResolvedValueOnce(voteResponse('{"files":"yes","workspace":"yes"}'));
+      expect(await enrichmentVotes('what did we decide')).toEqual({
+        files: true,
+        workspace: true,
+      });
+    });
+
+    it('degrades to both-false on failure and when disabled', async () => {
+      mockCreateToolFree.mockRejectedValueOnce(new Error('boom'));
+      expect(await enrichmentVotes('x')).toEqual({ files: false, workspace: false });
+      process.env.ENRICHMENT_ENABLED = '0';
+      mockCreateToolFree.mockClear();
+      expect(await enrichmentVotes('x')).toEqual({ files: false, workspace: false });
+      expect(mockCreateToolFree).not.toHaveBeenCalled();
     });
   });
 
