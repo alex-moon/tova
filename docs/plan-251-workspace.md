@@ -86,8 +86,8 @@ Slice-level decisions live in the slice plan docs; this section carries epic-lev
       at `d3fcc6f`; loop-ownership spike DONE (decision (c) hybrid, cap 1), merged to
       `epic/251-workspace` via PR #272 at `04ecc57`; **sequencer loop landed server-side on
       `feat/tv/254-sequencer-loop` (connector `maxSteps` field + `taskSequencer` turn loop +
-      steering/budget/resume tests); API routes + task client view remain**; #254 stays open
-      until the epic ships)
+      steering/budget/resume tests), PR #273 open against the epic branch; API routes + task
+      client view remain**; #254 stays open until the epic ships)
 - [ ] Slice #255 — chat-task integration
 - [ ] Slice #256 — retire the entity graph
 - [ ] Epic PR `epic/251-workspace` → `main`, linking this doc, `npm run ci` green
@@ -220,8 +220,8 @@ change, newest last. No phase numbers: the loop records outcomes, not protocol s
   now also writes the initial instruction as the stream's first `user` event (D1: stream is the
   source of truth). Tests: `mastraStepCap`, `taskSequencer`, rewritten `taskProcessor`
   (loop/steering/resume/budget). `npm run ci` green (95 suites, 1179 tests). Slice plan
-  (`docs/plan-254-task-entity.md`) carries D10/D11; slice PR opened against `epic/251-workspace`
-  this pass.
+  (`docs/plan-254-task-entity.md`) carries D10/D11; slice PR **#273** opened against
+  `epic/251-workspace` this pass.
 
 ## Follow-ups
 
