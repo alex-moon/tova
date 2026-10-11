@@ -84,10 +84,12 @@ Slice-level decisions live in the slice plan docs; this section carries epic-lev
       epic ships, tracked above)
 - [ ] Slice #254 — task entity (foundation landed: PR #269 merged to `epic/251-workspace`
       at `d3fcc6f`; loop-ownership spike DONE (decision (c) hybrid, cap 1), merged to
-      `epic/251-workspace` via PR #272 at `04ecc57`; **sequencer loop landed server-side on
-      `feat/tv/254-sequencer-loop` (connector `maxSteps` field + `taskSequencer` turn loop +
-      steering/budget/resume tests), PR #273 open against the epic branch; API routes + task
-      client view remain**; #254 stays open until the epic ships)
+      `epic/251-workspace` via PR #272 at `04ecc57`; **sequencer loop landed server-side
+      (connector `maxSteps` field + `taskSequencer` turn loop + steering/budget/resume tests)
+      on `feat/tv/254-sequencer-loop` via PR #273, merged to `epic/251-workspace` at `a080039`;
+      the post-merge hardening (`e305649`, tool-result + chip-query persistence) missed that
+      merge and lands via the follow-up hardening PR as `e6c95b7`; API routes + task client view
+      remain**; #254 stays open until the epic ships)
 - [ ] Slice #255 — chat-task integration
 - [ ] Slice #256 — retire the entity graph
 - [ ] Epic PR `epic/251-workspace` → `main`, linking this doc, `npm run ci` green
@@ -222,16 +224,25 @@ change, newest last. No phase numbers: the loop records outcomes, not protocol s
   (loop/steering/resume/budget). `npm run ci` green (95 suites, 1179 tests). Slice plan
   (`docs/plan-254-task-entity.md`) carries D10/D11; slice PR **#273** opened against
   `epic/251-workspace` this pass.
-- 2026-10-11 — #254 sequencer-loop hardening pass on `feat/tv/254-sequencer-loop` (PR #273),
-  checked against the code and #251/#254. Found and fixed a **functional break**: the raw tool
-  result was never persisted on a step's tool chip (Mongoose stripped an undeclared field), so
-  `renderToolReplay` replayed `[tool web_search]` with no output — under decision (c) a tool
-  step returns `text: ""`, so the next step lost the tool's results entirely. The task tool
-  event gained a `Mixed` `result` (the D4 resume payload); `parseStepOutcome` attaches it. Also
-  fixed the chip's `query` (D10's `(query)`): the sequencer dropped the `args` the connector
-  change threaded through, so the streaming-only query derivation never ran for tasks —
-  `toolResultEvent` now takes `args`; and the `system` notice's `step` (stale claim-time value).
-  `npm run ci` green (95 suites, 1184 tests). See the slice plan's "Review pass 2".
+- 2026-10-11 — #254 sequencer-loop hardening pass on `feat/tv/254-sequencer-loop`, authored as
+  commit `e305649` after PR #273 had already opened, checked against the code and #251/#254.
+  Found and fixed a **functional break**: the raw tool result was never persisted on a step's
+  tool chip (Mongoose stripped an undeclared field), so `renderToolReplay` replayed
+  `[tool web_search]` with no output — under decision (c) a tool step returns `text: ""`, so the
+  next step lost the tool's results entirely. The task tool event gained a `Mixed` `result` (the
+  D4 resume payload); `parseStepOutcome` attaches it. Also fixed the chip's `query` (D10's
+  `(query)`): the sequencer dropped the `args` the connector change threaded through, so the
+  streaming-only query derivation never ran for tasks — `toolResultEvent` now takes `args`; and
+  the `system` notice's `step` (stale claim-time value). `npm run ci` green (95 suites, 1184
+  tests). See the slice plan's "Review pass 2".
+- 2026-10-11 — reconciliation pass: found that **PR #273 merged without this hardening**. The
+  merge commit `a080039` (merged 2026-10-11T11:04:16Z) took PR #273's branch only up to the docs
+  commit `aca77a0`; the hardening commit `e305649` was pushed afterward and never entered
+  `epic/251-workspace`, so it orphaned on `feat/tv/254-sequencer-loop` while the log entry above
+  already read as landed — documentation and tree had diverged. Landed the hardening on the epic
+  branch as cherry-pick `e6c95b7` on `fix/tv/254-sequencer-hardening` (cut from
+  `epic/251-workspace`), follow-up PR opened against `epic/251-workspace`. Done checklist #254
+  line and this log corrected to match.
 
 ## Follow-ups
 
