@@ -108,12 +108,13 @@ Slice-level decisions live in the slice plan docs; this section carries epic-lev
       `feat/tv/255-chat-task-integration`; slice PR **#280** merged to `epic/251-workspace`
       at `78c0712`, merged 2026-10-11T17:56Z; slice plan archived to
       `docs/done/plan-255-chat-task-integration.md`; #255 issue stays open until the epic ships)
-- [ ] Slice #256 — retire the entity graph (implemented on
-      `feat/tv/256-retire-entity-graph`; slice PR **#281** opened against
-      `epic/251-workspace`, `npm run ci` green; disposition settled: drop the data;
-      awaiting merge)
+- [x] Slice #256 — retire the entity graph (implemented on
+      `feat/tv/256-retire-entity-graph`; slice PR **#281** merged to `epic/251-workspace`
+      at `72ab5cb`, merged 2026-10-11T18:38Z; disposition settled: drop the data; slice plan
+      archived to `docs/done/plan-256-retire-entity-graph.md`; #256 issue stays open until
+      the epic ships)
 - [ ] Epic PR `epic/251-workspace` → `main`, linking this doc, `npm run ci` green
-      (PR #270 opened as a draft; awaiting slice merges before it can leave draft)
+      (PR #270 opened as a draft; all slices #252–#256 merged — ready to leave draft)
 - [ ] Archive this doc to `docs/done/`
 
 ## Process log (epic-level tasks)
@@ -409,6 +410,12 @@ change, newest last. No phase numbers: the loop records outcomes, not protocol s
   `epic/251-workspace`, updating PR #270). `npm run ci` green (server 100 suites / 1233 tests;
   client 276 tests + build), plus `format:check`, semgrep (0 findings) and the responsive e2e
   suite (52) run locally for the full CI parity.
+- 2026-10-11 — #256 landed: PR **#281** (`feat/tv/256-retire-entity-graph` →
+  `epic/251-workspace`) merged at merge commit `72ab5cb` (merged 2026-10-11T18:38Z),
+  completing the entity-graph retirement. The #256 Done line flipped to done and its slice
+  plan archived to `docs/done/plan-256-retire-entity-graph.md`. All declared slices
+  #252–#256 are now merged to the epic branch; #256 (like #252–#255) stays open until the
+  epic ships. Epic PR #270 remains a draft, now unblocked to leave draft.
 
 ## Follow-ups
 
