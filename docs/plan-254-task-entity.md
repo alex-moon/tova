@@ -68,12 +68,15 @@ here. Where this plan adds concrete shapes, it does so to make them implementabl
   abort plumbing exists (racing's per-provider `AbortController`s,
   `racingService.ts:206-235`). **Not a deliverable of this slice.**
 - **D9 — This pass ships the foundation only, with an honest stub driver.** The
-  queue/model/runtime (D1/D4 data layer + poller) lands now; the sequencer turn loop stays
-  blocked on OQ9 (the racing path cannot pin `maxSteps: 1` or return the step's message
-  list). Rather than lose claimed tasks or fake their completion, the wired
-  `processTaskJob` transitions a claimed task to **`paused`** with a visible `system`
-  stream event (the same mechanism D6 uses for a budget breach). This keeps the runtime
-  real and self-healing while the driver is a separate slice; resumption is a queued
+  queue/model/runtime (D1/D4 data layer + poller) lands now; the sequencer turn loop
+  stays blocked on the loop-ownership spike (OQ9's `maxSteps`-pinning). **The spike
+  has since answered this (decision (c), cap 1; see "Spike result"): the loop is
+  unblocked in principle and needs one connector field (`CompletionOptions.maxSteps`)
+  before it can be built — the first item of the next pass.** Rather than lose
+  claimed tasks or fake their completion, the wired `processTaskJob` transitions a
+  claimed task to **`paused`** with a visible `system` stream event (the same
+  mechanism D6 uses for a budget breach). This keeps the runtime real and
+  self-healing while the driver is a separate slice; resumption is a queued
   instruction once the sequencer lands.
 
 ## Current state (re-verified against the working tree, 2026-10-10)
@@ -145,8 +148,11 @@ Each claim below was checked against the tree this pass; file:line references ar
 
 **Not verified this pass (spike must answer):** whether a Mastra agent call with
 `maxSteps: 1` **returns** tool-call content for the *driver* to execute, rather than
-executing the tool itself and returning only the result. This is the loop-ownership
-question (see OQ1). Critically, the evidence above shows the question cannot be answered
+executing the tool itself and returning only the result. **ANSWERED by the spike
+(2026-10-11): Mastra executes the tool itself and returns only the result — (b) is
+not reachable via the existing path. Decision is (c).** See "Spike result" above for
+the raw evidence and trace. The earlier note below stands as the reasoning that
+motivated the probe. Critically, the evidence above shows the question cannot be answered
 by observing `createCompletion` as it stands — that method already collapses call+result
 into `toolResults`. The spike must probe Mastra's raw output (or a new connector shape)
 to see whether a call/execute split is even reachable. `toNeutralStream` distinguishing
@@ -235,14 +241,128 @@ wrapper is the thing suspected of hiding the answer (see "Not verified" above).
 
 ### Spike checklist
 
-- [ ] Spike script added (`.iteration/` scratch, not committed unless it earns a home in
-      `scripts/`), forcing a tool call at `maxSteps: 1`.
-- [ ] Probe run against a roster model on both providers; raw output captured.
-- [ ] LangSmith trace read for the probe (project `tova-dev`) to confirm call-vs-execute
+- [x] Spike script added (`.iteration/loop-ownership-probe-254.ts`, scratch, not committed —
+      a one-time evidence probe, same convention as `.iteration/guard-budget-probe-169.ts`),
+      forcing a tool call at `maxSteps: 1`.
+- [x] Probe run against a roster model on both providers; raw output captured.
+- [x] LangSmith trace read for the probe (project `tova-dev`) to confirm call-vs-execute
       interleaving.
-- [ ] Decision (a | b | c) + evidence posted to #254.
-- [ ] Step schema and steering granularity frozen against the decision (feeds section
+- [x] Decision (a | b | c) + evidence posted to #254.
+- [x] Step schema and steering granularity frozen against the decision (feeds section
       below).
+
+### Spike result — DECISION: (c) hybrid, driver-pinnable small cap (2026-10-11)
+
+**Decision: option (c) — the hybrid — with the driver pinning the per-call step cap.**
+The driver calls the roster race once per *driver step* with a **small `maxSteps`
+cap** (proposal: `maxSteps: 1`), reads the step's messages/results out of the
+returned completion, **drains steering at that call boundary**, then calls again.
+Steering granularity is therefore **one model call + its tool executions per
+driver step** — the hybrid's "small-cap boundary", with the cap set to 1 so it is
+a *single* step, not a hidden 3–5 black box.
+
+**Why not (b).** The evidence below shows a Mastra call at `maxSteps: 1` **always
+executes the tool itself** and returns only the *result*; there is no return path
+that hands the driver an unexecuted call. Reaching (b) would require a new
+`LlmConnector` method plus a driver-side re-implementation of all six workspace
+tools (`read_file`, `list_files`, `fetch_url`, `generate_file`, `current_datetime`,
+`web_search`) — a large blast radius that is Mastra's whole tool-layer, for a
+steering benefit (per-*tool-call* granularity) that (c)-at-cap-1 already delivers
+within one call's error. (b) is rejected as unreachable-without-forking.
+
+**Why not (a).** `maxSteps: 12` (today's full-mode default) hides the entire cap
+inside Mastra; a steering message cannot be consumed at a boundary the driver
+cannot see. (a) degrades steering to "after the whole task", which fails the
+ticket's "steerable while running".
+
+**Evidence (both providers, both channels — no divergence).**
+
+1. **Raw probe (`.iteration/loop-ownership-probe-254.ts`).** A `full` agent built
+   exactly as `agentFor` does (tools baked in, one probe-local marker tool whose
+   `execute` increments a counter), a prompt forcing exactly one tool call, called
+   at `maxSteps: 1`:
+
+   - Non-streaming `generate` (DeepInfra **and** Fireworks `deepseek-v4p1-flash`):
+     `steps.length = 1`, `toolCalls.length = 1`, `toolResults.length = 1`,
+     `text = ""`, **marker tool executed count = 1**. The tool ran *inside* the
+     call.
+   - Streaming `stream().fullStream` (both providers): chunk order is
+     `… tool-call, tool-result, step-finish, finish` **within the same call**, and
+     **executed count = 1**. The `tool-call` is immediately followed by the
+     `tool-result` because Mastra executed it in between.
+   - The returned `result.messages` object exposes the step's assistant turn
+     (`{ role: 'assistant', content: [{ type: 'tool-call', toolName, input }] }`)
+     **plus** the tool turn (`{ role: 'tool', content: [{ type: 'tool-result', … }] }`)
+     — i.e. even the call+result split is visible *post hoc*, but both are already
+     produced by Mastra. A driver can read them to (a) observe step boundaries and
+     (b) build the next call's history; it cannot *pre-empt* execution.
+   - `text = ""` at `maxSteps: 1` is the key operational fact: a single-step call
+     that chose a tool returns **no final answer**; the driver must feed the result
+     back as history in the next call. That is exactly the (c) loop.
+
+2. **LangSmith trace (project `tova-dev`, non-streaming DeepInfra probe).** The span
+   tree is decisive:
+
+   ```
+   agent run: 'probe-deepinfra' (chain) [1.49s]
+   └── llm: 'deepseek-ai/DeepSeek-V4.1-Flash' (llm) [1.40s]
+       └── step: 0 (chain) [1.63s]
+           ├── inference: 0 (chain) [1.29s]
+           │   ├── chunk: 'text'
+           │   ├── chunk: 'tool-call'
+           │   └── chunk: 'tool-result'
+           └── tool: 'probe_marker' (tool) [6ms]
+   ```
+
+   The `tool: 'probe_marker'` span is a **child of `step: 0`** — Mastra owns
+   execution. There is no span shape where a tool call leaves the process
+   unexecuted for the caller. The `step: 0` span is also the boundary a driver can
+   observe: one `step` span per driver step when the cap is 1.
+
+**Smallest change that makes (c) reachable with cap 1.** `maxSteps` is currently
+hardcoded in the non-exported `callOptionsFrom` (`mastraService.ts:248`:
+`mode === 'full' ? 12 : 1`) and `createCompletion`/`createStreamingCompletion`
+always call it in `full` mode. The change is to thread a per-call step cap:
+`CompletionOptions.maxSteps?: number`, forwarded by `callOptionsFrom` (falling back
+to the current `12`/`1` when absent), so `raceRosterCompletion` — which passes
+`...options` straight into `createCompletion` (`racingService.ts:403`) — carries it
+through. Blast radius: one optional field on `CompletionOptions`
+(`llmTypes.ts:39`), one line in `callOptionsFrom`, and the connector forwards it
+(the `plain` tool-free path keeps its literal `1`). Existing chat call sites send
+no `maxSteps` and are byte-identical. This is the connector change that unblocks
+OQ9, and it is the first implementation item of the *next* pass — **not** part of
+this spike pass, which records the decision only.
+
+**Consequence for the rebooted steering model.** Steering is drained **once per
+driver step** (one `maxSteps: 1` roster call). This is coarser than per-*tool-call*
+steering (which (b) would give and which the ticket's "at step boundaries" wording
+aspires to) but is a real boundary the driver sees, unlike (a). Per the spike
+protocol's step 5, because the answer is not a clean (b), this granularity
+limitation is **raised on the epic (#251)** in the process log: task steering is
+per-model-step, not per-tool-call, unless a future slice builds the (b) connector.
+The parked interrupt (D8) degrades equally to the per-model-step boundary.
+
+### Frozen step schema (feeds the sequencer implementation)
+
+Against decision (c)-at-cap-1, a **step** is one `maxSteps: 1` roster call. The
+`TaskEvent` rows a step produces (D1's stream, unchanged shape) are:
+
+- One `assistant` event per step: `content` = the step's text (may be `""` when the
+  step chose a tool), plus `tools` = the step's `toolCall`/`toolResult` entries
+  (the `PersistedToolEvent` shape), `model`/`provider` = the race winner, `usage`
+  from the step, `step` = the step ordinal.
+- Tool **results** are part of the same `assistant` event's `tools` (Mastra returns
+  call+result together); there is no separate driver-executed `tool` event in (c),
+  because the driver does not execute tools. A `tool`-role event stays reserved for
+  any future (b) path.
+- A `system` event records steering consumption and budget breaches (D6).
+- The next driver step's history is reassembled from all prior `TaskEvent` rows
+  (D5: full task history, not a 10-message window), with the tool-result content
+  replayed as assistant/tool turns so the model sees its own calls.
+
+Steering is consumed at the **call boundary**: after a step's event is written and
+before the next `maxSteps: 1` call is issued, the driver drains queued `user`
+instructions into the history.
 
 ## Implementation outline (only the parts independent of the spike decision)
 
@@ -322,7 +442,8 @@ Ordered; spike first, then the loop-ownership-independent foundation. Items mark
 **[gated]** cannot start until the spike decision is recorded.
 
 ### Spike
-- [ ] Spike script + probe + trace; decision (a|b|c) posted to #254 (see checklist above).
+- [x] Spike script + probe + trace; decision (a|b|c) posted to #254 (see checklist above).
+      **Decision: (c) hybrid, driver-pinnable small cap (cap 1); see "Spike result" above.**
 
 ### Foundation (independent of the spike; one item also needs OQ5)
 - [x] `config/index.ts`: `task.maxSteps` (`TASK_MAX_STEPS`, parse+fallback, default 25) and
@@ -349,7 +470,9 @@ Ordered; spike first, then the loop-ownership-independent foundation. Items mark
 - [ ] Per-step routing helper: assemble history from `TaskEvent`, call
       `raceRosterCompletion`, size `max_tokens` via `outputTokensFor`; unit test with an
       injected roster/stream (mirror `racingService` test deps at `racingService.ts:93`).
-      **Blocked on OQ5 + OQ9** before the call shape is frozen.
+      **OQ9 resolved (spike): the call shape is a per-step `maxSteps: 1` race — frozen.
+      Still needs the `CompletionOptions.maxSteps` connector field and OQ5's
+      guard-vs-race decision before the helper is written (next pass).**
 - [ ] ZDR refusal: creating a task for a `settings.zdr` user is rejected (test). Per OQ8,
       v1 checks at creation only; the test pins that scope explicitly. **Deferred: no task
       creation route exists yet** (API is a later slice), so the refusal has no seam to
@@ -360,13 +483,15 @@ Ordered; spike first, then the loop-ownership-independent foundation. Items mark
       built and exercised by the processor stub (D9); the spend meter itself is deferred
       until the sequencer emits per-step usage.**
 
-### Sequencer loop **[gated on the spike]**
-- [ ] Freeze the step schema (assistant event / tool event / usage) against the chosen
-      architecture.
-- [ ] Implement the turn loop with steering drained at step boundaries per the decision.
-      **If the spike returns (a) or (c), "step boundary" means the small-cap boundary, not
-      a single tool step** — the checklist item is unchanged but its granularity is
-      decided by the spike, and that outcome is raised on #251 (spike step 5).
+### Sequencer loop **[unblocked by the spike; next pass]**
+- [x] Freeze the step schema (assistant event / tool event / usage) against the chosen
+      architecture — **frozen above: one step = one `maxSteps: 1` roster call; call+result
+      live together in the step's `assistant` event's `tools`; no driver-executed `tool`
+      event under (c)**.
+- [ ] Implement the turn loop with steering drained at **call boundaries** (the frozen
+      (c) granularity: one model call per driver step), per the decision. **Granularity is
+      per-model-step, not per-tool-call — raised on #251 (spike step 5), see the process
+      log.**
 - [ ] Resume-after-crash test: kill mid-run, re-queue, reassemble from stream, continue
       (see OQ7 on cap interaction).
 - [ ] Steering integration test: a queued instruction is consumed at the next boundary.
@@ -420,13 +545,12 @@ A hardening pass over the foundation before the `npm run ci` gate. Findings and 
 
 ## Open questions
 
-1. **Who owns the tool loop? (the spike's whole point.)** Whether Mastra with
-   `maxSteps: 1` returns tool calls for a driver to execute (option b) is **unverified**;
-   the neutral mapper distinguishes call from result (`mastraService.ts:166-184`) but
-   with tools attached Mastra may execute internally within one call. Everything in the
-   "Sequencer loop" checklist depends on this answer, so those items are gated, not
-   planned to the commit. **This is the ticket's own first deliverable; the plan does not
-   pre-empt it.**
+1. **Who owns the tool loop? (the spike's whole point.)** **ANSWERED (2026-10-11):**
+   Mastra owns execution at `maxSteps: 1` — a call returns only the executed
+   tool *result*, never an unexecuted call — so (b) is unreachable without a new
+   connector method. **Decision: (c) hybrid, driver-pinnable cap of 1.** See "Spike
+   result" above. The remaining work is the one-field connector change
+   (`CompletionOptions.maxSteps`), the first item of the next pass.
 2. **How far to generalise `assetJobService`?** The ticket says "generalise". Extracting
    a shared claim/retry/sweep helper risks touching the asset path (a non-slice
    subsystem). The plan proposes mirroring the pattern with a task-specific service first
