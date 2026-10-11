@@ -17,7 +17,7 @@ EPIC_BRANCH="epic/251-workspace"
 
 while true; do
   git checkout "$EPIC_BRANCH"
-  git pull --ff-only
+  git pull --ff-only origin "$EPIC_BRANCH"
 
   # Reconcile state only: bring the doc's Done checklist, tickets, PRs, and branches
   # back in line with reality. This step edits *content*, never the loop protocol.

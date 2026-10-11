@@ -137,6 +137,26 @@ export const config = {
     },
   },
 
+  // #254 (epic #251): the task sequencer's budget knobs. `maxSteps` is the
+  // step cap (above the chat cap of 12, below a runaway); `maxCostUsd` is the
+  // per-task spend ceiling. Both parse+fallback like `aux.enrichmentTimeoutMs`
+  // so a malformed env degrades to the default rather than a NaN budget.
+  task: {
+    get maxSteps(): number {
+      const raw = process.env.TASK_MAX_STEPS;
+      const parsed = raw === undefined || raw === '' ? NaN : Number(raw);
+      // Floor *before* the positivity guard: `0.5` is positive but floors to a
+      // zero-step budget, which must degrade to the default, not become 0.
+      const floored = Math.floor(parsed);
+      return Number.isFinite(parsed) && floored > 0 ? floored : 25;
+    },
+    get maxCostUsd(): number {
+      const raw = process.env.TASK_MAX_COST_USD;
+      const parsed = raw === undefined || raw === '' ? NaN : Number(raw);
+      return Number.isFinite(parsed) && parsed > 0 ? parsed : 5;
+    },
+  },
+
   // #225: scheduled eval suite. Off by default — a fresh deploy must not
   // start live provider calls unattended (OQ4). `schedule` is `off|daily`;
   // `hourUtc` is the earliest UTC hour a daily run may start. Names follow

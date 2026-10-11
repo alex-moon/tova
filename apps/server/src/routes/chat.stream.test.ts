@@ -184,17 +184,24 @@ describe('Chat streaming route', () => {
 
     const userId = (await User.findOne({ email: 'stream-timestamps@example.com' }))!._id;
     const session = await Session.create({ userId, title: 'timestamps' });
+    // Seed relative to now so the "2 days since" gap stays fixed regardless of
+    // the wall-clock date the suite runs on; absolute stamps below are derived
+    // from these instants.
+    const firstTurnAt = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000);
+    const firstReplyAt = new Date(firstTurnAt.getTime() + 60 * 1000);
+    const firstTurnStamp = firstTurnAt.toISOString().slice(0, 16).replace('T', ' ');
+    const firstReplyStamp = firstReplyAt.toISOString().slice(0, 16).replace('T', ' ');
     await Message.create({
       sessionId: session._id,
       role: 'user',
       content: 'first turn',
-      timestamp: new Date('2026-10-08T14:32:00Z'),
+      timestamp: firstTurnAt,
     });
     await Message.create({
       sessionId: session._id,
       role: 'assistant',
       content: 'first reply',
-      timestamp: new Date('2026-10-08T14:33:00Z'),
+      timestamp: firstReplyAt,
     });
 
     const app = createApp();
@@ -213,9 +220,9 @@ describe('Chat streaming route', () => {
     // Seeded turns carry absolute stamps; the assistant reply 1 minute later
     // gets no relative line (sub-hour), and the 2-day gap to the new turn does.
     const userTurns = turns.filter((m) => m.role === 'user');
-    expect(userTurns[0].content).toBe('[2026-10-08 14:32 UTC]\nfirst turn');
+    expect(userTurns[0].content).toBe(`[${firstTurnStamp} UTC]\nfirst turn`);
     const assistantTurn = turns.find((m) => m.role === 'assistant');
-    expect(assistantTurn?.content).toBe('[2026-10-08 14:33 UTC]\nfirst reply');
+    expect(assistantTurn?.content).toBe(`[${firstReplyStamp} UTC]\nfirst reply`);
     expect(userTurns[1].content).toMatch(
       /^\[\d{4}-\d{2}-\d{2} \d{2}:\d{2} UTC — 2 days since the last message\]\nsecond turn$/,
     );
