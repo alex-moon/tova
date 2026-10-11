@@ -9,6 +9,7 @@ import Login from './components/Login';
 import AdminView from './components/AdminView';
 import ProfileView from './components/ProfileView';
 import AssetsView from './components/AssetsView';
+import TasksView from './components/TasksView';
 import BackToChatLink from './components/BackToChatLink';
 
 export interface ToolEvent {
@@ -87,11 +88,18 @@ export function isFilesRoute() {
   return typeof window !== 'undefined' && window.location.pathname.startsWith('/files');
 }
 
+// Issue #254 (epic #251): the tasks view (list + read-only stream + queued
+// steering composer) gets its own URL alongside /files, /profile, /admin.
+export function isTasksRoute() {
+  return typeof window !== 'undefined' && window.location.pathname.startsWith('/tasks');
+}
+
 function App() {
   const { user, loading } = useAuth();
   const showAdminView = isAdminRoute();
   const showProfileView = isProfileRoute();
   const showFilesView = isFilesRoute();
+  const showTasksView = isTasksRoute();
   const [sessions, setSessions] = useState<Session[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -416,6 +424,8 @@ function App() {
         </>
       ) : showFilesView ? (
         <AssetsView />
+      ) : showTasksView ? (
+        <TasksView />
       ) : showAdminView && user.role === 'admin' ? (
         <>
           <BackToChatLink />

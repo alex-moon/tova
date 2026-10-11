@@ -184,10 +184,38 @@ const clippedElements = (page: Page) =>
     return offenders;
   });
 
+/*
+ * The /tasks route (#254) renders an empty list state when the API is
+ * unmocked (401), which makes the "no overflow" assertion vacuous. Seed one
+ * task with a realistically long instruction so the list row and its wrapping
+ * are actually exercised at phone width.
+ */
+const mockTasks = async (page: Page) => {
+  const task = {
+    id: 'e2e-task-1',
+    status: 'running',
+    instruction: 'Summarise the newest file and leave a short note with every action item you find',
+    origin: { kind: 'direct' },
+    stepCount: 2,
+    budget: { maxSteps: 25, maxCostUsd: 5, spentUsd: 0.0123 },
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  };
+  await page.route('**/api/tasks', async (route) => {
+    if (route.request().method() !== 'GET') return route.continue();
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ tasks: [task], nextCursor: null }),
+    });
+  });
+};
+
 const routes: Array<{ path: string; ready: string }> = [
   { path: '/', ready: '[data-testid="chat-input"]' },
   { path: '/profile', ready: '[data-testid="profile-view"]' },
   { path: '/files', ready: '[data-testid="assets-view"]' },
+  { path: '/tasks', ready: '[data-testid="tasks-view"]' },
   { path: '/admin', ready: '[data-testid="admin-view"]' },
 ];
 
@@ -195,6 +223,7 @@ for (const { path, ready } of routes) {
   test(`no horizontal overflow: ${path}`, async ({ page }) => {
     await mockAuth(page);
     if (path === '/admin') await mockAdminData(page);
+    if (path === '/tasks') await mockTasks(page);
     await page.goto(path);
     await expect(page.locator(ready)).toBeVisible();
 

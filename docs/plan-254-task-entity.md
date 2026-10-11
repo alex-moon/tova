@@ -564,15 +564,28 @@ Ordered; spike first, then the loop-ownership-independent foundation. Items mark
       (D12); the processor loop re-reads status each step so cancel is observed at the
       boundary (D13); instruction re-queues a `paused` task, refuses terminal (D14); ZDR
       refusal at creation (D7/OQ8), all behind `authenticate` and `userId`-scoped.
-- [ ] Task detail client view, mobile-first; read-only stream first.
-- [ ] Queued turn-taking composer per the frozen UX.
-- [ ] Playwright at ~375px; `npm run test:e2e` backstop (per standing client rules).
+- [x] Task detail client view, mobile-first; read-only stream first. **Landed this pass:**
+      `apps/client/src/services/tasks.ts` mirrors the `/api/tasks` contract; `TasksView.tsx`
+      (master/detail at `/tasks`, mirroring `AssetsView`) renders the ordered stream
+      read-only — user turns, assistant steps with #196 tool chips + markdown, and `system`
+      notices as neutral rows — with a status chip and the budget/step line. `TaskLibrary.tsx`
+      lists tasks and polls while any is active; `TaskStatusChip.tsx` is the shared enum chip.
+- [x] Queued turn-taking composer per the frozen UX. The composer explains it queues until
+      the next step boundary (D2), relabels to "Resume" from `paused` (D6/D14), is disabled
+      for terminal tasks, and Cancel is offered only while active (the header write D13
+      observes at the boundary).
+- [x] Playwright at ~375px; `npm run test:e2e` backstop (per standing client rules).
+      `e2e/tasks.spec.ts` runs in the mobile+desktop projects; `/tasks` added to
+      `e2e/responsive.spec.ts`'s overflow route set with a seeded task so the assertion is
+      not vacuous. Unit cover: `services/tasks.test.ts` + `TasksView.test.tsx`.
 
 ### Gate
 - [x] Plan doc moved to `docs/plan-254-task-entity.md` on the slice branch (OQ6 resolved;
       `.iteration/` is scratch, not the convention).
 - [x] `npm run ci` green on the routes slice (server lint/format/typecheck/test, client
       lint/format/test/build) — 96 suites, 1206 tests.
+- [x] `npm run ci` green on the client-view slice (server lint/format/typecheck/test, client
+      lint/format/test/build) — 96 server suites / 1206 tests, 21 client files / 261 tests.
 - [x] PR opened against the **epic branch** (`epic/251-workspace`), plan doc linked
       (`docs/workflow.md:48-50`).
 - [ ] Plan archived to `docs/done/` after the slice PR merges into the epic branch.
@@ -737,9 +750,45 @@ The API surface (#254's "API + client" section, server half). What landed:
   idempotency) + `steerTask`/`cancelTask` unit cases in `taskService.test.ts` + the D12
   collision-retry and D13 cancel-boundary cases in `taskProcessor.test.ts`.
 
-**Deferred (the client half, next pass):** the task detail view (read-only stream first),
-the queued turn-taking composer, and the Playwright ~375px backstop — per the standing
-client rules and `docs/plan-254-task-entity.md`'s API + client checklist.
+**Deferred at the routes slice, landed in the next pass (the client half):** the task
+detail view (read-only stream first), the queued turn-taking composer, and the Playwright
+~375px backstop — see "Client-view slice pass" below.
+
+## Client-view slice pass (2026-10-11)
+
+The client half of #254's "API + client" section. New files under `apps/client/src`:
+
+- **`services/tasks.ts`** — the browser contract for `/api/tasks` (D15): `TaskSummary`,
+  `TaskStreamEvent`, `TaskDetail`, `TaskListPage`, plus `isTerminalTask`/`TERMINAL_TASK_STATUSES`.
+  Mirrors the server's `serializeTask`/`serializeEvent` field-for-field and normalises
+  axios errors to a `TaskError` so a 409/404 message surfaces verbatim.
+- **`components/TasksView.tsx`** — mounted at `/tasks`, a master/detail like `AssetsView`.
+  The detail renders the ordered stream **read-only** (the worker is the sole writer):
+  user turns right-aligned, assistant steps left with the #196 tool-chip summary + markdown,
+  and `system` notices (D6) as neutral rows. A status chip (from `TaskStatusChip`) and the
+  `$spent / $budget · steps` line head the pane. The composer is the **queued turn-taking**
+  affordance (D2): its note says steering queues until the next step, it relabels to
+  "Resume" from `paused` (D6/D14), is disabled for terminal tasks, and a Cancel button is
+  offered only while active (D13's header write).
+- **`components/TaskLibrary.tsx`** — the list pane; polls silently while any task is active
+  (queued/running/paused), the same poll-while-pending idiom as `AssetLibrary`.
+- **`components/TaskStatusChip.tsx`** — the shared status→icon/tone mapping for all six
+  server enum values, reused by the list row and the detail header.
+- **Routing/nav** — `isTasksRoute()` in `App.tsx` (pathname-based, like `/files`) and a
+  "Tasks" link in `Sidebar.tsx` beside "Files". `/tasks` was deliberately chosen over
+  `/assets`-style collisions; it is a plain pathname route, served by the SPA fallback like
+  the other views.
+
+**Mobile-first, verified in a real browser.** Rendered at 375×667 (mobile) and 1280×800
+(desktop) via the `playwright-cli` skill against the local stack; the detail swaps in place
+on a phone (Back affordance `md:hidden`), the document does not overflow horizontally, and
+the paused/running/terminal states all render their expected composer/cancel affordances.
+
+**Tests.** `services/tasks.test.ts` (request contract + error normalisation + the terminal
+predicate) and `TasksView.test.tsx` (list→detail, tool-chip + system rendering, steering
+POST, terminal composer/cancel) — 14 new client unit tests. e2e: `e2e/tasks.spec.ts`
+(list/detail/steer/empty, both projects) + `/tasks` added to `e2e/responsive.spec.ts` with a
+seeded task so the overflow backstop is non-vacuous.
 
 ## Follow-ups
 
