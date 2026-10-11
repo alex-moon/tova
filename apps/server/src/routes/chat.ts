@@ -35,7 +35,11 @@ import { zdrHistorySchema } from '../validation';
 import { redactForLog } from '../services/logRedaction';
 import { decideTurn } from '../services/zdrTurn';
 import { AllModelsDisabledError } from '../services/modelConfigService';
-import { enrichmentLibraryBlock } from '../services/enrichmentService';
+import { enrichmentVotes, libraryIndexFor } from '../services/enrichmentService';
+import {
+  isWorkspaceMemoryEnabled,
+  retrieveWorkspaceBlock,
+} from '../services/workspaceRetrievalService';
 
 const router = express.Router();
 
@@ -546,6 +550,32 @@ const knowledgeBlockFor = async (prompt: string, userId: string): Promise<string
   }
 };
 
+/*
+ * #238/#253: one aux vote, two reads. The gate decides whether the turn refers
+ * to a library file (`files`) and/or to past work (`workspace`); the reads are
+ * independent Mongo lookups. A negative vote skips its read; a disabled gate
+ * (or a timeout inside `enrichmentVotes`) yields both-false. Never throws —
+ * enrichment, like the entity block, must not degrade a chat turn.
+ *
+ * `skipWorkspace` (ZDR turns, image turns) suppresses the memory read while
+ * leaving the files vote intact; the library read is separately suppressed by
+ * the caller for image turns via `skipFiles`.
+ */
+const enrichmentBlocksFor = async (
+  prompt: string,
+  history: { role: 'user' | 'assistant'; content: string }[],
+  userId: string,
+  opts: { skipFiles?: boolean; skipWorkspace?: boolean } = {},
+): Promise<{ libraryBlock: string; workspaceBlock: string }> => {
+  const votes = await enrichmentVotes(prompt, history);
+  const libraryBlock = !opts.skipFiles && votes.files ? await libraryIndexFor(userId) : '';
+  let workspaceBlock = '';
+  if (!opts.skipWorkspace && votes.workspace && isWorkspaceMemoryEnabled()) {
+    workspaceBlock = await retrieveWorkspaceBlock(prompt, userId);
+  }
+  return { libraryBlock, workspaceBlock };
+};
+
 // Chat endpoint (non-streaming, preserved for compatibility)
 router.post('/', authenticate, async (req: AuthRequest, res) => {
   // Held outside try so the catch can erase a throwaway attachment on any
@@ -740,21 +770,21 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
     await ensureUserLocation(userDoc, req.ip);
     const entityBlock = await knowledgeBlockFor(content, userId as string);
     /*
-     * #238: the enrichment pass (bounded serial) decides whether to inject the
-     * file-library index. Text-only: image turns skip it, matching the retired
-     * guard. `enrichmentHistoryFromDocs` is non-mutating so the same `history`
-     * array survives for `withSystemAndAsset`.
+     * #238/#253: the enrichment pass (bounded serial) decides whether to inject
+     * the file-library index and/or the workspace-memory block. Text-only:
+     * image turns skip both reads, matching the retired guard's files gating.
+     * `enrichmentHistoryFromDocs` is non-mutating so the same `history` array
+     * survives for `withSystemAndAsset`.
      */
-    const libraryBlock = hasImage
-      ? ''
-      : await enrichmentLibraryBlock(
-          content,
-          enrichmentHistoryFromDocs(
-            history as { _id: unknown; role: string; content: string }[],
-            userMessage._id,
-          ),
-          userId as string,
-        );
+    const { libraryBlock, workspaceBlock } = await enrichmentBlocksFor(
+      content,
+      enrichmentHistoryFromDocs(
+        history as { _id: unknown; role: string; content: string }[],
+        userMessage._id,
+      ),
+      userId as string,
+      { skipFiles: hasImage, skipWorkspace: hasImage },
+    );
     const withSystemAndAsset = async (systemContent: string) => {
       const next = messagesFromPersistedHistory(
         history as { role: string; content: string; timestamp?: Date }[],
@@ -778,7 +808,14 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
     const rosterPrePick = await pickRosterRoute(hasImage);
     if (!rosterPrePick) throw new AllModelsDisabledError();
     const turnMessages = await withSystemAndAsset(
-      buildSystemContent(userDoc, entityBlock, libraryBlock, false, userDoc.settings?.timezone),
+      buildSystemContent(
+        userDoc,
+        entityBlock,
+        libraryBlock,
+        false,
+        userDoc.settings?.timezone,
+        workspaceBlock,
+      ),
     );
     const raced = await routeAndComplete(
       {
@@ -980,15 +1017,23 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
 
     await ensureUserLocation(streamUserDoc, req.ip);
     /*
-     * #238: the enrichment pass supplies the file-library block (empty on ZDR —
-     * the write-nothing turn injects no index, as before — and on image turns,
-     * which are text-only for enrichment).
+     * #238/#253: the enrichment pass supplies the file-library block and the
+     * workspace-memory block (empty on ZDR — the write-nothing turn injects no
+     * index, as before — and on image turns, which are text-only for
+     * enrichment). ZDR turns may still READ the workspace (read-only, matching
+     * plan task 8); they never write corpus items, so they are absent from the
+     * corpus by construction.
      */
     let libraryBlock = '';
+    let streamWorkspaceBlock = '';
     if (zdr) {
       // Continuity comes from the client replay (#116); nothing is read back.
       messages = buildZdrMessages(zdrHistory, content);
       routingResult = rosterRoute;
+      const zdrBlocks = await enrichmentBlocksFor(content, zdrHistory, userId as string, {
+        skipFiles: hasImage,
+      });
+      streamWorkspaceBlock = zdrBlocks.workspaceBlock;
     } else {
       // Save user message
       const userMessage = await saveUserMessageWithMetrics(
@@ -1003,16 +1048,17 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
         .sort({ timestamp: -1 })
         .limit(10);
 
-      if (!hasImage) {
-        libraryBlock = await enrichmentLibraryBlock(
-          content,
-          enrichmentHistoryFromDocs(
-            history as { _id: unknown; role: string; content: string }[],
-            userMessage._id,
-          ),
-          userId as string,
-        );
-      }
+      const blocks = await enrichmentBlocksFor(
+        content,
+        enrichmentHistoryFromDocs(
+          history as { _id: unknown; role: string; content: string }[],
+          userMessage._id,
+        ),
+        userId as string,
+        { skipFiles: hasImage, skipWorkspace: hasImage },
+      );
+      libraryBlock = blocks.libraryBlock;
+      streamWorkspaceBlock = blocks.workspaceBlock;
 
       // Same image-turn gating as the non-streaming route (#115).
       routingResult = rosterRoute;
@@ -1035,6 +1081,7 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
         libraryBlock,
         zdr,
         streamUserDoc.settings?.timezone,
+        streamWorkspaceBlock,
       ),
     });
     if (attachedAsset) {

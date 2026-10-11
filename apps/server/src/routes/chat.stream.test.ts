@@ -71,7 +71,8 @@ jest.mock('../services/titleService', () => ({
 // #238: the enrichment pass is a separate aux call; the route tests pin the
 // main completion's arguments, so stub enrichment to a no-op block.
 jest.mock('../services/enrichmentService', () => ({
-  enrichmentLibraryBlock: jest.fn().mockResolvedValue(''),
+  enrichmentVotes: jest.fn().mockResolvedValue({ files: false, workspace: false }),
+  libraryIndexFor: jest.fn().mockResolvedValue(''),
   isEnrichmentEnabled: () => false,
 }));
 
@@ -184,17 +185,22 @@ describe('Chat streaming route', () => {
 
     const userId = (await User.findOne({ email: 'stream-timestamps@example.com' }))!._id;
     const session = await Session.create({ userId, title: 'timestamps' });
+    // Seeds are relative to now so the asserted relative gap ("2 days") does
+    // not rot as the wall clock advances (#261 follow-up; the current turn is
+    // stamped Date.now() by the route).
+    const firstTurnAt = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000 - 60 * 1000);
+    const firstReplyAt = new Date(firstTurnAt.getTime() + 60 * 1000);
     await Message.create({
       sessionId: session._id,
       role: 'user',
       content: 'first turn',
-      timestamp: new Date('2026-10-08T14:32:00Z'),
+      timestamp: firstTurnAt,
     });
     await Message.create({
       sessionId: session._id,
       role: 'assistant',
       content: 'first reply',
-      timestamp: new Date('2026-10-08T14:33:00Z'),
+      timestamp: firstReplyAt,
     });
 
     const app = createApp();
@@ -212,10 +218,12 @@ describe('Chat streaming route', () => {
     expect(options.instructions).not.toContain("Today's date is");
     // Seeded turns carry absolute stamps; the assistant reply 1 minute later
     // gets no relative line (sub-hour), and the 2-day gap to the new turn does.
+    const stamp = (d: Date) =>
+      `[${d.toISOString().slice(0, 10)} ${d.toISOString().slice(11, 16)} UTC]`;
     const userTurns = turns.filter((m) => m.role === 'user');
-    expect(userTurns[0].content).toBe('[2026-10-08 14:32 UTC]\nfirst turn');
+    expect(userTurns[0].content).toBe(`${stamp(firstTurnAt)}\nfirst turn`);
     const assistantTurn = turns.find((m) => m.role === 'assistant');
-    expect(assistantTurn?.content).toBe('[2026-10-08 14:33 UTC]\nfirst reply');
+    expect(assistantTurn?.content).toBe(`${stamp(firstReplyAt)}\nfirst reply`);
     expect(userTurns[1].content).toMatch(
       /^\[\d{4}-\d{2}-\d{2} \d{2}:\d{2} UTC — 2 days since the last message\]\nsecond turn$/,
     );

@@ -72,7 +72,8 @@ jest.mock('../services/titleService', () => ({
 // #238: stub the enrichment aux call so the main completion stays findable in
 // `mockAgentStream.mock.calls`.
 jest.mock('../services/enrichmentService', () => ({
-  enrichmentLibraryBlock: jest.fn().mockResolvedValue(''),
+  enrichmentVotes: jest.fn().mockResolvedValue({ files: false, workspace: false }),
+  libraryIndexFor: jest.fn().mockResolvedValue(''),
   isEnrichmentEnabled: () => false,
 }));
 

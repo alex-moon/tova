@@ -86,7 +86,8 @@ jest.mock('../services/titleService', () => ({
 // #238: stub the enrichment aux call so it does not occupy the mocked
 // inference-call slots the route tests inspect.
 jest.mock('../services/enrichmentService', () => ({
-  enrichmentLibraryBlock: jest.fn().mockResolvedValue(''),
+  enrichmentVotes: jest.fn().mockResolvedValue({ files: false, workspace: false }),
+  libraryIndexFor: jest.fn().mockResolvedValue(''),
   isEnrichmentEnabled: () => false,
 }));
 

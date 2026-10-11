@@ -65,7 +65,8 @@ jest.mock('../services/titleService', () => ({
 // main completion's arguments, so stub enrichment to a no-op block and keep
 // it off `inferenceService.mock.calls`.
 jest.mock('../services/enrichmentService', () => ({
-  enrichmentLibraryBlock: jest.fn().mockResolvedValue(''),
+  enrichmentVotes: jest.fn().mockResolvedValue({ files: false, workspace: false }),
+  libraryIndexFor: jest.fn().mockResolvedValue(''),
   isEnrichmentEnabled: () => false,
 }));
 
