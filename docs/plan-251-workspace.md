@@ -449,7 +449,8 @@ change, newest last. No phase numbers: the loop records outcomes, not protocol s
   unreachable, and a length + finite-result check). Arithmetic moved to the tools side of
   `SYSTEM_PROMPT`, `TOOL_INSTRUCTIONS` names `calculate`, and the #263 golden case was
   repointed (`arithmetic-no-search` → `arithmetic-uses-calculator`). Slice plan
-  `docs/plan-283-calculator.md`; slice PR opened against `epic/251-workspace`.
+  `docs/done/plan-283-calculator.md`; slice PR **#284** opened against `epic/251-workspace`
+  (stacked on the #263 branch, PR #282).
 
 ## Follow-ups
 

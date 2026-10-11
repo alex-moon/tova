@@ -52,7 +52,8 @@ adds the tool and points the prompt at it, so arithmetic becomes a tool case lik
 - [x] `evals/cases.ts` + `cases.test.ts`: rename `arithmetic-no-search` →
       `arithmetic-uses-calculator`; assert `calculate` is called and no reflex retrieval.
 - [x] `npm run ci` green (97 suites, 1205 tests; client lint/format/test/build).
-- [ ] PR opened against `epic/251-workspace`.
+- [x] PR [#284](https://github.com/alex-moon/tova/pull/284) opened against
+      `epic/251-workspace`.
 
 ## Verification
 
