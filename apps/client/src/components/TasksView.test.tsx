@@ -78,9 +78,48 @@ describe('TasksView (#254 client)', () => {
     expect(TaskService.get).toHaveBeenCalledWith('t1');
   });
 
+  // Regression (#254 client): the detail loader must key on the task *id*, not
+  // the loaded header object. A real GET returns a fresh object each time, so a
+  // loader that depended on the header would re-fire on its own response and
+  // loop unbounded. Mock `get` with a fresh object per call (as axios does) and
+  // assert the fetch settles to the initial load + at most one poll.
+  it('does not re-fetch in a loop when each response is a fresh object', async () => {
+    vi.mocked(TaskService.list).mockResolvedValue({ tasks: [task()], nextCursor: null });
+    vi.mocked(TaskService.get).mockImplementation(async () => detail());
+
+    render(<TasksView />);
+    await waitFor(() => expect(screen.getByTestId('task-row-t1')).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId('task-row-t1'));
+    await waitFor(() => expect(screen.getByText('Let me look.')).toBeInTheDocument());
+
+    // Give the (3s) poll a chance to run; a loop would rack up hundreds here.
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    expect(vi.mocked(TaskService.get).mock.calls.length).toBeLessThanOrEqual(2);
+  });
+
   it('shows the empty state when there are no tasks', async () => {
     render(<TasksView />);
     await waitFor(() => expect(screen.getByTestId('task-library-empty')).toBeInTheDocument());
+  });
+
+  // The list is cursor-paged server-side (20/page); the client must surface the
+  // "Show more" affordance and append the next page rather than silently
+  // dropping every task past the first page.
+  it('loads the next page of tasks via the cursor', async () => {
+    vi.mocked(TaskService.list)
+      .mockResolvedValueOnce({ tasks: [task({ id: 'p1' })], nextCursor: 'cur-1' })
+      .mockResolvedValueOnce({ tasks: [task({ id: 'p2' })], nextCursor: null });
+
+    render(<TasksView />);
+    await waitFor(() => expect(screen.getByTestId('task-row-p1')).toBeInTheDocument());
+
+    fireEvent.click(screen.getByTestId('task-load-more'));
+
+    await waitFor(() => expect(screen.getByTestId('task-row-p2')).toBeInTheDocument());
+    expect(TaskService.list).toHaveBeenLastCalledWith('cur-1');
+    // The first page is kept alongside the appended second page.
+    expect(screen.getByTestId('task-row-p1')).toBeInTheDocument();
+    expect(screen.queryByTestId('task-load-more')).not.toBeInTheDocument();
   });
 
   it('queues a steering instruction for an active task', async () => {

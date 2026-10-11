@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ChevronDown, ChevronLeft, ListTree, Loader2, Send, Square } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
@@ -122,7 +122,13 @@ const budgetLine = (task: TaskSummary): string =>
   `${task.stepCount}/${task.budget.maxSteps} steps`;
 
 const TasksView: React.FC = () => {
-  const [selected, setSelected] = useState<TaskSummary | null>(null);
+  // Selection is the task *id*; `seed` is the list row we already hold for an
+  // instant header, and `detail` (task + ordered stream) is the polled truth.
+  // Keeping the id separate from the loaded header is what stops a polled
+  // response from re-triggering the loader: `detail.task` is a fresh object
+  // every fetch, so making it the effect's dependency would loop.
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [seed, setSeed] = useState<TaskSummary | null>(null);
   const [detail, setDetail] = useState<TaskDetail | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -130,48 +136,67 @@ const TasksView: React.FC = () => {
   const [sending, setSending] = useState(false);
   const [cancelling, setCancelling] = useState(false);
 
-  const loadDetail = useCallback(async (task: TaskSummary, opts: { silent?: boolean } = {}) => {
+  // The id the in-flight load belongs to; compared after await so a response
+  // for a task the user has already navigated away from is discarded rather
+  // than painted over the newly selected one.
+  const selectedIdRef = useRef<string | null>(null);
+
+  const loadDetail = useCallback(async (taskId: string, opts: { silent?: boolean } = {}) => {
     if (!opts.silent) setLoading(true);
     try {
-      const next = await TaskService.get(task.id);
+      const next = await TaskService.get(taskId);
+      if (selectedIdRef.current !== taskId) return;
       setDetail(next);
       setError(null);
-      // Keep the selected header in sync with the polled status so the composer
-      // and cancel affordance settle the moment the task does.
-      setSelected((prev) => (prev && prev.id === next.task.id ? next.task : prev));
     } catch (err) {
-      if (!opts.silent) setError(err instanceof Error ? err.message : 'Could not load this task');
+      if (selectedIdRef.current !== taskId || opts.silent) return;
+      setError(err instanceof Error ? err.message : 'Could not load this task');
     } finally {
-      if (!opts.silent) setLoading(false);
+      if (!opts.silent && selectedIdRef.current === taskId) setLoading(false);
     }
   }, []);
 
+  // Select by id and reset the per-task draft/stream so nothing leaks across
+  // tasks. The seed header renders immediately; the detail GET follows.
+  const select = useCallback((task: TaskSummary) => {
+    setSelectedId(task.id);
+    setSeed(task);
+    setDetail(null);
+    setError(null);
+    setInstruction('');
+  }, []);
+
   useEffect(() => {
-    if (!selected) return;
+    selectedIdRef.current = selectedId;
+    if (!selectedId) return;
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    void loadDetail(selected);
-  }, [selected, loadDetail]);
+    void loadDetail(selectedId);
+  }, [selectedId, loadDetail]);
+
+  // The header is the freshly polled task, falling back to the seed row until
+  // the first detail response lands.
+  const summary = detail?.task ?? seed;
+  const terminal = summary != null && isTerminalTask(summary.status);
 
   // Poll while the task is still active so the stream advances in place; stop
   // once it reaches a terminal state (the worker is the only writer then).
-  const active = selected != null && !isTerminalTask(selected.status);
+  const active = selectedId != null && summary != null && !terminal;
   useEffect(() => {
-    if (!active || !selected) return;
-    const timer = setInterval(() => void loadDetail(selected, { silent: true }), POLL_MS);
+    if (!active || !selectedId) return;
+    const timer = setInterval(() => void loadDetail(selectedId, { silent: true }), POLL_MS);
     return () => clearInterval(timer);
-  }, [active, selected, loadDetail]);
+  }, [active, selectedId, loadDetail]);
 
   const handleInstruct = async (e: React.FormEvent) => {
     e.preventDefault();
     const text = instruction.trim();
-    if (!text || !selected || sending || isTerminalTask(selected.status)) return;
+    if (!text || !selectedId || !summary || sending || terminal) return;
     setSending(true);
     try {
-      const updated = await TaskService.instruct(selected.id, text);
-      setSelected(updated);
+      await TaskService.instruct(selectedId, text);
       setInstruction('');
       toast.success('Instruction queued');
-      await loadDetail(updated, { silent: true });
+      await loadDetail(selectedId, { silent: true });
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Could not queue instruction');
     } finally {
@@ -180,20 +205,17 @@ const TasksView: React.FC = () => {
   };
 
   const handleCancel = async () => {
-    if (!selected || cancelling || isTerminalTask(selected.status)) return;
+    if (!selectedId || cancelling || terminal) return;
     setCancelling(true);
     try {
-      const updated = await TaskService.cancel(selected.id);
-      setSelected(updated);
-      await loadDetail(updated, { silent: true });
+      await TaskService.cancel(selectedId);
+      await loadDetail(selectedId, { silent: true });
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Could not cancel task');
     } finally {
       setCancelling(false);
     }
   };
-
-  const terminal = selected != null && isTerminalTask(selected.status);
 
   return (
     <div
@@ -208,17 +230,17 @@ const TasksView: React.FC = () => {
       <div className="flex min-h-0 flex-1 gap-4 px-6 pb-6">
         <div
           className={`min-w-0 shrink-0 overflow-hidden rounded-xl border border-border md:w-96 ${
-            selected ? 'hidden md:block' : 'w-full'
+            selectedId ? 'hidden md:block' : 'w-full'
           }`}
         >
-          <TaskLibrary selectedId={selected?.id ?? null} onSelect={(task) => setSelected(task)} />
+          <TaskLibrary selectedId={selectedId} onSelect={select} />
         </div>
         <div
           className={`min-w-0 flex-1 flex-col overflow-hidden rounded-xl border border-border panel-surface ${
-            selected ? 'flex' : 'hidden md:flex'
+            selectedId ? 'flex' : 'hidden md:flex'
           }`}
         >
-          {!selected ? (
+          {!summary ? (
             <div className="flex flex-1 flex-col items-center justify-center gap-2 p-6 text-center text-muted-foreground">
               <ListTree className="size-6" />
               <p className="text-sm">Select a task to follow it.</p>
@@ -230,7 +252,7 @@ const TasksView: React.FC = () => {
                   type="button"
                   data-testid="task-detail-back"
                   aria-label="Back to task list"
-                  onClick={() => setSelected(null)}
+                  onClick={() => setSelectedId(null)}
                   className="flex shrink-0 items-center gap-1 text-sm text-muted-foreground hover:text-foreground md:hidden"
                 >
                   <ChevronLeft className="size-4" />
@@ -238,12 +260,12 @@ const TasksView: React.FC = () => {
                 </button>
                 <div className="flex min-w-0 flex-1 flex-col gap-1">
                   <div className="flex items-center gap-2">
-                    <TaskStatusChip status={selected.status} />
+                    <TaskStatusChip status={summary.status} />
                     <span
                       className="truncate text-xs text-muted-foreground"
                       data-testid="task-budget"
                     >
-                      {budgetLine(selected)}
+                      {budgetLine(summary)}
                     </span>
                   </div>
                 </div>
@@ -297,7 +319,7 @@ const TasksView: React.FC = () => {
                       placeholder={
                         terminal
                           ? 'This task has finished.'
-                          : selected.status === 'paused'
+                          : summary.status === 'paused'
                             ? 'Send an instruction to resume…'
                             : 'Steer the task — queued until the next step…'
                       }
@@ -320,7 +342,7 @@ const TasksView: React.FC = () => {
                       data-testid="task-instruction-send"
                     >
                       <Send className="size-4" />
-                      {selected.status === 'paused' ? 'Resume' : 'Queue'}
+                      {summary.status === 'paused' ? 'Resume' : 'Queue'}
                     </Button>
                   </div>
                 </form>

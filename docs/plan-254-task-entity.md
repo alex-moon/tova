@@ -790,6 +790,35 @@ POST, terminal composer/cancel) — 14 new client unit tests. e2e: `e2e/tasks.sp
 (list/detail/steer/empty, both projects) + `/tasks` added to `e2e/responsive.spec.ts` with a
 seeded task so the overflow backstop is non-vacuous.
 
+### Client-view hardening pass (2026-10-11)
+
+A post-landing review of the slice against the routes contract and the plan turned up three
+defects, fixed here:
+
+- **Unbounded detail-fetch loop.** `TasksView` keyed its loader effect on the selected
+  `TaskSummary` *object* and pushed each polled response back into that object. A real
+  `GET /api/tasks/:id` returns a fresh object every call, so every response re-triggered the
+  loader — measured at ~396 requests/second in a browser (`399`-call unit probe), and the
+  original unit test masked it by mocking a stable reference. Selection is now the task **id**
+  (`selectedId`), the header is derived (`detail?.task ?? seed`), and a `selectedIdRef` guard
+  drops responses for a task the user has navigated away from. A regression test mocks a
+  fresh object per call and asserts the fetch settles (≤2), which fails against the old code.
+- **Raw tool `result` leaked to the browser.** The API's `serializeEvent` returned
+  `event.tools` verbatim; the task stream's chips carry the executed call's raw `result` (the
+  sequencer's resume payload, D10 — never rendered by the client). `GET /api/tasks/:id` was
+  therefore shipping tool internals on every 3s poll. `serializeEvent` now rebuilds only the
+  #196 chip summary fields via `serializeToolEvent` (a subdoc must `toObject()` first), with a
+  route test pinning that `result` is absent while the chip survives.
+- **Task list dropped server pagination.** `GET /api/tasks` is cursor-paged (20/page) and the
+  client service already accepted a cursor, but `TaskLibrary` ignored `nextCursor`, so tasks
+  past the first page were unreachable. Added a "Show more" affordance mirroring
+  `AssetLibrary`, with a client test for the cursor round-trip.
+
+Also: `select` now clears the steering draft and stream when switching tasks (a draft typed
+for one task no longer carries into the next). Verified in the browser at 375px (no horizontal
+overflow; paging cursor fires; detail poll settles at one request per interval). `npm run ci`
+green (server 96 suites / 1207 tests; client 21 files / 263 tests).
+
 ## Follow-ups
 
 - Interrupt as a sequencing override (D8) — its own ticket after steering lands.
