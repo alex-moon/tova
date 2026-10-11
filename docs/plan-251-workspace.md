@@ -94,8 +94,8 @@ Slice-level decisions live in the slice plan docs; this section carries epic-lev
       `epic/251-workspace` at `327b5fe` (merged 2026-10-11T11:32Z); the **task client view
       landed this pass** on `feat/tv/254-task-client-view` (`services/tasks.ts` + `TasksView`
       + `TaskLibrary` + `TaskStatusChip`, `/tasks` route + Sidebar link, mobile-first, e2e
-      ~375px) — slice PR opened against `epic/251-workspace`; #254 stays open until the epic
-      ships)
+      ~375px) — slice PR **#278** opened against `epic/251-workspace`; #254 stays open until
+      the epic ships)
 - [ ] Slice #255 — chat-task integration
 - [ ] Slice #256 — retire the entity graph
 - [ ] Epic PR `epic/251-workspace` → `main`, linking this doc, `npm run ci` green
@@ -290,9 +290,9 @@ change, newest last. No phase numbers: the loop records outcomes, not protocol s
   `TasksView.test.tsx`), `e2e/tasks.spec.ts` (both projects) and `/tasks` added to
   `e2e/responsive.spec.ts` with a seeded task. `npm run ci` green (96 server suites / 1206
   tests; 21 client files / 261 tests). Slice plan (`docs/plan-254-task-entity.md`) carries
-  the "Client-view slice pass" section; slice PR opened against `epic/251-workspace`. #252/
-  #253 done; #255/#256 open; epic PR #270 still an open bodyless draft; the #253/#256 owner
-  questions and the self-merge gate stay open.
+  the "Client-view slice pass" section; slice PR **#278** opened against `epic/251-workspace`.
+  #252/#253 done; #255/#256 open; epic PR #270 still an open bodyless draft; the #253/#256
+  owner questions and the self-merge gate stay open.
 
 ## Follow-ups
 
