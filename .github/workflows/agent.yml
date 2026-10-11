@@ -1,0 +1,106 @@
+# Personal coding agent: comment "@agent <task>" on any issue or PR, or run
+# manually from the Actions tab. Powered by the Goose CLI + DeepInfra.
+#
+# Model routing:
+#   @agent        -> deepseek-ai/DeepSeek-V4.1-Flash  (well-spec'd work: CI fixes, tweaks)
+#   @agent-think  -> zai-org/GLM-5.3-Flash            (vague/ambiguous work: design, refactors)
+#
+# To switch to Fireworks when DeepInfra is saturated, change three lines in
+# the "Run goose" step:
+#   OPENAI_HOST: https://api.fireworks.ai
+#   OPENAI_BASE_PATH: inference/v1/chat/completions
+#   OPENAI_API_KEY: ${{ secrets.FIREWORKS_API_KEY }}
+# (Fireworks model slugs differ — check the dashboard.)
+
+name: Agent
+
+on:
+  issue_comment:
+    types: [created]
+  workflow_dispatch:
+    inputs:
+      prompt:
+        description: "Task for the agent"
+        required: true
+
+concurrency:
+  group: agent-${{ github.event.issue.number || 'manual' }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  agent:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      startsWith(github.event.comment.body || '', '@agent')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          # For PR comments, check out the PR head rather than the default branch.
+          ref: ${{ github.event.issue.pull_request && format('refs/pull/{0}/head', github.event.issue.number) || github.ref }}
+
+      - name: Install goose
+        uses: clouatre-labs/setup-goose-action@v1
+        with:
+          version: '1.52.0'
+
+      - name: Configure git + gh auth
+        run: |
+          git config user.name "tova-agent"
+          git config user.email "tova-agent@users.noreply.github.com"
+          git config --global credential.helper '!gh auth git-credential'
+
+      - name: Pick model
+        id: pick
+        env:
+          COMMENT: ${{ github.event.comment.body || github.event.inputs.prompt }}
+        run: |
+          case "$COMMENT" in
+            '@agent-think'*) echo 'model=zai-org/GLM-5.3-Flash' >> "$GITHUB_OUTPUT" ;;
+            *)               echo 'model=deepseek-ai/DeepSeek-V4.1-Flash' >> "$GITHUB_OUTPUT" ;;
+          esac
+
+      - name: Run goose
+        env:
+          GOOSE_PROVIDER: openai
+          GOOSE_MODEL: ${{ steps.pick.outputs.model }}
+          OPENAI_HOST: https://api.deepinfra.com
+          OPENAI_BASE_PATH: v1/openai/chat/completions
+          OPENAI_API_KEY: ${{ secrets.DEEPINFRA_API_KEY }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          COMMENT: ${{ github.event.comment.body }}
+          ISSUE_TITLE: ${{ github.event.issue.title }}
+          ISSUE_BODY: ${{ github.event.issue.body }}
+          MANUAL_PROMPT: ${{ github.event.inputs.prompt }}
+        run: |
+          set -euo pipefail
+          {
+            echo "Task for you (from Alex):"
+            if [ -n "${MANUAL_PROMPT:-}" ]; then
+              printf '%s\n' "$MANUAL_PROMPT"
+            else
+              [ -n "${ISSUE_TITLE:-}" ] && printf 'Issue: %s\n%s\n' "$ISSUE_TITLE" "$ISSUE_BODY"
+              if [ -n "${COMMENT:-}" ]; then
+                BODY="$COMMENT"
+                BODY="${BODY#"@agent-think"}"
+                BODY="${BODY#"@agent"}"
+                printf 'Instruction comment:\n%s\n' "$BODY"
+              fi
+            fi
+            cat <<'EOF'
+
+          Working rules:
+          - Create a branch named agent/task, commit your work there, push it, and open a PR against main using the gh CLI. NEVER push or commit directly to main.
+          - Keep the diff minimal; touch only what the task needs.
+          - Check .github/workflows/ci.yml for this repo's checks (semgrep + e2e) and make sure your change passes locally before opening the PR.
+          - If the task mentions CI failures, read the actual logs first: gh run list, then gh run view <id> --log-failed.
+          - In the PR body, summarise what you changed and why, and reference the triggering issue if there is one.
+          EOF
+          } > task.txt
+          goose run --headless -t "$(cat task.txt)"
