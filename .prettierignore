@@ -4,3 +4,10 @@ package-lock.json
 docs/plan-*.md
 docs/done/plan-*.md
 *.alloy
+
+# Human-authored agent workflow: its one description string uses double quotes,
+# which prettier's singleQuote setting rewrites. Ignored here because the App
+# token that lands agent branches cannot push workflow-file changes (missing
+# `workflows` permission), so a style rewrite can't be delivered. Other
+# workflows (ci.yml, deploy.yml) stay in scope.
+.github/workflows/agent.yml
