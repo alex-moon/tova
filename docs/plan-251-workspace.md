@@ -241,8 +241,9 @@ change, newest last. No phase numbers: the loop records outcomes, not protocol s
   `epic/251-workspace`, so it orphaned on `feat/tv/254-sequencer-loop` while the log entry above
   already read as landed — documentation and tree had diverged. Landed the hardening on the epic
   branch as cherry-pick `e6c95b7` on `fix/tv/254-sequencer-hardening` (cut from
-  `epic/251-workspace`), follow-up PR opened against `epic/251-workspace`. Done checklist #254
-  line and this log corrected to match.
+  `epic/251-workspace`), follow-up PR **#274** opened against `epic/251-workspace`; `npm run ci`
+  green on the branch (95 suites, 1184 tests). Done checklist #254 line and this log corrected to
+  match.
 
 ## Follow-ups
 
