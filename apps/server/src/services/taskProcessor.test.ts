@@ -126,6 +126,27 @@ describe('processTaskJob sequencer loop (#254)', () => {
     // seed user (0), pre-crash assistant (1), resumed assistant (2), completion (3).
     expect(events.map((e) => e.seq)).toEqual([0, 1, 2, 3]);
   });
+
+  it('stops at the next step boundary when the task is cancelled mid-run (D13)', async () => {
+    const task = await enqueue();
+    const claimed = await claimNextTask();
+    let calls = 0;
+    const runStep: TaskStepRunner = jest.fn().mockImplementation(async () => {
+      calls += 1;
+      // A cancel lands while the first step is in flight (the API's header
+      // write). The loop must observe it before issuing step 1 and return
+      // without settling the task back to `done`.
+      if (calls === 1) await Task.updateOne({ _id: task._id }, { $set: { status: 'cancelled' } });
+      return blankStep({
+        tools: [{ phase: 'result', name: 'read_file', label: 'r', status: 'ok' }],
+      });
+    });
+
+    await makeTaskProcessor(runStep)(claimed!);
+
+    expect(runStep).toHaveBeenCalledTimes(1);
+    expect((await Task.findById(task._id))?.status).toBe('cancelled');
+  });
 });
 
 describe('appendTaskEvent seq allocation (#254)', () => {
@@ -136,5 +157,36 @@ describe('appendTaskEvent seq allocation (#254)', () => {
     await appendTaskEvent(task._id, { role: 'system', content: 'note', step: 0 });
     const events = await eventsOf(task._id);
     expect(events.map((e) => e.seq)).toEqual([0, 1]);
+  });
+
+  it('retries the seq on a duplicate-key collision from a concurrent writer (D12)', async () => {
+    const task = await enqueue({ instruction: undefined });
+    const { appendTaskEvent } = await import('./taskProcessor');
+    // The pre-existing event the "other writer" landed at seq 0.
+    await TaskEvent.create({ taskId: task._id, seq: 0, role: 'user', content: 'other' });
+    // A concurrent writer already took the next seq, so the first insert here
+    // collides with the unique index. Force it deterministically: the first
+    // `create` throws the 11000 a real collision raises, then delegates to the
+    // real implementation. The retry must re-read max-seq and land at 1.
+    const realCreate = TaskEvent.create.bind(TaskEvent);
+    let thrown = false;
+    const spy = jest.spyOn(TaskEvent, 'create').mockImplementation((async (doc: unknown) => {
+      if (!thrown) {
+        thrown = true;
+        const err = new Error('E11000 duplicate key') as Error & { code: number };
+        err.code = 11000;
+        throw err;
+      }
+      return realCreate(doc as never);
+    }) as never);
+
+    await appendTaskEvent(task._id, { role: 'user', content: 'a', step: 0 });
+
+    spy.mockRestore();
+    const events = await eventsOf(task._id);
+    expect(events.map((e) => [e.seq, e.content])).toEqual([
+      [0, 'other'],
+      [1, 'a'],
+    ]);
   });
 });

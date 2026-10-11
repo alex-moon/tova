@@ -1,5 +1,6 @@
 import { Task, type TaskDocument } from '../models/Task';
 import { TaskEvent } from '../models/TaskEvent';
+import { appendTaskEvent } from './taskProcessor';
 
 // Task sequencer runtime (#254, epic #251), generalised from `assetJobService`:
 // enqueue, an atomic oldest-first claim (`queued -> running` + attempts bump),
@@ -149,3 +150,53 @@ export const stopTaskPoller = (): void => {
 };
 
 export const isTaskPollerRunning = (): boolean => timer !== null;
+
+/*
+ * Read/steer/cancel surface for the API (#254 routes slice, D14/D15).
+ *
+ * The API is a *second writer* on the task stream (steering `user` events,
+ * D12) but only a reader of everything else. Steering appends through
+ * `appendTaskEvent`, which retries the `{taskId, seq}` collision the second
+ * writer can cause. Cancel is a header write, not a stream write; the
+ * processor observes it at the next step boundary (D13).
+ */
+
+// The outcome of appending a steering turn: accepted (`queued`, whether it was
+// already active or resumed from `paused`), or refused because the stream is
+// terminal. Not-found is the route's concern (an ownerless id never reaches
+// here).
+export type SteeringResult = { status: 'queued' } | { status: 'refused' };
+
+// Append a steering `user` event to an owned task and, from `paused`, re-queue
+// it. Ownership is the caller's job (the route scopes the lookup by userId);
+// this helper takes the already-owned document.
+export const steerTask = async (
+  task: TaskDocument,
+  instruction: string,
+): Promise<SteeringResult> => {
+  if (task.status === 'done' || task.status === 'failed' || task.status === 'cancelled') {
+    return { status: 'refused' };
+  }
+
+  await appendTaskEvent(task._id, {
+    role: 'user',
+    content: instruction,
+    step: task.stepCount,
+  });
+
+  // From `paused` the instruction is the resume: move the header back to the
+  // queue so the poller re-claims it. From `queued`/`running` the status is
+  // already live; the event alone steers.
+  if (task.status === 'paused') {
+    await Task.updateOne({ _id: task._id }, { $set: { status: 'queued' } });
+  }
+  return { status: 'queued' };
+};
+
+// Cancel an owned task. Terminal states are left as-is (idempotent); a
+// `running` task's processor observes the status change at its next step
+// boundary (D13) and returns without settling it back to `done`.
+export const cancelTask = async (task: TaskDocument): Promise<void> => {
+  if (task.status === 'done' || task.status === 'failed' || task.status === 'cancelled') return;
+  await Task.updateOne({ _id: task._id }, { $set: { status: 'cancelled' } });
+};

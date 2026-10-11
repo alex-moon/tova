@@ -40,18 +40,32 @@ export interface TaskEventInput {
   usage?: TokenUsage;
 }
 
-// Append one event at the next seq. Read-max-then-insert, not an atomic
-// counter: safe because the stream has a single writer (the epic's
-// single-writer-per-stream invariant) and the poller is single-consumer. The
-// `{taskId, seq}` unique index still catches a violation rather than letting
-// it corrupt the order.
+// Is this a `{taskId, seq}` duplicate-key error (code 11000)? Two writers can
+// now race for the same seq: the poller appends assistant/system events and the
+// API appends steering `user` events (D12). The unique index is the guard; on a
+// collision we re-read the max seq and retry rather than surfacing a 500.
+const isDuplicateKeyError = (err: unknown): boolean =>
+  typeof err === 'object' && err !== null && (err as { code?: number }).code === 11000;
+
+// Append one event at the next seq. Read-max-then-insert, retried on the
+// `{taskId, seq}` unique-index collision. A single writer (the poller) never
+// collides; the retry exists for the second writer the API introduces (D12) so
+// a concurrent steering append is correct, not merely loud.
 export const appendTaskEvent = async (
   taskId: TaskDocument['_id'],
   event: TaskEventInput,
 ): Promise<void> => {
-  const last = await TaskEvent.findOne({ taskId }).sort({ seq: -1 });
-  const seq = (last?.seq ?? -1) + 1;
-  await TaskEvent.create({ taskId, seq, ...event });
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const last = await TaskEvent.findOne({ taskId }).sort({ seq: -1 });
+    const seq = (last?.seq ?? -1) + 1;
+    try {
+      await TaskEvent.create({ taskId, seq, ...event });
+      return;
+    } catch (err) {
+      if (!isDuplicateKeyError(err)) throw err;
+    }
+  }
+  throw new Error('Could not allocate a task event sequence');
 };
 
 // A visible system notice (budget breach, completion), rendered like content
@@ -82,11 +96,19 @@ export const makeTaskProcessor =
   async (task: TaskDocument): Promise<void> => {
     // Re-read the claimed task and the stream; on a resume these already carry
     // the prior steps, so the loop continues rather than restarting.
-    const current = (await Task.findById(task._id)) ?? task;
-    let stepCount = current.stepCount;
-    const maxSteps = current.budget.maxSteps;
+    const claimed = (await Task.findById(task._id)) ?? task;
+    let stepCount = claimed.stepCount;
 
     for (;;) {
+      // Re-read the header before each step (D13): cancel (or any external
+      // status change) is observed at this boundary — the same boundary
+      // steering is drained at — so a cancelled running task stops within one
+      // step instead of stepping to completion. `budget` is snapshotted at
+      // creation, but `status`/`stepCount` are live.
+      const current = (await Task.findById(task._id)) ?? claimed;
+      if (current.status !== 'running') return;
+      const maxSteps = current.budget.maxSteps;
+
       if (stepCount >= maxSteps) {
         await appendNotice(
           current._id,

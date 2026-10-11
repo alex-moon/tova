@@ -1,13 +1,16 @@
 import { Task } from '../models/Task';
+import { TaskEvent } from '../models/TaskEvent';
 import {
   MAX_TASK_ATTEMPTS,
   STALE_RUNNING_MS,
+  cancelTask,
   claimNextTask,
   enqueueTask,
   isTaskPollerRunning,
   requeueStaleTasks,
   runTaskTick,
   startTaskPoller,
+  steerTask,
   stopTaskPoller,
 } from './taskService';
 import type { TaskDocument } from '../models/Task';
@@ -185,5 +188,46 @@ describe('poller lifecycle (#254)', () => {
     await new Promise((r) => setTimeout(r, 40));
     expect(processor.mock.calls.length).toBe(callsAtStop);
     expect((await latestTask(String(task._id)))?.status).toBe('done');
+  });
+});
+
+describe('steerTask / cancelTask (#254 routes slice)', () => {
+  it('appends a steering user event on an active task', async () => {
+    const task = await createTask('steer');
+    const result = await steerTask(task, 'change of plan');
+    expect(result.status).toBe('queued');
+    const events = await TaskEvent.find({ taskId: task._id }).sort({ seq: 1 });
+    expect(events.map((e) => [e.seq, e.role, e.content])).toEqual([
+      [0, 'user', 'do steer'],
+      [1, 'user', 'change of plan'],
+    ]);
+  });
+
+  it('re-queues a paused task on a steering instruction (resume-as-steering, D6)', async () => {
+    const task = await createTask('resume');
+    await Task.updateOne({ _id: task._id }, { $set: { status: 'paused' } });
+    const paused = await latestTask(String(task._id));
+    const result = await steerTask(paused!, 'continue');
+    expect(result.status).toBe('queued');
+    expect((await latestTask(String(task._id)))?.status).toBe('queued');
+  });
+
+  it('refuses to steer a terminal task without appending (D14)', async () => {
+    const task = await createTask('terminal');
+    await Task.updateOne({ _id: task._id }, { $set: { status: 'done' } });
+    const done = await latestTask(String(task._id));
+    const result = await steerTask(done!, 'too late');
+    expect(result).toEqual({ status: 'refused' });
+    expect(await TaskEvent.countDocuments({ taskId: task._id })).toBe(1);
+  });
+
+  it('cancels an active task and leaves terminal tasks untouched', async () => {
+    const active = await createTask('cancel');
+    await cancelTask(active);
+    expect((await latestTask(String(active._id)))?.status).toBe('cancelled');
+
+    await Task.updateOne({ _id: active._id }, { $set: { status: 'done' } });
+    await cancelTask((await latestTask(String(active._id)))!);
+    expect((await latestTask(String(active._id)))?.status).toBe('done');
   });
 });

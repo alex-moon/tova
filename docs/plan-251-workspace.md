@@ -88,8 +88,11 @@ Slice-level decisions live in the slice plan docs; this section carries epic-lev
       (connector `maxSteps` field + `taskSequencer` turn loop + steering/budget/resume tests)
       on `feat/tv/254-sequencer-loop` via PR #273, merged to `epic/251-workspace` at `a080039`;
       the post-merge hardening (`e305649`, tool-result + chip-query persistence) missed that
-      merge and lands via the follow-up hardening PR as `e6c95b7`; API routes + task client view
-      remain**; #254 stays open until the epic ships)
+      merge and landed via follow-up PR #274, merged to `epic/251-workspace` at `cf2f93e`;
+      **API routes landed on `feat/tv/254-task-routes` via PR #275 (`routes/tasks.ts` +
+      `taskService` steer/cancel + D12 seq-retry + D13 cancel-boundary + D14/D15), pending
+      merge to `epic/251-workspace`; the **task client view** remains**; #254 stays open
+      until the epic ships)
 - [ ] Slice #255 — chat-task integration
 - [ ] Slice #256 — retire the entity graph
 - [ ] Epic PR `epic/251-workspace` → `main`, linking this doc, `npm run ci` green
@@ -244,6 +247,19 @@ change, newest last. No phase numbers: the loop records outcomes, not protocol s
   `epic/251-workspace`), follow-up PR **#274** opened against `epic/251-workspace`; `npm run ci`
   green on the branch (95 suites, 1184 tests). Done checklist #254 line and this log corrected to
   match.
+- 2026-10-11 — reconciliation + routes slice: hardening PR #274
+  (`fix/tv/254-sequencer-hardening` → `epic/251-workspace`) merged (merge commit `cf2f93e`),
+  landing the tool-result + chip-query persistence the sequencer loop needs. Then the next
+  unfinished #254 task — the API routes — was implemented on `feat/tv/254-task-routes` (cut
+  from the epic branch): `routes/tasks.ts` (`create/list/get/instruction/cancel`, all
+  `authenticate`d and `userId`-scoped, ZDR refusal at creation), `taskService` `steerTask`/
+  `cancelTask`, and two stream-integrity changes the API introduces — `appendTaskEvent`
+  retries the `{taskId, seq}` collision now that the API is a second stream writer (D12),
+  and the processor re-reads task status each step so a cancel is observed at the boundary
+  (D13). Terminal instructions are refused (D14); route surface recorded as D15. `npm run ci`
+  green (96 suites, 1206 tests). Slice PR **#275** opened against `epic/251-workspace`. The
+  task **client view** (read-only stream, queued composer, Playwright ~375px) is the
+  remaining #254 work.
 
 ## Follow-ups
 
