@@ -17,8 +17,6 @@ const keys = [
   'LANGSMITH_PROJECT',
   'LANGCHAIN_PROJECT',
   'BRAVE_SEARCH_API_KEY',
-  'ENTITY_GRAPH_ENABLED',
-  'ENTITY_GRAPH_PROMPT_INJECTION',
   'CHAT_MAX_OUTPUT_TOKENS',
   'PORT',
   'TRUST_PROXY_HOPS',
@@ -65,8 +63,6 @@ describe('config/index', () => {
       process.env.LANGSMITH_API_KEY = 'ls-key';
       process.env.LANGSMITH_PROJECT = 'tova-dev';
       process.env.BRAVE_SEARCH_API_KEY = 'brave';
-      process.env.ENTITY_GRAPH_ENABLED = 'true';
-      process.env.ENTITY_GRAPH_PROMPT_INJECTION = 'true';
       process.env.CHAT_MAX_OUTPUT_TOKENS = '2048';
       process.env.PORT = '4000';
       process.env.TRUST_PROXY_HOPS = '1';
@@ -93,8 +89,6 @@ describe('config/index', () => {
       expect(config.langsmith.apiKey).toBe('ls-key');
       expect(config.langsmith.project).toBe('tova-dev');
       expect(config.search.braveApiKey).toBe('brave');
-      expect(config.entityGraph.extractionEnabled).toBe(true);
-      expect(config.entityGraph.promptInjectionEnabled).toBe(true);
       expect(config.chat.maxOutputTokens).toBe('2048');
       expect(config.runtime.port).toBe('4000');
       expect(config.runtime.trustProxyHops).toBe('1');
@@ -134,10 +128,7 @@ describe('config/index', () => {
       expect(config.safeBrowsing.apiKey).toBe('gk');
     });
 
-    it('booleans are truthiness checks, not string comparisons', () => {
-      expect(config.entityGraph.extractionEnabled).toBe(false);
-      process.env.ENTITY_GRAPH_ENABLED = 'false';
-      expect(config.entityGraph.extractionEnabled).toBe(true);
+    it('storage configuration is a truthiness check, not a string comparison', () => {
       process.env.DO_SPACES_KEY = 'k';
       process.env.DO_SPACES_SECRET = 's';
       process.env.DO_SPACES_BUCKET = '';

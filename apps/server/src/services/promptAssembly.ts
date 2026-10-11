@@ -99,22 +99,6 @@ const profileContextBlock = (
     .trim();
 };
 
-const KEY_INTRO =
-  'You also have context from the user’s past chats, below — durable people, places, ' +
-  'projects and commitments they have mentioned. Use it only where relevant to the ' +
-  'current question to connect what they are asking about with what they already told ' +
-  'you; it may be stale, so do not assert it as fact if the chat contradicts it.';
-
-// Pre-retrieved entity-graph block (issue #138, plan task 4). The caller does
-// the Mongo retrieval and the flag check; this function only decides layout
-// and whether the block is worth a slot at all — an empty/garbage block must
-// not shift an otherwise identical prompt (plan decision 4's regression guard).
-const entityGraphBlock = (block: string | null | undefined): string => {
-  const trimmed = block?.trim();
-  if (!trimmed) return '';
-  return ['<user:knowledge_graph>', KEY_INTRO, '', trimmed, '</user:knowledge_graph>'].join('\n');
-};
-
 const LIBRARY_INTRO =
   'The user is likely referring to one of the files in their library, listed below ' +
   '(newest first) with the id needed to open it. Match the request to the most ' +
@@ -124,7 +108,7 @@ const LIBRARY_INTRO =
 // #253: pre-retrieved workspace memory. The caller does the gate and the Mongo
 // read; this function only decides layout and the empty-no-op guard, so an
 // empty block never shifts an otherwise identical prompt (same posture as the
-// entity and library blocks).
+// library block).
 const WORKSPACE_INTRO =
   'Below is context from the user’s own past work — earlier chats and files. Use it ' +
   'only where it is relevant to the current question, to connect what they are asking ' +
@@ -168,7 +152,7 @@ const taskCompletionBlock = (block: string | null | undefined): string => {
  * — newest first, capped at 20, with an honest truncation notice when more
  * exist. Kept pure and separate from the Mongo read (`chat.ts:libraryBlockFor`)
  * so the cap/notice contract is unit-testable without a DB, mirroring the
- * retrieval/layout split used for the entity-graph block.
+ * retrieval/layout split used for the workspace block.
  */
 export const fileLibraryIndex = (
   rows: {
@@ -309,7 +293,6 @@ const timezoneContextLine = (timezone?: string | null): string => {
 
 export const buildSystemContent = (
   user: Pick<UserDocument, 'name' | 'preferredName' | 'location' | 'settings'> | null,
-  knowledgeBlock: string | null | undefined = undefined,
   fileLibraryBlock: string | null | undefined = undefined,
   // #261: persisted turns carry a per-message timestamp header, which now
   // supplies both the day and the time-of-day, so the bare date line is
@@ -339,7 +322,6 @@ export const buildSystemContent = (
     includeDate ? `Today's date is ${clockIn(now, timezone).date} (${zoneLabel}).` : '',
     timezoneContextLine(timezone),
     profileContextBlock(user),
-    entityGraphBlock(knowledgeBlock),
     workspaceBlock(workspaceMemoryBlock),
     libraryBlock(fileLibraryBlock),
     taskCompletionBlock(taskCompletion),

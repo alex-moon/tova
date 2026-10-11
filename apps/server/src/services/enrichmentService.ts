@@ -24,9 +24,9 @@ import { fileLibraryIndex } from './promptAssembly';
  */
 
 /*
- * Kill switch, mirroring ENTITY_GRAPH_ENABLED: enrichment (an extra aux call
- * per turn) can be turned off without a deploy. Default ON — the pre-#232 guard
- * ran on every text turn, so this preserves that behaviour.
+ * Kill switch: enrichment (an extra aux call per turn) can be turned off
+ * without a deploy. Default ON — the pre-#232 guard ran on every text turn,
+ * so this preserves that behaviour.
  */
 export const isEnrichmentEnabled = (): boolean => {
   const raw = process.env.ENRICHMENT_ENABLED;
@@ -169,8 +169,8 @@ export const classifyFileIntent = async (
  * #214/#238: bounded library index for the system prompt, mirroring
  * `list_files` exactly — newest first, 20 rows, the 21st only sets the
  * truncation notice — so the injected list and the tool agree. Never throws: a
- * prompt-enrichment read must not degrade a chat turn (same posture as the
- * entity-graph block). Moved here from the chat route with the enrichment pass.
+ * prompt-enrichment read must not degrade a chat turn. Moved here from the
+ * chat route with the enrichment pass.
  */
 export const libraryIndexFor = async (userId: string): Promise<string> => {
   try {

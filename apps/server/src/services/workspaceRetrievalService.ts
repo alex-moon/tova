@@ -2,7 +2,6 @@ import mongoose from 'mongoose';
 import { Asset } from '../models/Asset';
 import { Message } from '../models/Message';
 import { Session } from '../models/Session';
-import { promptWords } from './entityRetrievalService';
 import { config } from '../config';
 
 /*
@@ -17,20 +16,59 @@ import { config } from '../config';
  * Retrieval is personal-scale and lexical (#251: no vector infra in v1):
  * keyword-overlap scoring over a recent bounded candidate pool, recency as a
  * tiebreak only. An overlap of zero scores zero, so recency alone cannot drag
- * an unrelated slice into the block — the same rule the entity block keeps.
+ * an unrelated slice into the block.
  *
  * The gate (does a turn deserve retrieval at all?) lives in
- * `enrichmentService.ts`; this module is pure retrieval + layout, mirroring
- * the entityRetrievalService split so scoring is unit-testable without Mongo.
+ * `enrichmentService.ts`; this module is pure retrieval + layout so scoring
+ * is unit-testable without Mongo.
  */
 
-// #251/decision: kill switch, mirroring ENTITY_GRAPH_PROMPT_INJECTION.
-// Default OFF — a wrong injection pollutes every turn, so the block ships
-// opt-in until the gate evals exist (see docs/plan-253-workspace-memory.md).
+/*
+ * Keyword tokeniser for lexical scoring (moved here from the retired
+ * `entityRetrievalService`, #256). Lowercase, split on non-word characters,
+ * drop single characters and stopwords that carry no linking signal — "the
+ * hotel" still matches a slice mentioning "hotel" via `hotel`, but 'the'
+ * alone must not surface unrelated slices.
+ */
+const WORD_PATTERN = /[a-z0-9']+/g;
+
+const STOPWORDS = new Set([
+  'a',
+  'an',
+  'the',
+  'and',
+  'or',
+  'for',
+  'to',
+  'of',
+  'in',
+  'on',
+  'near',
+  'at',
+  'is',
+  'it',
+  'my',
+  'me',
+  'you',
+  'we',
+  'i',
+  'be',
+  'are',
+  'was',
+]);
+
+export const promptWords = (prompt: string): Set<string> => {
+  const words = prompt.toLowerCase().replace(/\s+/g, ' ').trim().match(WORD_PATTERN) ?? [];
+  return new Set(words.filter((word) => word.length > 1 && !STOPWORDS.has(word)));
+};
+
+// #251/decision: kill switch. Default OFF — a wrong injection pollutes every
+// turn, so the block ships opt-in until the gate evals exist (see
+// docs/plan-253-workspace-memory.md).
 export const isWorkspaceMemoryEnabled = (): boolean => config.workspaceMemory.enabled;
 
-// Injection budget (chars). Below the entity block's 1500 because the library
-// index competes for the same prompt budget (plan decision 4).
+// Injection budget (chars), sized so the block leaves room for the library
+// index in the same prompt budget (plan decision 4).
 export const BLOCK_CAP = 1200;
 
 // Candidate pool sizes: bounded so cost is flat regardless of history length.
@@ -103,9 +141,8 @@ export const matchSnippet = (text: string, prompt: string, cap = 160): string =>
 
 /*
  * Layout: one bullet per slice, hard character cap, empty-on-nothing so an
- * empty block never shifts an otherwise identical prompt (the entity block's
- * regression guard, plan-138 decision 4). Chat slices carry their session
- * title + date; file slices carry their filename.
+ * empty block never shifts an otherwise identical prompt. Chat slices carry
+ * their session title + date; file slices carry their filename.
  */
 export const buildWorkspaceBlock = (
   prompt: string,
@@ -134,8 +171,8 @@ export const buildWorkspaceBlock = (
 /*
  * Mongo-backed retrieval: a recent bounded pool of the user's messages (joined
  * to their session titles) and extracted-asset text, scored against the prompt.
- * Empty block when nothing overlaps. Never throws — memory, like the entity
- * block, must not degrade a chat turn.
+ * Empty block when nothing overlaps. Never throws — memory must not degrade a
+ * chat turn.
  *
  * Ownership is resolved session-first: `messages` is keyed by `sessionId`, not
  * by `userId`, so the user's sessions are the join key. Fetching the sessions

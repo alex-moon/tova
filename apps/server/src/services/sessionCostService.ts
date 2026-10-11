@@ -6,8 +6,8 @@ import type { AdminSessionCostRow, AdminSessionsCostPayload } from '@tova/shared
 /*
  * Per-session cost breakdown for the admin Traces tab (#224). The model rollup
  * comes from LangSmith llm runs; this view comes from our own persisted
- * `Message` rows, because LangSmith does not reliably attribute chat turns to a
- * session (only entity-extraction runs carry `session_id`).
+ * `Message` rows, which carry the per-role message counts the session table
+ * needs (the model rollup above covers model-level spend from LangSmith).
  *
  * Message in = `role:'user'`, message out = `role:'assistant'`. Token totals and
  * cost cover only the assistant messages that carry `usage` — that field only

@@ -17,20 +17,12 @@ import {
 import { generateChatTitle } from '../services/titleService';
 import { hasPermission, ROUTING_PERMISSION } from '../services/userService';
 import { buildSystemContent, timestampHeader } from '../services/promptAssembly';
-import {
-  isEntityInjectionEnabled,
-  retrieveKnowledgeBlock,
-} from '../services/entityRetrievalService';
 import { ensureUserLocation } from '../services/geoLocationService';
 import { outputTokensFor, promptCharsFrom } from '../services/outputTokenCap';
 import type { MessageContentPart, NeutralStreamChunk } from '../services/llmTypes';
 import { classifyAndPersistPromptDimensions, isTriviallyNeutral } from '../services/metricsService';
 import { computeDeterministicMetrics } from '../services/promptMetrics';
 import { generateFollowups } from '../services/followupService';
-import {
-  extractAndPersistFromTurn,
-  isEntityExtractionEnabled,
-} from '../services/entityExtractionService';
 import { zdrHistorySchema } from '../validation';
 import { redactForLog } from '../services/logRedaction';
 import { decideTurn } from '../services/zdrTurn';
@@ -554,27 +546,11 @@ const saveUserMessageWithMetrics = async (
 };
 
 /*
- * Entity-graph retrieval (#138, plan task 4): read-only, bounded "what we
- * know about you" block for the system prompt, only when
- * ENTITY_GRAPH_PROMPT_INJECTION is set. Never throws — graph enrichment,
- * like extraction, must not degrade a chat turn.
- */
-const knowledgeBlockFor = async (prompt: string, userId: string): Promise<string> => {
-  if (!isEntityInjectionEnabled()) return '';
-  try {
-    return await retrieveKnowledgeBlock(prompt, userId);
-  } catch (err) {
-    console.error('Entity graph retrieval error:', redactForLog(err));
-    return '';
-  }
-};
-
-/*
  * #238/#253: one aux vote, two reads. The gate decides whether the turn refers
  * to a library file (`files`) and/or to past work (`workspace`); the reads are
  * independent Mongo lookups. A negative vote skips its read; a disabled gate
  * (or a timeout inside `enrichmentVotes`) yields both-false. Never throws —
- * enrichment, like the entity block, must not degrade a chat turn.
+ * enrichment must not degrade a chat turn.
  *
  * `skipWorkspace` (ZDR turns, image turns) suppresses the memory read while
  * leaving the files vote intact; the library read is separately suppressed by
@@ -756,11 +732,6 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
         return res.status(400).json({ message: 'Invalid chat history' });
       }
       await ensureUserLocation(userDoc, req.ip);
-      // Plan task 8: ZDR/incognito turns DO retrieve the graph read-only
-      // (Alex, 2026-09-21) — but they write nothing, and this branch an early
-      // return before any persistence does exactly that. Extraction below
-      // never runs for ZDR.
-      const zdrEntityBlock = await knowledgeBlockFor(content, userId as string);
       /*
        * #253: matching the streaming route and plan decision 6, a ZDR turn MAY
        * read the workspace (read-only) — it writes nothing, so it is absent from
@@ -783,7 +754,6 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
           role: 'system',
           content: buildSystemContent(
             userDoc,
-            zdrEntityBlock,
             '',
             true,
             userDoc.settings?.timezone,
@@ -859,7 +829,6 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
     // country; cheap when cached (fresh/cooldown returns immediately) and the
     // service itself never throws, so chat cannot block hard on it.
     await ensureUserLocation(userDoc, req.ip);
-    const entityBlock = await knowledgeBlockFor(content, userId as string);
     /*
      * #238/#253: the enrichment pass (bounded serial) decides whether to inject
      * the file-library index and/or the workspace-memory block. Text-only:
@@ -910,7 +879,6 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
     const turnMessages = await withSystemAndAsset(
       buildSystemContent(
         userDoc,
-        entityBlock,
         libraryBlock,
         false,
         userDoc.settings?.timezone,
@@ -978,21 +946,6 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
     await markNotified(taskCompletion.taskIds).catch((err) =>
       console.error('Task mark-notified error:', redactForLog(err)),
     );
-
-    // Entity graph extraction (#138): one extra LLM call after the turn is
-    // served, fire-and-forget like title generation. Never runs for ZDR
-    // chats (handled above), and only when ENTITY_GRAPH_ENABLED is set —
-    // extraction is enrichment, so failures log and everything else
-    // continues from here.
-    if (isEntityExtractionEnabled()) {
-      extractAndPersistFromTurn({
-        userId: String(userDoc!._id),
-        sessionId: String(session!._id),
-        messageId: String(assistantMessage._id),
-        userText: content,
-        assistantText: assistantContent,
-      }).catch((err) => console.error('Entity extraction error:', redactForLog(err)));
-    }
 
     res.json({
       sessionId: session!._id,
@@ -1198,7 +1151,6 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
       );
     }
 
-    const streamEntityBlock = await knowledgeBlockFor(content, userId as string);
     messages.unshift({
       role: 'system',
       // #261: persisted turns carry per-message timestamps (no date line); ZDR
@@ -1207,7 +1159,6 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
       // known (storage stays UTC).
       content: buildSystemContent(
         streamUserDoc,
-        streamEntityBlock,
         libraryBlock,
         zdr,
         streamUserDoc.settings?.timezone,
@@ -1426,16 +1377,6 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
     await markNotified(streamTaskIds).catch((err) =>
       console.error('Task mark-notified error:', redactForLog(err)),
     );
-
-    if (isEntityExtractionEnabled()) {
-      extractAndPersistFromTurn({
-        userId: String(streamUserDoc!._id),
-        sessionId: String(session!._id),
-        messageId: String(assistantMessage._id),
-        userText: content,
-        assistantText: assistantContent,
-      }).catch((err) => console.error('Entity extraction error:', redactForLog(err)));
-    }
 
     // Follow-up suggestions (issue #33): generated with the cheap guard
     // model, reusing the title/classification service pattern. Skipped for
