@@ -217,15 +217,24 @@ describe('Chat streaming route', () => {
     // The date line is gone on the persisted path.
     expect(options.instructions).not.toContain("Today's date is");
     // Seeded turns carry absolute stamps; the assistant reply 1 minute later
-    // gets no relative line (sub-hour), and the 2-day gap to the new turn does.
+    // gets no relative line (sub-hour). The new turn rides the live clock, so
+    // its absolute stamp is the current UTC minute and its gap to the seeded
+    // turn is whatever unit that (ever-growing) gap rounds to. Assert the
+    // shape, not a fixed value: hard-coding the relative gap from a fixed seed
+    // rots as wall time moves past it.
     const stamp = (d: Date) =>
       `[${d.toISOString().slice(0, 10)} ${d.toISOString().slice(11, 16)} UTC]`;
     const userTurns = turns.filter((m) => m.role === 'user');
     expect(userTurns[0].content).toBe(`${stamp(firstTurnAt)}\nfirst turn`);
     const assistantTurn = turns.find((m) => m.role === 'assistant');
     expect(assistantTurn?.content).toBe(`${stamp(firstReplyAt)}\nfirst reply`);
+    const now = new Date();
+    const pad = (n: number) => String(n).padStart(2, '0');
+    const currentStamp = `${now.toISOString().slice(0, 10)} ${pad(now.getUTCHours())}:${pad(now.getUTCMinutes())}`;
     expect(userTurns[1].content).toMatch(
-      /^\[\d{4}-\d{2}-\d{2} \d{2}:\d{2} UTC — 2 days since the last message\]\nsecond turn$/,
+      new RegExp(
+        `^\\[${currentStamp} UTC — \\d+ (hour|day|week|month|year)s? since the last message\\]\\nsecond turn$`,
+      ),
     );
   });
 
