@@ -24,7 +24,8 @@ activity stays out of the map by contract. This supersedes #138's entity-graph d
 reconceives the closed #166 as the task entity.
 
 Slices, in dependency order (#252 lands first as the prerequisite vocabulary; #256 is
-subtractive and lands only after #253 proves out):
+subtractive and unblocked — the entity graph is unused, so there is no read pattern to
+wait for #253 to replace, and its data is droppable):
 
 - #252 — workspace provenance on generated files (prerequisite vocabulary; tiny)
 - #253 — workspace memory: retrieval across chats and files (flagship)
@@ -56,6 +57,10 @@ Slice-level decisions live in the slice plan docs; this section carries epic-lev
   below), the loop picks a conservative default, records it in the slice plan doc's
   Decisions, and flags it at the top of the slice PR for the owner to veto. The loop
   never silently blocks on an absent owner.
+- **#256 retires the entity graph and drops its data.** Owner decision, 2026-10-11: the
+  entity graph is not used, so #256 is purely subtractive and its existing data (the
+  `entities` and `entityedges` collections) can be wiped — nothing needs to be preserved.
+  No archive or read-only retention is required.
 
 ### Open owner questions (settle, or default-and-flag per the fallback)
 
@@ -70,7 +75,9 @@ Slice-level decisions live in the slice plan docs; this section carries epic-lev
 - #254: meter/pause/confirm behavior on budget breach — settled by the slice plan
   (`docs/plan-254-task-entity.md`, D6: breach → `paused` + visible system event, resume as
   steering); flagged at the slice PR for owner veto per the fallback.
-- #256: entity-graph data disposition (keep read-only, archive, or drop).
+- #256: entity-graph data disposition — **settled (2026-10-11): drop.** The graph is
+  unused; the `entities`/`entityedges` data can be wiped with nothing preserved (see
+  Decisions).
 
 ## Done (epic)
 
@@ -100,7 +107,8 @@ Slice-level decisions live in the slice plan docs; this section carries epic-lev
 - [ ] Slice #255 — chat-task integration (implemented on
       `feat/tv/255-chat-task-integration`; slice PR **#280** opened against `epic/251-workspace`
       at `3982932`, `npm run ci` green; awaiting merge)
-- [ ] Slice #256 — retire the entity graph
+- [ ] Slice #256 — retire the entity graph (disposition settled: drop the data; unblocked
+      — the graph is unused)
 - [ ] Epic PR `epic/251-workspace` → `main`, linking this doc, `npm run ci` green
       (PR #270 opened as a draft; awaiting slice merges before it can leave draft)
 - [ ] Archive this doc to `docs/done/`
@@ -339,6 +347,10 @@ change, newest last. No phase numbers: the loop records outcomes, not protocol s
   human gate), matching the #271/#272/#274/#275 precedent. The #254 Done line flipped to
   done and the slice plan archived to `docs/done/plan-254-task-entity.md`. Next unfinished
   slice: **#255 chat-task integration**.
+- 2026-10-11 — owner decision on #256: the entity graph is unused, so retirement is
+  unblocked (no read pattern to wait for #253 to replace) and its data is droppable — the
+  `entities`/`entityedges` collections can be wiped, nothing preserved. Recorded in
+  Decisions and the open-question list; the #256 Done line annotated.
 - 2026-10-11 — #255 chat-task integration implemented on `feat/tv/255-chat-task-integration`
   (cut from the epic branch tip `3d0b208`) — the join between the chat and task streams, and
   the next unfinished slice. Plan doc `docs/plan-255-chat-task-integration.md` settles the
