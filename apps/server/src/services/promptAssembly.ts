@@ -147,6 +147,22 @@ const libraryBlock = (block: string | null | undefined): string => {
   return ['<user:file_library>', LIBRARY_INTRO, '', trimmed, '</user:file_library>'].join('\n');
 };
 
+// #255 (F4): completed background tasks surfaced into the turn that follows
+// their completion — a queued write the chat route drains, never a mid-turn
+// interruption. The caller does the Mongo read and the mark-notified; this
+// function only decides layout and keeps the empty-no-op guard (an empty block
+// must not shift an otherwise identical prompt).
+const TASK_COMPLETION_INTRO =
+  'One or more background tasks the user started have finished since the last ' +
+  'message. Tell the user briefly what finished and the key result; do not repeat ' +
+  'the task’s full output.';
+
+const taskCompletionBlock = (block: string | null | undefined): string => {
+  const trimmed = block?.trim();
+  if (!trimmed) return '';
+  return ['<task:completed>', TASK_COMPLETION_INTRO, '', trimmed, '</task:completed>'].join('\n');
+};
+
 /*
  * #214 preliminary: render the library index exactly as `list_files` reports it
  * — newest first, capped at 20, with an honest truncation notice when more
@@ -308,6 +324,9 @@ export const buildSystemContent = (
   // #253: pre-retrieved workspace memory block (chats + files). Optional and
   // last so existing callers keep compiling; absent = no block.
   workspaceMemoryBlock: string | null | undefined = undefined,
+  // #255 (F4): completed background tasks drained into this turn (queued write).
+  // Optional and last so existing callers keep compiling; absent = no block.
+  taskCompletion: string | null | undefined = undefined,
 ): string => {
   const now = new Date();
   const zoneLabel = clockIn(now, timezone).zoneName;
@@ -323,6 +342,7 @@ export const buildSystemContent = (
     entityGraphBlock(knowledgeBlock),
     workspaceBlock(workspaceMemoryBlock),
     libraryBlock(fileLibraryBlock),
+    taskCompletionBlock(taskCompletion),
     customInstructionsBlock(user?.settings ?? null),
   ].filter(Boolean);
   return parts.join('\n\n');

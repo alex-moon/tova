@@ -11,6 +11,7 @@ import ProfileView from './components/ProfileView';
 import AssetsView from './components/AssetsView';
 import TasksView from './components/TasksView';
 import BackToChatLink from './components/BackToChatLink';
+import TaskService from './services/tasks';
 
 export interface ToolEvent {
   phase: 'call' | 'result';
@@ -104,6 +105,9 @@ function App() {
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [isChatLoading, setIsChatLoading] = useState(false);
+  // #255: bumped when the composer creates a task, so the embedded card
+  // refetches immediately (an empty card does not poll).
+  const [taskRefreshSignal, setTaskRefreshSignal] = useState(0);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const streamingRef = useRef(false);
   // Per-chat incognito (#144): the composer toggle's state. `null` means "no
@@ -349,6 +353,21 @@ function App() {
     }
   };
 
+  // #255 (F7): hand the composer text to the background worker. The task is
+  // created with this chat as its thin origin; the chat itself stays untouched
+  // until the worker reports back via the completion drain on a later turn.
+  const handleSendToWorker = async (content: string) => {
+    if (!activeSessionId) return;
+    try {
+      await TaskService.create(content, { kind: 'chat', sessionId: activeSessionId });
+      toast.success('Sent to the background worker');
+      setTaskRefreshSignal((n) => n + 1);
+    } catch (err) {
+      console.error('Delegation error:', err);
+      toast.error('Could not send that to the worker');
+    }
+  };
+
   const handleFeedback = async (messageId: string, value: 'up' | 'down' | null) => {
     try {
       if (value === null) {
@@ -456,6 +475,8 @@ function App() {
           <ChatWindow
             messages={messages}
             onSendMessage={handleSendMessage}
+            onSendToWorker={handleSendToWorker}
+            taskRefreshSignal={taskRefreshSignal}
             isLoading={isChatLoading}
             onOpenSidebar={() => setSidebarOpen(true)}
             onFeedback={handleFeedback}

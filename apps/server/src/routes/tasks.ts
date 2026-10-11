@@ -134,13 +134,20 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
 });
 
 // GET /api/tasks — cursor-paged, strictly scoped to the caller (mirrors
-// `GET /api/assets`: newest first, `_id` descending as the cursor).
+// `GET /api/assets`: newest first, `_id` descending as the cursor). An optional
+// `originSessionId` scopes to the tasks a chat started (#255's embedded card):
+// the join is the thin `origin.sessionId` reference, never a reverse pointer on
+// the session.
 router.get('/', authenticate, async (req: AuthRequest, res) => {
   try {
     const query: Record<string, unknown> = { userId: req.user?.id };
     const cursor = req.query.cursor;
     if (typeof cursor === 'string' && isValidObjectId(cursor)) {
       query._id = { $lt: cursor };
+    }
+    const originSessionId = req.query.originSessionId;
+    if (typeof originSessionId === 'string' && originSessionId) {
+      query['origin.sessionId'] = originSessionId;
     }
     const tasks = await Task.find(query)
       .sort({ _id: -1 })

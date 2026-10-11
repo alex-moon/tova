@@ -103,6 +103,29 @@ const TaskService = {
     return res.data;
   },
 
+  // #255: the tasks a given chat started — the embedded card's data. The join
+  // is the thin `origin.sessionId` reference (F1), filtered server-side.
+  async listForSession(sessionId: string): Promise<TaskSummary[]> {
+    const res = await axios.get<TaskListPage>('/api/tasks', {
+      params: { originSessionId: sessionId },
+    });
+    return res.data.tasks;
+  },
+
+  // #255 (F7): the manual "send to worker" path — create a task from the
+  // composer with this chat as its origin, instead of sending a chat turn.
+  async create(instruction: string, origin?: TaskOrigin): Promise<TaskSummary> {
+    try {
+      const res = await axios.post<{ task: TaskSummary }>('/api/tasks', {
+        instruction,
+        ...(origin ? { origin } : {}),
+      });
+      return res.data.task;
+    } catch (err) {
+      throw toTaskError(err);
+    }
+  },
+
   async get(taskId: string): Promise<TaskDetail> {
     try {
       const res = await axios.get<TaskDetail>(`/api/tasks/${taskId}`);
