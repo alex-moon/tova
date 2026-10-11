@@ -427,14 +427,19 @@ change, newest last. No phase numbers: the loop records outcomes, not protocol s
   grounding-as-offer, absence-as-information, the weights/world epistemic split, and
   conversation shape (help conversations finish) — composed around the #259 stance and
   emotional paragraphs (verbatim) with the brevity rule last. The three ticket owner
-  decisions are settled in the slice plan (`docs/plan-263-workspace-prompt.md`): size
+  decisions are settled in the slice plan (`docs/done/plan-263-workspace-prompt.md`): size
   budget ~2× the prior prompt; state vocabulary stays in the envelope intros (no separate
   state tag); no client-side conversation-shape follow-up. Unit pins added to
-  `promptAssembly.test.ts`; a deterministic weights-side golden case
+  `promptAssembly.test.ts`; a deterministic "no reflex search" golden case
   (`arithmetic-no-search`) added to `evals/cases.ts` + pinned in `cases.test.ts`.
-  `npm run ci` green (96 suites, 1194 tests). Slice PR opened against `epic/251-workspace`;
-  the slice plan archived to `docs/done/`. The completed non-epic plan docs (#257, #259,
-  #260, #261, #262) were archived to `docs/done/` in the same PR.
+  `npm run ci` green (96 suites, 1194 tests). Slice PR **#282** opened against
+  `epic/251-workspace`; the slice plan archived to `docs/done/`. The completed non-epic plan
+  docs (#257, #259, #260, #261, #262) were archived to `docs/done/` in the same PR.
+  Owner review of #282 caught a defect: the layer-4 list named **arithmetic** as
+  weights-side (transcribed from the ticket without challenge), which is wrong. Arithmetic
+  was dropped from the "trust yourself" list in #282; a **calculator tool** (mathjs
+  number-only, locked down) is a separate follow-up slice that will add the tool and point
+  arithmetic at it. See the slice plan's correction entry.
 
 ## Follow-ups
 

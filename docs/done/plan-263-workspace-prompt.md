@@ -26,9 +26,10 @@ things and how to work" layer, authored as one constitution with it (the two are
 3. **Absence of information is information.** No visible connection is information, not
    failure. Invite intent only when the view is thin *and knowing more would change what
    you do* — once, in your own words, at the natural moment.
-4. **Epistemic contract (weights/world split).** Disposition, reasoning, arithmetic, the
-   given clock, the user's own material: from the weights, no citation. Time-sensitive,
-   specific, or subject-matter claims about the world: grounded in tools/retrieval, cited.
+4. **Epistemic contract (weights/world split).** Disposition, reasoning, the given clock,
+   the user's own material: from the weights, no citation. Time-sensitive, specific, or
+   subject-matter claims about the world: grounded in tools/retrieval, cited. (Arithmetic is
+   *not* weights-side — see the correction below; it gets a tool in a follow-up slice.)
 5. **Conversation shape.** Memory lives in the workspace, not the transcript, so help
    conversations *finish*; a fresh conversation loses nothing.
 
@@ -64,12 +65,19 @@ things and how to work" layer, authored as one constitution with it (the two are
   decision: **no follow-up client/session ticket is opened from this slice.** The nudge is
   a disposition ("help it finish"); client/session UX affordances (an explicit "start
   fresh" surface) are a separate product question, deliberately out of scope here.
-- **New deterministic eval coverage for the weights side.** Existing golden cases already
-  pin the *world* side (a current-events question requires `web_search` + inline sources:
-  `pm-announcements-web`, `benchmaxxed-evals-web`) and absence (`no-sources-unanswerable`
-  requires an explicit no-sources signal). The gap is the *weights* side — that Tova does
-  **not** reflexively reach for a tool on pure reasoning. A new case (`arithmetic-no-search`)
-  pins it.
+- **New deterministic eval coverage for the "don't over-search" side.** Existing golden
+  cases already pin the *world* side (a current-events question requires `web_search` +
+  inline sources: `pm-announcements-web`, `benchmaxxed-evals-web`) and absence
+  (`no-sources-unanswerable` requires an explicit no-sources signal). A new case
+  (`arithmetic-no-search`) pins the negative: a calculation must not trigger a web search
+  or a file read.
+- **Arithmetic is a tool case, not a weights case (owner correction, 2026-10-11).** The
+  ticket's layer-4 list named arithmetic as weights-side; that premise is wrong — LLMs are
+  unreliable at multi-digit arithmetic. This slice **drops arithmetic from the "trust
+  yourself" list**; a dedicated calculator tool (mathjs number-only, locked down) is a
+  follow-up slice that will move arithmetic to the tools side. The `arithmetic-no-search`
+  case stays (its negative assertion still holds) and will be repointed at the calculator
+  when that lands.
 
 ## Done
 
@@ -77,7 +85,7 @@ things and how to work" layer, authored as one constitution with it (the two are
       with the #259 stance/emotional paragraphs (verbatim) and the brevity rule (last).
 - [x] `promptAssembly.test.ts`: pin the new dispositions and that conversation shape sits
       before the brevity rule; keep the existing stance/no-trigger pins green.
-- [x] `evals/cases.ts`: add `arithmetic-no-search` (weights side of the split).
+- [x] `evals/cases.ts`: add `arithmetic-no-search` (negative: no reflex tool use).
 - [x] `evals/cases.test.ts`: pin the new case.
 - [x] `npm run ci` green (96 suites, 1194 tests; client lint/format/test/build).
 - [x] PR [#282](https://github.com/alex-moon/tova/pull/282) opened against
@@ -103,6 +111,9 @@ things and how to work" layer, authored as one constitution with it (the two are
 
 ## Follow-ups
 
+- **Calculator tool** — a dedicated arithmetic tool (mathjs number-only, locked down),
+  filed as a separate slice; it will move arithmetic to the tools side of the prompt and
+  repoint the `arithmetic-no-search` case at the tool.
 - **Semantic eval cases** for the judgement-only clauses (intent invitation, clean
   conversation close) — needs an LLM-judge or a human review harness; not deterministic.
 - **Weak-vs-strong connection state** in the retrieval envelope, if gate evals (#253
@@ -123,3 +134,11 @@ things and how to work" layer, authored as one constitution with it (the two are
   this environment — `BRAVE_API_KEY` is unset (the `web_search` tool cannot run) and no
   GitHub MCP server is wired — so their failures are environmental, not prompt regressions.
   The new prompt did not break tool use on any case.
+- 2026-10-11 — owner review caught a real defect: the layer-4 list named **arithmetic** as
+  weights-side, which is wrong — LLMs are unreliable calculators, and arithmetic is exactly
+  the kind of thing that should be a tool. The phrase came straight from the ticket, and was
+  transcribed without challenge. Fixed on this branch by dropping arithmetic from the
+  "trust yourself" list; a **calculator tool** (mathjs number-only, locked down) is a
+  separate follow-up slice that will add the tool and point arithmetic at it. The
+  `arithmetic-no-search` case description was corrected to state the negative only (no
+  reflex search/file read), not the wrong "comes from the model" claim.

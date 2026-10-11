@@ -145,8 +145,9 @@ export const CASES: EvalCase[] = [
     id: 'arithmetic-no-search',
     prompt: 'If I put away £250 a month, how much will that be after three years?',
     description:
-      '#263 weights/world split: pure arithmetic and reasoning come from the model, not a ' +
-      'tool — the agent must not reflexively search the web or reach for files to answer it.',
+      '#263: a calculation must not trigger a web search or a file read — arithmetic is not ' +
+      'a retrieval task. (A dedicated calculator tool is a follow-up slice; this case pins ' +
+      'the negative — no reflex tool use — until it lands.)',
     assertions: [
       { type: 'tool_not_called', tool: 'web_search' },
       { type: 'tool_not_called', tool: 'list_files' },
