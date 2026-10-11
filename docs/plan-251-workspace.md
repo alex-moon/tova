@@ -83,8 +83,9 @@ Slice-level decisions live in the slice plan docs; this section carries epic-lev
       slice branch `feat/tv/253-workspace-memory` kept; #253 issue stays open until the
       epic ships, tracked above)
 - [ ] Slice #254 — task entity (foundation landed: PR #269 merged to `epic/251-workspace`
-      at `d3fcc6f`; #254 stays open — the loop-ownership spike and sequencer loop are still
-      gated on that spike)
+      at `d3fcc6f`; **loop-ownership spike DONE (decision (c) hybrid, cap 1) on
+      `feat/tv/254-loop-ownership`; sequencer loop + connector field next**; #254 stays
+      open until the sequencer lands)
 - [ ] Slice #255 — chat-task integration
 - [ ] Slice #256 — retire the entity graph
 - [ ] Epic PR `epic/251-workspace` → `main`, linking this doc, `npm run ci` green
@@ -169,6 +170,30 @@ change, newest last. No phase numbers: the loop records outcomes, not protocol s
   not a change, that the chat corpus reads `role: 'user'` only — widening to assistant turns
   is a gate-eval question left to the owner. `npm run ci` green. Slice plan carries the
   detail.
+- 2026-10-11 — #254 loop-ownership spike complete on `feat/tv/254-loop-ownership` (cut from
+  `epic/251-workspace`). **Decision: (c) hybrid, driver-pinnable small cap (cap 1).** A raw
+  Mastra probe (`maxSteps: 1`, tools attached, both providers, both channels) shows Mastra
+  **executes the tool internally and returns only the result** — `toolCalls: 1`,
+  `toolResults: 1`, executed, `text: ""` — so option (b) is unreachable via the existing
+  path; the LangSmith trace (`tova-dev`) confirms a `tool` span child of `step: 0`. A
+  driver can pin a per-call cap and drain steering at each call boundary. **Granularity
+  limitation raised here per the spike protocol:** task steering is per-*model-step*, not
+  per-*tool-call* (the parked interrupt D8 degrades the same). Unblocking the sequencer
+  needs one field, `CompletionOptions.maxSteps`, threaded through the non-exported
+  `callOptionsFrom` — the first item of the next pass. Frozen step schema (one step = one
+  cap-1 roster call; call+result together in the step's assistant event) recorded in
+  `docs/plan-254-task-entity.md`; decision posted to #254 (comment `6107858749`).
+- 2026-10-11 — #254 spike-pass hardening on `feat/tv/254-loop-ownership` (commit `d1f3cf8`,
+  pushed; carried in PR #272). A review of the spike commit (`f3a2678`) against the landed
+  tree: the "Current state" section claimed live `file:line` refs but they had rotted when
+  the foundation landed (`mastraService.ts` and `routes/chat.ts` both shifted) — every ref
+  re-pointed and the section relabelled as the pre-foundation snapshot; the same section's
+  "no `TASK_MAX_STEPS` anywhere" claim, invalidated by `config.task.maxSteps`, called out
+  inline; the spike method's second provider corrected Groq→Fireworks (the roster serves the
+  probed model on DeepInfra + Fireworks only); and the "no issue comments" note updated to
+  reflect the two now on #254. `npm run ci` green (server 93 suites / 1166 tests, client 250).
+  PR #272 still open/`MERGEABLE` under the unsettled self-merge owner gate; slice plan
+  (`docs/plan-254-task-entity.md`) carries the corrected refs and method.
 
 ## Follow-ups
 
