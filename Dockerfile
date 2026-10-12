@@ -1,34 +1,48 @@
 # Backend image (#257 workspace layout). Installs are scoped per workspace so
 # the builder never pulls trees it does not build (client tooling stays out of
 # server-only layers) and the prod stage carries only the server runtime tree.
+#
+# The client and server builds run as separate stages (#257 follow-up) so
+# BuildKit builds them in parallel and neither install drags in the other's
+# toolchain.
 
-# Build stage
-FROM node:22-alpine AS builder
+# Client build stage: the server embeds the client bundle as the production
+# static fallback (nginx is the primary frontend path; the embedded copy serves
+# direct backend-port access).
+FROM node:22-alpine AS client-builder
 
 WORKDIR /app
 
-# Workspace manifests first so the dependency layers cache independently of
-# source changes. All four must exist: npm ci resolves the whole workspace
-# graph from the root lockfile before applying the -w filter.
+# Workspace manifests first so the dependency layer caches independently of
+# source changes. The client type-imports shared through the @shared alias into
+# ../shared/src, so only shared's manifest is needed here (no shared build).
+COPY package.json package-lock.json ./
+COPY apps/client/package.json apps/client/
+COPY apps/shared/package.json apps/shared/
+
+RUN npm ci -w apps/client --ignore-scripts
+
+COPY apps/shared/src apps/shared/src
+COPY apps/client apps/client
+
+RUN npm run build -w apps/client
+
+# Server build stage: shared (types boundary + mongoUri runtime helper) then
+# server. Shared must build first: server tsc consumes its emitted d.ts.
+FROM node:22-alpine AS server-builder
+
+WORKDIR /app
+
 COPY package.json package-lock.json ./
 COPY apps/server/package.json apps/server/
 COPY apps/shared/package.json apps/shared/
-COPY apps/client/package.json apps/client/
-COPY apps/migrations/package.json apps/migrations/
 
-# --ignore-scripts: no workspace lifecycle runs before its sources are copied.
-RUN npm ci -w apps/shared -w apps/server -w apps/client --ignore-scripts
+RUN npm ci -w apps/server --ignore-scripts
 
-# Sources: shared (types boundary), server, and the client build that the
-# server embeds as the production static fallback (nginx is the primary
-# frontend path; the embedded copy serves direct backend-port access).
 COPY apps/shared apps/shared
 COPY apps/server apps/server
-COPY apps/client apps/client
 
-# Build order matters: shared emits the contracts d.ts that server tsc
-# consumes; the client build is independent.
-RUN npm run build -w apps/shared && npm run build -w apps/server && npm run build -w apps/client
+RUN npm run build -w apps/shared && npm run build -w apps/server
 
 # Production stage
 FROM node:22-alpine
@@ -39,14 +53,15 @@ COPY package.json package-lock.json ./
 COPY apps/server/package.json apps/server/
 COPY apps/shared/package.json apps/shared/
 
-# Server runtime tree only. @tova/shared is types-only by contract — every
-# server import of it is elided at emit — so its dist is intentionally absent.
+# Server runtime tree only. @tova/shared is now a runtime dependency (server
+# imports buildMongoUri), so its emitted dist ships below; its own deps are nil.
 RUN npm ci -w apps/server --omit=dev --ignore-scripts
 
-# Built assets: server dist, the embedded client dist, and the vendored
-# tessdata (#209: OCR must not egress to a CDN at recognition time).
-COPY --from=builder /app/apps/server/dist ./apps/server/dist
-COPY --from=builder /app/apps/client/dist ./apps/client/dist
+# Built assets: server dist, shared runtime dist, the embedded client dist, and
+# the vendored tessdata (#209: OCR must not egress to a CDN at recognition time).
+COPY --from=server-builder /app/apps/server/dist ./apps/server/dist
+COPY --from=server-builder /app/apps/shared/dist ./apps/shared/dist
+COPY --from=client-builder /app/apps/client/dist ./apps/client/dist
 COPY assets ./assets
 
 # Expose port

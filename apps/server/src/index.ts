@@ -16,7 +16,7 @@ import profileRoutes from './routes/profile';
 import assetRoutes from './routes/assets';
 import taskRoutes from './routes/tasks';
 import mcpServerRoutes from './routes/mcpServers';
-import { buildMongoUri } from './mongoUri';
+import { buildMongoUri } from '@tova/shared';
 import { getJwtSecret } from './config/jwt';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';

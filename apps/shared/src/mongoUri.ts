@@ -1,3 +1,8 @@
+// Mongo connection string assembly, shared by the server, migrations, and the
+// host-side scripts (#257 follow-up): the migration runner used to reach into
+// the server tree for this, which forced its image to carry the whole server
+// runtime just to build a URI.
+//
 // Two connection paths (issue #138): MONGODB_URL takes precedence when set and
 // is returned verbatim — never re-parsed or reassembled — so a spec-accurate
 // Atlas `mongodb+srv://...` URL (or any full URL, credential and options

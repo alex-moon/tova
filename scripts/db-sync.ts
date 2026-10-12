@@ -5,7 +5,7 @@ import { mkdirSync, readdirSync, existsSync } from 'node:fs';
 import path from 'node:path';
 import bcrypt from 'bcryptjs';
 import { MongoClient, type IndexDescriptionInfo } from 'mongodb';
-import { buildMongoUri } from '../apps/server/src/mongoUri';
+import { buildMongoUri } from '../apps/shared/src/mongoUri';
 
 // One script, five subcommands:
 //   dump     — mongodump MONGODB_DUMP_URL -> data/db-dumps tarball

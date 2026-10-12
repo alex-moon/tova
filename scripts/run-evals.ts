@@ -28,7 +28,7 @@
  */
 import 'dotenv/config';
 import mongoose from 'mongoose';
-import { buildMongoUri } from '../apps/server/src/mongoUri';
+import { buildMongoUri } from '../apps/shared/src/mongoUri';
 import {
   langsmithClientFromEnv,
   parseModelsFlag,
