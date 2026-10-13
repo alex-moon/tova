@@ -1,7 +1,7 @@
 import mongoose from 'mongoose';
 
 // Computed eval rollup (#225), house style of ModelMetricStat: one document
-// per execution of the deterministic eval suite (`src/server/evals/`), across
+// per execution of the deterministic eval suite (`apps/server/src/evals/`), across
 // one or more models. Written by evalRunService; read by the admin Evals tab
 // so a page load never re-queries LangSmith (the #179/#186 "stored so a
 // deploy does not wipe it" rationale). `status: 'running'` is the serialisation

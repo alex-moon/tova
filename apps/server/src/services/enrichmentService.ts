@@ -17,7 +17,7 @@ import { fileLibraryIndex } from './promptAssembly';
  *
  * It is deliberately narrow: the `files` signal is preserved verbatim from the
  * retired guard, and no new signals are invented until the owner supplies the
- * concrete expansion list (see docs/plan-238-aux-enrichment.md follow-ups).
+ * concrete expansion list (see docs/done/plan-238-aux-enrichment.md follow-ups).
  *
  * Enrichment is never load-bearing: a failed call, a slow call, an unparseable
  * reply, or an empty library all degrade to "no block", never an error.
@@ -48,9 +48,6 @@ export const ENRICHMENT_VOTE_PROMPT = `Classify the user's current request below
 
 - files: is the user likely referring to a specific file in their library — an existing uploaded document they expect you to find, open, or quote ("summarise my CV", "what did the lease say about pets", "check the Q3 report")? Say "no" when they ask you to create or save a new file, and "no" for general chat that does not point at an existing document.
 - workspace: is the user likely referring back to their own past work — something discussed in an earlier chat or produced by an earlier run — rather than a file to open now ("what did we decide about the move", "remind me what I said about the budget", "where did we leave the holiday plan")? Say "no" for a fresh question or general chat that does not point back at earlier work.`;
-
-// Back-compat alias: the old export name, kept for existing importers/tests.
-export const FILES_VOTE_PROMPT = ENRICHMENT_VOTE_PROMPT;
 
 /*
  * Extract the LAST balanced, JSON-parseable {...} object in the reply that

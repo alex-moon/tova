@@ -4,7 +4,7 @@ export const STORAGE_KEY = 'tova-theme';
 export const COOKIE_NAME = 'tova-theme';
 
 /**
- * Standalone twin: src/client/index.html carries a verbatim inline copy of
+ * Standalone twin: apps/client/index.html carries a verbatim inline copy of
  * this logic that runs before the bundle loads (keep in sync).
  */
 const readLocalStorage = (): string | null => {

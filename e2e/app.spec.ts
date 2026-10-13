@@ -54,8 +54,7 @@ test('send a message, stream a mocked reply, then switch sessions in the sidebar
 
   // Mocked SSE reply has already been consumed by the time this resolves.
   await expect(page.locator('p').filter({ hasText: /^OK$/ })).toBeVisible();
-  // Model attribution is intentionally not asserted here under the mock;
-  // see docs/ticket-1-responsive.md, "Known open question".
+  // Model attribution is intentionally not asserted here under the mock.
 
   // Switch to another session via the sidebar (if one exists); history renders.
   if (isMobileViewport(page)) {

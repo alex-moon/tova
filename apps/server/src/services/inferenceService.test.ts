@@ -2,9 +2,9 @@ import { inferenceService } from './inferenceService';
 
 /*
  * Tests the provider dispatch in the delegating service. The connectors now
- * live in `mastraService` (the single `@mastra/*` boundary, whose mapping is
- * pinned in `mastraService.test.ts`); this suite pins that options dispatch
- * to the right connector and that un-tagged callers default to `groq`.
+ * live in `mastraService` (the single `@mastra/*` boundary); this suite pins
+ * that options dispatch to the right connector and that un-tagged callers
+ * default to `groq`.
  */
 
 const mockGroqCompletion = jest.fn();

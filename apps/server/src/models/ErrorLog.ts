@@ -1,8 +1,8 @@
 import mongoose from 'mongoose';
 
 // Issue #175: durable record of error-level log output for diagnostics.
-// The admin logs view reads the in-memory ring buffer (logService.ts),
-// which is lost on restart; every entry here survives it.
+// The admin logs view reads retained logs from Grafana Cloud; every entry
+// here is a durable copy that survives a restart.
 const errorLogSchema = new mongoose.Schema(
   {
     // Monotonic buffer id emitted by logService at write time; not unique
@@ -17,9 +17,5 @@ const errorLogSchema = new mongoose.Schema(
 );
 
 errorLogSchema.index({ createdAt: 1 });
-
-export type ErrorLogDocument = mongoose.HydratedDocument<
-  mongoose.InferSchemaType<typeof errorLogSchema>
->;
 
 export const ErrorLog = mongoose.model('ErrorLog', errorLogSchema);

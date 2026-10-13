@@ -7,11 +7,11 @@
  * visible over time. Tracing of the underlying agent calls rides on the
  * Mastra LangSmithExporter (#5) via `trace.sessionId`.
  *
- * #225: the grading core lives in `src/server/services/evalRunService.ts`,
+ * #225: the grading core lives in `apps/server/src/services/evalRunService.ts`,
  * shared with the scheduled admin path; this script keeps CLI parsing,
  * Mongo connect/disconnect, and stdout printing.
  *
- * Not part of CI (same stance as `scripts/eval-classify-models.ts`):
+ * Not part of CI (same stance as the other one-off scripts):
  *   npx tsx scripts/run-evals.ts [--keep-fixtures]
  *   npx tsx scripts/run-evals.ts --models all
  *   npx tsx scripts/run-evals.ts --models "deepinfra:zai-org/GLM-5.3-Flash"

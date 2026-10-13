@@ -10,7 +10,7 @@ import { Db } from 'mongodb';
  * deletion is #233, and app-level seeding (`rosterConfig.ensureSeed`) only
  * recovers an EMPTY collection, so upgrades need this migration.
  *
- * Row content mirrors `ROSTER_SEED` in `src/server/services/rosterConfig.ts`
+ * Row content mirrors `ROSTER_SEED` in `apps/server/src/services/rosterConfig.ts`
  * exactly (drift is pinned by a test). Owner-locked roster, verified live on
  * DeepInfra and Fireworks serverless, 2026-10-08:
  *   - DeepSeek V4.1 Flash  → deepinfra `deepseek-ai/DeepSeek-V4.1-Flash`,

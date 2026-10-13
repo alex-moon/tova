@@ -18,7 +18,7 @@ module.exports = {
   // `@mastra/core`'s CJS build requires ESM-only transitive deps (e.g.
   // `@sindresorhus/slugify`), which ts-jest cannot load. Suites that need
   // agent behaviour mock '@mastra/core/agent' explicitly; everything else
-  // gets inert stubs (src/server/test/mastra*Stub.ts etc.).
+  // gets inert stubs (apps/server/src/test/mastra*Stub.ts etc.).
   moduleNameMapper: {
     // @tova/shared now carries a runtime helper (buildMongoUri); resolve it to
     // source so suites never depend on a prior shared build.

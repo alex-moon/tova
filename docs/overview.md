@@ -54,14 +54,14 @@
 ## Long-Lived Constraints
 
 - Keep model selection abstracted away from end users.
-- Every log emission path passes shared redaction before output (`src/server/services/logRedaction.ts` governs console/admin-buffer output; `traceRedaction.ts` applies the same policy to LangSmith span payloads). Long-form prompt content never lands in stderr or the admin logs view. Note residual surfaces: traces are only sent when a dev LangSmith key is set, and very short personal fragments in error paths are not fully covered by the conservative heuristic.
+- Every log emission path passes shared redaction before output (`apps/server/src/services/logRedaction.ts` governs console/admin-buffer output; `traceRedaction.ts` applies the same policy to LangSmith span payloads). Long-form prompt content never lands in stderr or the admin logs view. Note residual surfaces: traces are only sent when a dev LangSmith key is set, and very short personal fragments in error paths are not fully covered by the conservative heuristic.
 - Preserve secure auth defaults such as HTTP-only cookie handling.
 - Keep local and production runtime claims aligned with the actual repository tooling.
 - Prefer small, reviewable implementation increments over broad speculative rewrites.
 
 ## File-Storage Boundary (#149)
 
-- All Spaces (S3-compatible) object access goes through `src/server/services/workspaceStorage.ts`. Only `workspaceStorage.ts` and test files may import `storageService.ts` directly (enforced by ESLint `no-restricted-imports`).
+- All Spaces (S3-compatible) object access goes through `apps/server/src/services/workspaceStorage.ts`. Only `workspaceStorage.ts` and test files may import `storageService.ts` directly (enforced by ESLint `no-restricted-imports`).
 - The storage-agnostic surface is `WorkspaceStorage` (put/get/getStream/delete/list, keyed by userId + chatId + filename); it is the landing zone for the future workspace feature and a possible local (IndexedDB/fs) backend.
 - Chat-scoped key layout: `<userId>/chats/<chatId>/<filename>`. Asset keys keep their existing `<userId>/<assetId>/<filename>` layout, accessed via the explicit `RawKeyStorage` byKey subset (assets carry their key strings on documents and have no chatId); Spaces-only extras (presigns, config probe) live in `SpacesCapabilities`, not on the agnostic interface.
 

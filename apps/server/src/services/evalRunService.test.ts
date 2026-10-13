@@ -13,7 +13,7 @@ import {
  * #225 service coverage. The suite drives live providers in production; here
  * connectors, runCase, gradeRun, fixtures, repo reads, and the LangSmith
  * client are all injected so the flows are deterministic. The shared jest
- * setup provides the in-memory Mongo (src/server/test/setup.ts).
+ * setup provides the in-memory Mongo (apps/server/src/test/setup.ts).
  */
 
 const model = { provider: 'deepinfra' as const, model: 'openai/gpt-oss-20b' };

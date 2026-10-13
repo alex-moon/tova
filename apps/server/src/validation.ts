@@ -41,8 +41,6 @@ export const createPatSchema = z.object({
     .max(100, { message: 'Name must be at most 100 characters' }),
 });
 
-export type CreatePatRequest = z.infer<typeof createPatSchema>;
-
 // PATCH /api/profile body (issue #35). Strict on purpose: unknown keys
 // (name, avatarUrl, email, role…) are a 400, not silently dropped — a client
 // bug must not pretend success while losing data. Telegram-style: absent keys
@@ -275,6 +273,3 @@ export const mcpServerCreateSchema = z.strictObject({
     .max(4000, { message: 'authToken is too long' })
     .optional(),
 });
-
-export type LoginCredentials = z.infer<typeof loginSchema>;
-export type RegisterCredentials = z.infer<typeof registerSchema>;

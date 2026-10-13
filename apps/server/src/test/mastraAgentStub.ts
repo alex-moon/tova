@@ -3,8 +3,8 @@
  * not explicitly mock it. The real package's transitive deps include
  * ESM-only modules (e.g. `@sindresorhus/slugify`) that ts-jest in CJS mode
  * cannot `require`; the suites that exercise the agent machinery
- * (`mastraService.test.ts` and the route/service tests) replace this module
- * wholesale via `jest.mock('@mastra/core/agent', ...)`, so the stub never
+ * (the route/service tests) replace this module wholesale via
+ * `jest.mock('@mastra/core/agent', ...)`, so the stub never
  * participates in those suites. Any suite that reaches the `Agent` here
  * without a mock fails loudly instead of making real network calls.
  */

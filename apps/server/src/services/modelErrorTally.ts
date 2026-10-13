@@ -26,22 +26,6 @@ export type ModelErrorCategory =
   | 'unknown_provider'
   | 'unknown';
 
-export const CATEGORIES: ModelErrorCategory[] = [
-  'missing_key',
-  'invalid_or_expired_key',
-  'forbidden',
-  'not_found',
-  'rate_limit',
-  'context_length',
-  'overloaded',
-  'server_error',
-  'bad_request',
-  'timeout',
-  'network',
-  'unknown_provider',
-  'unknown',
-];
-
 // AI-SDK APICallError shape, plus plain Axios-style messages
 // ("Request failed with status code 401").
 type StatusCarrier = { statusCode?: unknown; status?: unknown };

@@ -76,20 +76,6 @@ export interface RosterRoutingResult {
  */
 export const MAX_RACE_ATTEMPTS = 6;
 
-/*
- * Feature gate for the #232 racing path. The roster runtime coexists with the
- * tier router (#233 deletes the latter); this flag lets the swap be staged.
- * Default ON everywhere except the test environment, where the chat-route
- * suites still stub the tier primitives. `ROSTER_RACING_ENABLED=0` forces it
- * off, `=1` forces it on.
- */
-export const rosterRacingEnabled = (): boolean => {
-  const raw = process.env.ROSTER_RACING_ENABLED;
-  if (raw === '0') return false;
-  if (raw === '1') return true;
-  return process.env.NODE_ENV !== 'test';
-};
-
 export interface RaceDeps {
   /** Override the roster read (tests). */
   roster?: RosterModel[];
