@@ -137,6 +137,9 @@ export const runTaskStep = async (
   const options: Omit<CompletionOptions, 'provider' | 'model'> = {
     messages,
     userId: String(task.userId),
+    // #298: attribute any file this step generates to the task (task files
+    // carry `provenance.kind: 'task'`, distinct from chat-generated files).
+    taskId: String(task._id),
     maxSteps: 1,
     max_tokens: outputTokensFor(picking?.contextLength, promptCharsFrom(messages)),
     trace: { tags: ['task', `task:${String(task._id)}`], metadata: { taskId: String(task._id) } },

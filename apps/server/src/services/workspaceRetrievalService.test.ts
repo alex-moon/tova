@@ -2,6 +2,8 @@ import { Types } from 'mongoose';
 import { Asset } from '../models/Asset';
 import { Message } from '../models/Message';
 import { Session } from '../models/Session';
+import { Task } from '../models/Task';
+import { TaskEvent } from '../models/TaskEvent';
 import {
   buildWorkspaceBlock,
   isWorkspaceMemoryEnabled,
@@ -10,6 +12,7 @@ import {
   promptWords,
   retrieveWorkspaceBlock,
   scoreSlice,
+  taskTitle,
   type WorkspaceSlice,
 } from './workspaceRetrievalService';
 
@@ -132,6 +135,17 @@ describe('workspaceRetrievalService', () => {
       expect(block).toContain('file "lease.pdf"');
     });
 
+    it('labels task slices as tasks (#298)', () => {
+      const block = buildWorkspaceBlock('budget', [
+        slice({
+          kind: 'task',
+          title: 'Plan the move',
+          text: 'the moving budget is twelve thousand',
+        }),
+      ]);
+      expect(block).toContain('task "Plan the move"');
+    });
+
     it('honours the character cap', () => {
       const long = slice({ text: 'budget '.repeat(400) });
       const withCap = buildWorkspaceBlock('budget', [long], 6, 80);
@@ -161,6 +175,22 @@ describe('workspaceRetrievalService', () => {
       expect(isWorkspaceMemoryEnabled()).toBe(true);
       process.env.WORKSPACE_MEMORY_ENABLED = 'false';
       expect(isWorkspaceMemoryEnabled()).toBe(false);
+    });
+  });
+
+  describe('taskTitle (#298)', () => {
+    it('collapses whitespace and falls back when empty', () => {
+      expect(taskTitle('  Plan   the move\nover the weekend  ')).toBe(
+        'Plan the move over the weekend',
+      );
+      expect(taskTitle('')).toBe('Untitled task');
+      expect(taskTitle('   ')).toBe('Untitled task');
+    });
+
+    it('caps a long instruction with an ellipsis', () => {
+      const title = taskTitle('x'.repeat(200));
+      expect(title.length).toBeLessThanOrEqual(60);
+      expect(title.endsWith('…')).toBe(true);
     });
   });
 
@@ -271,6 +301,82 @@ describe('workspaceRetrievalService', () => {
       const block = await retrieveWorkspaceBlock('lease pets clause', userId);
       expect(block).not.toContain('throwaway.txt');
       expect(block).not.toContain('one cat');
+    });
+
+    it('retrieves task work from the task stream (#298)', async () => {
+      const userId = String(new Types.ObjectId());
+      const task = await Task.create({
+        userId,
+        instruction: 'Plan the move budget',
+        budget: { maxSteps: 25, maxCostUsd: 5 },
+      });
+      await TaskEvent.create({
+        taskId: task._id,
+        seq: 0,
+        role: 'user',
+        content: 'Plan the move budget',
+      });
+      await TaskEvent.create({
+        taskId: task._id,
+        seq: 1,
+        role: 'assistant',
+        content: 'the moving budget is twelve thousand',
+      });
+
+      const block = await retrieveWorkspaceBlock('what was the moving budget', userId);
+      expect(block).toContain('task "Plan the move budget"');
+      expect(block).toContain('twelve thousand');
+    });
+
+    it('never leaks another user\u2019s tasks (#298)', async () => {
+      const userId = String(new Types.ObjectId());
+      const other = String(new Types.ObjectId());
+      const otherTask = await Task.create({
+        userId: other,
+        instruction: 'Secret budget',
+        budget: { maxSteps: 25, maxCostUsd: 5 },
+      });
+      await TaskEvent.create({
+        taskId: otherTask._id,
+        seq: 0,
+        role: 'assistant',
+        content: 'the secret moving budget is nine million',
+      });
+
+      const block = await retrieveWorkspaceBlock('what was the moving budget', userId);
+      expect(block).not.toContain('nine million');
+      expect(block).not.toContain('Secret budget');
+    });
+
+    it('skips system notices and drops tasks with no content (#298)', async () => {
+      const userId = String(new Types.ObjectId());
+      const empty = await Task.create({
+        userId,
+        instruction: 'Empty task',
+        budget: { maxSteps: 25, maxCostUsd: 5 },
+      });
+      await TaskEvent.create({
+        taskId: empty._id,
+        seq: 0,
+        role: 'system',
+        content: 'Task paused: budget reached.',
+      });
+      const real = await Task.create({
+        userId,
+        instruction: 'Real task',
+        budget: { maxSteps: 25, maxCostUsd: 5 },
+      });
+      await TaskEvent.create({
+        taskId: real._id,
+        seq: 0,
+        role: 'assistant',
+        content: 'the moving budget is twelve thousand',
+      });
+
+      const block = await retrieveWorkspaceBlock('what was the moving budget', userId);
+      expect(block).toContain('task "Real task"');
+      expect(block).not.toContain('Empty task');
+      expect(block).not.toContain('budget reached');
     });
 
     it("excludes the current turn's attached asset (not past work)", async () => {

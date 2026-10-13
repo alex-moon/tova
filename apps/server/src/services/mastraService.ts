@@ -216,7 +216,9 @@ const modelSettingsFrom = (options: CompletionOptions) => ({
  * `requestContext.get('userId')` to scope per-user work (e.g. asset
  * library lookups). Since #252 the caller's sessionId rides alongside it
  * (`requestContext.get('sessionId')`) so provenance-writing tools can
- * attribute files to their conversation.
+ * attribute files to their conversation. Since #298 the caller's taskId rides
+ * too (`requestContext.get('taskId')`) for task-origin files, which have no
+ * session.
  */
 /*
  * MCP toolsets (#36): when the caller is a user, resolve platform + personal
@@ -241,6 +243,9 @@ const callOptionsFrom = (
   // (generate_file) can attribute a file to its conversation without coupling
   // to the LangSmith tracing switch (see CompletionOptions.sessionId).
   if (options.sessionId !== undefined) requestContext.set('sessionId', options.sessionId);
+  // #298: the task id rides alongside so a task-generated file is attributed to
+  // its task (the task stream has no session; see CompletionOptions.taskId).
+  if (options.taskId !== undefined) requestContext.set('taskId', options.taskId);
   return {
     ...(options.abortSignal ? { abortSignal: options.abortSignal } : {}),
     // #198: the merged single system message rides in as a per-call override
@@ -641,14 +646,22 @@ const generateFileExecute = async (
   // #252: attribute the file to its conversation when a session is on the
   // context; with no session we leave provenance absent (unknown) rather than
   // inventing one (ZDR turns, raced calls, future non-chat callers).
+  // #298: a task-origin call carries a taskId and no session, so it stamps
+  // `kind: 'task'`; the task id takes precedence (the two never coexist).
   const sessionId = requestContext.get('sessionId') as string | undefined;
+  const taskId = requestContext.get('taskId') as string | undefined;
+  const provenance = taskId
+    ? ({ kind: 'task', taskId } as const)
+    : sessionId
+      ? ({ kind: 'chat', sessionId } as const)
+      : undefined;
   try {
     const result = await createSystemAsset(
       userId,
       filename,
       Buffer.from(content, 'utf8'),
       'text/markdown',
-      sessionId ? { kind: 'chat', sessionId } : undefined,
+      provenance,
     );
     if (!result.ok) return { error: result.code };
     return {
