@@ -122,21 +122,25 @@ Style: Prettier settings in `.prettierrc` (single quotes, trailing commas, 100 p
 
 ### Workspace install/build contract
 
-The repo is an npm-workspaces monorepo (`apps/{client,server,shared,migrations}`) with a
-compiled boundary for `@tova/shared` (#257, #288):
+The repo is an npm-workspaces monorepo (`apps/{client,server,shared,migrations}`).
+`@tova/shared` is resolved **from source** in dev and tests, and compiled only for the
+emit path (#257, #288):
 
-- `apps/shared` is `composite`; `apps/server` declares a TypeScript **project reference**
-  to it. `tsc -b apps/server` builds shared first, then server. Do not add an explicit
-  `npm run build -w apps/shared` prefix to `build`/`typecheck` or the Dockerfile — the
-  reference already declares the order.
-- `dev` is the exception: the server runs from source via `tsx`, so it needs shared's
-  emitted `dist` at runtime and calls `npm run build -w apps/shared` (the package's single
-  `build` script) before starting.
-- `typecheck` runs `tsc -b` and therefore emits `dist` (project references have no
-  emit-free mode); the output is gitignored and ignored by ESLint/Prettier.
+- Dev and tests never need shared's `dist`. `apps/server/tsconfig.json` maps
+  `@tova/shared` to `../shared/src` via `paths`, so `tsx` and `tsc --noEmit` read source;
+  `dev:server` passes `--tsconfig apps/server/tsconfig.json` because tsx discovers its
+  config from the cwd (the repo root has none). The client (Vite alias `@shared`),
+  migrations, and Jest (`moduleNameMapper`) already resolve source.
+- The emit path is a separate, **paths-free** config: `apps/server/tsconfig.build.json`
+  extends the base, sets `paths: {}` + `rootDir: src`, and declares a project reference to
+  `../shared`, so `tsc -b` builds shared first, then server. `rootDir` and the source
+  `paths` mapping cannot coexist (TS6059) — that is why they are split. Do not add an
+  explicit `npm run build -w apps/shared` prefix to `build`/`typecheck` or the Dockerfile;
+  the reference declares the order. `typecheck` is `tsc --noEmit` and writes nothing.
 - Scoped installs (`npm ci -w <pkg> --ignore-scripts`) are deliberate: they keep each
   image's tree minimal, and there are **no workspace `prepare` scripts** — adding one is a
   trap, because npm runs a workspace `prepare` before its sources are copied even under
-  `--ignore-scripts`. Build shared through the project reference instead.
-- Jest resolves `@tova/shared` straight to source (`moduleNameMapper`), so the test suite
-  never depends on a prior shared build.
+  `--ignore-scripts`.
+- `apps/server/src/sharedResolution.contracts.test.ts` pins all of the above (the four
+  source-resolution legs, the paths-free build config, the no-`prepare` rule), so the
+  contract cannot drift silently.
