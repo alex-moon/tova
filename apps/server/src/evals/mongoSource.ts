@@ -144,14 +144,13 @@ const FIXTURE_ASSETS = (): FixtureWithUnits[] => [
   },
 ];
 
-const ensureEvalUser = async () => {
+export const ensureEvalUser = async (): Promise<void> => {
   await User.updateOne(
     { _id: evalUserId },
     { $setOnInsert: { email: evalUserEmail, passwordHash: 'eval-fixture', role: 'user' } },
     { upsert: true },
   );
 };
-
 /** Upsert every fixture asset for the eval user; never touches other users. */
 export const seedEvalSource = async (): Promise<void> => {
   await ensureEvalUser();

@@ -25,6 +25,7 @@
     "db:password": "tsx scripts/db-sync.ts password",
     "logs": "tsx scripts/loki.ts",
     "evals": "tsx scripts/run-evals.ts",
+    "evals:memory": "tsx scripts/run-memory-evals.ts",
     "test": "NODE_OPTIONS=--experimental-vm-modules jest",
     "lint": "eslint apps --ext .ts,.tsx",
     "lint:fix": "npm run lint -- --fix",
