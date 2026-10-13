@@ -64,7 +64,7 @@ export const promptWords = (prompt: string): Set<string> => {
 
 // #251/decision: kill switch. Default OFF — a wrong injection pollutes every
 // turn, so the block ships opt-in until the gate evals exist (see
-// docs/plan-253-workspace-memory.md).
+// docs/done/plan-253-workspace-memory.md).
 export const isWorkspaceMemoryEnabled = (): boolean => config.workspaceMemory.enabled;
 
 // Injection budget (chars), sized so the block leaves room for the library

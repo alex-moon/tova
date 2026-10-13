@@ -1,5 +1,5 @@
 import { EvalRunRecord } from './EvalRunRecord';
-// The shared jest setup (src/server/test/setup.ts) provides the in-memory
+// The shared jest setup (apps/server/src/test/setup.ts) provides the in-memory
 // Mongo, connects mongoose, syncs indexes, and clears collections per test.
 
 /*

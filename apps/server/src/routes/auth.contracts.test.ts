@@ -3,7 +3,7 @@ import { createApp } from '../index';
 
 // Drift tests for the shared auth contracts (issue #20): pin the wire
 // payloads of /api/auth/register, /login and /me to the exact field sets
-// of LoginUserPayload and AuthUser in src/shared/contracts.ts. If a route
+// of LoginUserPayload and AuthUser in apps/shared/src/contracts.ts. If a route
 // starts returning a different shape than the contract, these fail.
 describe('auth route contract drift', () => {
   it('register returns a user payload matching LoginUserPayload exactly', async () => {

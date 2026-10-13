@@ -19,8 +19,4 @@ const modelRouteErrorSchema = new mongoose.Schema({
 
 modelRouteErrorSchema.index({ provider: 1, model: 1, status: 1, category: 1 }, { unique: true });
 
-export type ModelRouteErrorDocument = mongoose.HydratedDocument<
-  mongoose.InferSchemaType<typeof modelRouteErrorSchema>
->;
-
 export const ModelRouteError = mongoose.model('ModelRouteError', modelRouteErrorSchema);

@@ -3,7 +3,7 @@ import type { LlmProvider } from '../services/llmTypes';
 
 /*
  * Central, typed server config surface (issue #142). One module over every
- * env var currently read in src/server. Semantics are byte-identical to the
+ * env var currently read in apps/server/src. Semantics are byte-identical to the
  * call sites: same `||`/`??` operators, same fallbacks, same truthiness —
  * no new validation, no new required vars, no parsing (consumers keep their
  * own Number.parseInt/NaN handling until the follow-up sweep).

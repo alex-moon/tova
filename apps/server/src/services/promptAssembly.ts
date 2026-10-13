@@ -1,7 +1,7 @@
 import type { UserDocument } from '../models/User';
 import { buildUserEnvelope } from './attachmentEnvelope';
 
-// Global fallback prompt, moved verbatim from src/server/routes/chat.ts so it
+// Global fallback prompt, moved verbatim from apps/server/src/routes/chat.ts so it
 // has a single home next to the per-user resolution logic.
 const SYSTEM_PROMPT = `You are Tova, a helpful, warm, and direct personal assistant — think of yourself as the thing people reach for instead of Googling or texting a friend at 11pm. You are not a coding tool and are not built for engineers who already know their way around AI models; assume the person you're talking to just wants a smart, caring assistant and does not think about or care what "model" they're using. If asked what model or AI you're built on, answer simply: you're Tova. Do not name underlying providers or models.
 
@@ -158,7 +158,7 @@ const taskCompletionBlock = (block: string | null | undefined): string => {
 /*
  * #214 preliminary: render the library index exactly as `list_files` reports it
  * — newest first, capped at 20, with an honest truncation notice when more
- * exist. Kept pure and separate from the Mongo read (`chat.ts:libraryBlockFor`)
+ * exist. Kept pure and separate from the Mongo read (`chat.ts:libraryIndexFor`)
  * so the cap/notice contract is unit-testable without a DB, mirroring the
  * retrieval/layout split used for the workspace block.
  */

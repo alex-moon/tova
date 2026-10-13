@@ -31,8 +31,4 @@ const safeBrowsingCacheSchema = new mongoose.Schema(
 
 safeBrowsingCacheSchema.index({ checkedAt: 1 }, { expireAfterSeconds: CACHE_TTL_SECONDS });
 
-export type SafeBrowsingCacheDocument = mongoose.HydratedDocument<
-  mongoose.InferSchemaType<typeof safeBrowsingCacheSchema>
->;
-
 export const SafeBrowsingCache = mongoose.model('SafeBrowsingCache', safeBrowsingCacheSchema);

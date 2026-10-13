@@ -132,5 +132,3 @@ export const stopAssetJobPoller = (): void => {
     timer = null;
   }
 };
-
-export const isAssetJobPollerRunning = (): boolean => timer !== null;

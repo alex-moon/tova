@@ -13,7 +13,7 @@ import {
 /*
  * Task sequencer (#254, epic #251) — the driver-owned turn loop over the task
  * stream. The loop-ownership spike (decision (c), cap 1; see
- * `docs/plan-254-task-entity.md`) froze the shape:
+ * `docs/done/plan-254-task-entity.md`) froze the shape:
  *
  *   one driver step = one `raceRosterCompletion` call pinned to `maxSteps: 1`,
  *   whose options carry `maxSteps: 1` so Mastra runs exactly one model turn

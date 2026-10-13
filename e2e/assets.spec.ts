@@ -60,8 +60,8 @@ const mockUploadPipeline = async (
     }),
   );
   // A "fixed" CORS rule, mirroring what the Spaces bucket must send once the
-  // Allowed Headers delta from docs/spaces-cors.md is applied: PUT is
-  // non-simple, so the browser preflights and needs the CORS response headers.
+  // Allowed Headers delta is applied: PUT is non-simple, so the browser
+  // preflights and needs the CORS response headers.
   const corsHeaders = {
     'access-control-allow-origin': origin ?? '*',
     'access-control-allow-methods': 'PUT',

@@ -37,7 +37,7 @@ const mcpServerSchema = new mongoose.Schema(
         message: 'MCP server url must be a valid https URL',
       },
     },
-    // AES-256-GCM envelope (src/server/services/crypto.ts). Secret material at
+    // AES-256-GCM envelope (apps/server/src/services/crypto.ts). Secret material at
     // rest is only these three fields; the toJSON transform below strips the
     // whole envelope so no API response ever echoes it.
     headers: {

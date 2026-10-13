@@ -13,8 +13,6 @@ import { ROSTER_SEED, type RosterProvider } from './rosterConfig';
  * from `rosterConfig`, which does not import back — no cycle).
  */
 
-export type ProviderName = 'groq' | 'deepinfra' | 'fireworks' | 'typesafe';
-
 /*
  * #168: thrown when every model that could serve a request is cooling off. The
  * racing runtime surfaces an all-models-unavailable turn with this message so

@@ -158,14 +158,14 @@ const resetPasswords = async () => {
     await client.connect();
     const database = client.db(db);
 
-    // Users use bcrypt cost 10 (see src/server/models/User.ts pre-save hook);
+    // Users use bcrypt cost 10 (see apps/server/src/models/User.ts pre-save hook);
     // hash once and bulk-write so a large dump stays fast. Bumping the model
     // cost would require bumping it here too.
     const passwordHash = await bcrypt.hash(TEST_PASSWORD, 10);
     const users = await database.collection('users').updateMany({}, { $set: { passwordHash } });
 
     // Every PAT collapses onto one tokenHash, which violates the unique
-    // index on `tokenHash` (src/server/models/Pat.ts) as soon as a second
+    // index on `tokenHash` (apps/server/src/models/Pat.ts) as soon as a second
     // PAT exists. Drop it first, then warn loudly: the local schema is now
     // missing a constraint until it is re-created.
     const pats = database.collection('pats');

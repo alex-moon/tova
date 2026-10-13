@@ -169,7 +169,7 @@
 }
 
 /* No prefers-color-scheme fallback here: default order (issue #53) is resolved
- * in the inline <head> script in src/client/index.html (twin of theme.ts),
+ * in the inline <head> script in apps/client/index.html (twin of theme.ts),
  * which always sets exactly one class — explicit preference beats system
  * preference, and the default is light.
  */

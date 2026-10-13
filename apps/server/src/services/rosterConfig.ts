@@ -7,16 +7,13 @@ import { ModelRoster } from '../models/ModelRoster';
  * it owns the roster definition, the rolling-TTFT reads/writes, the per-provider
  * cool-off, and the weighted score that selects the primary model for a turn.
  *
- * It deliberately COEXISTS with the tier machinery (`modelConfigService` /
- * `routerService`); the tier deletion is #233. Nothing here imports the tier
- * router, and the tier router does not import this.
+ * The tier router (`routerService`) and its tier config machinery were deleted
+ * in #233; this module is the routing data layer. The tier-free remnant
+ * `modelConfigService` imports the roster seed from here, never the reverse.
  */
 
-/** Providers a roster model can be raced across (serverless, pay-per-token). */
-export type RosterProvider = 'deepinfra' | 'fireworks';
-
 /** Every provider the racing path can talk to. */
-export const ROSTER_PROVIDERS: RosterProvider[] = ['deepinfra', 'fireworks'];
+export type RosterProvider = 'deepinfra' | 'fireworks';
 
 /*
  * A single roster model plus the provider entry selected as its primary. The
@@ -48,7 +45,7 @@ export interface RosterModel {
 /*
  * Seed definition (owner-locked roster, verified live 2026-10-08). Kept here
  * as the single source of truth for both the migration and empty-collection
- * recovery, mirroring the SEED_ENTRIES discipline of `modelConfigService`.
+ * recovery.
  *
  * Constraints recorded in #232: every model >120B total params, serverless on
  * BOTH providers. MiniMax M3 is text-only on Fireworks
@@ -318,8 +315,7 @@ const ensureSeed = async (): Promise<void> => {
  * Read the eligible roster, ordered as seeded (the seed order is the owner's
  * preference ranking; ties in the weighted score keep it). A DB read failure
  * falls back to the seed definition so a broken config read never takes chat
- * down; an EMPTY collection is seeded first (empty-pool recovery, mirroring
- * `listByTier`).
+ * down; an EMPTY collection is seeded first (empty-pool recovery).
  */
 export const listRoster = async (): Promise<RosterModel[]> => {
   try {
@@ -428,9 +424,9 @@ export const recordTtft = async (
 };
 
 /*
- * Per-provider cool-off, mirroring `disableModel` (#168/#213): `ttlMs`
- * overrides the default 6h for endpoint overload (#213 short TTL). Errors are
- * logged, not thrown — the cool-off rides alongside a real failure.
+ * Per-provider cool-off: `ttlMs` overrides the default 6h for endpoint
+ * overload (#213 short TTL). Errors are logged, not thrown — the cool-off
+ * rides alongside a real failure.
  */
 const coolOffHours = (): number => {
   const raw = process.env.MODEL_COOL_OFF_HOURS;

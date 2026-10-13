@@ -8,7 +8,7 @@
 //   appear as ISO strings after res.json() / JSON.parse.
 
 // Public shape of an admin-visible user record, as returned by
-// GET /api/admin/users (server projection in src/server/routes/admin.ts).
+// GET /api/admin/users (server projection in apps/server/src/routes/admin.ts).
 export interface AdminUser {
   id: string;
   email: string;
@@ -395,14 +395,4 @@ export interface LoginUserPayload {
   id: string;
   email: string;
   role: 'user' | 'admin';
-}
-
-export interface LoginRequest {
-  email: string;
-  password: string;
-}
-
-export interface RegisterRequest {
-  email: string;
-  password: string;
 }

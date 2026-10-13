@@ -412,7 +412,7 @@ export const toolResultEvent = (result: {
 // Session indices count only prior messages (computed before .save()), so a
 // session's first message gets index 0. Count-based indices are racy under
 // concurrent turns in one session; accepted in the plan
-// (docs/plan-17-prompt-metrics.md) since metrics are analytical.
+// (docs/done/plan-17-prompt-metrics.md) since metrics are analytical.
 const buildMessageMetrics = async (
   sessionId: string,
   content: string,
@@ -511,7 +511,7 @@ const parseZdrHistory = (
 // Persist the user turn with its metrics. Trivially neutral prompts record
 // llmSkipReason 'trivial' so the skip gate is distinguishable in the DB from
 // failed ('parse'/'error') classification; non-trivial prompts get a
-// fire-and-forget classification call back (docs/plan-17-prompt-metrics.md
+// fire-and-forget classification call back (docs/done/plan-17-prompt-metrics.md
 // tasks 6 and 9). The gate is computed once and reused for both purposes.
 const saveUserMessageWithMetrics = async (
   sessionId: string,

@@ -4,7 +4,7 @@ import type { CompletionOptions } from './llmTypes';
 /*
  * #254 (epic #251) connector seam: the task sequencer pins one roster call to
  * `maxSteps: 1` so a single call is one driver-observable step (spike decision
- * (c), `docs/plan-254-task-entity.md`). Two contracts are pinned here:
+ * (c), `docs/done/plan-254-task-entity.md`). Two contracts are pinned here:
  *
  * 1. `CompletionOptions.maxSteps` is forwarded verbatim onto Mastra's call
  *    options; absent keeps the existing mode default (12 full / 1 plain), so

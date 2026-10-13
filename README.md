@@ -23,14 +23,14 @@ Backing services (MongoDB) run in Docker Compose; the backend and frontend run d
 
 - Node.js (v22+) and npm
 - Docker with the Compose plugin (for MongoDB only)
-- Provider API keys: DeepInfra + Fireworks (chat roster racing) and Groq (auxiliary calls: titles, followups, metrics classification, entity extraction), plus the Google OAuth credentials described below
+- Provider API keys: DeepInfra + Fireworks (chat roster racing) and Groq (auxiliary calls: titles, followups, metrics classification), plus the Google OAuth credentials described below
 
 ### Setup
 
 1. **Install dependencies**
 
    ```bash
-   npm run install:all
+   npm install
    ```
 
 2. **Configure environment** — copy `.env.example` to `.env` in the repo root (it is the canonical list). Required: `GROQ_API_KEY`, `JWT_SECRET`, `MONGODB_URL` (full Mongo connection string; Atlas uses the `mongodb+srv://` scheme) or `MONGODB_PASSWORD` (dev fallback assembled from it), `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_CALLBACK_URL`. Optional per feature: `BRAVE_SEARCH_API_KEY` (web search tool), `DO_SPACES_KEY`/`DO_SPACES_SECRET`/`DO_SPACES_BUCKET`/`DO_SPACES_REGION` (asset library), `MCP_ENCRYPTION_KEY` (MCP servers with auth headers), `LANGSMITH_API_KEY` + `LANGCHAIN_PROJECT` (tracing), `ADMIN_PASSWORD` (default `admin`), `GOOGLE_SAFE_BROWSING_API_KEY` (safe link check for `fetch_url`; `GOOGLE_API_KEY` also accepted).
@@ -73,8 +73,7 @@ Required: set `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, and `GOOGLE_CALLBACK_U
 
 | Command                                  | What it does                                                                                 |
 | ---------------------------------------- | -------------------------------------------------------------------------------------------- |
-| `npm install`                            | Install root and client dependencies (`postinstall` adds the client)                         |
-| `npm run install:all`                    | Explicit form of the above                                                                   |
+| `npm install`                            | Install all workspace dependencies (npm workspaces)                                          |
 | `npm run stack:up` / `stack:down`        | Start/stop the Dockerized MongoDB backing service                                            |
 | `npm run db:migrate` / `db:migrate:down` | Run/undo DB migrations (`mongo-migrate-ts`, `apps/migrations/`)                              |
 | `npm run db:dump`                        | `mongodump` from `MONGODB_DUMP_URL` into a `data/db-dumps/` tarball                          |
@@ -87,7 +86,7 @@ Required: set `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, and `GOOGLE_CALLBACK_U
 | `npm run dev:client`                     | Run frontend only (Vite dev server)                                                          |
 | `npm run build`                          | Compile backend TypeScript to `dist/`                                                        |
 | `npm run build:client`                   | Build the frontend bundle                                                                    |
-| `npm start`                              | Start the built backend from `dist/index.js`                                                 |
+| `npm start`                              | Start the built backend from `dist/main.js`                                                  |
 | `npm test`                               | Run the backend Jest suite (also run via `test:server`)                                      |
 | `npm run test:e2e`                       | Run the Playwright e2e suite (`e2e/`)                                                        |
 | `npm run lint` / `lint:fix`              | ESLint check / auto-fix over `apps/`; `fix` does both fixes                                  |
@@ -126,7 +125,7 @@ Inference runs through Mastra connectors across multiple providers. Chat respons
 
 ## Implementation Pointers
 
-- Root backend entry: `src/index.ts`
+- Backend entry: `apps/server/src/main.ts`
 - Server app bootstrap: `apps/server/src/index.ts`
 - Routes: `apps/server/src/routes/` (chat, auth, assets, mcpServers, feedback, profile, admin)
 - Services: `apps/server/src/services/` (roster config + provider racing, Mastra agent + connectors, search/MCP/assets, metrics)

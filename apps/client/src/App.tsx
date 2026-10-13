@@ -28,7 +28,7 @@ export interface ToolEvent {
 // the live chip flips spinner → check in place instead of stacking two chips.
 // An unmatched result is appended standalone; a resolved entry is never a merge
 // target, so a like-named second result becomes its own chip. Kept in sync with
-// `reconcileToolEvent` in `src/server/routes/chat.ts` (their tests pin both).
+// `reconcileToolEvent` in `apps/server/src/routes/chat.ts` (their tests pin both).
 export const reconcileToolEvents = (list: ToolEvent[], ev: ToolEvent): ToolEvent[] => {
   if (ev.phase === 'result') {
     for (let i = list.length - 1; i >= 0; i -= 1) {

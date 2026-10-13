@@ -65,7 +65,7 @@ export interface CompletionOptions {
    * path leaves it unset and gets the connector default (12 with tools, 1
    * without); the task sequencer pins it to `1` so a single roster call is one
    * *driver step* the driver can observe and drain steering at (the spike's
-   * decision (c), `docs/plan-254-task-entity.md`). Another value is a middle
+   * decision (c), `docs/done/plan-254-task-entity.md`). Another value is a middle
    * ground the driver does not need yet; it is forwarded verbatim.
    */
   maxSteps?: number;

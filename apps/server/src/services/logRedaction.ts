@@ -9,7 +9,7 @@
 // It targets long/high-entropy segments, quoted request bodies, and JSON
 // blocks; short message tokens (status codes, errno classes, file paths)
 // survive. Whether it is sufficient for short personal content is an open
-// audit question — see docs/plan-145-log-redaction.md.
+// audit question — see docs/done/plan-145-log-redaction.md.
 
 export const REDACTED = '[redacted]';
 
