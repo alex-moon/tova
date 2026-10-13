@@ -191,10 +191,11 @@ export const buildWorkspaceBlock = (
 };
 
 /*
- * Mongo-backed retrieval: a recent bounded pool of the user's messages (joined
- * to their session titles), extracted-asset text, and task streams, scored
- * against the prompt. Empty block when nothing overlaps. Never throws — memory
- * must not degrade a chat turn.
+ * The corpus read: a recent bounded pool of the user's messages (joined to
+ * their session titles), extracted-asset text, and task streams, assembled into
+ * prompt-independent `WorkspaceSlice[]`. Pure data — scoring and layout happen
+ * in the callers, so the #289 hit-rate eval can match on slice IDs while the
+ * chat path only ever wants the rendered block.
  *
  * Ownership is resolved session-first: `messages` is keyed by `sessionId`, not
  * by `userId`, so the user's sessions are the join key. Fetching the sessions
@@ -224,6 +225,134 @@ export const buildWorkspaceBlock = (
  * is not folded into the text — it is also the first `user` event, so including
  * it would duplicate it.
  */
+export const collectWorkspaceSlices = async (
+  userId: string,
+  excludeMessageId?: string,
+  excludeAssetId?: string,
+): Promise<WorkspaceSlice[]> => {
+  const uid = new mongoose.Types.ObjectId(userId);
+  const sessions = await Session.find({ userId: uid, deletedAt: null })
+    .sort({ lastMessageAt: -1 })
+    .limit(MESSAGE_POOL)
+    .select('title')
+    .lean();
+
+  const titleById = new Map(sessions.map((s) => [String(s._id), s.title as string] as const));
+  const sessionIds = sessions.map((s) => s._id as mongoose.Types.ObjectId);
+
+  const [messages, assets, tasks] = await Promise.all([
+    // An empty `$in` yields no rows, so a user with files but no chats still
+    // gets file retrieval (the asset read does not depend on sessions).
+    Message.find({
+      role: 'user',
+      sessionId: { $in: sessionIds },
+      _id: { $ne: excludeMessageId ?? null },
+    })
+      .sort({ timestamp: -1 })
+      .limit(MESSAGE_POOL)
+      .select('sessionId content timestamp')
+      .lean(),
+    Asset.find({
+      userId: uid,
+      status: 'ready',
+      ephemeral: { $ne: true },
+      _id: { $ne: excludeAssetId ?? null },
+      $or: [{ textExtracted: { $ne: null } }, { markdownExtracted: { $ne: null } }],
+    })
+      .sort({ _id: -1 })
+      .limit(ASSET_POOL)
+      .select('filename textExtracted markdownExtracted createdAt')
+      .lean(),
+    Task.find({ userId: uid })
+      .sort({ updatedAt: -1 })
+      .limit(TASK_POOL)
+      .select('instruction createdAt updatedAt')
+      .lean(),
+  ]);
+
+  const taskIds = tasks.map((t) => t._id as mongoose.Types.ObjectId);
+  const taskEvents = taskIds.length
+    ? await TaskEvent.find({
+        taskId: { $in: taskIds },
+        role: { $in: ['user', 'assistant'] },
+      })
+        .sort({ seq: 1 })
+        .select('taskId content')
+        .lean()
+    : [];
+  const eventsByTask = new Map<string, string[]>();
+  for (const event of taskEvents) {
+    const text = (event.content as string) ?? '';
+    if (!text.trim()) continue;
+    const key = String(event.taskId);
+    const bucket = eventsByTask.get(key);
+    if (bucket) bucket.push(text);
+    else eventsByTask.set(key, [text]);
+  }
+
+  const slices: WorkspaceSlice[] = [];
+  for (const m of messages) {
+    const sid = String(m.sessionId);
+    const text = (m.content as string) ?? '';
+    if (!text.trim()) continue;
+    slices.push({
+      kind: 'chat',
+      id: String(m._id),
+      title: titleById.get(sid) ?? 'Untitled chat',
+      text,
+      at: m.timestamp as Date,
+    });
+  }
+  for (const a of assets) {
+    const text = ((a.markdownExtracted as string) || (a.textExtracted as string) || '').trim();
+    if (!text) continue;
+    slices.push({
+      kind: 'file',
+      id: String(a._id),
+      title: a.filename as string,
+      text,
+      at: (a.createdAt as Date) ?? new Date(0),
+    });
+  }
+  for (const t of tasks) {
+    const text = (eventsByTask.get(String(t._id)) ?? []).join('\n');
+    if (!text.trim()) continue;
+    slices.push({
+      kind: 'task',
+      id: String(t._id),
+      title: taskTitle(t.instruction as string),
+      text,
+      at: (t.updatedAt as Date) ?? (t.createdAt as Date) ?? new Date(0),
+    });
+  }
+  return slices;
+};
+
+/*
+ * The top-ranked slices for a prompt, with their IDs (#289: hit-rate matches on
+ * the slice ID, which the rendered block does not carry). Never throws — an eval
+ * or a chat turn must degrade to "nothing", not an error.
+ */
+export const retrieveWorkspaceSlices = async (
+  prompt: string,
+  userId: string,
+  n = MAX_SLICES,
+  excludeMessageId?: string,
+  excludeAssetId?: string,
+): Promise<WorkspaceSlice[]> => {
+  try {
+    const slices = await collectWorkspaceSlices(userId, excludeMessageId, excludeAssetId);
+    return pickTopSlices(prompt, slices, n).map((picked) => picked.slice);
+  } catch (err) {
+    console.error('Workspace retrieval error:', err);
+    return [];
+  }
+};
+
+/*
+ * The rendered `<user:workspace>` block for a prompt. Empty when nothing
+ * overlaps. Never throws — memory must not degrade a chat turn.
+ */
 export const retrieveWorkspaceBlock = async (
   prompt: string,
   userId: string,
@@ -232,102 +361,7 @@ export const retrieveWorkspaceBlock = async (
   excludeAssetId?: string,
 ): Promise<string> => {
   try {
-    const uid = new mongoose.Types.ObjectId(userId);
-    const sessions = await Session.find({ userId: uid, deletedAt: null })
-      .sort({ lastMessageAt: -1 })
-      .limit(MESSAGE_POOL)
-      .select('title')
-      .lean();
-
-    const titleById = new Map(sessions.map((s) => [String(s._id), s.title as string] as const));
-    const sessionIds = sessions.map((s) => s._id as mongoose.Types.ObjectId);
-
-    const [messages, assets, tasks] = await Promise.all([
-      // An empty `$in` yields no rows, so a user with files but no chats still
-      // gets file retrieval (the asset read does not depend on sessions).
-      Message.find({
-        role: 'user',
-        sessionId: { $in: sessionIds },
-        _id: { $ne: excludeMessageId ?? null },
-      })
-        .sort({ timestamp: -1 })
-        .limit(MESSAGE_POOL)
-        .select('sessionId content timestamp')
-        .lean(),
-      Asset.find({
-        userId: uid,
-        status: 'ready',
-        ephemeral: { $ne: true },
-        _id: { $ne: excludeAssetId ?? null },
-        $or: [{ textExtracted: { $ne: null } }, { markdownExtracted: { $ne: null } }],
-      })
-        .sort({ _id: -1 })
-        .limit(ASSET_POOL)
-        .select('filename textExtracted markdownExtracted createdAt')
-        .lean(),
-      Task.find({ userId: uid })
-        .sort({ updatedAt: -1 })
-        .limit(TASK_POOL)
-        .select('instruction createdAt updatedAt')
-        .lean(),
-    ]);
-
-    const taskIds = tasks.map((t) => t._id as mongoose.Types.ObjectId);
-    const taskEvents = taskIds.length
-      ? await TaskEvent.find({
-          taskId: { $in: taskIds },
-          role: { $in: ['user', 'assistant'] },
-        })
-          .sort({ seq: 1 })
-          .select('taskId content')
-          .lean()
-      : [];
-    const eventsByTask = new Map<string, string[]>();
-    for (const event of taskEvents) {
-      const text = (event.content as string) ?? '';
-      if (!text.trim()) continue;
-      const key = String(event.taskId);
-      const bucket = eventsByTask.get(key);
-      if (bucket) bucket.push(text);
-      else eventsByTask.set(key, [text]);
-    }
-
-    const slices: WorkspaceSlice[] = [];
-    for (const m of messages) {
-      const sid = String(m.sessionId);
-      const text = (m.content as string) ?? '';
-      if (!text.trim()) continue;
-      slices.push({
-        kind: 'chat',
-        id: String(m._id),
-        title: titleById.get(sid) ?? 'Untitled chat',
-        text,
-        at: m.timestamp as Date,
-      });
-    }
-    for (const a of assets) {
-      const text = ((a.markdownExtracted as string) || (a.textExtracted as string) || '').trim();
-      if (!text) continue;
-      slices.push({
-        kind: 'file',
-        id: String(a._id),
-        title: a.filename as string,
-        text,
-        at: (a.createdAt as Date) ?? new Date(0),
-      });
-    }
-    for (const t of tasks) {
-      const text = (eventsByTask.get(String(t._id)) ?? []).join('\n');
-      if (!text.trim()) continue;
-      slices.push({
-        kind: 'task',
-        id: String(t._id),
-        title: taskTitle(t.instruction as string),
-        text,
-        at: (t.updatedAt as Date) ?? (t.createdAt as Date) ?? new Date(0),
-      });
-    }
-
+    const slices = await collectWorkspaceSlices(userId, excludeMessageId, excludeAssetId);
     return buildWorkspaceBlock(prompt, slices, n);
   } catch (err) {
     console.error('Workspace retrieval error:', err);
