@@ -119,3 +119,24 @@ Naming convention: a bare verb **checks**; append `:fix` to **write**. So `lint`
 Iterate per side with the shortcut scripts: `ci:server` / `ci:client`, plus `lint:server` / `format:server` / `test:server` and `lint:client` / `format:client` / `test:client` (vitest, config in `apps/client/vite.config.ts`).
 
 Style: Prettier settings in `.prettierrc` (single quotes, trailing commas, 100 print width). Rules live in the root `eslint.config.js`.
+
+### Workspace install/build contract
+
+The repo is an npm-workspaces monorepo (`apps/{client,server,shared,migrations}`) with a
+compiled boundary for `@tova/shared` (#257, #288):
+
+- `apps/shared` is `composite`; `apps/server` declares a TypeScript **project reference**
+  to it. `tsc -b apps/server` builds shared first, then server. Do not add an explicit
+  `npm run build -w apps/shared` prefix to `build`/`typecheck` or the Dockerfile — the
+  reference already declares the order.
+- `dev` is the exception: the server runs from source via `tsx`, so it needs shared's
+  emitted `dist` at runtime and calls `npm run build -w apps/shared` (the package's single
+  `build` script) before starting.
+- `typecheck` runs `tsc -b` and therefore emits `dist` (project references have no
+  emit-free mode); the output is gitignored and ignored by ESLint/Prettier.
+- Scoped installs (`npm ci -w <pkg> --ignore-scripts`) are deliberate: they keep each
+  image's tree minimal, and there are **no workspace `prepare` scripts** — adding one is a
+  trap, because npm runs a workspace `prepare` before its sources are copied even under
+  `--ignore-scripts`. Build shared through the project reference instead.
+- Jest resolves `@tova/shared` straight to source (`moduleNameMapper`), so the test suite
+  never depends on a prior shared build.

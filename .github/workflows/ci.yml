@@ -59,7 +59,13 @@ jobs:
 
           while IFS= read -r file; do
             case "$file" in
-              apps/server/*|apps/shared/*|apps/migrations/*|Dockerfile)
+              # #288: server/shared changes can break the dev stack the e2e job
+              # boots (server + Mongo + client), so they run e2e too — that is
+              # the break the old client/e2e-only gate missed on the PR.
+              apps/server/*|apps/shared/*)
+                server=true
+                e2e=true ;;
+              apps/migrations/*|Dockerfile)
                 server=true ;;
               apps/client/*)
                 client=true
@@ -137,8 +143,9 @@ jobs:
 
   # Responsive e2e gate (#220): the mobile (375x667) and desktop Playwright
   # projects must pass, so a route that overflows at phone width or a stale
-  # assertion is caught mechanically. Gated on client/e2e changes to respect
-  # the free-tier-minutes constraint (#141) — a server-only PR skips it.
+  # assertion is caught mechanically. Gated on client/e2e changes (#141:
+  # free-tier minutes) plus server/shared changes (#288: a server break crashes
+  # the dev stack this job boots) — migrations/Dockerfile-only PRs still skip it.
   #
   # Runs against the local stack the way a developer does: a Mongo container,
   # migrations (seeds the admin user), `db:password` (fixture
