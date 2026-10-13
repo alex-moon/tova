@@ -2,6 +2,8 @@ import mongoose from 'mongoose';
 import { Asset } from '../models/Asset';
 import { Message } from '../models/Message';
 import { Session } from '../models/Session';
+import { Task } from '../models/Task';
+import { TaskEvent } from '../models/TaskEvent';
 import { config } from '../config';
 
 /*
@@ -9,9 +11,10 @@ import { config } from '../config';
  *
  * The epic's unit of memory is a *piece of work*, not an extracted concept
  * (that was #138, superseded). The v1 corpus is addressable *views* over what
- * already exists — `Message` rows joined to their `Session` title, and `Asset`
- * rows' extracted text — read at retrieval time; nothing is copied into a new
- * store (the ticket's "no eager copies into library-shaped docs").
+ * already exists — `Message` rows joined to their `Session` title, `Asset`
+ * rows' extracted text, and (since #298) a task's `TaskEvent` stream — read at
+ * retrieval time; nothing is copied into a new store (the ticket's "no eager
+ * copies into library-shaped docs").
  *
  * Retrieval is personal-scale and lexical (#251: no vector infra in v1):
  * keyword-overlap scoring over a recent bounded candidate pool, recency as a
@@ -74,10 +77,11 @@ export const BLOCK_CAP = 1200;
 // Candidate pool sizes: bounded so cost is flat regardless of history length.
 const MESSAGE_POOL = 200;
 const ASSET_POOL = 50;
+const TASK_POOL = 50;
 const MAX_SLICES = 6;
 
 export type WorkspaceSlice = {
-  kind: 'chat' | 'file';
+  kind: 'chat' | 'file' | 'task';
   id: string;
   title: string;
   text: string;
@@ -140,9 +144,22 @@ export const matchSnippet = (text: string, prompt: string, cap = 160): string =>
 };
 
 /*
+ * Slice title for a task: the first line of its instruction, collapsed and
+ * capped, falling back to a stable placeholder when the instruction is empty
+ * (a task whose header seed is blank but whose stream still carries work).
+ */
+export const TASK_TITLE_CAP = 60;
+export const taskTitle = (instruction: string): string => {
+  const line = instruction.replace(/\s+/g, ' ').trim();
+  if (!line) return 'Untitled task';
+  return line.length <= TASK_TITLE_CAP ? line : `${line.slice(0, TASK_TITLE_CAP - 1)}…`;
+};
+
+/*
  * Layout: one bullet per slice, hard character cap, empty-on-nothing so an
  * empty block never shifts an otherwise identical prompt. Chat slices carry
- * their session title + date; file slices carry their filename.
+ * their session title + date; file slices carry their filename; task slices
+ * carry a title derived from the task instruction.
  */
 export const buildWorkspaceBlock = (
   prompt: string,
@@ -156,7 +173,12 @@ export const buildWorkspaceBlock = (
   let used = 0;
   for (const { slice } of picked) {
     const date = new Date(slice.at).toISOString().slice(0, 10);
-    const label = slice.kind === 'chat' ? `chat "${slice.title}"` : `file "${slice.title}"`;
+    const label =
+      slice.kind === 'chat'
+        ? `chat "${slice.title}"`
+        : slice.kind === 'task'
+          ? `task "${slice.title}"`
+          : `file "${slice.title}"`;
     const line = `- ${label} (${date}) — ${matchSnippet(slice.text, prompt)}`;
     // Count the joining newline too, so the rendered block stays within `cap`
     // rather than exceeding it by up to n-1 separators.
@@ -170,9 +192,9 @@ export const buildWorkspaceBlock = (
 
 /*
  * Mongo-backed retrieval: a recent bounded pool of the user's messages (joined
- * to their session titles) and extracted-asset text, scored against the prompt.
- * Empty block when nothing overlaps. Never throws — memory must not degrade a
- * chat turn.
+ * to their session titles), extracted-asset text, and task streams, scored
+ * against the prompt. Empty block when nothing overlaps. Never throws — memory
+ * must not degrade a chat turn.
  *
  * Ownership is resolved session-first: `messages` is keyed by `sessionId`, not
  * by `userId`, so the user's sessions are the join key. Fetching the sessions
@@ -180,6 +202,7 @@ export const buildWorkspaceBlock = (
  * filtering messages by `sessionId` keeps the pool owned by construction — a
  * global `Message.find({ role: 'user' })` would be dominated by other users'
  * recent turns and could starve this user's own history out of the window.
+ * Tasks are owned directly (`Task.userId`) and read the same pool-first way.
  *
  * `excludeMessageId` drops the just-saved current turn (the routes run
  * retrieval after persisting it) so the turn is never retrieved and injected
@@ -192,7 +215,14 @@ export const buildWorkspaceBlock = (
  * Ephemeral assets (ZDR chat-composer uploads, `ephemeral: true`) are filtered
  * out of the corpus entirely, matching decision 6 / the epic invariant that
  * incognito artifacts never become workspace items — the durable-library reads
- * (the assets page) exclude them for the same reason.
+ * (the assets page) exclude them for the same reason. Tasks need no such
+ * filter: ZDR users get no tasks (D7).
+ *
+ * #298: a task contributes one slice whose text is its `user`/`assistant`
+ * `TaskEvent` content in `seq` order (`system` notices are visible-only, never
+ * model context, and are skipped). The header `instruction` names the slice but
+ * is not folded into the text — it is also the first `user` event, so including
+ * it would duplicate it.
  */
 export const retrieveWorkspaceBlock = async (
   prompt: string,
@@ -212,7 +242,7 @@ export const retrieveWorkspaceBlock = async (
     const titleById = new Map(sessions.map((s) => [String(s._id), s.title as string] as const));
     const sessionIds = sessions.map((s) => s._id as mongoose.Types.ObjectId);
 
-    const [messages, assets] = await Promise.all([
+    const [messages, assets, tasks] = await Promise.all([
       // An empty `$in` yields no rows, so a user with files but no chats still
       // gets file retrieval (the asset read does not depend on sessions).
       Message.find({
@@ -235,7 +265,32 @@ export const retrieveWorkspaceBlock = async (
         .limit(ASSET_POOL)
         .select('filename textExtracted markdownExtracted createdAt')
         .lean(),
+      Task.find({ userId: uid })
+        .sort({ updatedAt: -1 })
+        .limit(TASK_POOL)
+        .select('instruction createdAt updatedAt')
+        .lean(),
     ]);
+
+    const taskIds = tasks.map((t) => t._id as mongoose.Types.ObjectId);
+    const taskEvents = taskIds.length
+      ? await TaskEvent.find({
+          taskId: { $in: taskIds },
+          role: { $in: ['user', 'assistant'] },
+        })
+          .sort({ seq: 1 })
+          .select('taskId content')
+          .lean()
+      : [];
+    const eventsByTask = new Map<string, string[]>();
+    for (const event of taskEvents) {
+      const text = (event.content as string) ?? '';
+      if (!text.trim()) continue;
+      const key = String(event.taskId);
+      const bucket = eventsByTask.get(key);
+      if (bucket) bucket.push(text);
+      else eventsByTask.set(key, [text]);
+    }
 
     const slices: WorkspaceSlice[] = [];
     for (const m of messages) {
@@ -259,6 +314,17 @@ export const retrieveWorkspaceBlock = async (
         title: a.filename as string,
         text,
         at: (a.createdAt as Date) ?? new Date(0),
+      });
+    }
+    for (const t of tasks) {
+      const text = (eventsByTask.get(String(t._id)) ?? []).join('\n');
+      if (!text.trim()) continue;
+      slices.push({
+        kind: 'task',
+        id: String(t._id),
+        title: taskTitle(t.instruction as string),
+        text,
+        at: (t.updatedAt as Date) ?? (t.createdAt as Date) ?? new Date(0),
       });
     }
 

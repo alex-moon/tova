@@ -118,7 +118,8 @@ const LIBRARY_INTRO =
 // empty block never shifts an otherwise identical prompt (same posture as the
 // library block).
 const WORKSPACE_INTRO =
-  'Below is context from the user’s own past work — earlier chats and files. Use it ' +
+  'Below is context from the user’s own past work — earlier chats, files, and tasks you ' +
+  'ran for them. Use it ' +
   'only where it is relevant to the current question, to connect what they are asking ' +
   'with what they already worked on; it may be stale or superseded, so do not assert ' +
   'it as fact if the current chat contradicts it, and never read it back verbatim.';

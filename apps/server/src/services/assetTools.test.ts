@@ -42,6 +42,14 @@ const asCtxWithSession = (userId: string, sessionId: string) => {
   return { requestContext };
 };
 
+// #298: a context carrying a task id (no session), to exercise task provenance.
+const asCtxWithTask = (userId: string, taskId: string) => {
+  const requestContext = new RequestContext();
+  requestContext.set('userId', userId);
+  requestContext.set('taskId', taskId);
+  return { requestContext };
+};
+
 // `createTool` is the identity stub, so the tools keep their plain config
 // shape; pick the execute off it explicitly for direct invocation.
 const listExecute = (
@@ -148,6 +156,17 @@ describe('generate_file tool (#66)', () => {
     const stored = await Asset.findById(out.file?.id);
     expect(stored?.provenance?.kind).toBe('chat');
     expect(stored?.provenance?.sessionId).toBe(sessionId);
+  });
+
+  it('stamps task provenance when a task id rides on the context (#298)', async () => {
+    const user = await createUser('generate-task-provenance@example.com');
+    const taskId = new Types.ObjectId().toString();
+    const out = (await generateExecute(good, asCtxWithTask(user.id, taskId))) as {
+      file?: { id: string };
+    };
+    const stored = await Asset.findById(out.file?.id);
+    expect(stored?.provenance?.kind).toBe('task');
+    expect(stored?.provenance?.taskId).toBe(taskId);
   });
 
   it('leaves provenance absent when no session is on the context (#252)', async () => {

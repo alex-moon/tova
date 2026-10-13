@@ -58,6 +58,13 @@ export interface CompletionOptions {
    * request context like `userId`; absent means unknown (never invented).
    */
   sessionId?: string;
+  /*
+   * Calling task id for this turn (#298), set by the task sequencer. The task
+   * stream has no session, so provenance-writing tools (generate_file) read
+   * this to attribute a task-generated file to its task (`kind: 'task'`). Rides
+   * into Mastra's request context like `userId`; absent means unknown.
+   */
+  taskId?: string;
   temperature?: number;
   max_tokens?: number;
   /*
