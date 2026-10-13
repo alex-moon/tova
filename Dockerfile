@@ -27,8 +27,9 @@ COPY apps/client apps/client
 
 RUN npm run build -w apps/client
 
-# Server build stage: shared (types boundary + mongoUri runtime helper) then
-# server. Shared must build first: server tsc consumes its emitted d.ts.
+# Server build stage: `tsc -b` follows the project reference to shared and
+# builds it first (server tsc consumes its emitted d.ts), so the ordering is a
+# declared dependency in the build graph, not a repeated script prefix (#288).
 FROM node:22-alpine AS server-builder
 
 WORKDIR /app
@@ -42,7 +43,7 @@ RUN npm ci -w apps/server --ignore-scripts
 COPY apps/shared apps/shared
 COPY apps/server apps/server
 
-RUN npm run build -w apps/shared && npm run build -w apps/server
+RUN npm run build -w apps/server
 
 # Production stage
 FROM node:22-alpine

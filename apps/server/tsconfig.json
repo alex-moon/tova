@@ -9,8 +9,10 @@
     "skipLibCheck": true,
     "rootDir": "src",
     "types": ["node", "jest"],
-    "outDir": "dist"
+    "outDir": "dist",
+    "tsBuildInfoFile": "dist/tsconfig.tsbuildinfo"
   },
   "include": ["src/**/*.ts"],
-  "exclude": ["src/**/*.test.ts", "src/test/**"]
+  "exclude": ["src/**/*.test.ts", "src/test/**"],
+  "references": [{ "path": "../shared" }]
 }
