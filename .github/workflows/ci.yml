@@ -58,28 +58,29 @@ jobs:
           e2e=false
 
           while IFS= read -r file; do
+            # e2e is default-on (#288): it runs unless every changed path is
+            # provably inert for the dev stack the job boots (server + Mongo +
+            # client). Dockerfile is inert here because e2e never builds
+            # images; docs/markdown/skills cannot affect runtime. A new or
+            # unknown path therefore runs e2e — the old allowlist failed open
+            # and silently skipped it.
             case "$file" in
-              # #288: server/shared changes can break the dev stack the e2e job
-              # boots (server + Mongo + client), so they run e2e too — that is
-              # the break the old client/e2e-only gate missed on the PR.
-              apps/server/*|apps/shared/*)
-                server=true
-                e2e=true ;;
-              apps/migrations/*|Dockerfile)
+              docs/*|*.md|.opencode/*|Dockerfile) ;;
+              *) e2e=true ;;
+            esac
+
+            case "$file" in
+              apps/server/*|apps/shared/*|apps/migrations/*|Dockerfile)
                 server=true ;;
               apps/client/*)
-                client=true
-                e2e=true ;;
-              e2e/*)
-                e2e=true ;;
+                client=true ;;
               package.json|package-lock.json|apps/*/package.json)
                 deps=true ;;
               eslint.config.js|tsconfig*.json|apps/*/tsconfig*.json|jest.config.js|.prettierrc|prettier.config.*)
                 tooling=true ;;
               .github/*)
                 # Workflow changes affect the gate itself: run everything.
-                tooling=true
-                e2e=true ;;
+                tooling=true ;;
             esac
           done < /tmp/changed-files.txt
 
@@ -143,9 +144,12 @@ jobs:
 
   # Responsive e2e gate (#220): the mobile (375x667) and desktop Playwright
   # projects must pass, so a route that overflows at phone width or a stale
-  # assertion is caught mechanically. Gated on client/e2e changes (#141:
-  # free-tier minutes) plus server/shared changes (#288: a server break crashes
-  # the dev stack this job boots) — migrations/Dockerfile-only PRs still skip it.
+  # assertion is caught mechanically. Default-on (#288): it runs unless every
+  # changed path is provably inert (docs/markdown/skills, Dockerfile), so a
+  # server/shared break that crashes the dev stack this job boots is caught on
+  # the PR, not just on the push to main. (#141 bounded the cost by running it
+  # on client/e2e changes only; that allowlist's fail-open skip is what #288
+  # fixes.)
   #
   # Runs against the local stack the way a developer does: a Mongo container,
   # migrations (seeds the admin user), `db:password` (fixture
@@ -341,8 +345,8 @@ jobs:
           else
             # PR run: deploy is gated on push-to-main runs only; PR-side
             # scans were removed (scans are a deploy gate, not a merge gate).
-            # The e2e job is skipped when no client/e2e change touched the PR
-            # (issue #141), so only a failed run fails the gate — skipped is fine.
+            # The e2e job is skipped only for provably-inert PRs (docs/markdown,
+            # #141/#288), so only a failed run fails the gate — skipped is fine.
             if [[ "${{ needs.ci.result }}" != "success" ]]; then
               echo "ci result: ${{ needs.ci.result }}"
               exit 1

@@ -7,12 +7,10 @@
     "forceConsistentCasingInFileNames": true,
     "strict": true,
     "skipLibCheck": true,
-    "rootDir": "src",
     "types": ["node", "jest"],
-    "outDir": "dist",
-    "tsBuildInfoFile": "dist/tsconfig.tsbuildinfo"
+    "baseUrl": ".",
+    "paths": { "@tova/shared": ["../shared/src"] }
   },
   "include": ["src/**/*.ts"],
-  "exclude": ["src/**/*.test.ts", "src/test/**"],
-  "references": [{ "path": "../shared" }]
+  "exclude": ["src/**/*.test.ts", "src/test/**"]
 }
