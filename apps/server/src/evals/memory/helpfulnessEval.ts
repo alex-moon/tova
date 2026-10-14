@@ -86,18 +86,34 @@ export const buildJudgePrompt = (query: string, answerA: string, answerB: string
     `Answer B:\n${answerB}`,
   ].join('\n');
 
+const verdictFromToken = (token: string): JudgeVerdict => {
+  const upper = token.toUpperCase();
+  if (upper === 'A') return 'A';
+  if (upper === 'B') return 'B';
+  return 'tie';
+};
+
 /**
  * Last standalone A/B/TIE token wins. An empty or unparseable reply is an
  * `error`, not a `tie`: a dead or truncated judge must not read as a
  * considered "no preference" that scores 0.5 (T14b, OQ20/OQ21).
+ *
+ * A standalone lowercase `a` is the English article, not a verdict: the judge
+ * is instructed to emit uppercase `A`, so a trailing "…is B because it gives a
+ * clearer explanation" must not be read as `A` (which would invert the verdict
+ * *consistently* across both swap orders and flip a loss into a win). Lowercase
+ * `a` is therefore dropped from the candidate pool unless it is the entire
+ * reply. The residual — which arm token to prefer when a reasoned reply names
+ * both, e.g. "A is better because B misses the point" — stays OQ38.
  */
 export const parseJudgeVerdict = (raw: string): JudgeVerdict => {
+  const alone = /^(A|B|TIE)\.?$/i.exec(raw.trim());
+  if (alone) return verdictFromToken(alone[1]);
   const matches = raw.match(/\b(A|B|TIE)\b/gi);
   if (!matches?.length) return 'error';
-  const last = matches[matches.length - 1].toUpperCase();
-  if (last === 'A') return 'A';
-  if (last === 'B') return 'B';
-  return 'tie';
+  const candidates = matches.filter((token) => token !== 'a');
+  const pool = candidates.length ? candidates : matches;
+  return verdictFromToken(pool[pool.length - 1]);
 };
 
 /* ---------------------------------- types ---------------------------------- */

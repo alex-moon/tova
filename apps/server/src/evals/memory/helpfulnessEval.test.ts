@@ -56,6 +56,21 @@ describe('parseJudgeVerdict (#289)', () => {
     expect(parseJudgeVerdict('Weighing A against B, the better answer is B.')).toBe('B');
   });
 
+  it('does not read a trailing article "a" as the verdict (would invert it)', () => {
+    // A verbose judge reply that ends in prose: the standalone "a" is the
+    // English article, not arm A. Without the filter the last match would be
+    // "a" → 'A', inverting a correct 'B' verdict *identically* in both swap
+    // orders, which resolveSwappedOutcome would score as an order-consistent
+    // win — a loss silently recorded as a win.
+    expect(parseJudgeVerdict('The answer is B because it gives a clearer explanation.')).toBe('B');
+    expect(parseJudgeVerdict('Answer B is better since it provides a complete answer.')).toBe('B');
+  });
+
+  it('still accepts a lone lowercase "a" as the verdict', () => {
+    expect(parseJudgeVerdict('a')).toBe('A');
+    expect(parseJudgeVerdict('a.')).toBe('A');
+  });
+
   it('treats an empty or unparseable reply as an error, not a tie', () => {
     expect(parseJudgeVerdict('')).toBe('error');
     expect(parseJudgeVerdict('I cannot decide.')).toBe('error');
