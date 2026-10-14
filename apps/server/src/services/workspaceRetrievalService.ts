@@ -4,7 +4,11 @@ import { Message } from '../models/Message';
 import { Session } from '../models/Session';
 import { Task } from '../models/Task';
 import { TaskEvent } from '../models/TaskEvent';
+import { WorkspaceEmbedding } from '../models/WorkspaceEmbedding';
 import { config } from '../config';
+import { VECTOR_INDEX_NAME } from './atlasVectorIndex';
+import { embedTexts } from './embeddingService';
+import { withTimeout } from './markdownConversion';
 
 /*
  * #253: workspace memory — retrieval over the user's past work.
@@ -367,4 +371,148 @@ export const retrieveWorkspaceBlock = async (
     console.error('Workspace retrieval error:', err);
     return '';
   }
+};
+
+/*
+ * #294, task 8: the semantic half of retrieval. Embed the query, then ask
+ * Atlas Vector Search for the nearest stored vectors over the same corpus BM25
+ * searches. This is the one stage that cannot run in CI: `$vectorSearch` does
+ * not exist on local `mongod`/`mongodb-memory-server`, so the driver path is
+ * exercised only against Atlas (the #289 live run). Everything around it is
+ * injectable, so the degradation contract is unit-tested with fakes.
+ *
+ * It never throws. A missing key, an unavailable index, a provider error, a
+ * timeout, or a malformed response all degrade to `[]` — retrieval then falls
+ * back to the BM25 result, never an error on a chat turn.
+ */
+
+export interface VectorHit {
+  sourceId: string;
+  score: number;
+}
+
+export interface VectorSearchParams {
+  userId: string;
+  model: string;
+  queryVector: number[];
+  limit: number;
+  numCandidates: number;
+}
+
+export interface VectorSearchDeps {
+  // Injectable for tests; default embeds the query against DeepInfra.
+  embed?: (texts: string[]) => Promise<number[][]>;
+  // Injectable for tests; default runs the Atlas `$vectorSearch` aggregate.
+  search?: (params: VectorSearchParams) => Promise<VectorHit[]>;
+  timeoutMs?: number;
+}
+
+/*
+ * Candidate headroom: the vector hits are intersected with the collected slice
+ * set downstream (task 10), and orphaned rows (their source deleted) still
+ * occupy this window, so over-fetch before filtering. `numCandidates` must be
+ * >= `limit` for `$vectorSearch`; both scale together.
+ */
+export const VECTOR_CANDIDATE_MULTIPLIER = 4;
+export const VECTOR_CANDIDATE_FLOOR = 100;
+
+const defaultVectorSearch = async (params: VectorSearchParams): Promise<VectorHit[]> => {
+  const rows = await WorkspaceEmbedding.aggregate([
+    {
+      $vectorSearch: {
+        index: VECTOR_INDEX_NAME,
+        path: 'vector',
+        queryVector: params.queryVector,
+        numCandidates: params.numCandidates,
+        limit: params.limit,
+        // `userId` is stored as an ObjectId and `$vectorSearch` filters compare
+        // exactly, so it must be passed as one (a string would silently match
+        // nothing). `model` is a plain string.
+        filter: { userId: new mongoose.Types.ObjectId(params.userId), model: params.model },
+      },
+    },
+    { $project: { _id: 0, sourceId: 1, score: { $meta: 'vectorSearchScore' } } },
+  ]);
+  return rows.map((row) => ({ sourceId: String(row.sourceId), score: Number(row.score) }));
+};
+
+export const vectorCandidates = async (
+  query: string,
+  userId: string,
+  model: string,
+  n = MAX_SLICES,
+  deps: VectorSearchDeps = {},
+): Promise<VectorHit[]> => {
+  const limit = Math.max(n * VECTOR_CANDIDATE_MULTIPLIER, VECTOR_CANDIDATE_FLOOR);
+  const numCandidates = Math.max(limit, VECTOR_CANDIDATE_FLOOR);
+  try {
+    const embed = deps.embed ?? ((texts: string[]) => embedTexts(texts, { kind: 'query' }));
+    const search = deps.search ?? defaultVectorSearch;
+    // One deadline over the whole stage (embed + ANN query): `embedTexts` sets
+    // its own `AbortSignal` at the same `timeoutMs`, so the two fire together
+    // and the effective bound is ~`timeoutMs`, not twice it. `withTimeout`
+    // rejects the caller but cannot cancel the in-flight work, which is fine —
+    // the late result is discarded and retrieval has already degraded to BM25.
+    const run = async (): Promise<VectorHit[]> => {
+      const [queryVector] = await embed([query]);
+      if (!queryVector || queryVector.length === 0) return [];
+      return search({ userId, model, queryVector, limit, numCandidates });
+    };
+    return await withTimeout(run(), deps.timeoutMs ?? config.embeddings.timeoutMs);
+  } catch (err) {
+    console.error('Workspace vector search degraded to BM25:', err);
+    return [];
+  }
+};
+
+/*
+ * #294, task 9: reciprocal rank fusion (RRF) of the BM25 and vector rankings.
+ *
+ * score(d) = w_bm25 / (k + rank_bm25(d)) + w_vec / (k + rank_vec(d))
+ *
+ * Rank-based, so no score normalisation between BM25 and cosine distance is
+ * needed. A document absent from a ranking contributes 0 (no penalty). Only
+ * slices present in `slices` are eligible, so a vector hit whose `sourceId` is
+ * not in the collected set (an orphaned row) is dropped — the intersection is
+ * the correctness invariant that keeps deleted/ephemeral/out-of-pool slices
+ * from being surfaced. Pure: no Mongo, no `Date.now()`.
+ */
+export const RRF_K = 60;
+export const RRF_BM25_WEIGHT = 1;
+export const RRF_VECTOR_WEIGHT = 1;
+
+export interface RrfWeights {
+  bm25: number;
+  vector: number;
+}
+
+export const rrfFuse = (
+  slices: WorkspaceSlice[],
+  bm25: { slice: WorkspaceSlice; score: number }[],
+  vector: VectorHit[],
+  weights: RrfWeights = { bm25: RRF_BM25_WEIGHT, vector: RRF_VECTOR_WEIGHT },
+  k = RRF_K,
+): WorkspaceSlice[] => {
+  const byId = new Map(slices.map((slice) => [slice.id, slice] as const));
+  const scores = new Map<string, number>();
+  const add = (id: string, weight: number, rank: number): void => {
+    scores.set(id, (scores.get(id) ?? 0) + weight / (k + rank));
+  };
+
+  bm25.forEach((hit, i) => {
+    if (byId.has(hit.slice.id)) add(hit.slice.id, weights.bm25, i + 1);
+  });
+  vector.forEach((hit, i) => {
+    if (byId.has(hit.sourceId)) add(hit.sourceId, weights.vector, i + 1);
+  });
+
+  return [...scores.entries()]
+    .map(([id, score]) => ({ slice: byId.get(id) as WorkspaceSlice, score }))
+    .sort(
+      (a, b) =>
+        b.score - a.score ||
+        new Date(b.slice.at).getTime() - new Date(a.slice.at).getTime() ||
+        (a.slice.id < b.slice.id ? -1 : a.slice.id > b.slice.id ? 1 : 0),
+    )
+    .map((entry) => entry.slice);
 };
