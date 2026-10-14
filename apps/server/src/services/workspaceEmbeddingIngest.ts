@@ -143,7 +143,13 @@ export const embedWorkspaceUser = async (
   };
   if (deps.dryRun) return result;
 
-  const embed = deps.embed ?? ((texts: string[]) => embedTexts(texts, { kind: 'passage' }));
+  // The backfill timeout, not the hot-path one: a 64-passage batch
+  // cold-embeds in seconds, which the 800ms hot-path budget cannot cover
+  // (observed live: the default timed out on real batches).
+  const embed =
+    deps.embed ??
+    ((texts: string[]) =>
+      embedTexts(texts, { kind: 'passage', timeoutMs: config.embeddings.backfillTimeoutMs }));
   for (let i = 0; i < plan.toEmbed.length; i += EMBED_BATCH) {
     const batch = plan.toEmbed.slice(i, i + EMBED_BATCH);
     let vectors: number[][];

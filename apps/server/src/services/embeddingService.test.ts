@@ -170,4 +170,58 @@ describe('embedTexts (#294)', () => {
       embedTexts(['hello'], { fetchImpl: fetchImpl as unknown as typeof fetch }),
     ).rejects.toThrow(/not a numeric vector/);
   });
+
+  it('recovers a context-length 400 by splitting per text and halving the offender', async () => {
+    // `EMBEDDING_MAX_CHARS` cannot see token density, so a code-dense slice can
+    // still exceed the model's 512-token window and DeepInfra 400s the whole
+    // batch. The clean text must come back in one piece and in input order;
+    // only the offender is retried, halved until it fits.
+    const dense = 'x'.repeat(3000);
+    const contextError = {
+      ok: false,
+      status: 400,
+      text: async () =>
+        JSON.stringify({
+          error: {
+            message:
+              "the model's context length is only 512 tokens, resulting in a maximum input length of 512 tokens",
+          },
+        }),
+    };
+    const fetchImpl = jest.fn(async (_url: unknown, init?: { body?: string }) => {
+      const input = (JSON.parse((init as FetchInit).body as string) as { input: string[] }).input;
+      if (input.length > 1) return contextError;
+      if (input[0].length > 700) return contextError;
+      return okResponse([vector(4, input[0].length)]);
+    });
+    const result = await embedTexts(['clean passage', dense], {
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+    expect(result).toEqual([vector(4, 'clean passage'.length), vector(4, 375)]);
+    // 1 batch call + 2 per-text calls + (1500, 750, 375) offender retries.
+    expect(fetchImpl).toHaveBeenCalledTimes(6);
+  });
+
+  it('fails loudly when an input cannot shrink below the context floor', async () => {
+    const contextError = {
+      ok: false,
+      status: 400,
+      text: async () => 'maximum input length of 512 tokens',
+    };
+    const fetchImpl = jest.fn(async () => contextError);
+    await expect(
+      embedTexts(['a'.repeat(40)], { fetchImpl: fetchImpl as unknown as typeof fetch }),
+    ).rejects.toThrow(/exceeds the model context even after truncation/);
+  });
+
+  it('keeps a non-context 400 as a plain response error', async () => {
+    const fetchImpl = jest.fn(async () => ({
+      ok: false,
+      status: 400,
+      text: async () => '{"error":{"message":"bad request"}}',
+    }));
+    await expect(
+      embedTexts(['hello'], { fetchImpl: fetchImpl as unknown as typeof fetch }),
+    ).rejects.toThrow(/HTTP 400/);
+  });
 });
