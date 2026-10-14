@@ -33,6 +33,24 @@ describe('memory corpus (#289)', () => {
     expect(GATE_CASES.some((c) => !c.refersBack && (c.history?.length ?? 0) > 0)).toBe(true);
   });
 
+  it('every gate case records its labelling source in `note`', () => {
+    // T1/OQ1: label independence is only auditable if each case names who
+    // labelled it. Enforce the convention so a future addition cannot silently
+    // drop the provenance and quietly weaken the "hand-labelled" claim.
+    for (const testCase of GATE_CASES) {
+      const note = testCase.note ?? '';
+      expect(note.trim().length).toBeGreaterThan(0);
+      expect(/^(agent-authored|owner-confirmed)\b/.test(note)).toBe(true);
+    }
+  });
+
+  it('gate cases have unique prompts (no accidental double-counting)', () => {
+    // A copied case under a fresh id would double-weight one label in the
+    // precision/recall denominator without showing up in the id check above.
+    const prompts = GATE_CASES.map((c) => c.prompt.trim().toLowerCase());
+    expect(new Set(prompts).size).toBe(prompts.length);
+  });
+
   it('scenarios have unique ids, resolvable expected seeds, and a fact', () => {
     const ids = MEMORY_SCENARIOS.map((s) => s.id);
     expect(new Set(ids).size).toBe(ids.length);
