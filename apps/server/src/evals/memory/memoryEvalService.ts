@@ -263,7 +263,9 @@ export const pushMemoryCorpusToLangSmith = async (
   for (const testCase of gateCases) {
     await ls.createExample(
       { stage: 'gate', prompt: testCase.prompt, history: testCase.history ?? [] },
-      { refersBack: testCase.refersBack },
+      // `subtype` (T1b-i) rides the example so a dataset consumer can stratify
+      // recall per refer-back subtype, the same split the local metrics report.
+      { refersBack: testCase.refersBack, subtype: testCase.subtype },
       { datasetName: MEMORY_DATASET_NAME },
     );
   }

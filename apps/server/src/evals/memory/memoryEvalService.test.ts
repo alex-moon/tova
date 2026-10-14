@@ -79,6 +79,33 @@ describe('gateMetrics (#289)', () => {
     });
     expect(metrics.recallBySubtype['bare-deixis'].recall).toBe(1);
   });
+
+  it('partitions the positive labels across subtypes (bucket sums match overall recall)', () => {
+    // Every subtype row is a positive, so the subtype buckets must exactly
+    // partition the overall tp/fn. A regression that double-counted or dropped
+    // a subtype would silently move a per-subtype bar without changing overall
+    // recall, so the partition is the invariant that keeps them consistent.
+    const withSubtype = (
+      subtype: GateCaseResult['subtype'],
+      expected: boolean,
+      observed: boolean,
+    ): GateCaseResult => ({ ...gate(expected, observed), subtype });
+    const metrics = gateMetrics([
+      withSubtype('explicit', true, true),
+      withSubtype('explicit', true, false),
+      withSubtype('continuation', true, true),
+      withSubtype('bare-deixis', true, false),
+      withSubtype('bare-deixis', true, true),
+      gate(false, true),
+      gate(false, false),
+    ]);
+    const buckets = Object.values(metrics.recallBySubtype);
+    const sum = (pick: (b: (typeof buckets)[number]) => number) =>
+      buckets.reduce((n, b) => n + pick(b), 0);
+    expect(sum((b) => b.total)).toBe(metrics.truePos + metrics.falseNeg);
+    expect(sum((b) => b.truePos)).toBe(metrics.truePos);
+    expect(sum((b) => b.falseNeg)).toBe(metrics.falseNeg);
+  });
 });
 
 describe('retrievalMetrics (#289)', () => {
@@ -180,12 +207,14 @@ describe('runRetrievalEval (#289)', () => {
 describe('pushMemoryCorpusToLangSmith (#289)', () => {
   it('creates the dataset when absent and writes one example per case', async () => {
     const created: string[] = [];
+    const outputs: unknown[] = [];
     const client = {
       hasDataset: jest.fn().mockResolvedValue(false),
       createDataset: jest.fn().mockResolvedValue({ id: 'ds' }),
       createExample: jest.fn(
-        async (input: unknown, _output: unknown, opts?: { datasetName: string }) => {
+        async (_input: unknown, output: unknown, opts?: { datasetName: string }) => {
           created.push(opts?.datasetName ?? '');
+          outputs.push(output);
         },
       ),
     } as unknown as Client;
@@ -204,12 +233,15 @@ describe('pushMemoryCorpusToLangSmith (#289)', () => {
           expectedFact: 'f',
         },
       ],
-      [{ id: 'g1', prompt: 'p', refersBack: true }],
+      [{ id: 'g1', prompt: 'p', refersBack: true, subtype: 'explicit' }],
     );
 
     expect((client as unknown as { createDataset: jest.Mock }).createDataset).toHaveBeenCalledWith(
       MEMORY_DATASET_NAME,
     );
     expect(created).toEqual([MEMORY_DATASET_NAME, MEMORY_DATASET_NAME]);
+    // The subtype rides the gate example, so the shareable corpus carries the
+    // same per-subtype split the local metrics report (T1b-i).
+    expect(outputs[0]).toMatchObject({ refersBack: true, subtype: 'explicit' });
   });
 });

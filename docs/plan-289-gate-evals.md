@@ -30,9 +30,9 @@ checked-in corpus uses **synthetic analogues** (same structure, no personal data
      against.
    - **Stage 3 — helpfulness (mixed).** Scenarios carry the expected fact (deterministic
      substring) and are shaped for the pairwise A/B + blinded, position-swapped judge
-     (`openai/gpt-oss-120b` on Groq). **The judge is not wired in this increment** — the
-     ticket requires validating it against hand labels first. The data is encoded so the
-     judge runner is a drop-in follow-up.
+     (`openai/gpt-oss-120b` on Groq). The judge is **wired but not yet validated** against
+     hand labels (OQ1); its win-rate is provisional until that validation clears (see the
+     Stage 3 section below).
 
 2. **Hit-rate needs slice IDs, so retrieval is split.** `retrieveWorkspaceBlock` returns
    a rendered string, not the picked slices. Extract `collectWorkspaceSlices(...)` and add
@@ -89,6 +89,14 @@ ratified from the evidence (ticket: "baseline first, then ratify"). Every bar ne
 a stated minimum N; n=36 gate / n=22 retrieval now clear the per-category floors
 pinned in `corpus.test.ts`.
 
+> **Provenance caveat (2026-10-14).** The gate numbers above were captured *before*
+> the T1b-i subtype annotation landed, which changes the corpus hash. A later local
+> run on the annotated corpus read recall 88.9% (two misses: `gate-one-from-yesterday`,
+> `gate-finish-draft`) — the `gate-other-one` flip is provider run-to-run variance
+> (OQ26), not a corpus change. The baseline is re-captured on the annotated corpus as
+> T9 in `plan-289-workspace-memory.md`; treat the numbers here as the pre-annotation
+> record.
+
 ## Stage 3 — helpfulness (wired, not yet validated)
 
 `evals/memory/helpfulnessEval.ts` runs the ticket's mixed stage: the same query
@@ -135,10 +143,14 @@ issue stay in sync:
   429) to `{workspace:false}`, so a rate-limited positive is scored as a gate "no"
   and inflates false negatives. Options: pace/retry, surface failures as a distinct
   excluded outcome, or both.
-- **OQ12 bare-deixis fairness** — `gate-other-one`/`gate-one-from-yesterday` have no
-  history, so the referent is unresolvable in what the gate sees. Split explicit /
-  continuation refer-backs from bare-deixis and set bars per subtype? If judged
-  unfair, recall rises to 94.4% (34/36).
+- **OQ12 bare-deixis fairness** — five positives are bare-deictic with no history
+  (`gate-same-as-before`, `gate-other-one`, `gate-and-that-one`, `gate-previous-version`,
+  `gate-one-from-yesterday`), so the referent is unresolvable in what the gate sees. The
+  subtype is now recorded on every positive (T1b-i), so per-subtype recall is reported;
+  the open part is whether bare deixis is a fair `refersBack: true` label at all, or
+  whether all five should be relabelled/dropped. `gate-finish-draft` is a `continuation`
+  with history and is unaffected. Ties to OQ36 (a bare-deictic negative would collide
+  with the bare-deictic positive `gate-and-that-one`).
 
 ## Done
 
@@ -156,8 +168,10 @@ issue stay in sync:
 
 ## Follow-ups
 
-- Grow the gate set further and split bare-deixis from explicit/continuation
-  refer-backs (OQ12) before ratifying thresholds.
+- Grow the gate set further and ratify the bare-deixis bar (OQ12) before ratifying
+  thresholds. The explicit/continuation/bare-deixis split is now recorded on every
+  positive (T1b-i); what remains is the owner's judgement on whether bare deixis is a
+  fair refer-back label.
 - Validate the stage-3 judge (`gpt-oss-120b` on Groq) against ~30–50 hand-labelled
   pairs (OQ1) before its win-rate ratifies a bar.
 - Persist memory-eval metrics (new shape or collection) and surface them in the admin

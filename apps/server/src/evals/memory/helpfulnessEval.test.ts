@@ -107,6 +107,15 @@ describe('helpfulnessMetrics (#289)', () => {
     expect(metrics.counterfactualHits).toBe(1);
     expect(metrics.deterministicWins).toBe(0);
   });
+
+  it('counts a deterministic win when the block and answer carry the fact and the blank arm does not', () => {
+    // The backbone's positive case: retrieval carried the fact AND the with-arm
+    // answer used it, with no counterfactual. This is the signal the judge is a
+    // backstop for, so it must be counted, not just the negative case above.
+    const metrics = helpfulnessMetrics([row({})]);
+    expect(metrics.deterministicWins).toBe(1);
+    expect(metrics.counterfactualHits).toBe(0);
+  });
 });
 
 describe('runHelpfulnessEval (#289)', () => {
@@ -188,5 +197,26 @@ describe('runHelpfulnessEval (#289)', () => {
     expect(judged).toBe(0);
     expect(results[0].outcome).toBeNull();
     expect(results[0].blockCarriesId).toBe(false);
+  });
+
+  it('does not pay for a second responder call when there is no block to inject', async () => {
+    // With no block the two arms are byte-identical, so the runner reuses the
+    // with-arm answer instead of issuing a duplicate live call. A regression
+    // here would double stage-3 cost and risk the two arms diverging by
+    // sampling noise on a pair that is trivially a tie.
+    let respondCalls = 0;
+    const { results } = await runHelpfulnessEval({
+      scenarios: [scenario('s1', 'fact')],
+      clear: async () => {},
+      seed: async () => ({ 'seed-a': 'real-1' }),
+      retrieve: async () => [],
+      respond: async () => {
+        respondCalls += 1;
+        return 'nothing on that';
+      },
+      judge: async () => 'A',
+    });
+    expect(respondCalls).toBe(1);
+    expect(results[0].outcome).toBeNull();
   });
 });
