@@ -49,8 +49,9 @@ export interface MemoryScenario {
   expectedSliceId: string;
   /**
    * Whether the baseline is expected to surface it. `false` documents a known
-   * miss by construction (deleted seed, out-of-pool seed) so #293/#294 can show
-   * the delta when they land.
+   * miss by construction (a deleted seed, excluded by `deletedAt`). `out-of-pool`
+   * was a miss under the pre-#293 bounded read; since #293 searches the whole
+   * corpus it expects a hit.
    */
   expectSurfaced: boolean;
   /** Deterministic substring a helpful answer must contain (stage-3 backbone). */
@@ -62,6 +63,15 @@ export interface MemoryScenario {
   poolFill?: number;
 }
 
+/**
+ * How a positive turn refers back. `explicit` names the referent; `continuation`
+ * carries it only in `history`; `bare-deixis` relies on a pronoun/deictic with no
+ * content word and (by construction) no history. Recording the subtype lets
+ * recall be reported per subtype (T1b-i): a bar set on bare deixis is a
+ * different claim from one set on explicit refer-backs (OQ12/OQ36).
+ */
+export type GateSubtype = 'explicit' | 'continuation' | 'bare-deixis';
+
 /** One hand-labelled gate case: does this turn refer back to the user's past work? */
 export interface GateCase {
   id: string;
@@ -70,5 +80,7 @@ export interface GateCase {
   history?: { role: 'user' | 'assistant'; content: string }[];
   /** Hand label: true = the workspace gate should fire. */
   refersBack: boolean;
+  /** Refer-back subtype; set on every positive, absent on negatives. */
+  subtype?: GateSubtype;
   note?: string;
 }

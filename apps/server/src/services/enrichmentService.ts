@@ -131,7 +131,7 @@ const enrichmentModel = (): string => config.aux.model;
  * ("open it", "what did we decide") can inherit the previous turn's intent,
  * mirroring the retired guard.
  */
-export const classifyFileIntent = async (
+const runEnrichmentCall = async (
   query: string,
   history: { role: 'user' | 'assistant'; content: string }[] = [],
 ): Promise<{ files: boolean; workspace: boolean }> => {
@@ -140,25 +140,81 @@ export const classifyFileIntent = async (
         .map((m) => `${m.role}: ${m.content}`)
         .join('\n')}\n`
     : '';
+  const completion = await inferenceService.createToolFreeCompletion({
+    provider: config.aux.provider,
+    model: enrichmentModel(),
+    messages: [
+      {
+        role: 'user',
+        content: `${ENRICHMENT_VOTE_PROMPT}\n${transcript}\nCurrent request: ${query}`,
+      },
+    ],
+    temperature: 0,
+    max_tokens: 512,
+    trace: { tags: ['enrichment:votes'] },
+  });
+  const raw = completion.choices[0]?.message?.content ?? '';
+  return { files: filesVoteFromReply(raw), workspace: workspaceVoteFromReply(raw) };
+};
+
+export const classifyFileIntent = async (
+  query: string,
+  history: { role: 'user' | 'assistant'; content: string }[] = [],
+): Promise<{ files: boolean; workspace: boolean }> => {
   try {
-    const completion = await inferenceService.createToolFreeCompletion({
-      provider: config.aux.provider,
-      model: enrichmentModel(),
-      messages: [
-        {
-          role: 'user',
-          content: `${ENRICHMENT_VOTE_PROMPT}\n${transcript}\nCurrent request: ${query}`,
-        },
-      ],
-      temperature: 0,
-      max_tokens: 512,
-      trace: { tags: ['enrichment:votes'] },
-    });
-    const raw = completion.choices[0]?.message?.content ?? '';
-    return { files: filesVoteFromReply(raw), workspace: workspaceVoteFromReply(raw) };
+    return await runEnrichmentCall(query, history);
   } catch (err) {
     console.error('Enrichment classify error:', redactForLog(err));
     return { files: false, workspace: false };
+  }
+};
+
+/*
+ * #289 T15b: strict variant for the gate eval. Unlike `classifyFileIntent` it
+ * does NOT swallow a provider failure (a Groq 429, a timeout) into both-false, so
+ * the eval can tell a real "no" from a failed call — the distinction that
+ * otherwise inflates gate false negatives (OQ11). Production never calls this.
+ */
+export const classifyFileIntentStrict = (
+  query: string,
+  history: { role: 'user' | 'assistant'; content: string }[] = [],
+): Promise<{ files: boolean; workspace: boolean }> => runEnrichmentCall(query, history);
+
+/*
+ * #289 T15b: the eval-facing probe. Runs the strict classifier under the same
+ * `ENRICHMENT_TIMEOUT_MS` cap as production and reports the outcome distinctly:
+ * `ok` (a real vote), `timeout` (the cap fired — OQ33) or `error` (the call
+ * threw). The gate eval records these as `timeouts`/`errors` and excludes them
+ * from the precision/recall denominator, so a slow or dead aux call is never
+ * silently scored as a gate "no".
+ */
+export type EnrichmentProbe =
+  | { outcome: 'ok'; files: boolean; workspace: boolean }
+  | { outcome: 'timeout' }
+  | { outcome: 'error' };
+
+export const classifyFileIntentForEval = async (
+  query: string,
+  history: { role: 'user' | 'assistant'; content: string }[] = [],
+  timeoutMs: number = config.aux.enrichmentTimeoutMs,
+): Promise<EnrichmentProbe> => {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<EnrichmentProbe>((resolve) => {
+    timer = setTimeout(() => resolve({ outcome: 'timeout' }), timeoutMs);
+  });
+  // `classifyFileIntentStrict` is wrapped so a rejection becomes an `error`
+  // probe rather than an unhandled rejection after the timeout wins the race.
+  const call = classifyFileIntentStrict(query, history).then(
+    (votes): EnrichmentProbe => ({ outcome: 'ok', ...votes }),
+    (err): EnrichmentProbe => {
+      console.error('Enrichment classify (eval) error:', redactForLog(err));
+      return { outcome: 'error' };
+    },
+  );
+  try {
+    return await Promise.race([call, timeout]);
+  } finally {
+    if (timer) clearTimeout(timer);
   }
 };
 

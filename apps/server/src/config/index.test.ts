@@ -30,6 +30,14 @@ const keys = [
   'TOVA_EVAL_PROVIDER',
   'TASK_MAX_STEPS',
   'TASK_MAX_COST_USD',
+  'MEMORY_JUDGE_MODEL',
+  'MEMORY_JUDGE_PROVIDER',
+  'MEMORY_RESPONDER_MODEL',
+  'MEMORY_RESPONDER_PROVIDER',
+  'MEMORY_RESPONDER_TEMPERATURE',
+  'MEMORY_EVAL_PACE_MS',
+  'MEMORY_EVAL_GATE_PACE_MS',
+  'MEMORY_EVAL_JUDGE_PACE_MS',
   'EMBEDDING_MODEL',
   'EMBEDDING_DIM',
   'EMBEDDING_TIMEOUT_MS',
@@ -181,6 +189,49 @@ describe('config/index', () => {
       process.env.TASK_MAX_COST_USD = '2.5';
       expect(config.task.maxSteps).toBe(40);
       expect(config.task.maxCostUsd).toBe(2.5);
+    });
+
+    it('memory-eval judge defaults are pinned; responder overrides stay undefined (#289)', () => {
+      // Judge pin: owner judge-probe sweep 2026-10-14 (100%/100% validation,
+      // non-overlapping family vs gate and responder, cheapest finalist).
+      expect(config.memoryEval.judgeModel).toBe('Qwen/Qwen3-235B-A22B-Instruct-2507');
+      expect(config.memoryEval.judgeProvider).toBe('deepinfra');
+      // Unset responder overrides fall through to the roster default in the
+      // runner (T14c), so the getters must return undefined, not a pin.
+      expect(config.memoryEval.responderModel).toBeUndefined();
+      expect(config.memoryEval.responderProvider).toBeUndefined();
+      expect(config.memoryEval.responderTemperature).toBe(0);
+      expect(config.memoryEval.paceMs).toBe(1000);
+      expect(config.memoryEval.gatePaceMs).toBe(2000);
+      expect(config.memoryEval.judgePaceMs).toBe(2000);
+    });
+
+    it('memory-eval responder overrides and pacing parse from env (#289)', () => {
+      process.env.MEMORY_RESPONDER_MODEL = 'openai/gpt-oss-20b';
+      process.env.MEMORY_RESPONDER_PROVIDER = 'groq';
+      process.env.MEMORY_RESPONDER_TEMPERATURE = '0.4';
+      process.env.MEMORY_EVAL_PACE_MS = '250';
+      process.env.MEMORY_EVAL_GATE_PACE_MS = '500';
+      process.env.MEMORY_EVAL_JUDGE_PACE_MS = '750';
+      expect(config.memoryEval.responderModel).toBe('openai/gpt-oss-20b');
+      expect(config.memoryEval.responderProvider).toBe('groq');
+      expect(config.memoryEval.responderTemperature).toBe(0.4);
+      expect(config.memoryEval.paceMs).toBe(250);
+      expect(config.memoryEval.gatePaceMs).toBe(500);
+      expect(config.memoryEval.judgePaceMs).toBe(750);
+    });
+
+    it('memory-eval temperature and pacing fall back on malformed or negative values (#289)', () => {
+      for (const bad of ['garbage', '', '-1', 'Infinity']) {
+        process.env.MEMORY_RESPONDER_TEMPERATURE = bad;
+        process.env.MEMORY_EVAL_PACE_MS = bad;
+        process.env.MEMORY_EVAL_GATE_PACE_MS = bad;
+        process.env.MEMORY_EVAL_JUDGE_PACE_MS = bad;
+        expect(config.memoryEval.responderTemperature).toBe(0);
+        expect(config.memoryEval.paceMs).toBe(1000);
+        expect(config.memoryEval.gatePaceMs).toBe(2000);
+        expect(config.memoryEval.judgePaceMs).toBe(2000);
+      }
     });
 
     it('embeddings default model/dim/timeout when unset or malformed (#294)', () => {

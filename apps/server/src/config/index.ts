@@ -134,6 +134,66 @@ export const config = {
     },
   },
 
+  // #289: the stage-3 helpfulness eval. The judge is deliberately a different
+  // model from the gate (`openai/gpt-oss-20b`) so self-preference bias cannot
+  // flatter the gate. Owner-selected (2026-10-14, judge-probe sweep): the
+  // original ticket pin (`openai/gpt-oss-120b` on Groq) kept the same family
+  // as the gate, and the validation sweep found `Qwen/Qwen3-235B-A22B-Instruct-
+  // 2507` scores 100%/100% on the judge-validation sets (vs the incumbent's
+  // 81.8%/100%), is a different family from the gate AND from the responder
+  // default (`zai-org/GLM-5.3-Flash`), rides the DeepInfra key the embeddings
+  // already use, and is the cheapest of the validated finalists. Overridable
+  // so a judge swap (OQ2/OQ29) needs no code change.
+  //
+  // The responder is the roster default (`resolveScheduledModels`), but pinned
+  // here (T14c) so the arm is not moved silently by a `ROSTER_SEED` edit and a
+  // model sweep (OQ24/OQ29) is a config change. `responderModel`/`Provider`
+  // return `undefined` when unset, so the caller keeps the roster fallback.
+  // `paceMs` (T15d) is the inter-call delay that keeps a ~4-call-per-scenario
+  // run under the provider RPM (OQ32).
+  memoryEval: {
+    get judgeModel(): string {
+      return process.env.MEMORY_JUDGE_MODEL || 'Qwen/Qwen3-235B-A22B-Instruct-2507';
+    },
+    get judgeProvider(): LlmProvider {
+      return (process.env.MEMORY_JUDGE_PROVIDER as LlmProvider) || 'deepinfra';
+    },
+    get responderModel(): string | undefined {
+      return process.env.MEMORY_RESPONDER_MODEL || undefined;
+    },
+    get responderProvider(): LlmProvider | undefined {
+      return (process.env.MEMORY_RESPONDER_PROVIDER as LlmProvider) || undefined;
+    },
+    get responderTemperature(): number {
+      const raw = process.env.MEMORY_RESPONDER_TEMPERATURE;
+      const parsed = raw === undefined || raw === '' ? NaN : Number(raw);
+      return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
+    },
+    get paceMs(): number {
+      const raw = process.env.MEMORY_EVAL_PACE_MS;
+      const parsed = raw === undefined || raw === '' ? NaN : Number(raw);
+      return Number.isFinite(parsed) && parsed >= 0 ? parsed : 1000;
+    },
+    // T15c: the gate stage makes one aux call per case (36 at n=36), which can
+    // trip the aux provider's RPM. 2000ms keeps a burst under Groq's 30 RPM;
+    // config-sourced so the budget (OQ32) is a config change.
+    get gatePaceMs(): number {
+      const raw = process.env.MEMORY_EVAL_GATE_PACE_MS;
+      const parsed = raw === undefined || raw === '' ? NaN : Number(raw);
+      return Number.isFinite(parsed) && parsed >= 0 ? parsed : 2000;
+    },
+    // T5: judge validation makes one judge call per pair (~37 across both sets)
+    // as a fast single-token burst, which trips Groq's 30 RPM at the 1000ms
+    // stage-3 pace (observed live: a 429 at 1s spacing). 2000ms matches the
+    // gate's rate-limit headroom; config-sourced so the budget (OQ32) is a
+    // config change.
+    get judgePaceMs(): number {
+      const raw = process.env.MEMORY_EVAL_JUDGE_PACE_MS;
+      const parsed = raw === undefined || raw === '' ? NaN : Number(raw);
+      return Number.isFinite(parsed) && parsed >= 0 ? parsed : 2000;
+    },
+  },
+
   chat: {
     get maxOutputTokens(): string | undefined {
       return process.env.CHAT_MAX_OUTPUT_TOKENS;

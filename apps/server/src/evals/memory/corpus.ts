@@ -13,26 +13,122 @@ import type { GateCase, MemoryScenario } from './types';
  * bounded read; #293 searches the whole corpus, so it now expects a hit.
  */
 
-/** Hand-labelled gate set. Positives read as continuations; negatives are fresh asks. */
+/*
+ * Hand-labelled gate set. Positives are explicit refer-backs or continuations
+ * whose signal lives in `history`; negatives are fresh asks AND bare deixis
+ * with no resolvable referent (owner decision 2026-10-14, OQ12/OQ36: the gate
+ * may only fire on a vague prompt when the referent is resolvable from the
+ * history it sees — otherwise a refusal is the best answer). The set is
+ * deliberately hard on both sides: continuations whose refer-back lives only
+ * in `history` test recall, while fresh asks that *look* like memory probes
+ * ("what should I do about my job?") and bare deixis ("and that one as well?")
+ * test precision. This is the first of the three stages (#289) and the one
+ * that must clear a minimum-N bar (≥ 30 cases, ≥ 12 per label) before any
+ * threshold is ratified.
+ *
+ * `note` records the labelling source (`agent-authored` vs `owner-confirmed`,
+ * per the plan's OQ1) so label independence stays auditable.
+ */
 export const GATE_CASES: GateCase[] = [
+  // Positives — explicit refer-backs to earlier decisions or work.
   {
     id: 'gate-move-decision',
     prompt: 'What did we decide about the move in the end?',
     refersBack: true,
-    note: 'explicit refer-back to an earlier decision',
+    subtype: 'explicit',
+    note: 'agent-authored: explicit refer-back to an earlier decision',
   },
   {
     id: 'gate-budget-recall',
     prompt: 'Remind me what I said about the budget.',
     refersBack: true,
-    note: 'explicit recall of the user’s own past statement',
+    subtype: 'explicit',
+    note: 'agent-authored: explicit recall of the user’s own past statement',
   },
   {
     id: 'gate-holiday-plan',
     prompt: 'Where did we leave the holiday plan?',
     refersBack: true,
-    note: 'refer-back to shared past work',
+    subtype: 'explicit',
+    note: 'agent-authored: refer-back to shared past work',
   },
+  {
+    id: 'gate-remind-recommendation',
+    prompt: 'What did you recommend in the end?',
+    refersBack: true,
+    subtype: 'explicit',
+    note: 'agent-authored: refer-back to an earlier recommendation',
+  },
+  {
+    id: 'gate-what-we-discussed',
+    prompt: 'What was it we discussed about the roof?',
+    refersBack: true,
+    subtype: 'explicit',
+    note: 'agent-authored: refer-back to an earlier discussion',
+  },
+  {
+    id: 'gate-change-mind',
+    prompt: 'Did we change our mind about the venue?',
+    refersBack: true,
+    subtype: 'explicit',
+    note: 'agent-authored: refer-back to an earlier shared decision',
+  },
+  {
+    id: 'gate-you-mentioned',
+    prompt: 'You mentioned something about a warranty — what was it?',
+    refersBack: true,
+    subtype: 'explicit',
+    note: 'agent-authored: refer-back to a prior assistant turn',
+  },
+  {
+    id: 'gate-earlier-list',
+    prompt: 'Add the third one to the list you made earlier.',
+    refersBack: true,
+    subtype: 'explicit',
+    note: 'agent-authored: refer-back to work the assistant produced earlier',
+  },
+  {
+    id: 'gate-update-that-plan',
+    prompt: 'Can you update that plan with the new dates?',
+    refersBack: true,
+    subtype: 'explicit',
+    note: 'agent-authored: refer-back to a shared artefact, then extend it',
+  },
+  // Negatives — bare deixis with no resolvable referent (owner decision
+  // 2026-10-14, OQ12/OQ36: the gate may only fire on a vague prompt when the
+  // referent is resolvable from visible history; with none, staying quiet —
+  // a refusal — is the best answer). Relabelled from positives.
+  {
+    id: 'gate-same-as-before',
+    prompt: 'Do the same as before.',
+    refersBack: false,
+    note: 'owner-confirmed: bare deixis, no history — the referent is unresolvable, so the gate stays quiet',
+  },
+  {
+    id: 'gate-other-one',
+    prompt: 'Actually, use the other one instead.',
+    refersBack: false,
+    note: 'owner-confirmed: bare deixis, no history — the referent is unresolvable, so the gate stays quiet',
+  },
+  {
+    id: 'gate-and-that-one',
+    prompt: 'And that one as well?',
+    refersBack: false,
+    note: 'owner-confirmed: bare deixis, no history — the referent is unresolvable, so the gate stays quiet',
+  },
+  {
+    id: 'gate-previous-version',
+    prompt: 'Go back to the previous version.',
+    refersBack: false,
+    note: 'owner-confirmed: bare deixis, no history — the referent is unresolvable, so the gate stays quiet',
+  },
+  {
+    id: 'gate-one-from-yesterday',
+    prompt: 'Pull up the one from yesterday.',
+    refersBack: false,
+    note: 'owner-confirmed: bare deixis, no history — the referent is unresolvable, so the gate stays quiet',
+  },
+  // Positives — continuations whose refer-back lives only in the transcript.
   {
     id: 'gate-continuation',
     prompt: 'Can you pick that back up for me?',
@@ -41,31 +137,156 @@ export const GATE_CASES: GateCase[] = [
       { role: 'assistant', content: 'Sure — want to start with the layout or the budget?' },
     ],
     refersBack: true,
-    note: 'continuation whose refer-back lives in the history, not the text',
+    subtype: 'continuation',
+    note: 'agent-authored: continuation whose refer-back lives in the history, not the text',
   },
+  {
+    id: 'gate-continue-where-left',
+    prompt: 'Continue where we left off.',
+    history: [
+      { role: 'user', content: 'I want to draft a business plan for a small coffee roastery.' },
+      { role: 'assistant', content: 'Great — I have sketched the market and cost sections.' },
+    ],
+    refersBack: true,
+    subtype: 'continuation',
+    note: 'agent-authored: continuation, refer-back only in history',
+  },
+  {
+    id: 'gate-finish-draft',
+    prompt: 'Finish the draft for me.',
+    history: [
+      { role: 'user', content: 'Help me write a cover letter for a warehouse supervisor role.' },
+      { role: 'assistant', content: 'Here is the opening paragraph — shall I carry on?' },
+    ],
+    refersBack: true,
+    subtype: 'continuation',
+    note: 'agent-authored: continuation of assistant-produced work',
+  },
+  {
+    id: 'gate-pick-up-tax',
+    prompt: 'Can you pick it up from where you stopped?',
+    history: [
+      { role: 'user', content: 'Walk me through filling in my self-assessment tax return.' },
+      { role: 'assistant', content: 'We covered the employment section; next is expenses.' },
+    ],
+    refersBack: true,
+    subtype: 'continuation',
+    note: 'agent-authored: continuation, referent only in history',
+  },
+  // Negatives — fresh world-knowledge, generative, and tool asks.
   {
     id: 'gate-capital',
     prompt: 'What is the capital of Australia?',
     refersBack: false,
-    note: 'fresh world-knowledge question',
+    note: 'agent-authored: fresh world-knowledge question',
   },
   {
     id: 'gate-poem',
     prompt: 'Write me a short poem about the sea.',
     refersBack: false,
-    note: 'fresh generative request',
+    note: 'agent-authored: fresh generative request',
   },
   {
     id: 'gate-time',
     prompt: 'What time is it right now?',
     refersBack: false,
-    note: 'fresh tool question',
+    note: 'agent-authored: fresh tool question',
   },
   {
     id: 'gate-photosynthesis',
     prompt: 'Explain how photosynthesis works.',
     refersBack: false,
-    note: 'fresh explanation request',
+    note: 'agent-authored: fresh explanation request',
+  },
+  {
+    id: 'gate-fresh-why-sky',
+    prompt: 'Why is the sky blue?',
+    refersBack: false,
+    note: 'agent-authored: fresh explanation request',
+  },
+  {
+    id: 'gate-fresh-compound-interest',
+    prompt: 'Summarise how compound interest works.',
+    refersBack: false,
+    note: 'agent-authored: fresh concept summary, not a document or past chat',
+  },
+  {
+    id: 'gate-fresh-define',
+    prompt: 'What does serendipity mean?',
+    refersBack: false,
+    note: 'agent-authored: fresh definition request',
+  },
+  {
+    id: 'gate-fresh-news',
+    prompt: 'What happened in the news today?',
+    refersBack: false,
+    note: 'agent-authored: fresh current-affairs question',
+  },
+  {
+    id: 'gate-fresh-maths',
+    prompt: 'What is 17 times 24?',
+    refersBack: false,
+    note: 'agent-authored: fresh arithmetic question',
+  },
+  {
+    id: 'gate-fresh-python',
+    prompt: 'Write a Python function that reverses a string.',
+    refersBack: false,
+    note: 'agent-authored: fresh coding request',
+  },
+  {
+    id: 'gate-fresh-translate',
+    prompt: 'Translate good morning into Spanish.',
+    refersBack: false,
+    note: 'agent-authored: fresh translation request',
+  },
+  // Negatives — fresh asks that superficially resemble memory probes.
+  {
+    id: 'gate-fresh-job-advice',
+    prompt: 'What should I do about my job?',
+    refersBack: false,
+    note: 'agent-authored: fresh advice request, no past work referenced',
+  },
+  {
+    id: 'gate-fresh-dinner',
+    prompt: 'What should I have for dinner tonight?',
+    refersBack: false,
+    note: 'agent-authored: fresh suggestion request, no past work referenced',
+  },
+  {
+    id: 'gate-fresh-trip',
+    prompt: 'Help me plan a trip to Iceland.',
+    refersBack: false,
+    note: 'agent-authored: fresh planning request, no prior trip in play',
+  },
+  {
+    id: 'gate-fresh-exercise',
+    prompt: 'Suggest an exercise routine for a beginner.',
+    refersBack: false,
+    note: 'agent-authored: fresh recommendation request',
+  },
+  {
+    id: 'gate-fresh-bakery-names',
+    prompt: 'Give me some name ideas for a small bakery.',
+    refersBack: false,
+    note: 'agent-authored: fresh generative request',
+  },
+  {
+    id: 'gate-fresh-recipe',
+    prompt: 'Give me a recipe for sourdough bread.',
+    refersBack: false,
+    note: 'agent-authored: fresh generative request',
+  },
+  // Negative with history: history alone must not imply a refer-back.
+  {
+    id: 'gate-fresh-after-history',
+    prompt: 'Actually, write me a short poem about the sea.',
+    history: [
+      { role: 'user', content: 'Help me plan the garden office build.' },
+      { role: 'assistant', content: 'Sure — want to start with the layout or the budget?' },
+    ],
+    refersBack: false,
+    note: 'agent-authored: fresh ask that follows history but refers back to nothing',
   },
 ];
 
@@ -179,6 +400,306 @@ export const MEMORY_SCENARIOS: MemoryScenario[] = [
     expectedSliceId: 'seed-old-policy',
     expectSurfaced: true,
     expectedFact: 'AX-4471',
+    poolFill: 210,
+  },
+  // More `direct` cases: the easy baseline that must keep surfacing, so a
+  // retrieval change (#293/#294) is not judged only by its hard-category wins.
+  {
+    id: 'retrieval-direct-sister',
+    description: 'Direct query names the fact ("sister").',
+    category: 'direct',
+    seeds: [
+      {
+        id: 'seed-sister',
+        kind: 'chat',
+        title: 'Family chat',
+        text: 'My sister is called Rosalind and she lives in Leeds.',
+        at: '2026-09-18T10:00:00.000Z',
+      },
+    ],
+    query: 'What is my sister called?',
+    expectedSliceId: 'seed-sister',
+    expectSurfaced: true,
+    expectedFact: 'Rosalind',
+  },
+  {
+    id: 'retrieval-direct-car',
+    description: 'Direct query shares the content word "year".',
+    category: 'direct',
+    seeds: [
+      {
+        id: 'seed-car',
+        kind: 'chat',
+        title: 'Car chat',
+        text: 'I bought a second-hand Volvo estate last year for the family.',
+        at: '2026-09-16T10:00:00.000Z',
+      },
+    ],
+    query: 'Which car did I buy last year?',
+    expectedSliceId: 'seed-car',
+    expectSurfaced: true,
+    expectedFact: 'Volvo',
+  },
+  // More `paraphrase` cases: the query and its seed share no content word, so
+  // lexical scoring scores zero. These are the misses #293/#294 are expected to
+  // move; each is asserted no-overlap in `corpus.test.ts`.
+  {
+    id: 'retrieval-paraphrase-gardener',
+    description: 'Paraphrase query shares no content word with the seed.',
+    category: 'paraphrase',
+    seeds: [
+      {
+        id: 'seed-gardener',
+        kind: 'chat',
+        title: 'Work chat',
+        text: 'She earns her living as a landscape gardener and tends the grounds at the local hospital.',
+        at: '2026-09-19T10:00:00.000Z',
+      },
+    ],
+    query: 'What line of work is my other half in?',
+    expectedSliceId: 'seed-gardener',
+    expectSurfaced: true,
+    expectedFact: 'landscape gardener',
+  },
+  {
+    id: 'retrieval-paraphrase-railpass',
+    description: 'Paraphrase query shares no content word with the seed.',
+    category: 'paraphrase',
+    seeds: [
+      {
+        id: 'seed-railpass',
+        kind: 'chat',
+        title: 'Trip chat',
+        text: 'The rail pass covers unlimited train journeys between the two cities for a month.',
+        at: '2026-09-21T10:00:00.000Z',
+      },
+    ],
+    query: 'How do I get around when I am over there?',
+    expectedSliceId: 'seed-railpass',
+    expectSurfaced: true,
+    expectedFact: 'rail pass',
+  },
+  {
+    id: 'retrieval-paraphrase-coeliac',
+    description: 'Paraphrase query shares no content word with the seed.',
+    category: 'paraphrase',
+    seeds: [
+      {
+        id: 'seed-coeliac',
+        kind: 'chat',
+        title: 'Health chat',
+        text: 'She avoids gluten and keeps to a low-sugar plan because of the coeliac diagnosis.',
+        at: '2026-09-22T10:00:00.000Z',
+      },
+    ],
+    query: 'What kind of diet am I supposed to follow?',
+    expectedSliceId: 'seed-coeliac',
+    expectSurfaced: true,
+    expectedFact: 'coeliac',
+  },
+  {
+    id: 'retrieval-paraphrase-greyhound',
+    description: 'Paraphrase query shares no content word with the seed.',
+    category: 'paraphrase',
+    seeds: [
+      {
+        id: 'seed-greyhound',
+        kind: 'chat',
+        title: 'Home chat',
+        text: 'The greyhound called Bramble sleeps on the sofa all afternoon.',
+        at: '2026-09-23T10:00:00.000Z',
+      },
+    ],
+    query: 'What four-legged friend do we keep at home?',
+    expectedSliceId: 'seed-greyhound',
+    expectSurfaced: true,
+    expectedFact: 'greyhound',
+  },
+  // More `file` cases: the fact lives in `textExtracted`/`markdownExtracted`.
+  {
+    id: 'retrieval-file-cake',
+    description: 'Fact lives in a file slice.',
+    category: 'file',
+    seeds: [
+      {
+        id: 'seed-cake',
+        kind: 'file',
+        title: 'cake-recipe.md',
+        text: 'For the sponge use self-raising flour and a pinch of salt.',
+        at: '2026-09-02T10:00:00.000Z',
+      },
+    ],
+    query: 'What flour does the cake recipe need?',
+    expectedSliceId: 'seed-cake',
+    expectSurfaced: true,
+    expectedFact: 'self-raising flour',
+  },
+  {
+    id: 'retrieval-file-boiler',
+    description: 'Fact lives in a file slice.',
+    category: 'file',
+    seeds: [
+      {
+        id: 'seed-boiler',
+        kind: 'file',
+        title: 'boiler-manual.md',
+        text: 'Warranty: the manufacturer covers parts and labour for ten years from installation.',
+        at: '2026-09-03T10:00:00.000Z',
+      },
+    ],
+    query: 'How long is the boiler warranty?',
+    expectedSliceId: 'seed-boiler',
+    expectSurfaced: true,
+    expectedFact: 'ten years',
+  },
+  {
+    id: 'retrieval-file-venue',
+    description: 'Fact lives in a file slice.',
+    category: 'file',
+    seeds: [
+      {
+        id: 'seed-venue',
+        kind: 'file',
+        title: 'venue-details.md',
+        text: 'The wedding venue is the Old Mill Barn on Church Lane, with parking for forty cars.',
+        at: '2026-09-04T10:00:00.000Z',
+      },
+    ],
+    query: 'What is the venue address for the wedding?',
+    expectedSliceId: 'seed-venue',
+    expectSurfaced: true,
+    expectedFact: 'Old Mill Barn',
+  },
+  {
+    id: 'retrieval-file-gym',
+    description: 'Fact lives in a file slice.',
+    category: 'file',
+    seeds: [
+      {
+        id: 'seed-gym',
+        kind: 'file',
+        title: 'gym-terms.md',
+        text: 'Gym membership renews automatically each January unless cancelled thirty days before.',
+        at: '2026-09-05T10:00:00.000Z',
+      },
+    ],
+    query: 'When does the gym membership renew?',
+    expectedSliceId: 'seed-gym',
+    expectSurfaced: true,
+    expectedFact: 'January',
+  },
+  // More `task` cases (#298): the fact lives in the `assistant` TaskEvent.
+  {
+    id: 'retrieval-task-heatpump',
+    description: 'Fact lives in a task transcript slice (#298).',
+    category: 'task',
+    seeds: [
+      {
+        id: 'seed-task-heatpump',
+        kind: 'task',
+        title: 'Compare heat pump models',
+        text: 'The heat pump comparison put the AeroTherm 300 best on running cost, about two hundred pounds a year cheaper.',
+        at: '2026-09-26T10:00:00.000Z',
+      },
+    ],
+    query: 'What did the comparison of heat pumps conclude?',
+    expectedSliceId: 'seed-task-heatpump',
+    expectSurfaced: true,
+    expectedFact: 'AeroTherm 300',
+  },
+  {
+    id: 'retrieval-task-script',
+    description: 'Fact lives in a task transcript slice (#298).',
+    category: 'task',
+    seeds: [
+      {
+        id: 'seed-task-script',
+        kind: 'task',
+        title: 'Write a date formatter script',
+        text: 'The script uses the date-fns library to format timestamps in the report.',
+        at: '2026-09-27T10:00:00.000Z',
+      },
+    ],
+    query: 'What library did the script use for dates?',
+    expectedSliceId: 'seed-task-script',
+    expectSurfaced: true,
+    expectedFact: 'date-fns',
+  },
+  {
+    id: 'retrieval-task-trip',
+    description: 'Fact lives in a task transcript slice (#298).',
+    category: 'task',
+    seeds: [
+      {
+        id: 'seed-task-trip',
+        kind: 'task',
+        title: 'Plan the Barcelona trip',
+        text: 'The plan recommends the Hotel Gaudi near the Sagrada Familia for three nights.',
+        at: '2026-09-28T10:00:00.000Z',
+      },
+    ],
+    query: 'Which hotel did the trip plan recommend?',
+    expectedSliceId: 'seed-task-trip',
+    expectSurfaced: true,
+    expectedFact: 'Hotel Gaudi',
+  },
+  {
+    id: 'retrieval-task-shortlist',
+    description: 'Fact lives in a task transcript slice (#298).',
+    category: 'task',
+    seeds: [
+      {
+        id: 'seed-task-shortlist',
+        kind: 'task',
+        title: 'Shortlist project names',
+        text: 'The final shortlist was Meridian, Lantern, and Cove.',
+        at: '2026-09-29T10:00:00.000Z',
+      },
+    ],
+    query: 'What was the final shortlist of names for the project?',
+    expectedSliceId: 'seed-task-shortlist',
+    expectSurfaced: true,
+    expectedFact: 'Meridian',
+  },
+  // A second deleted-seed case: excluded by `deletedAt`, independent of recency.
+  {
+    id: 'retrieval-deleted-seed-alarm',
+    description: 'Seed sits in a soft-deleted chat: excluded by construction.',
+    category: 'deleted-seed',
+    seeds: [
+      {
+        id: 'seed-deleted-alarm',
+        kind: 'chat',
+        title: 'Deleted chat',
+        text: 'The alarm code is 4815, changed after the break-in.',
+        at: '2026-09-11T10:00:00.000Z',
+        deleted: true,
+      },
+    ],
+    query: 'What was the alarm code I set?',
+    expectedSliceId: 'seed-deleted-alarm',
+    expectSurfaced: false,
+    expectedFact: '4815',
+  },
+  // A second out-of-pool case: buried beyond the old bounded pool by newer
+  // filler; reachable since #293 searches the whole corpus.
+  {
+    id: 'retrieval-out-of-pool-wheel',
+    description: 'Seed buried beyond the old bounded pool by newer messages: reachable since #293.',
+    category: 'out-of-pool',
+    seeds: [
+      {
+        id: 'seed-old-wheel',
+        kind: 'chat',
+        title: 'Old chat',
+        text: 'The spare wheel is a 15-inch steel rim with a 195/65 tyre.',
+        at: '2026-09-06T10:00:00.000Z',
+      },
+    ],
+    query: 'What is the spare wheel size for the car?',
+    expectedSliceId: 'seed-old-wheel',
+    expectSurfaced: true,
+    expectedFact: '15-inch',
     poolFill: 210,
   },
 ];

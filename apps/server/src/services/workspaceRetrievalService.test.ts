@@ -109,17 +109,26 @@ describe('workspaceRetrievalService', () => {
     // slightly positive, so a ubiquitous-but-relevant slice still surfaces
     // (classic BM25 IDF can go negative and drop it).
     it('still scores a term present in every document', () => {
+      // Equal BM25 scores, so the order falls to the recency tie-break. Pin
+      // `at` equal so the id-asc tie-break decides deterministically; the
+      // default `new Date()` in the `slice` helper can straddle a millisecond
+      // boundary under load and flip the pair (a latent flake from #293).
+      const at = new Date('2026-06-01');
       const picks = pickTopSlices('budget', [
-        slice({ id: 'A', text: 'budget' }),
-        slice({ id: 'B', text: 'budget' }),
+        slice({ id: 'A', text: 'budget', at }),
+        slice({ id: 'B', text: 'budget', at }),
       ]);
       expect(picks.map((p) => p.slice.id)).toEqual(['A', 'B']);
       expect(picks[0].score).toBeGreaterThan(0);
     });
 
     it('ignores a query term absent from every document', () => {
-      const withAbsent = pickTopSlices('budget zzzz', [slice({ id: 'A', text: 'budget' })]);
-      const withoutAbsent = pickTopSlices('budget', [slice({ id: 'A', text: 'budget' })]);
+      // Pin `at` so the two runs differ only by the absent term; the default
+      // `new Date()` can straddle a millisecond between calls and flip
+      // deep-equality (same latent flake from #293 as above).
+      const at = new Date('2026-06-01');
+      const withAbsent = pickTopSlices('budget zzzz', [slice({ id: 'A', text: 'budget', at })]);
+      const withoutAbsent = pickTopSlices('budget', [slice({ id: 'A', text: 'budget', at })]);
       expect(withAbsent).toEqual(withoutAbsent);
     });
 
