@@ -42,14 +42,38 @@ describe('memory corpus (#289)', () => {
     const count = (subtype: string) => GATE_CASES.filter((c) => c.subtype === subtype).length;
     expect(count('explicit')).toBe(9);
     expect(count('continuation')).toBe(4);
-    expect(count('bare-deixis')).toBe(5);
+    // Zero by owner decision (2026-10-14, OQ12/OQ36): no bare-deixis positives
+    // may exist — the subtype is negative-only under the resolvability rule.
+    expect(count('bare-deixis')).toBe(0);
+  });
+
+  it('keeps the five bare-deictic no-history cases negative (owner decision 2026-10-14)', () => {
+    // OQ12/OQ36 resolution: bare deixis with no resolvable referent stays
+    // quiet — a refusal is the best answer. Pin the exact ids so a relabel
+    // back to positive cannot slip in silently (the collision rule).
+    const relabelled = [
+      'gate-same-as-before',
+      'gate-other-one',
+      'gate-and-that-one',
+      'gate-previous-version',
+      'gate-one-from-yesterday',
+    ];
+    for (const id of relabelled) {
+      const testCase = GATE_CASES.find((c) => c.id === id);
+      expect(testCase).toBeDefined();
+      expect(testCase?.refersBack).toBe(false);
+      expect(testCase?.subtype).toBeUndefined();
+      expect(testCase?.note).toMatch(/^owner-confirmed\b/);
+    }
   });
 
   it('keeps every bare-deixis positive history-free and every continuation history-bearing', () => {
-    // Bare deixis is the ambiguous subtype (OQ12): the referent is unresolvable
-    // in the input the gate sees, so a bare-deictic positive must not smuggle a
-    // transcript that would make it resolvable. A continuation is the opposite —
-    // its refer-back lives only in the transcript, so it must carry one.
+    // Bare deixis is the ambiguous shape (OQ12/OQ36): the referent is
+    // unresolvable in the input the gate sees, so under the owner rule there
+    // are no bare-deictic positives at all — but if one ever returns, it must
+    // not smuggle a transcript that would make it resolvable. A continuation
+    // is the opposite — its refer-back lives only in the transcript, so it
+    // must carry one.
     for (const testCase of GATE_CASES) {
       if (testCase.subtype === 'bare-deixis') {
         expect(testCase.history?.length ?? 0).toBe(0);

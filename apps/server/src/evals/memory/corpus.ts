@@ -14,13 +14,17 @@ import type { GateCase, MemoryScenario } from './types';
  */
 
 /*
- * Hand-labelled gate set. Positives are refer-backs or continuations; negatives
- * are fresh asks. The set is deliberately hard on both sides: indirect
- * refer-backs ("the same as before", "and that one?") and continuations whose
- * signal lives only in `history` test recall, while fresh asks that *look* like
- * memory probes ("what should I do about my job?") test precision. This is the
- * first of the three stages (#289) and the one that must clear a minimum-N bar
- * (≥ 30 cases, ≥ 12 per label) before any threshold is ratified.
+ * Hand-labelled gate set. Positives are explicit refer-backs or continuations
+ * whose signal lives in `history`; negatives are fresh asks AND bare deixis
+ * with no resolvable referent (owner decision 2026-10-14, OQ12/OQ36: the gate
+ * may only fire on a vague prompt when the referent is resolvable from the
+ * history it sees — otherwise a refusal is the best answer). The set is
+ * deliberately hard on both sides: continuations whose refer-back lives only
+ * in `history` test recall, while fresh asks that *look* like memory probes
+ * ("what should I do about my job?") and bare deixis ("and that one as well?")
+ * test precision. This is the first of the three stages (#289) and the one
+ * that must clear a minimum-N bar (≥ 30 cases, ≥ 12 per label) before any
+ * threshold is ratified.
  *
  * `note` records the labelling source (`agent-authored` vs `owner-confirmed`,
  * per the plan's OQ1) so label independence stays auditable.
@@ -90,41 +94,39 @@ export const GATE_CASES: GateCase[] = [
     subtype: 'explicit',
     note: 'agent-authored: refer-back to a shared artefact, then extend it',
   },
-  // Positives — indirect refer-backs (no content word names the referent).
+  // Negatives — bare deixis with no resolvable referent (owner decision
+  // 2026-10-14, OQ12/OQ36: the gate may only fire on a vague prompt when the
+  // referent is resolvable from visible history; with none, staying quiet —
+  // a refusal — is the best answer). Relabelled from positives.
   {
     id: 'gate-same-as-before',
     prompt: 'Do the same as before.',
-    refersBack: true,
-    subtype: 'bare-deixis',
-    note: 'agent-authored: indirect refer-back carried entirely by deixis',
+    refersBack: false,
+    note: 'owner-confirmed: bare deixis, no history — the referent is unresolvable, so the gate stays quiet',
   },
   {
     id: 'gate-other-one',
     prompt: 'Actually, use the other one instead.',
-    refersBack: true,
-    subtype: 'bare-deixis',
-    note: 'agent-authored: indirect refer-back to a previously offered option',
+    refersBack: false,
+    note: 'owner-confirmed: bare deixis, no history — the referent is unresolvable, so the gate stays quiet',
   },
   {
     id: 'gate-and-that-one',
     prompt: 'And that one as well?',
-    refersBack: true,
-    subtype: 'bare-deixis',
-    note: 'agent-authored: elliptical continuation, referent only implied',
+    refersBack: false,
+    note: 'owner-confirmed: bare deixis, no history — the referent is unresolvable, so the gate stays quiet',
   },
   {
     id: 'gate-previous-version',
     prompt: 'Go back to the previous version.',
-    refersBack: true,
-    subtype: 'bare-deixis',
-    note: 'agent-authored: refer-back to an earlier revision',
+    refersBack: false,
+    note: 'owner-confirmed: bare deixis, no history — the referent is unresolvable, so the gate stays quiet',
   },
   {
     id: 'gate-one-from-yesterday',
     prompt: 'Pull up the one from yesterday.',
-    refersBack: true,
-    subtype: 'bare-deixis',
-    note: 'agent-authored: temporal refer-back, no content word',
+    refersBack: false,
+    note: 'owner-confirmed: bare deixis, no history — the referent is unresolvable, so the gate stays quiet',
   },
   // Positives — continuations whose refer-back lives only in the transcript.
   {
