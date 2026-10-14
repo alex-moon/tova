@@ -38,6 +38,9 @@ const keys = [
   'MEMORY_EVAL_PACE_MS',
   'MEMORY_EVAL_GATE_PACE_MS',
   'MEMORY_EVAL_JUDGE_PACE_MS',
+  'EMBEDDING_MODEL',
+  'EMBEDDING_DIM',
+  'EMBEDDING_TIMEOUT_MS',
 ] as const;
 
 const backup: Record<string, string | undefined> = {};
@@ -227,6 +230,27 @@ describe('config/index', () => {
         expect(config.memoryEval.gatePaceMs).toBe(2000);
         expect(config.memoryEval.judgePaceMs).toBe(2000);
       }
+    });
+
+    it('embeddings default model/dim/timeout when unset or malformed (#294)', () => {
+      expect(config.embeddings.model).toBe('BAAI/bge-base-en-v1.5');
+      expect(config.embeddings.dim).toBe(768);
+      expect(config.embeddings.timeoutMs).toBe(800);
+      for (const bad of ['garbage', '', '0', '-3', 'Infinity']) {
+        process.env.EMBEDDING_DIM = bad;
+        process.env.EMBEDDING_TIMEOUT_MS = bad;
+        expect(config.embeddings.dim).toBe(768);
+        expect(config.embeddings.timeoutMs).toBe(800);
+      }
+    });
+
+    it('embeddings parse a positive env value, flooring the dimension (#294)', () => {
+      process.env.EMBEDDING_MODEL = 'BAAI/bge-m3';
+      process.env.EMBEDDING_DIM = '1024.9';
+      process.env.EMBEDDING_TIMEOUT_MS = '1500';
+      expect(config.embeddings.model).toBe('BAAI/bge-m3');
+      expect(config.embeddings.dim).toBe(1024);
+      expect(config.embeddings.timeoutMs).toBe(1500);
     });
   });
 

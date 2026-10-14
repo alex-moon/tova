@@ -5,6 +5,7 @@ import { enqueueAssetJob } from './assetJobService';
 import { isConvertible } from './markdownConversion';
 import { extractText, isExtractable, truncateForPrompt } from './textExtraction';
 import { safeAsset } from './assetViews';
+import { enqueueWorkspaceEmbedding } from './workspaceEmbeddingIngest';
 
 // Presign + confirm headroom: pending assets older than this cannot be
 // confirmed, so stale rows never revive (plan honest-boundaries for #34).
@@ -107,6 +108,22 @@ const confirmAsset = async (asset: AssetDocument): Promise<ConfirmResult> => {
     return { status: 'ok', asset: safeAsset(asset) };
   }
   await asset.save();
+  // #294: embed the fast-path extracted text. Fire-and-forget and flag-gated
+  // inside the helper. Ephemeral (ZDR) uploads are never embedded — the durable
+  // derived-data invariant — so the guard is explicit here, not left to the
+  // helper (which only knows the text, not the ephemeral flag).
+  if (!asset.ephemeral) {
+    enqueueWorkspaceEmbedding({
+      userId: String(asset.userId),
+      kind: 'file',
+      sourceId: String(asset._id),
+      source: {
+        kind: 'file',
+        markdownExtracted: asset.markdownExtracted,
+        textExtracted: asset.textExtracted,
+      },
+    });
+  }
   return { status: 'ok', asset: safeAsset(asset) };
 };
 

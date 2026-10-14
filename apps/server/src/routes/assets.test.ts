@@ -195,6 +195,50 @@ describe('Assets confirm', () => {
     expect(stored?.size).toBe(11);
   });
 
+  it('embeds extracted text on confirm but never for an ephemeral upload (#294)', async () => {
+    const enqueueEmbed = jest.spyOn(
+      jest.requireActual<typeof import('../services/workspaceEmbeddingIngest')>(
+        '../services/workspaceEmbeddingIngest',
+      ),
+      'enqueueWorkspaceEmbedding',
+    );
+    process.env.WORKSPACE_MEMORY_ENABLED = '1';
+    const email = 'assets-embed-user@example.com';
+    const cookie = await registerUser(email);
+    const user = await User.findOne({ email });
+
+    try {
+      const durableId = await presignOk(cookie, 'notes.txt', 'text/plain', 11);
+      mockHead.mockResolvedValue(headerForObject(11, 'text/plain'));
+      mockGetObjectBuffer.mockResolvedValue(Buffer.from('hello world'));
+      await confirmFor(cookie, durableId);
+      expect(enqueueEmbed).toHaveBeenCalledWith(
+        expect.objectContaining({ kind: 'file', sourceId: durableId }),
+      );
+
+      enqueueEmbed.mockClear();
+
+      // An ephemeral (ZDR) upload must never produce durable derived data.
+      const ephemeral = await Asset.create({
+        userId: user?._id,
+        filename: 'secret.txt',
+        key: 'ephemeral-key',
+        contentType: 'text/plain',
+        size: 11,
+        status: 'pending',
+        ephemeral: true,
+      });
+      mockHead.mockResolvedValue(headerForObject(11, 'text/plain'));
+      mockGetObjectBuffer.mockResolvedValue(Buffer.from('hello world'));
+      const confirmed = await confirmFor(cookie, String(ephemeral._id));
+      expect(confirmed.status).toBe(200);
+      expect(enqueueEmbed).not.toHaveBeenCalled();
+    } finally {
+      delete process.env.WORKSPACE_MEMORY_ENABLED;
+      enqueueEmbed.mockRestore();
+    }
+  });
+
   it('skips extraction for non-text filenames and marks ready with null text', async () => {
     const cookie = await registerUser('assets-binary-user@example.com');
     const assetId = await presignOk(cookie, 'picture.png', 'image/png', 100);

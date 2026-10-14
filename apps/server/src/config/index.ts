@@ -194,6 +194,29 @@ export const config = {
     },
   },
 
+  // #294: workspace-memory semantic retrieval (embeddings + Atlas Vector
+  // Search). `model` and `dim` are config-driven because the Atlas index
+  // dimension is fixed at creation time: switching model is a config change
+  // plus a re-index and re-backfill (the owner's "probe bge-m3/gte" path).
+  // `timeoutMs` bounds the query embed + `$vectorSearch` on the chat hot path
+  // before retrieval degrades to the BM25 result. All parse+fallback like
+  // `aux.enrichmentTimeoutMs` so a malformed env degrades to the default.
+  embeddings: {
+    get model(): string {
+      return process.env.EMBEDDING_MODEL || 'BAAI/bge-base-en-v1.5';
+    },
+    get dim(): number {
+      const raw = process.env.EMBEDDING_DIM;
+      const parsed = raw === undefined || raw === '' ? NaN : Number(raw);
+      return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : 768;
+    },
+    get timeoutMs(): number {
+      const raw = process.env.EMBEDDING_TIMEOUT_MS;
+      const parsed = raw === undefined || raw === '' ? NaN : Number(raw);
+      return Number.isFinite(parsed) && parsed > 0 ? parsed : 800;
+    },
+  },
+
   // #254 (epic #251): the task sequencer's budget knobs. `maxSteps` is the
   // step cap (above the chat cap of 12, below a runaway); `maxCostUsd` is the
   // per-task spend ceiling. Both parse+fallback like `aux.enrichmentTimeoutMs`

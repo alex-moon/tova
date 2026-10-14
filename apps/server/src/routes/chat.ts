@@ -32,6 +32,7 @@ import {
   isWorkspaceMemoryEnabled,
   retrieveWorkspaceBlock,
 } from '../services/workspaceRetrievalService';
+import { enqueueWorkspaceEmbedding } from '../services/workspaceEmbeddingIngest';
 import { TaskEvent } from '../models/TaskEvent';
 import type { TaskDocument } from '../models/Task';
 import {
@@ -514,6 +515,7 @@ const parseZdrHistory = (
 // fire-and-forget classification call back (docs/done/plan-17-prompt-metrics.md
 // tasks 6 and 9). The gate is computed once and reused for both purposes.
 const saveUserMessageWithMetrics = async (
+  userId: string,
   sessionId: string,
   content: string,
   asset?: { _id: unknown } | null,
@@ -536,6 +538,18 @@ const saveUserMessageWithMetrics = async (
   // `new Date()`) keeps the stored value consistent with the message it
   // represents. Awaited so the sidebar order cannot lag the turn.
   await Session.updateOne({ _id: sessionId }, { $set: { lastMessageAt: userMessage.timestamp } });
+
+  // #294: embed the saved turn for semantic retrieval. Fire-and-forget and
+  // gated by the workspace-memory flag inside the helper, so with memory off
+  // this is a no-op (no provider call) and a failure never affects the turn.
+  // This helper is only reached on non-ZDR paths, so incognito turns are never
+  // embedded — asserted in chat.zdr.test.ts.
+  enqueueWorkspaceEmbedding({
+    userId,
+    kind: 'chat',
+    sourceId: String(userMessage._id),
+    source: { kind: 'chat', content },
+  });
 
   if (!triviallyNeutral) {
     classifyAndPersistPromptDimensions(String(userMessage._id), content).catch((err) =>
@@ -810,6 +824,7 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
     }
     // Save user message
     const userMessage = await saveUserMessageWithMetrics(
+      userId as string,
       String(session!._id),
       content,
       attachedAsset,
@@ -1108,6 +1123,7 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
     } else {
       // Save user message
       const userMessage = await saveUserMessageWithMetrics(
+        userId as string,
         String(session!._id),
         content,
         attachedAsset,

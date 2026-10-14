@@ -127,7 +127,10 @@ const main = async (): Promise<void> => {
       console.log(`    ${subtype}: recall ${pct(m.recall)} (${m.truePos}/${m.total})`);
     }
 
-    console.log('\nStage 2 — retrieval hit-rate (expected slice surfaced):');
+    console.log(
+      `\nStage 2 — retrieval hit-rate (expected slice surfaced)` +
+        ` [vector stage ${retrieval.vectorEnabled ? 'enabled' : 'off (BM25 baseline)'}]:`,
+    );
     for (const r of retrieval.results) {
       console.log(
         `  ${r.pass ? 'ok  ' : 'MISS'} [${r.category}] ${r.scenarioId} ` +

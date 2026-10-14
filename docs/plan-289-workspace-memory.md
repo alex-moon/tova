@@ -301,6 +301,32 @@ differ, this one is the forward plan.
 >    seed-throws case to the T14e cleanup tests.
 >
 > OQ41 is queued on #289.
+>
+> **Revision note (2026-10-14, pr-review-rectify pass).** The branch was reconciled
+> onto the current `origin/main` (`2bab78d`), which now contains **both** #293
+> (BM25) and #294 (embeddings/vector) — #294 merged after the critic's pass-8 note.
+> The reconciliation is a real merge with two textual conflicts
+> (`config/index.test.ts`, `memoryEvalService.ts`), both resolved by keeping the
+> branch's #289 additions alongside `main`'s #293/#294 additions:
+> `MemoryEvalDeps` now carries both `pace?` (T15c) and `embed?` (#294);
+> `runRetrievalEval` keeps the T14e `try/finally` cleanup **and** #294's per-scenario
+> `embed` call and `vectorEnabled` return; the `MemoryEvalReport` keeps the branch's
+> optional `gate?`/`retrieval?` (the `stages` selector) with #294's
+> `retrieval.vectorEnabled`.
+>
+> **OQ41 is resolved (by the merge, as the evidence required):** #293's whole-corpus
+> BM25 makes the bounded-pool burial reachable, so the second `out-of-pool` case
+> (`retrieval-out-of-pool-wheel`) flipped to `expectSurfaced: true` (the first was
+> already `true` on `main`), and the `corpus.test.ts` `missByConstruction` invariant
+> now lists only `deleted-seed`. Re-captured **stage-2 baseline on the merged tree**
+> (`runRetrievalEval` against `mongodb-memory-server`, `vectorEnabled:false`):
+> `expectedMet 77.3% / surfacedRate 68.2%` (n=22); `direct` 3/3, `file` 5/5,
+> `task` 5/5, `out-of-pool` 2/2 surface; `paraphrase` 0/5 (the #294 vector target);
+> `deleted-seed` 0/2 (the only by-construction miss). The pre-#293 baseline
+> (`surfacedRate 59.1%`, `out-of-pool 0/2`) is void and is superseded above. The
+> `docs/plan-289-gate-evals.md` baseline and framing were updated to match.
+> Stage 1 (gate) is a live aux call and was not re-run this pass; the T9 double-run
+> remains the gate re-capture (its pre-annotation provenance caveat still stands).
 
 ## Motivation
 
@@ -517,17 +543,20 @@ minimum N.
   override is unset, and the identity is not yet recorded in the run (OQ29).
 - **No ad-hoc `process.env` at call sites** (#142): any new model id goes through
   `config`.
-- **Baseline** (local stack, this branch). Retrieval is stable at
-  `expectedMet 77.3% / surfacedRate 59.1%` (n=22); the gate has **run-to-run
-  variance**: the pre-T1b-i read was precision 100% / recall 83.3% / fireRate
-  41.7% (n=36, three misses), and the post-T1b-i annotated read was precision
-  100% / recall 88.9% / fireRate 44.4% (n=36, two misses: `gate-one-from-yesterday`
-  bare-deixis, `gate-finish-draft` continuation; `gate-other-one` passed that run
-  where it had missed before). Stage 3 has not been run end-to-end yet. The
-  retrieval misses are by design (`paraphrase` 0/5, `deleted-seed` 0/2,
-  `out-of-pool` 0/2). **The gate variance is itself a finding** — it is why T9
-  runs twice and why OQ26 asks whether a double-run disagreement blocks
-  ratification.
+- **Baseline** (local stack, this branch, **post-#293/#294 merge**). Retrieval was
+  re-captured on the merged tree at `expectedMet 77.3% / surfacedRate 68.2%` (n=22,
+  `vectorEnabled:false`); the pre-#293 read (`surfacedRate 59.1%`,
+  `out-of-pool 0/2`) is void — #293's whole-corpus BM25 surfaces the buried seed, so
+  `out-of-pool` is now 2/2 and no longer a miss by construction (OQ41 resolved). The
+  only remaining retrieval misses are `paraphrase` 0/5 (the #294 vector target) and
+  `deleted-seed` 0/2 (`deletedAt`). The gate has **run-to-run variance**: the
+  pre-T1b-i read was precision 100% / recall 83.3% / fireRate 41.7% (n=36, three
+  misses), and the post-T1b-i annotated read was precision 100% / recall 88.9% /
+  fireRate 44.4% (n=36, two misses: `gate-one-from-yesterday` bare-deixis,
+  `gate-finish-draft` continuation; `gate-other-one` passed that run where it had
+  missed before). Stage 3 has not been run end-to-end yet. **The gate variance is
+  itself a finding** — it is why T9 runs twice and why OQ26 asks whether a
+  double-run disagreement blocks ratification.
 
 ## Decisions
 
@@ -981,8 +1010,9 @@ possible.
   live in `textExtracted`; task facts live in the `assistant` `TaskEvent` (#298).
 - `corpus.test.ts` asserts per-scenario no-overlap, per-category minimum-N, and
   `expectedFact` in the expected seed (stage-3 backbone reachability).
-- Live retrieval run: expectedMet 77.3% / surfacedRate 59.1% (n=22). Corpus
-  pushed to `tova-memory-evals`.
+- Live retrieval run (pre-#293): expectedMet 77.3% / surfacedRate 59.1% (n=22).
+  Corpus pushed to `tova-memory-evals`. Post-#293/#294 merge the branch re-captures
+  at surfacedRate **68.2%** (`out-of-pool` 2/2); see the revision note above.
 
 ### T3 — Stage-3 deterministic backbone  [DONE]
 
@@ -1746,7 +1776,11 @@ unknowns):**
   retrieval number); ties to OQ1/OQ26. No task depends on the answer — T10
   proposes the corpus-prevalence bar and can add the adjusted line either way.
 - **OQ41 — Is the branch stale relative to #293, voiding the recorded baseline and
-  the `out-of-pool` corpus expectation? (new, critic pass 8.)** This branch is
+  the `out-of-pool` corpus expectation? (new, critic pass 8.) [RESOLVED — pr-review-rectify pass:
+  the branch is merged onto `origin/main` `2bab78d` (#293 + #294); both `out-of-pool`
+  scenarios are now `expectSurfaced: true`, the `missByConstruction` invariant lists only
+  `deleted-seed`, and the post-#293 baseline is re-captured at surfacedRate 68.2%. The
+  text below records the state before the merge.]** This branch is
   based on `5a9ecfa` (PR #301) and does **not** contain #293; `origin/main` is now
   `80492cd` (PR #302, "#293 workspace retrieval"). #293 dropped the bounded
   `MESSAGE_POOL` message read for a **whole-corpus BM25** ranker and, on `main`,

@@ -9,9 +9,10 @@ import { clearMemoryCorpus, seedMemoryScenario } from './memorySource';
 /*
  * #289 retrieval integration: seed a scenario's real Mongo rows, run the real
  * retrieval read, and check whether the expected slice ID surfaced. These pin
- * the *baseline* — the deterministic outcomes lexical scoring (and the deleted
- * filter, and the bounded pool) produce today — so a later ranking change
- * (#293/#294) has a diff to show.
+ * the deterministic outcomes the current ranker (and the deleted filter)
+ * produce, so a later ranking change (#294) has a diff to show. #293 replaced
+ * the bounded-pool overlap score with whole-corpus BM25, which flips the
+ * `out-of-pool` case to a hit; `paraphrase` stays a miss (lexical ranker).
  */
 describe('memory corpus retrieval (#289)', () => {
   afterAll(async () => {
@@ -65,8 +66,8 @@ describe('memory corpus retrieval (#289)', () => {
     expect((await retrieve('retrieval-deleted-seed')).surfaced).toBe(false);
   });
 
-  it('does not surface a seed buried beyond the bounded pool', async () => {
-    expect((await retrieve('retrieval-out-of-pool')).surfaced).toBe(false);
+  it('surfaces a seed buried beyond the old bounded pool (#293)', async () => {
+    expect((await retrieve('retrieval-out-of-pool')).surfaced).toBe(true);
   });
 
   it('carries the expected fact into the block exactly when the slice surfaces', async () => {

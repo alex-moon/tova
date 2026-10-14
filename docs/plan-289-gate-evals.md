@@ -30,8 +30,8 @@ checked-in corpus uses **synthetic analogues** (same structure, no personal data
      and asks a query whose answer requires one of them; hit = did retrieval surface the
      expected slice ID. Scenarios are tagged `direct`, `paraphrase`, `file`, `task`,
      `deleted-seed`, `out-of-pool` so the baseline shows exactly where lexical retrieval
-     (and deletion, and the bounded pool) fails — the headroom #293/#294 are measured
-     against.
+     (and deletion) fails — the headroom #294 is measured against. #293 has already
+     landed and flipped `out-of-pool` from a miss to a hit (whole-corpus BM25).
    - **Stage 3 — helpfulness (mixed).** Scenarios carry the expected fact (deterministic
      substring) and are shaped for the pairwise A/B + blinded, position-swapped judge
      (`openai/gpt-oss-120b` on Groq). The judge is **wired but not yet validated** against
@@ -48,7 +48,8 @@ checked-in corpus uses **synthetic analogues** (same structure, no personal data
    user's memory collections, materialises only its own seeds, and runs its query — so one
    scenario's seeds cannot contaminate another's hit-rate. `deleted-seed` materialises a
    soft-deleted session (excluded by `deletedAt`); `out-of-pool` buries its seed under
-   `MESSAGE_POOL` newer messages (excluded by the bound).
+   many newer messages, which excluded it under the pre-#293 bounded read — since #293
+   reads the whole corpus it surfaces.
 
 4. **The corpus is loadable in the existing harness.** A `pushMemoryCorpusToLangSmith`
    exports the scenarios (seeds + query + expected) as examples on a `tova-memory-evals`
@@ -82,11 +83,20 @@ n=8 was noise, this is the first real read):
   other one instead") and `gate-one-from-yesterday` (bare deixis, no history in
   the input the gate sees — see OQ12), and `gate-finish-draft` (a continuation
   whose refer-back is in `history`).
-- **Stage 2 — retrieval:** expectedMet 77.3%, surfacedRate 59.1% (n=22). `direct`
-  3/3, `file` 5/5, `task` 5/5 surface; `paraphrase` 0/5 (no lexical overlap — the
-  gap #293/#294 close); `deleted-seed` 0/2 and `out-of-pool` 0/2 are misses by
-  construction.
+- **Stage 2 — retrieval (re-captured after the #293/#294 rebase):** expectedMet
+  77.3%, surfacedRate **68.2%** (n=22). `direct` 3/3, `file` 5/5, `task` 5/5 and
+  `out-of-pool` 2/2 surface (#293's whole-corpus BM25 reaches the buried seed);
+  `paraphrase` 0/5 is the remaining lexical gap (#294 embeddings/vector closes it);
+  `deleted-seed` 0/2 is the only miss by construction (`deletedAt`).
 - Corpus pushed to the LangSmith `tova-memory-evals` dataset.
+
+> **Rebase note (2026-10-14).** #293 (BM25) and #294 (embeddings/vector) have merged
+> to `main`; the branch was reconciled onto them. Under #293 the bounded-pool
+> `out-of-pool` category is no longer a miss by construction, so both
+> `out-of-pool` scenarios now carry `expectSurfaced: true` and the retrieval
+> baseline above is the post-#293 read. With `WORKSPACE_MEMORY_ENABLED` off (the
+> default) the vector stage is disabled and stage 2 is the BM25 baseline; the
+> `paraphrase` misses stand until the flag is on and an Atlas index exists.
 
 These are the provisional-50% measurements, not the ship bars: the go-live bars are
 ratified from the evidence (ticket: "baseline first, then ratify"). Every bar needs

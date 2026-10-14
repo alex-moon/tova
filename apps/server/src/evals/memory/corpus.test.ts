@@ -103,8 +103,10 @@ describe('memory corpus (#289)', () => {
     // The retrieval metric counts a case as met when `surfaced === expectSurfaced`,
     // so a scenario whose `expectSurfaced` contradicts its category silently
     // inverts its contribution to `expectedMetRate`. The hard categories are
-    // expected to surface; `deleted-seed`/`out-of-pool` are misses by construction.
-    const missByConstruction = new Set(['deleted-seed', 'out-of-pool']);
+    // expected to surface; only `deleted-seed` is a miss by construction
+    // (`deletedAt`). `out-of-pool` now expects a hit: #293 searches the whole
+    // corpus, so the old bounded-pool burial no longer excludes it.
+    const missByConstruction = new Set(['deleted-seed']);
     for (const scenario of MEMORY_SCENARIOS) {
       expect(scenario.expectSurfaced).toBe(!missByConstruction.has(scenario.category));
     }

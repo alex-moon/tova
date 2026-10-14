@@ -3,6 +3,7 @@ import { Message } from '../../models/Message';
 import { Asset } from '../../models/Asset';
 import { Task } from '../../models/Task';
 import { TaskEvent } from '../../models/TaskEvent';
+import { WorkspaceEmbedding } from '../../models/WorkspaceEmbedding';
 import { evalUserId, ensureEvalUser } from '../mongoSource';
 import type { MemoryScenario, MemorySeed } from './types';
 
@@ -82,9 +83,11 @@ const seedOne = (seed: MemorySeed): Promise<string> => {
 };
 
 /*
- * Bury the scenario's seed beyond `MESSAGE_POOL` with newer filler turns, so
- * the `out-of-pool` case is genuinely unreachable by the bounded read (the
- * ticket's "old relevant chat outside the current bounded recent pool").
+ * Bury the scenario's seed behind the pre-#293 bounded pool with newer filler
+ * turns, so the `out-of-pool` case proves the seed is reachable past the old
+ * 200-message window (the ticket's "old relevant chat outside the bounded
+ * recent pool"). #293 searches the whole corpus, so the seed is now surfaced
+ * despite the filler.
  */
 const fillPool = async (count: number): Promise<void> => {
   const start = Date.parse('2026-09-30T10:00:00.000Z');
@@ -125,4 +128,10 @@ export const clearMemoryCorpus = async (): Promise<void> => {
   const taskIds = tasks.map((t) => t._id);
   await TaskEvent.deleteMany({ taskId: { $in: taskIds } });
   await Task.deleteMany({ userId: evalUserId });
+
+  // #294: a previous scenario's embeddings would otherwise occupy the Atlas
+  // `$vectorSearch` candidate window for the next scenario (the vector hits are
+  // intersected with the freshly seeded slices, so stale rows can never surface
+  // — but they still consume the ANN budget). Clear them with the rest.
+  await WorkspaceEmbedding.deleteMany({ userId: evalUserId });
 };

@@ -7,9 +7,11 @@ import {
 } from '../../services/enrichmentService';
 import { config } from '../../config';
 import {
+  isWorkspaceMemoryEnabled,
   retrieveWorkspaceSlices,
   type WorkspaceSlice,
 } from '../../services/workspaceRetrievalService';
+import { embedWorkspaceUser } from '../../services/workspaceEmbeddingIngest';
 import { evalUserId } from '../mongoSource';
 import { GATE_CASES, MEMORY_SCENARIOS } from './corpus';
 import { clearMemoryCorpus, seedMemoryScenario, type SeedIdMap } from './memorySource';
@@ -214,13 +216,25 @@ export interface MemoryEvalDeps {
   clear?: () => Promise<void>;
   /** Inter-call delay before each live gate call (T15c); injected in tests. */
   pace?: () => Promise<void>;
+  /** Embeds the eval user's corpus after seeding; injected in tests. */
+  embed?: (userId: string) => Promise<void>;
 }
 
 export interface MemoryEvalReport {
   /** Absent when the run's `stages` selector excluded the gate. */
   gate?: { results: GateCaseResult[]; metrics: GateMetrics };
   /** Absent when the run's `stages` selector excluded retrieval. */
-  retrieval?: { results: RetrievalCaseResult[]; metrics: RetrievalMetrics };
+  retrieval?: {
+    results: RetrievalCaseResult[];
+    metrics: RetrievalMetrics;
+    /**
+     * Whether the vector stage was enabled for this run (the workspace-memory
+     * flag). When false the run is the #293 BM25 baseline; when true but the
+     * provider/index is unreachable, `vectorCandidates` degrades to BM25 and
+     * the stage-2 delta will show it.
+     */
+    vectorEnabled: boolean;
+  };
 }
 
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
@@ -275,13 +289,31 @@ export const runGateEval = async (
   return { results, metrics: gateMetrics(results) };
 };
 
+/*
+ * Default per-scenario embedding for the semantic measurement: with the flag on
+ * this backfills the freshly seeded slices so the vector stage has candidates;
+ * with it off it is a no-op (the run is the BM25 baseline). Best-effort — an
+ * embedding failure must not abort the run, it just means the vector stage
+ * degrades and stage 2 reports the BM25 result.
+ */
+const defaultEmbedUser = async (userId: string): Promise<void> => {
+  if (!isWorkspaceMemoryEnabled()) return;
+  await embedWorkspaceUser(userId);
+};
+
 export const runRetrievalEval = async (
   deps: MemoryEvalDeps = {},
-): Promise<{ results: RetrievalCaseResult[]; metrics: RetrievalMetrics }> => {
+): Promise<{
+  results: RetrievalCaseResult[];
+  metrics: RetrievalMetrics;
+  vectorEnabled: boolean;
+}> => {
   const scenarios = deps.scenarios ?? MEMORY_SCENARIOS;
   const retrieve = deps.retrieve ?? retrieveWorkspaceSlices;
   const seed = deps.seed ?? seedMemoryScenario;
   const clear = deps.clear ?? clearMemoryCorpus;
+  const embed = deps.embed ?? defaultEmbedUser;
+  const vectorEnabled = isWorkspaceMemoryEnabled();
   const results: RetrievalCaseResult[] = [];
   // Clear in a `finally` (T14e): a thrown seed/retrieve/provider error must not
   // leak seeded rows under the shared `evalUserId` and pollute the next run or
@@ -291,6 +323,14 @@ export const runRetrievalEval = async (
       // Reseed per scenario so one scenario's slices cannot contaminate another.
       await clear();
       const idMap = await seed(scenario);
+      // Embed *after* seed and *before* retrieve: the runner clears and reseeds
+      // inside the loop, so a one-off embedding up front would be wiped by the
+      // next scenario's clear.
+      try {
+        await embed(evalUserId.toHexString());
+      } catch (err) {
+        console.error('Memory eval embedding degraded to BM25:', err);
+      }
       const picks = await retrieve(scenario.query, evalUserId.toHexString());
       const surfacedIds = picks.map((slice) => slice.id);
       const expectedId = idMap[scenario.expectedSliceId];
@@ -308,7 +348,7 @@ export const runRetrievalEval = async (
   } finally {
     await clear();
   }
-  return { results, metrics: retrievalMetrics(results) };
+  return { results, metrics: retrievalMetrics(results), vectorEnabled };
 };
 
 /** The deterministic memory stages the runner can execute. */

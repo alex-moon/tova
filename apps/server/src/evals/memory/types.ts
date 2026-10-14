@@ -49,15 +49,16 @@ export interface MemoryScenario {
   expectedSliceId: string;
   /**
    * Whether the baseline is expected to surface it. `false` documents a known
-   * miss by construction (deleted seed, out-of-pool seed) so #293/#294 can show
-   * the delta when they land.
+   * miss by construction (a deleted seed, excluded by `deletedAt`). `out-of-pool`
+   * was a miss under the pre-#293 bounded read; since #293 searches the whole
+   * corpus it expects a hit.
    */
   expectSurfaced: boolean;
   /** Deterministic substring a helpful answer must contain (stage-3 backbone). */
   expectedFact: string;
   /**
-   * Filler user messages to bury the seed beyond `MESSAGE_POOL`, for the
-   * `out-of-pool` category. Absent/0 for every other category.
+   * Filler user messages to bury the seed beyond the pre-#293 bounded pool, for
+   * the `out-of-pool` category. Absent/0 for every other category.
    */
   poolFill?: number;
 }
