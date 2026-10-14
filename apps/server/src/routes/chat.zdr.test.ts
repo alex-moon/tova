@@ -435,6 +435,15 @@ describe('Zero-data retention chats (issue #116)', () => {
     const cookies = await registerUser(email);
     await enableZdr(email);
     const retrieve = forceWorkspaceBlock('- chat "Move" (2026-10-01) — budget is twelve thousand');
+    // #294: the ingest hook lives in the non-ZDR save path, so a ZDR turn must
+    // never enqueue an embedding (which would persist derived data for content
+    // the user asked not to retain).
+    const enqueue = jest.spyOn(
+      jest.requireActual<typeof import('../services/workspaceEmbeddingIngest')>(
+        '../services/workspaceEmbeddingIngest',
+      ),
+      'enqueueWorkspaceEmbedding',
+    );
 
     try {
       const response = await plainMessage(cookies, {
@@ -449,9 +458,11 @@ describe('Zero-data retention chats (issue #116)', () => {
       // Read-only: the ZDR turn writes no session or message rows.
       expect(await Session.countDocuments()).toBe(0);
       expect(await Message.countDocuments()).toBe(0);
+      expect(enqueue).not.toHaveBeenCalled();
     } finally {
       delete process.env.WORKSPACE_MEMORY_ENABLED;
       retrieve.mockRestore();
+      enqueue.mockRestore();
     }
   });
 

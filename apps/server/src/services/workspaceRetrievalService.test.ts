@@ -12,9 +12,12 @@ import {
   matchSnippet,
   pickTopSlices,
   promptWords,
+  rankWorkspaceSlices,
   retrieveWorkspaceBlock,
+  rrfFuse,
   taskTitle,
   tokenize,
+  vectorCandidates,
   type WorkspaceSlice,
 } from './workspaceRetrievalService';
 
@@ -523,6 +526,270 @@ describe('workspaceRetrievalService', () => {
       const userId = String(new Types.ObjectId());
       expect(await retrieveWorkspaceBlock('birds', userId)).toBe('');
       expect(await retrieveWorkspaceBlock('birds', 'not-an-object-id')).toBe('');
+    });
+  });
+
+  /*
+   * #294, task 8: the semantic stage is the one non-unit-testable piece
+   * (`$vectorSearch` is Atlas-only). These tests inject `embed`/`search` so the
+   * degradation contract — every failure path returns `[]`, never throws — is
+   * pinned in CI. No test makes a provider call.
+   */
+  describe('vectorCandidates (#294)', () => {
+    const query = 'what do you know about my partner';
+
+    it('embeds the query and returns the injected search hits', async () => {
+      const embed = jest.fn(async () => [[0.1, 0.2, 0.3]]);
+      const search = jest.fn(async () => [{ sourceId: 'a', score: 0.9 }]);
+      const hits = await vectorCandidates(query, 'user', 'model-x', 6, { embed, search });
+      expect(embed).toHaveBeenCalledWith([query]);
+      expect(search).toHaveBeenCalledTimes(1);
+      expect(hits).toEqual([{ sourceId: 'a', score: 0.9 }]);
+    });
+
+    it('sizes the ANN window with headroom (floor 100)', async () => {
+      const search = jest.fn(async () => []);
+      await vectorCandidates(query, 'user', 'model-x', 6, { embed: async () => [[1]], search });
+      expect(search.mock.calls[0][0]).toMatchObject({ limit: 100, numCandidates: 100 });
+    });
+
+    it('passes the userId and model through to the search filter', async () => {
+      // The Atlas filter compares exactly: a string `userId` against an ObjectId
+      // field would silently match nothing, so the stage must forward the raw
+      // ids unchanged (the default search casts `userId` at the driver edge).
+      const search = jest.fn(async () => []);
+      await vectorCandidates(query, 'user-1', 'model-x', 6, {
+        embed: async () => [[1]],
+        search,
+      });
+      expect(search.mock.calls[0][0]).toMatchObject({ userId: 'user-1', model: 'model-x' });
+    });
+
+    it('returns [] without searching when the embed returns no vector at all', async () => {
+      const search = jest.fn();
+      const hits = await vectorCandidates(query, 'user', 'model-x', 6, {
+        embed: async () => [],
+        search,
+      });
+      expect(hits).toEqual([]);
+      expect(search).not.toHaveBeenCalled();
+    });
+
+    it('grows the ANN window with n so numCandidates stays >= limit', async () => {
+      const search = jest.fn(async () => []);
+      await vectorCandidates(query, 'user', 'model-x', 100, { embed: async () => [[1]], search });
+      expect(search.mock.calls[0][0]).toMatchObject({ limit: 400, numCandidates: 400 });
+    });
+
+    it('degrades to [] when the embed throws (e.g. missing key)', async () => {
+      const search = jest.fn();
+      const hits = await vectorCandidates(query, 'user', 'model-x', 6, {
+        embed: async () => {
+          throw new Error('DEEPINFRA_API_KEY is not configured');
+        },
+        search,
+      });
+      expect(hits).toEqual([]);
+      expect(search).not.toHaveBeenCalled();
+    });
+
+    it('degrades to [] when the search throws (index absent / unavailable)', async () => {
+      const hits = await vectorCandidates(query, 'user', 'model-x', 6, {
+        embed: async () => [[1]],
+        search: async () => {
+          throw new Error('$vectorSearch is not allowed');
+        },
+      });
+      expect(hits).toEqual([]);
+    });
+
+    it('degrades to [] on timeout without waiting for the stage', async () => {
+      const hits = await vectorCandidates(query, 'user', 'model-x', 6, {
+        embed: () => new Promise<number[][]>(() => {}),
+        timeoutMs: 10,
+      });
+      expect(hits).toEqual([]);
+    });
+
+    it('returns [] without searching when the query vector is empty', async () => {
+      const search = jest.fn();
+      const hits = await vectorCandidates(query, 'user', 'model-x', 6, {
+        embed: async () => [[]],
+        search,
+      });
+      expect(hits).toEqual([]);
+      expect(search).not.toHaveBeenCalled();
+    });
+  });
+
+  /*
+   * #294, task 9: reciprocal rank fusion. Pure, so every branch is unit-tested
+   * with hand-built rankings.
+   */
+  describe('rrfFuse (#294)', () => {
+    const a = slice({ id: 'a', at: new Date('2024-01-01') });
+    const b = slice({ id: 'b', at: new Date('2024-01-02') });
+    const c = slice({ id: 'c', at: new Date('2024-01-03') });
+    const slices = [a, b, c];
+
+    it('a document in both rankings beats a document in only one', () => {
+      const bm25 = [
+        { slice: a, score: 9 },
+        { slice: b, score: 8 },
+      ];
+      const vector = [
+        { sourceId: 'a', score: 0.9 },
+        { sourceId: 'c', score: 0.8 },
+      ];
+      // a: 1/61 + 1/61; b: 1/62; c: 1/62.
+      const fused = rrfFuse(slices, bm25, vector);
+      expect(fused[0].id).toBe('a');
+      expect(
+        fused
+          .slice(1)
+          .map((s) => s.id)
+          .sort(),
+      ).toEqual(['b', 'c']);
+    });
+
+    it('includes a vector-only hit and can outrank a lower BM25-only hit', () => {
+      const bm25 = [
+        { slice: a, score: 9 },
+        { slice: b, score: 8 },
+      ];
+      const vector = [{ sourceId: 'c', score: 0.9 }];
+      // a: 1/61; c: 1/61; b: 1/62 — c (vector-only) outranks b (bm25 #2).
+      const fused = rrfFuse(slices, bm25, vector);
+      expect(fused.findIndex((s) => s.id === 'c')).toBeLessThan(
+        fused.findIndex((s) => s.id === 'b'),
+      );
+    });
+
+    it('drops a vector hit whose sourceId is not in the collected set', () => {
+      const vector = [{ sourceId: 'ghost', score: 0.99 }];
+      expect(rrfFuse(slices, [], vector)).toEqual([]);
+    });
+
+    it('weights change the order', () => {
+      const bm25 = [{ slice: a, score: 9 }];
+      const vector = [{ sourceId: 'b', score: 0.9 }];
+      // Equal weight: a and b tie on score, tiebreak by `at` desc -> b (newer).
+      expect(rrfFuse(slices, bm25, vector)[0].id).toBe('b');
+      expect(rrfFuse(slices, bm25, vector, { bm25: 5, vector: 1 })[0].id).toBe('a');
+      expect(rrfFuse(slices, bm25, vector, { bm25: 1, vector: 5 })[0].id).toBe('b');
+    });
+
+    it('is deterministic: equal score falls back to at desc', () => {
+      const older = slice({ id: 'older', at: new Date('2024-01-01') });
+      const newer = slice({ id: 'newer', at: new Date('2024-01-02') });
+      const fused = rrfFuse(
+        [older, newer],
+        [{ slice: older, score: 1 }],
+        [{ sourceId: 'newer', score: 1 }],
+      );
+      expect(fused.map((s) => s.id)).toEqual(['newer', 'older']);
+    });
+
+    it('breaks a same-score same-time tie by id ascending', () => {
+      const x = slice({ id: 'x', at: new Date('2024-01-01') });
+      const y = slice({ id: 'y', at: new Date('2024-01-01') });
+      const fused = rrfFuse(
+        [y, x],
+        [
+          { slice: x, score: 9 },
+          { slice: y, score: 8 },
+        ],
+        [
+          { sourceId: 'y', score: 0.9 },
+          { sourceId: 'x', score: 0.8 },
+        ],
+      );
+      // x: 1/61 + 1/62; y: 1/62 + 1/61 -> equal; same `at` -> id asc -> x.
+      expect(fused.map((s) => s.id)).toEqual(['x', 'y']);
+    });
+
+    it('is safe on empty inputs', () => {
+      expect(rrfFuse(slices, [], [])).toEqual([]);
+      expect(rrfFuse([], [], [])).toEqual([]);
+    });
+
+    it('matches a hand-computed RRF score', () => {
+      // k=60, weights 1/1. a is bm25 #1 and vector #2; b is bm25 #2 and vector #1.
+      const bm25 = [
+        { slice: a, score: 9 },
+        { slice: b, score: 8 },
+      ];
+      const vector = [
+        { sourceId: 'b', score: 0.9 },
+        { sourceId: 'a', score: 0.8 },
+      ];
+      // a: 1/61 + 1/62; b: 1/62 + 1/61 -> equal; tiebreak at desc -> b (newer).
+      const fused = rrfFuse(slices, bm25, vector);
+      expect(fused.slice(0, 2).map((s) => s.id)).toEqual(['b', 'a']);
+    });
+  });
+
+  /*
+   * #294, task 10: the fusion wiring. The vector stage is injectable, so the
+   * pipeline (BM25 -> vector -> intersect -> RRF) is pinned without Mongo or a
+   * provider, and the flag-off contract is explicit.
+   */
+  describe('rankWorkspaceSlices (#294)', () => {
+    const a = slice({
+      id: 'a',
+      text: 'the budget for the move is twelve thousand',
+      at: new Date('2024-01-01'),
+    });
+    const b = slice({
+      id: 'b',
+      text: 'an unrelated note about the weather',
+      at: new Date('2024-01-02'),
+    });
+    const c = slice({
+      id: 'c',
+      text: 'a slice with no lexical overlap at all',
+      at: new Date('2024-01-03'),
+    });
+    const slices = [a, b, c];
+
+    afterEach(() => {
+      delete process.env.WORKSPACE_MEMORY_ENABLED;
+    });
+
+    it('does not call the vector stage when the feature is off (BM25 only)', async () => {
+      delete process.env.WORKSPACE_MEMORY_ENABLED;
+      const vectorCandidates = jest.fn(async () => [{ sourceId: 'c', score: 0.9 }]);
+      const ranked = await rankWorkspaceSlices('what is the budget', 'u', slices, 6, {
+        vectorCandidates,
+      });
+      expect(vectorCandidates).not.toHaveBeenCalled();
+      expect(ranked.map((s) => s.id)).toEqual(['a']);
+    });
+
+    it('surfaces a vector-only hit that is in the collected set', async () => {
+      process.env.WORKSPACE_MEMORY_ENABLED = '1';
+      // 'c' shares no term with the query, so BM25 alone cannot surface it.
+      const vectorCandidates = jest.fn(async () => [{ sourceId: 'c', score: 0.9 }]);
+      const ranked = await rankWorkspaceSlices('a paraphrase with no overlap', 'u', slices, 6, {
+        vectorCandidates,
+      });
+      expect(ranked.map((s) => s.id)).toContain('c');
+    });
+
+    it('drops a vector hit whose source is not in the collected set', async () => {
+      process.env.WORKSPACE_MEMORY_ENABLED = '1';
+      const vectorCandidates = jest.fn(async () => [{ sourceId: 'ghost', score: 0.99 }]);
+      const ranked = await rankWorkspaceSlices('what is the budget', 'u', slices, 6, {
+        vectorCandidates,
+      });
+      expect(ranked.map((s) => s.id)).toEqual(['a']);
+    });
+
+    it('returns [] without calling the vector stage when there are no slices', async () => {
+      process.env.WORKSPACE_MEMORY_ENABLED = '1';
+      const vectorCandidates = jest.fn(async () => [{ sourceId: 'x', score: 0.9 }]);
+      expect(await rankWorkspaceSlices('q', 'u', [], 6, { vectorCandidates })).toEqual([]);
+      expect(vectorCandidates).not.toHaveBeenCalled();
     });
   });
 });

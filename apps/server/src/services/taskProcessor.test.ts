@@ -56,6 +56,52 @@ describe('processTaskJob sequencer loop (#254)', () => {
     expect(events[3].step).toBe(2);
   });
 
+  it('enqueues a task embedding when the task settles to done (#294)', async () => {
+    process.env.WORKSPACE_MEMORY_ENABLED = '1';
+    const enqueueEmbed = jest.spyOn(
+      jest.requireActual<typeof import('./workspaceEmbeddingIngest')>('./workspaceEmbeddingIngest'),
+      'enqueueWorkspaceEmbedding',
+    );
+    const task = await enqueue();
+    const claimed = await claimNextTask();
+    const runStep: TaskStepRunner = jest.fn().mockResolvedValue(blankStep({ text: 'all done' }));
+
+    try {
+      await makeTaskProcessor(runStep)(claimed!);
+      expect(enqueueEmbed).toHaveBeenCalledWith(
+        expect.objectContaining({ kind: 'task', sourceId: String(task._id) }),
+      );
+    } finally {
+      delete process.env.WORKSPACE_MEMORY_ENABLED;
+      enqueueEmbed.mockRestore();
+    }
+  });
+
+  it('does not enqueue an embedding when the task pauses at the step budget (#294)', async () => {
+    process.env.WORKSPACE_MEMORY_ENABLED = '1';
+    const enqueueEmbed = jest.spyOn(
+      jest.requireActual<typeof import('./workspaceEmbeddingIngest')>('./workspaceEmbeddingIngest'),
+      'enqueueWorkspaceEmbedding',
+    );
+    const task = await enqueue({ maxSteps: 1 });
+    const claimed = await claimNextTask();
+    const runStep: TaskStepRunner = jest
+      .fn()
+      .mockResolvedValue(
+        blankStep({ tools: [{ phase: 'result', name: 'read_file', label: 'Read', status: 'ok' }] }),
+      );
+
+    try {
+      await makeTaskProcessor(runStep)(claimed!);
+      const settled = await Task.findById(task._id);
+      expect(settled?.status).toBe('paused');
+      expect(enqueueEmbed).not.toHaveBeenCalled();
+    } finally {
+      delete process.env.WORKSPACE_MEMORY_ENABLED;
+      enqueueEmbed.mockRestore();
+    }
+  });
+
   it('pauses at the step budget with a visible system event', async () => {
     const task = await enqueue({ maxSteps: 2 });
     const claimed = await claimNextTask();

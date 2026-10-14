@@ -8,6 +8,7 @@ import { makeThumbnail } from './imageThumbnail';
 import { thumbnailKeyFor } from './assetThumbnails';
 import { OCR_MAX_INPUT_BYTES, finalizeOcrText, isNearEmpty, recognizeImage } from './ocr';
 import { rasterizePdf } from './pdfRasterize';
+import { enqueueWorkspaceEmbedding } from './workspaceEmbeddingIngest';
 
 // Real processor for the asset-job queue (issue #67, extended by #208 and
 // #209): a job covers whatever the asset still needs. Documents get the
@@ -108,6 +109,21 @@ const processConversion = async (
   asset.markdownStatus = 'ready';
   asset.markdownFailureReason = null;
   await asset.save();
+  // #294: embed the freshly converted text. Jobs only run for non-ephemeral
+  // assets (the confirm path never queues one for an ephemeral upload), and the
+  // helper is fire-and-forget + flag-gated.
+  if (!asset.ephemeral) {
+    enqueueWorkspaceEmbedding({
+      userId: String(asset.userId),
+      kind: 'file',
+      sourceId: String(asset._id),
+      source: {
+        kind: 'file',
+        markdownExtracted: asset.markdownExtracted,
+        textExtracted: asset.textExtracted,
+      },
+    });
+  }
 };
 
 const processThumbnail = async (

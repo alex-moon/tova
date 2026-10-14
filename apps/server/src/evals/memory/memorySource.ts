@@ -3,6 +3,7 @@ import { Message } from '../../models/Message';
 import { Asset } from '../../models/Asset';
 import { Task } from '../../models/Task';
 import { TaskEvent } from '../../models/TaskEvent';
+import { WorkspaceEmbedding } from '../../models/WorkspaceEmbedding';
 import { evalUserId, ensureEvalUser } from '../mongoSource';
 import type { MemoryScenario, MemorySeed } from './types';
 
@@ -115,4 +116,10 @@ export const clearMemoryCorpus = async (): Promise<void> => {
   const taskIds = tasks.map((t) => t._id);
   await TaskEvent.deleteMany({ taskId: { $in: taskIds } });
   await Task.deleteMany({ userId: evalUserId });
+
+  // #294: a previous scenario's embeddings would otherwise occupy the Atlas
+  // `$vectorSearch` candidate window for the next scenario (the vector hits are
+  // intersected with the freshly seeded slices, so stale rows can never surface
+  // — but they still consume the ANN budget). Clear them with the rest.
+  await WorkspaceEmbedding.deleteMany({ userId: evalUserId });
 };
