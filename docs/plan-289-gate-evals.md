@@ -1,5 +1,9 @@
 # Plan — #289 Workspace memory: gate evals and thresholds
 
+> The remaining work on #289 is re-planned in
+> [plan-289-workspace-memory.md](./plan-289-workspace-memory.md); where the two
+> differ, that document is the forward plan.
+
 Issue: [alex-moon/tova#289](https://github.com/alex-moon/tova). Epic: #251.
 Follow-up to #253 (workspace memory). Retrieval-ranking follow-ups: #293, #294.
 
@@ -179,14 +183,12 @@ issue stay in sync:
 
 ## Follow-ups
 
-- Grow the gate set further and ratify the bare-deixis bar (OQ12) before ratifying
-  thresholds. The explicit/continuation/bare-deixis split is now recorded on every
-  positive (T1b-i); what remains is the owner's judgement on whether bare deixis is a
-  fair refer-back label.
-- Validate the stage-3 judge (`gpt-oss-120b` on Groq) against ~30–50 hand-labelled
-  pairs (OQ1) before its win-rate ratifies a bar.
-- Persist memory-eval metrics (new shape or collection) and surface them in the admin
-  Evals tab.
-- Decide the assistant-turns corpus question (only `role: 'user'` is indexed today)
-  from the retrieval evidence.
-- Go/no-go for `WORKSPACE_MEMORY_ENABLED=1` on live.
+Deferred to [plan-289-workspace-memory.md](./plan-289-workspace-memory.md),
+which carries the task checklist and the current baseline. In short: grow/ratify
+the gate set (OQ12/OQ36), validate the stage-3 judge against hand labels (OQ1),
+persist memory metrics into the `evalruns` rollup and surface them in the admin
+Evals tab, wire the memory stage into the scheduled suite, decide the
+assistant-turns corpus question, and make the `WORKSPACE_MEMORY_ENABLED=1`
+go/no-go call. The retired list (kept for history): validate the stage-3 judge
+(`gpt-oss-120b` on Groq) against ~30–50 hand-labelled pairs; persist memory-eval
+metrics; decide the assistant-turns question; go/no-go on live.

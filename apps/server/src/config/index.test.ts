@@ -37,6 +37,7 @@ const keys = [
   'MEMORY_RESPONDER_TEMPERATURE',
   'MEMORY_EVAL_PACE_MS',
   'MEMORY_EVAL_GATE_PACE_MS',
+  'MEMORY_EVAL_JUDGE_PACE_MS',
 ] as const;
 
 const backup: Record<string, string | undefined> = {};
@@ -197,6 +198,7 @@ describe('config/index', () => {
       expect(config.memoryEval.responderTemperature).toBe(0);
       expect(config.memoryEval.paceMs).toBe(1000);
       expect(config.memoryEval.gatePaceMs).toBe(2000);
+      expect(config.memoryEval.judgePaceMs).toBe(2000);
     });
 
     it('memory-eval responder overrides and pacing parse from env (#289)', () => {
@@ -205,11 +207,13 @@ describe('config/index', () => {
       process.env.MEMORY_RESPONDER_TEMPERATURE = '0.4';
       process.env.MEMORY_EVAL_PACE_MS = '250';
       process.env.MEMORY_EVAL_GATE_PACE_MS = '500';
+      process.env.MEMORY_EVAL_JUDGE_PACE_MS = '750';
       expect(config.memoryEval.responderModel).toBe('openai/gpt-oss-20b');
       expect(config.memoryEval.responderProvider).toBe('groq');
       expect(config.memoryEval.responderTemperature).toBe(0.4);
       expect(config.memoryEval.paceMs).toBe(250);
       expect(config.memoryEval.gatePaceMs).toBe(500);
+      expect(config.memoryEval.judgePaceMs).toBe(750);
     });
 
     it('memory-eval temperature and pacing fall back on malformed or negative values (#289)', () => {
@@ -217,9 +221,11 @@ describe('config/index', () => {
         process.env.MEMORY_RESPONDER_TEMPERATURE = bad;
         process.env.MEMORY_EVAL_PACE_MS = bad;
         process.env.MEMORY_EVAL_GATE_PACE_MS = bad;
+        process.env.MEMORY_EVAL_JUDGE_PACE_MS = bad;
         expect(config.memoryEval.responderTemperature).toBe(0);
         expect(config.memoryEval.paceMs).toBe(1000);
         expect(config.memoryEval.gatePaceMs).toBe(2000);
+        expect(config.memoryEval.judgePaceMs).toBe(2000);
       }
     });
   });

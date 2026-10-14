@@ -245,7 +245,7 @@ const defaultRespond = async (query: string, block: string): Promise<string> => 
  */
 const JUDGE_MAX_TOKENS = 512;
 
-const defaultJudge = async (
+export const defaultJudge = async (
   query: string,
   answerA: string,
   answerB: string,

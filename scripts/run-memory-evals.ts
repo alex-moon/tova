@@ -7,6 +7,8 @@
  *
  *   npx tsx scripts/run-memory-evals.ts
  *   npx tsx scripts/run-memory-evals.ts --helpfulness
+ *   npx tsx scripts/run-memory-evals.ts --preflight-judge
+ *   npx tsx scripts/run-memory-evals.ts --validate-judge
  *   npm run evals:memory
  *
  * Needs: local MongoDB (fixtures). The gate stage needs GROQ_API_KEY (the aux
@@ -23,9 +25,16 @@ import {
   runMemoryEvals,
 } from '../apps/server/src/evals/memory/memoryEvalService';
 import {
+  defaultJudge,
   runHelpfulnessEval,
   runJudgePreflight,
 } from '../apps/server/src/evals/memory/helpfulnessEval';
+import {
+  constructedJudgeLabels,
+  handJudgeLabels,
+  judgeAgreement,
+  type JudgeLabel,
+} from '../apps/server/src/evals/memory/judgeValidation';
 import { config } from '../apps/server/src/config';
 
 const pct = (value: number | null): string =>
@@ -47,12 +56,52 @@ const wantsHelpfulness = (): boolean => process.argv.slice(2).includes('--helpfu
  */
 const wantsPreflight = (): boolean => process.argv.slice(2).includes('--preflight-judge');
 
+/*
+ * `--validate-judge` (T5) scores the judge against the constructed set (always)
+ * and the checked-in hand-labelled seed, printing accuracy and Cohen's kappa with
+ * each set's provenance. The constructed number is a smoke test (the judge is
+ * callable and not position-biased), not evidence; the hand number is the
+ * non-circular one, and is `agent-authored` until the owner confirms it (OQ1).
+ * It needs no Mongo, so it runs before the connection.
+ */
+const wantsValidateJudge = (): boolean => process.argv.slice(2).includes('--validate-judge');
+
+const printAgreement = async (
+  title: string,
+  provenance: string,
+  labels: JudgeLabel[],
+): Promise<void> => {
+  const { n, errors, accuracy, kappa } = await judgeAgreement(labels, defaultJudge);
+  console.log(
+    `\n${title} (${provenance}): n=${n} errors=${errors} ` +
+      `accuracy=${pct(accuracy)} kappa=${kappa === null ? 'n/a' : kappa.toFixed(3)}`,
+  );
+};
+
 const main = async (): Promise<void> => {
   if (wantsPreflight()) {
     const { first, second } = await runJudgePreflight();
     console.log(
       `\nJudge preflight ok: first=${first} second=${second} ` +
         `(model=${config.memoryEval.judgeModel} provider=${config.memoryEval.judgeProvider})`,
+    );
+    return;
+  }
+
+  if (wantsValidateJudge()) {
+    console.log(
+      `\nJudge validation (model=${config.memoryEval.judgeModel} ` +
+        `provider=${config.memoryEval.judgeProvider}):`,
+    );
+    await printAgreement(
+      'Constructed set — smoke test only, not evidence',
+      'constructed',
+      constructedJudgeLabels(),
+    );
+    await printAgreement(
+      'Hand-labelled set',
+      'agent-authored, not independent evidence until owner-confirmed (OQ1)',
+      handJudgeLabels,
     );
     return;
   }

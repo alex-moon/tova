@@ -176,6 +176,16 @@ export const config = {
       const parsed = raw === undefined || raw === '' ? NaN : Number(raw);
       return Number.isFinite(parsed) && parsed >= 0 ? parsed : 2000;
     },
+    // T5: judge validation makes one judge call per pair (~37 across both sets)
+    // as a fast single-token burst, which trips Groq's 30 RPM at the 1000ms
+    // stage-3 pace (observed live: a 429 at 1s spacing). 2000ms matches the
+    // gate's rate-limit headroom; config-sourced so the budget (OQ32) is a
+    // config change.
+    get judgePaceMs(): number {
+      const raw = process.env.MEMORY_EVAL_JUDGE_PACE_MS;
+      const parsed = raw === undefined || raw === '' ? NaN : Number(raw);
+      return Number.isFinite(parsed) && parsed >= 0 ? parsed : 2000;
+    },
   },
 
   chat: {
