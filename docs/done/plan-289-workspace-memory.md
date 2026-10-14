@@ -1,7 +1,11 @@
 # Plan — #289 Workspace memory: gate evals and thresholds
 
+> **Archived 2026-10-14** (PR #303 merged; remaining work moved to #306 —
+> forward plan: [plan-306-eval-closeout.md](../plan-306-eval-closeout.md)).
+> Kept as the decision record.
+
 Issue: [alex-moon/tova#289](https://github.com/alex-moon/tova). Epic: #251.
-Branch: `feat/289-workspace-memory` (PR #303, WIP draft). Follow-up to #253
+Branch: `feat/289-workspace-memory` (PR #303, merged). Follow-up to #253
 (merged #271); retrieval follow-ups: #293 (BM25), #294 (embeddings/vector).
 
 This plan covers the **remaining** work on #289. The first increment (PR #301)

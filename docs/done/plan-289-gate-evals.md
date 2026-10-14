@@ -1,5 +1,8 @@
 # Plan — #289 Workspace memory: gate evals and thresholds
 
+> **Archived 2026-10-14** (PR #303 merged; remaining work moved to #306 —
+> forward plan: [plan-306-eval-closeout.md](../plan-306-eval-closeout.md)).
+
 > The remaining work on #289 is re-planned in
 > [plan-289-workspace-memory.md](./plan-289-workspace-memory.md); where the two
 > differ, that document is the forward plan.
