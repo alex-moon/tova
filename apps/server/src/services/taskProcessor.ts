@@ -3,6 +3,7 @@ import { Task } from '../models/Task';
 import { TaskEvent, type TaskEventDocument, type TaskToolEvent } from '../models/TaskEvent';
 import type { TokenUsage } from './llmTypes';
 import { runTaskStep, type TaskStepOutcome } from './taskSequencer';
+import { enqueueWorkspaceEmbedding } from './workspaceEmbeddingIngest';
 
 /*
  * Task processor (#254, epic #251) — the sequencer's worker-driven turn loop.
@@ -153,6 +154,23 @@ export const makeTaskProcessor =
         );
         if (settled.modifiedCount) {
           await appendNotice(current._id, 'Task completed.', stepCount);
+          // #294: embed the settled task's stream for semantic retrieval.
+          // Fire-and-forget + flag-gated; the read happens after the completion
+          // notice so the embedded text includes the final answer. Only a task
+          // that actually settled to `done` is embedded (a cancel is not).
+          const taskEvents = await TaskEvent.find({
+            taskId: current._id,
+            role: { $in: ['user', 'assistant'] },
+          })
+            .sort({ seq: 1 })
+            .select('role content')
+            .lean();
+          enqueueWorkspaceEmbedding({
+            userId: String(current.userId),
+            kind: 'task',
+            sourceId: String(current._id),
+            source: { kind: 'task', events: taskEvents },
+          });
         }
         return;
       }

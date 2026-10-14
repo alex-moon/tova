@@ -56,8 +56,8 @@ export interface MemoryScenario {
   /** Deterministic substring a helpful answer must contain (stage-3 backbone). */
   expectedFact: string;
   /**
-   * Filler user messages to bury the seed beyond `MESSAGE_POOL`, for the
-   * `out-of-pool` category. Absent/0 for every other category.
+   * Filler user messages to bury the seed beyond the pre-#293 bounded pool, for
+   * the `out-of-pool` category. Absent/0 for every other category.
    */
   poolFill?: number;
 }

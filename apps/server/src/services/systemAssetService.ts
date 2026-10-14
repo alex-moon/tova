@@ -2,6 +2,7 @@ import { Asset } from '../models/Asset';
 import type { AssetProvenance } from '../models/Asset';
 import { spacesWorkspaceStorage } from './workspaceStorage';
 import { MAX_ASSET_SIZE, sanitizeFilename } from './assetLimits';
+import { enqueueWorkspaceEmbedding } from './workspaceEmbeddingIngest';
 
 // Server-side write path for system-generated assets (issue #66): Tova
 // itself creates a file (currently markdown only) and puts it in the user's
@@ -77,6 +78,14 @@ export const createSystemAsset = async (
   asset.textExtracted = text || null;
   asset.status = 'ready';
   await asset.save();
+
+  // #294: embed the generated file's text. Fire-and-forget + flag-gated.
+  enqueueWorkspaceEmbedding({
+    userId,
+    kind: 'file',
+    sourceId: String(asset._id),
+    source: { kind: 'file', textExtracted: asset.textExtracted },
+  });
 
   return {
     ok: true,

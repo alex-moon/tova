@@ -5,15 +5,18 @@ import { Session } from '../models/Session';
 import { Task } from '../models/Task';
 import { TaskEvent } from '../models/TaskEvent';
 import {
+  BM25_B,
+  BM25_K1,
   buildWorkspaceBlock,
   isWorkspaceMemoryEnabled,
   matchSnippet,
   pickTopSlices,
   promptWords,
+  rankWorkspaceSlices,
   retrieveWorkspaceBlock,
   rrfFuse,
-  scoreSlice,
   taskTitle,
+  tokenize,
   vectorCandidates,
   type WorkspaceSlice,
 } from './workspaceRetrievalService';
@@ -46,20 +49,98 @@ describe('workspaceRetrievalService', () => {
     });
   });
 
-  describe('scoreSlice', () => {
-    it('scores zero on no keyword overlap even for a fresh slice', () => {
-      expect(scoreSlice('unrelated question about birds', slice())).toBe(0);
+  describe('tokenize', () => {
+    it('keeps terms with multiplicity, dropping stopwords and single characters', () => {
+      expect(tokenize('the budget, the budget and a move')).toEqual(['budget', 'budget', 'move']);
+    });
+  });
+
+  describe('bm25', () => {
+    it('records the standard k1/b defaults', () => {
+      expect(BM25_K1).toBe(1.2);
+      expect(BM25_B).toBe(0.75);
     });
 
-    it('scores overlap, with recency only reordering equals', () => {
-      const fresh = scoreSlice('budget', slice({ at: new Date() }));
-      const stale = scoreSlice('budget', slice({ at: new Date('2020-01-01') }));
-      expect(fresh).toBeGreaterThan(stale);
-      expect(scoreSlice('budget', slice())).toBeGreaterThan(0);
+    it('drops zero-overlap slices even when fresh', () => {
+      expect(pickTopSlices('unrelated question about birds', [slice({ at: new Date() })])).toEqual(
+        [],
+      );
     });
 
-    it('returns zero for an all-stopword prompt', () => {
-      expect(scoreSlice('the a of', slice())).toBe(0);
+    it('returns no picks for an all-stopword prompt', () => {
+      expect(pickTopSlices('the a of', [slice()])).toEqual([]);
+    });
+
+    it('returns no picks for an empty corpus', () => {
+      expect(pickTopSlices('budget', [])).toEqual([]);
+    });
+
+    it('returns no picks when every document tokenises to nothing', () => {
+      expect(pickTopSlices('budget', [slice({ text: 'the a of' })])).toEqual([]);
+    });
+
+    // N=3; A=`budget`, B=`budget move`, C=`move`; q=`budget`; avgdl=4/3.
+    // Hand-computed BM25: A ≈ 0.5236 (shorter doc wins), B ≈ 0.3902, C = 0.
+    it('normalises by document length and drops zero-overlap docs', () => {
+      const picks = pickTopSlices('budget', [
+        slice({ id: 'A', text: 'budget' }),
+        slice({ id: 'B', text: 'budget move' }),
+        slice({ id: 'C', text: 'move' }),
+      ]);
+      expect(picks.map((p) => p.slice.id)).toEqual(['A', 'B']);
+      expect(picks[0].score).toBeCloseTo(0.5236, 3);
+      expect(picks[1].score).toBeCloseTo(0.3902, 3);
+    });
+
+    // N=3; A=`rare`, B=`common`, C=`common`; q=`rare common`. The rarer term
+    // carries the higher IDF, so A outranks B.
+    it('weights rare terms above common terms (IDF)', () => {
+      const at = new Date('2026-06-01');
+      const picks = pickTopSlices('rare common', [
+        slice({ id: 'A', text: 'rare', at }),
+        slice({ id: 'B', text: 'common', at }),
+        slice({ id: 'C', text: 'common', at }),
+      ]);
+      expect(picks.map((p) => p.slice.id)).toEqual(['A', 'B', 'C']);
+      expect(picks[0].score).toBeGreaterThan(picks[1].score);
+    });
+
+    // The non-negative IDF form keeps a term that appears in *every* document
+    // slightly positive, so a ubiquitous-but-relevant slice still surfaces
+    // (classic BM25 IDF can go negative and drop it).
+    it('still scores a term present in every document', () => {
+      const picks = pickTopSlices('budget', [
+        slice({ id: 'A', text: 'budget' }),
+        slice({ id: 'B', text: 'budget' }),
+      ]);
+      expect(picks.map((p) => p.slice.id)).toEqual(['A', 'B']);
+      expect(picks[0].score).toBeGreaterThan(0);
+    });
+
+    it('ignores a query term absent from every document', () => {
+      const withAbsent = pickTopSlices('budget zzzz', [slice({ id: 'A', text: 'budget' })]);
+      const withoutAbsent = pickTopSlices('budget', [slice({ id: 'A', text: 'budget' })]);
+      expect(withAbsent).toEqual(withoutAbsent);
+    });
+
+    it('breaks equal scores by recency (at desc) then id asc', () => {
+      const byRecency = pickTopSlices('budget', [
+        slice({ id: 'z', text: 'budget', at: new Date('2026-01-01') }),
+        slice({ id: 'a', text: 'budget', at: new Date('2026-06-01') }),
+      ]);
+      expect(byRecency.map((p) => p.slice.id)).toEqual(['a', 'z']);
+
+      const at = new Date('2026-06-01');
+      const byId = pickTopSlices('budget', [
+        slice({ id: 'b', text: 'budget', at }),
+        slice({ id: 'a', text: 'budget', at }),
+      ]);
+      expect(byId.map((p) => p.slice.id)).toEqual(['a', 'b']);
+    });
+
+    it('is deterministic across repeated calls', () => {
+      const slices = [slice({ id: 'a', text: 'budget move' }), slice({ id: 'b', text: 'budget' })];
+      expect(pickTopSlices('budget', slices)).toEqual(pickTopSlices('budget', slices));
     });
   });
 
@@ -245,6 +326,35 @@ describe('workspaceRetrievalService', () => {
       expect(block).toContain('Move');
       expect(block).toContain('twelve thousand');
       expect(block).not.toContain('filler');
+    });
+
+    it('surfaces a seed buried beyond the old bounded pool (#293)', async () => {
+      // Regression: the pre-#293 read kept only the newest 200 messages, so a
+      // matching chat older than that window was unreachable by construction.
+      const userId = String(new Types.ObjectId());
+      const session = await Session.create({ userId, title: 'Old policy' });
+      await Message.create({
+        sessionId: session._id,
+        role: 'user',
+        content: 'my travel insurance policy number is AX-4471',
+        timestamp: new Date('2026-09-05T10:00:00.000Z'),
+      });
+      const filler = await Session.create({ userId, title: 'Filler' });
+      await Message.insertMany(
+        Array.from({ length: 210 }, (_, i) => ({
+          sessionId: filler._id,
+          role: 'user',
+          content: `Filler turn ${i}: unrelated notes about the weather and lunch.`,
+          timestamp: new Date(Date.parse('2026-09-30T10:00:00.000Z') + i * 1000),
+        })),
+      );
+
+      const block = await retrieveWorkspaceBlock(
+        'what is my travel insurance policy number',
+        userId,
+      );
+      expect(block).toContain('Old policy');
+      expect(block).toContain('AX-4471');
     });
 
     it('excludes the just-saved current turn from the corpus', async () => {
@@ -616,6 +726,70 @@ describe('workspaceRetrievalService', () => {
       // a: 1/61 + 1/62; b: 1/62 + 1/61 -> equal; tiebreak at desc -> b (newer).
       const fused = rrfFuse(slices, bm25, vector);
       expect(fused.slice(0, 2).map((s) => s.id)).toEqual(['b', 'a']);
+    });
+  });
+
+  /*
+   * #294, task 10: the fusion wiring. The vector stage is injectable, so the
+   * pipeline (BM25 -> vector -> intersect -> RRF) is pinned without Mongo or a
+   * provider, and the flag-off contract is explicit.
+   */
+  describe('rankWorkspaceSlices (#294)', () => {
+    const a = slice({
+      id: 'a',
+      text: 'the budget for the move is twelve thousand',
+      at: new Date('2024-01-01'),
+    });
+    const b = slice({
+      id: 'b',
+      text: 'an unrelated note about the weather',
+      at: new Date('2024-01-02'),
+    });
+    const c = slice({
+      id: 'c',
+      text: 'a slice with no lexical overlap at all',
+      at: new Date('2024-01-03'),
+    });
+    const slices = [a, b, c];
+
+    afterEach(() => {
+      delete process.env.WORKSPACE_MEMORY_ENABLED;
+    });
+
+    it('does not call the vector stage when the feature is off (BM25 only)', async () => {
+      delete process.env.WORKSPACE_MEMORY_ENABLED;
+      const vectorCandidates = jest.fn(async () => [{ sourceId: 'c', score: 0.9 }]);
+      const ranked = await rankWorkspaceSlices('what is the budget', 'u', slices, 6, {
+        vectorCandidates,
+      });
+      expect(vectorCandidates).not.toHaveBeenCalled();
+      expect(ranked.map((s) => s.id)).toEqual(['a']);
+    });
+
+    it('surfaces a vector-only hit that is in the collected set', async () => {
+      process.env.WORKSPACE_MEMORY_ENABLED = '1';
+      // 'c' shares no term with the query, so BM25 alone cannot surface it.
+      const vectorCandidates = jest.fn(async () => [{ sourceId: 'c', score: 0.9 }]);
+      const ranked = await rankWorkspaceSlices('a paraphrase with no overlap', 'u', slices, 6, {
+        vectorCandidates,
+      });
+      expect(ranked.map((s) => s.id)).toContain('c');
+    });
+
+    it('drops a vector hit whose source is not in the collected set', async () => {
+      process.env.WORKSPACE_MEMORY_ENABLED = '1';
+      const vectorCandidates = jest.fn(async () => [{ sourceId: 'ghost', score: 0.99 }]);
+      const ranked = await rankWorkspaceSlices('what is the budget', 'u', slices, 6, {
+        vectorCandidates,
+      });
+      expect(ranked.map((s) => s.id)).toEqual(['a']);
+    });
+
+    it('returns [] without calling the vector stage when there are no slices', async () => {
+      process.env.WORKSPACE_MEMORY_ENABLED = '1';
+      const vectorCandidates = jest.fn(async () => [{ sourceId: 'x', score: 0.9 }]);
+      expect(await rankWorkspaceSlices('q', 'u', [], 6, { vectorCandidates })).toEqual([]);
+      expect(vectorCandidates).not.toHaveBeenCalled();
     });
   });
 });
