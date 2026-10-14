@@ -15,6 +15,28 @@ describe('EvalRunRecord', () => {
     expect(doc.error).toBeNull();
     expect(doc.results).toEqual([]);
     expect(doc.models).toEqual(['deepinfra:x']);
+    // #289: a row is a tool-use run unless stated, with no stages/metrics.
+    expect(doc.kind).toBe('tool-use');
+    expect(doc.stages).toEqual([]);
+    expect(doc.metrics).toBeNull();
+  });
+
+  it('stores a memory run with its kind, stages and metrics payload', async () => {
+    const doc = await EvalRunRecord.create({
+      startedAt: new Date(),
+      kind: 'memory',
+      models: ['memory'],
+      stages: ['retrieval'],
+      metrics: { corpusHash: 'abc', stages: ['retrieval'] },
+    });
+    const found = await EvalRunRecord.findById(doc._id);
+    expect(found?.kind).toBe('memory');
+    expect(found?.stages).toEqual(['retrieval']);
+    expect(found?.metrics).toEqual({ corpusHash: 'abc', stages: ['retrieval'] });
+  });
+
+  it('rejects an unknown kind', async () => {
+    await expect(EvalRunRecord.create({ startedAt: new Date(), kind: 'alien' })).rejects.toThrow();
   });
 
   it('stores per-case results without subdocument ids', async () => {
@@ -42,6 +64,7 @@ describe('EvalRunRecord', () => {
     const keys = indexes.map((index) => JSON.stringify(index.key));
     expect(keys).toContain(JSON.stringify({ startedAt: -1 }));
     expect(keys).toContain(JSON.stringify({ status: 1, startedAt: -1 }));
+    expect(keys).toContain(JSON.stringify({ kind: 1, startedAt: -1 }));
   });
 
   // The migration `create-eval-runs` pre-creates `evalruns`. Without the

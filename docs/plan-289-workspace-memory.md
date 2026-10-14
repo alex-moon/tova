@@ -1190,7 +1190,7 @@ set as evidence.
   agent alone; the task reports the constructed-set agreement and completes.
 - Verify: `npm run ci`, plus a local `--validate-judge` run against Groq.
 
-### T6 — Persist memory metrics (server)  [dep: none]
+### T6 — Persist memory metrics (server)  [DONE; dep: none]
 
 - Extend `EvalRunRecord` (`apps/server/src/models/EvalRunRecord.ts`):
   - `kind: { type: String, enum: ['tool-use', 'memory'], default: 'tool-use' }`;
@@ -1903,8 +1903,20 @@ unknowns):**
     default **2000ms**, matching the gate's headroom) removed the 429; the clean
     run above has `errors=0`. The stage-3 `paceMs` (1000ms) is left as-is: its
     responder calls are slow enough that its effective RPM stays under the cap.
-- [ ] T6 persist memory metrics (server; incl. `kind`, `metrics`, migration,
-  corpus hash, all three model identities)
+- [x] T6 persist memory metrics (server). Delivered: `EvalRunRecord` gains
+  `kind` (`'tool-use'|'memory'`, default `tool-use`), `stages`, and a `Mixed`
+  `metrics` payload, plus the `{kind:1, startedAt:-1}` index; migration
+  `20261014000000-eval-runs-kind` backfills `kind:'tool-use'` and adds the index.
+  `memoryCorpusHash()` (canonical JSON → SHA-256) is recorded on every run.
+  `runMemoryEvals` takes a `stages` selector (`['gate','retrieval']` default; a
+  scheduled run passes `['retrieval']`). New `memoryEvalRunService.ts`
+  (`beginMemoryEvalRun`/`executeMemoryEvalRun`/`startMemoryEvalRun`) reuses the
+  **global** lease and writes sentinel `model:'memory'`/`provider:'memory'`
+  per-case rows (gate → pass/fail/error; retrieval → pass/fail) plus the
+  continuous `metrics` rollup with all three model identities. `AdminEval*`
+  contracts gain `kind` + `AdminEvalMemoryMetrics`; `evalRunsAdminService`
+  projects them (detail-only `metrics`); `countScores` left unchanged (D9).
+  `npm run ci` green (client + server; 1314 server tests).
 - [ ] T7 surface metrics in the admin Evals tab (client)
 - [ ] T8 wire memory stage 2 into the scheduled suite (sequential with tool-use)
 - [ ] T9 enlarged baseline (all three stages, via `--helpfulness`, twice)

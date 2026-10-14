@@ -69,6 +69,26 @@ describe('listEvalRuns / getEvalRun (#225)', () => {
     expect(await getEvalRun('64b7f9f2a1c3d4e5f6a7b8c9')).toBeNull();
   });
 
+  it('defaults kind to tool-use and projects no metrics for a tool-use run', async () => {
+    await seed(new Date('2026-10-05T00:00:00Z'), [result('pass')]);
+    const runs = await listEvalRuns();
+    expect(runs[0].kind).toBe('tool-use');
+    const detail = await getEvalRun(runs[0].id);
+    expect(detail?.metrics).toBeNull();
+  });
+
+  it('projects a memory run kind and metrics rollup', async () => {
+    const doc = await seed(new Date('2026-10-06T00:00:00Z'), [result('pass', 'retrieval:s1')], {
+      kind: 'memory',
+      models: ['memory'],
+      metrics: { stages: ['retrieval'], corpusHash: 'abc', surfacedRate: 1 },
+    });
+    const runs = await listEvalRuns();
+    expect(runs[0].kind).toBe('memory');
+    const detail = await getEvalRun(doc._id.toString());
+    expect(detail?.metrics).toMatchObject({ corpusHash: 'abc', surfacedRate: 1 });
+  });
+
   it('counts a prototype-chain score name as an error, not a real key', async () => {
     // "constructor" is `in` a plain object via Object.prototype; the counts
     // rollup must not treat it as a pass/partial/fail/error key.

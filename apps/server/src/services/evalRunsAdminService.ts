@@ -7,7 +7,9 @@
 import { EvalRunRecord, type EvalRunRecordDocument } from '../models/EvalRunRecord';
 import type {
   AdminEvalCaseResult,
+  AdminEvalMemoryMetrics,
   AdminEvalRunDetail,
+  AdminEvalRunKind,
   AdminEvalRunSummary,
   AdminEvalScoreCounts,
 } from '@tova/shared';
@@ -43,6 +45,9 @@ const toSummary = (doc: EvalRunRecordDocument): AdminEvalRunSummary => ({
   finishedAt: doc.finishedAt ? doc.finishedAt.toISOString() : null,
   status: doc.status,
   models: doc.models,
+  // Old rows predate the field; the model default covers new writes and the
+  // migration backfills deployed docs, so a missing value reads as tool-use.
+  kind: (doc.kind ?? 'tool-use') as AdminEvalRunKind,
   counts: countScores(doc.results),
   total: doc.results.length,
   error: doc.error ?? null,
@@ -63,5 +68,10 @@ export const getEvalRun = async (id: string): Promise<AdminEvalRunDetail | null>
     score: result.score as AdminEvalCaseResult['score'],
     report: result.report,
   }));
-  return { ...toSummary(doc), results };
+  return {
+    ...toSummary(doc),
+    results,
+    // Only memory runs carry a continuous rollup; a tool-use run has none.
+    metrics: (doc.metrics as AdminEvalMemoryMetrics | null | undefined) ?? null,
+  };
 };

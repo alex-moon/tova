@@ -4,9 +4,11 @@ import {
   assertEnrichmentEnabled,
   gateMetrics,
   MEMORY_DATASET_NAME,
+  memoryCorpusHash,
   pushMemoryCorpusToLangSmith,
   retrievalMetrics,
   runGateEval,
+  runMemoryEvals,
   runRetrievalEval,
   type GateCaseResult,
   type RetrievalCaseResult,
@@ -389,5 +391,32 @@ describe('pushMemoryCorpusToLangSmith (#289)', () => {
     // The subtype rides the gate example, so the shareable corpus carries the
     // same per-subtype split the local metrics report (T1b-i).
     expect(outputs[0]).toMatchObject({ refersBack: true, subtype: 'explicit' });
+  });
+});
+
+describe('memoryCorpusHash (#289 T6/D15)', () => {
+  it('is stable across property order and changes on a label edit', () => {
+    const gateA = { id: 'g1', prompt: 'p', refersBack: true, subtype: 'explicit' } as const;
+    const gateB = { prompt: 'p', refersBack: true, subtype: 'explicit', id: 'g1' } as const;
+    // Key order must not matter (canonical JSON sorts keys).
+    expect(memoryCorpusHash([gateA], [])).toBe(memoryCorpusHash([gateB], []));
+    // A one-character label edit changes the hash.
+    const flipped = { ...gateA, refersBack: false };
+    expect(memoryCorpusHash([flipped], [])).not.toBe(memoryCorpusHash([gateA], []));
+  });
+
+  it('defaults to the shipped corpus', () => {
+    expect(memoryCorpusHash()).toMatch(/^[0-9a-f]{64}$/);
+  });
+});
+
+describe('runMemoryEvals stage selector (#289 T6)', () => {
+  it('runs only the requested stages', async () => {
+    const retrievalOnly = await runMemoryEvals(
+      { scenarios: [], clear: async () => {}, seed: async () => ({}), retrieve: async () => [] },
+      ['retrieval'],
+    );
+    expect(retrievalOnly.gate).toBeUndefined();
+    expect(retrievalOnly.retrieval?.metrics.total).toBe(0);
   });
 });

@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import type { Client } from 'langsmith';
 import {
   classifyFileIntentForEval,
@@ -216,8 +217,10 @@ export interface MemoryEvalDeps {
 }
 
 export interface MemoryEvalReport {
-  gate: { results: GateCaseResult[]; metrics: GateMetrics };
-  retrieval: { results: RetrievalCaseResult[]; metrics: RetrievalMetrics };
+  /** Absent when the run's `stages` selector excluded the gate. */
+  gate?: { results: GateCaseResult[]; metrics: GateMetrics };
+  /** Absent when the run's `stages` selector excluded retrieval. */
+  retrieval?: { results: RetrievalCaseResult[]; metrics: RetrievalMetrics };
 }
 
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
@@ -308,12 +311,55 @@ export const runRetrievalEval = async (
   return { results, metrics: retrievalMetrics(results) };
 };
 
-/** Both deterministic stages, in order. Stage 3 (judge) is a follow-up. */
-export const runMemoryEvals = async (deps: MemoryEvalDeps = {}): Promise<MemoryEvalReport> => {
-  const gate = await runGateEval(deps);
-  const retrieval = await runRetrievalEval(deps);
-  return { gate, retrieval };
+/** The deterministic memory stages the runner can execute. */
+export type MemoryEvalStage = 'gate' | 'retrieval';
+
+/**
+ * Runs the requested deterministic stages, in order. Stage 3 (judge) is
+ * manual-only and not part of this runner. The `stages` selector exists so a
+ * scheduled run can take **retrieval only** without making the 36 live gate
+ * calls unattended (D13/OQ26). Defaults to both, the manual-CLI shape.
+ */
+export const runMemoryEvals = async (
+  deps: MemoryEvalDeps = {},
+  stages: MemoryEvalStage[] = ['gate', 'retrieval'],
+): Promise<MemoryEvalReport> => {
+  const report: MemoryEvalReport = {};
+  if (stages.includes('gate')) report.gate = await runGateEval(deps);
+  if (stages.includes('retrieval')) report.retrieval = await runRetrievalEval(deps);
+  return report;
 };
+
+/* ------------------------------ corpus identity ----------------------------- */
+
+/**
+ * Deterministic JSON with recursively sorted object keys, so the hash below is
+ * independent of property order. The corpus is plain JSON (strings/booleans/
+ * numbers/arrays; verified in `types.ts`), so no `Date`/`ObjectId` handling is
+ * needed.
+ */
+const canonicalJson = (value: unknown): string => {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
+  if (value && typeof value === 'object') {
+    const entries = Object.entries(value as Record<string, unknown>)
+      .filter(([, v]) => v !== undefined)
+      .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+      .map(([k, v]) => `${JSON.stringify(k)}:${canonicalJson(v)}`);
+    return `{${entries.join(',')}}`;
+  }
+  return JSON.stringify(value);
+};
+
+/**
+ * SHA-256 over the canonical gate + retrieval corpus (D15). Recorded on every
+ * memory run so a corpus change (a label edit, a new scenario) is visible
+ * rather than silent: the baseline a threshold was ratified against can be
+ * identified from the hash.
+ */
+export const memoryCorpusHash = (
+  gateCases: GateCase[] = GATE_CASES,
+  scenarios: MemoryScenario[] = MEMORY_SCENARIOS,
+): string => createHash('sha256').update(canonicalJson({ gateCases, scenarios })).digest('hex');
 
 /* ------------------------- LangSmith corpus export -------------------------- */
 

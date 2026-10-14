@@ -110,6 +110,8 @@ const main = async (): Promise<void> => {
   await mongoose.connect(buildMongoUri());
   try {
     const { gate, retrieval } = await runMemoryEvals();
+    if (!gate || !retrieval)
+      throw new Error('default memory eval must run both deterministic stages');
 
     console.log('\nStage 1 — gate precision/recall (workspace vote vs hand label):');
     for (const r of gate.results) {

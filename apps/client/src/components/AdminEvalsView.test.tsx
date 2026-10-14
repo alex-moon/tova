@@ -32,6 +32,7 @@ const runSummary = (over: Partial<AdminEvalRunSummary> = {}): AdminEvalRunSummar
   finishedAt: '2026-10-06T00:05:00.000Z',
   status: 'done',
   models: ['deepinfra:openai/gpt-oss-20b'],
+  kind: 'tool-use',
   counts: { pass: 8, partial: 1, fail: 1, error: 0 },
   total: 10,
   error: null,

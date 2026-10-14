@@ -322,12 +322,19 @@ export interface AdminEvalScoreCounts {
   error: number;
 }
 
+// #289: a run is either the tool-use golden suite or the workspace-memory eval.
+// Memory runs reuse the same `evalruns` collection (D9) with a `kind` badge and
+// a continuous `metrics` rollup that does not fit the per-case `pass|partial|
+// fail|error` scores.
+export type AdminEvalRunKind = 'tool-use' | 'memory';
+
 export interface AdminEvalRunSummary {
   id: string;
   startedAt: string;
   finishedAt: string | null;
   status: 'running' | 'done' | 'error';
   models: string[];
+  kind: AdminEvalRunKind;
   counts: AdminEvalScoreCounts;
   total: number;
   error: string | null;
@@ -348,8 +355,76 @@ export interface AdminEvalCaseResult {
   report: string;
 }
 
+// #289 memory-eval rollup. Precision/recall@k/win-rate are continuous, so they
+// live here rather than in the per-case `results` rows (which carry a
+// drill-down score). Every stage field is optional: a scheduled retrieval-only
+// run writes no `gate`/`helpfulness`.
+export interface AdminEvalSubtypeRecall {
+  total: number;
+  truePos: number;
+  falseNeg: number;
+  recall: number | null;
+}
+
+export interface AdminEvalGateMetrics {
+  total: number;
+  evaluated: number;
+  truePos: number;
+  falsePos: number;
+  trueNeg: number;
+  falseNeg: number;
+  precision: number | null;
+  recall: number | null;
+  fireRate: number;
+  errors: number;
+  timeouts: number;
+  recallBySubtype: Record<string, AdminEvalSubtypeRecall>;
+}
+
+export interface AdminEvalRetrievalMetrics {
+  total: number;
+  surfaced: number;
+  expectedMet: number;
+  expectedMetRate: number;
+  surfacedRate: number;
+  byCategory: Record<string, { total: number; surfaced: number; expectedMet: number }>;
+}
+
+export interface AdminEvalHelpfulnessMetrics {
+  total: number;
+  judged: number;
+  wins: number;
+  losses: number;
+  ties: number;
+  errors: number;
+  winRate: number | null;
+  blockIdRate: number;
+  factHitRate: number;
+  counterfactualHits: number;
+  deterministicWins: number;
+}
+
+export interface AdminEvalMemoryMetrics {
+  /** Stages this run executed, so a partial run is self-describing. */
+  stages: string[];
+  /** SHA-256 over the canonical corpus (D15), so a corpus change is visible. */
+  corpusHash: string;
+  gateModel: string;
+  gateProvider: string;
+  /** Responder/judge identities (D15/OQ29); absent on a retrieval-only run. */
+  responderModel?: string;
+  responderProvider?: string;
+  judgeModel?: string;
+  judgeProvider?: string;
+  gate?: AdminEvalGateMetrics;
+  retrieval?: AdminEvalRetrievalMetrics;
+  helpfulness?: AdminEvalHelpfulnessMetrics;
+}
+
 export interface AdminEvalRunDetail extends AdminEvalRunSummary {
   results: AdminEvalCaseResult[];
+  /** Present on `kind:'memory'` runs; absent (null) on tool-use runs. */
+  metrics?: AdminEvalMemoryMetrics | null;
 }
 
 // `location` is the coarse country-level geolocation (issue #50): only the
