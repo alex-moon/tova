@@ -40,6 +40,11 @@ const seedChat = async (seed: MemorySeed): Promise<string> => {
 };
 
 const seedFile = async (seed: MemorySeed): Promise<string> => {
+  // `timestamps: true` would otherwise stamp `createdAt` with wall-clock now,
+  // ignoring `seed.at` and making the fixture non-deterministic (the corpus
+  // contract says `at` keeps fixtures deterministic). Mongoose respects an
+  // explicit `createdAt`, and the retrieval slice reads it as the slice's `at`.
+  const at = new Date(seed.at);
   const asset = await Asset.create({
     userId: evalUserId,
     filename: seed.title,
@@ -48,15 +53,22 @@ const seedFile = async (seed: MemorySeed): Promise<string> => {
     size: seed.text.length,
     status: 'ready',
     textExtracted: seed.text,
+    createdAt: at,
+    updatedAt: at,
   });
   return String(asset._id);
 };
 
 const seedTask = async (seed: MemorySeed): Promise<string> => {
+  // The task slice reads `updatedAt`, so pin both timestamps to `seed.at` for
+  // the same determinism reason as `seedFile`.
+  const at = new Date(seed.at);
   const task = await Task.create({
     userId: evalUserId,
     instruction: seed.title,
     budget: { maxSteps: 25, maxCostUsd: 5 },
+    createdAt: at,
+    updatedAt: at,
   });
   await TaskEvent.create({ taskId: task._id, seq: 0, role: 'user', content: seed.title });
   await TaskEvent.create({ taskId: task._id, seq: 1, role: 'assistant', content: seed.text });

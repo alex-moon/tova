@@ -1,5 +1,8 @@
 import { evalUserId } from '../mongoSource';
-import { retrieveWorkspaceSlices } from '../../services/workspaceRetrievalService';
+import {
+  buildWorkspaceBlock,
+  retrieveWorkspaceSlices,
+} from '../../services/workspaceRetrievalService';
 import { MEMORY_SCENARIOS } from './corpus';
 import { clearMemoryCorpus, seedMemoryScenario } from './memorySource';
 
@@ -37,6 +40,20 @@ describe('memory corpus retrieval (#289)', () => {
     expect((await retrieve('retrieval-task-budget')).surfaced).toBe(true);
   });
 
+  it('materialises file and task slices at the seed date (deterministic fixtures)', async () => {
+    // `Asset`/`Task` are `timestamps: true`, so without pinning the seeder would
+    // stamp `createdAt`/`updatedAt` with wall-clock now and the corpus's `at`
+    // would be silently ignored — a latent trap for any future scenario that
+    // relies on recency ordering. Assert the slice carries the declared date.
+    for (const id of ['retrieval-file-lease-pets', 'retrieval-task-budget']) {
+      const scenario = MEMORY_SCENARIOS.find((s) => s.id === id)!;
+      const seed = scenario.seeds.find((s) => s.id === scenario.expectedSliceId)!;
+      const { picks } = await retrieve(id);
+      const pick = picks.find((p) => p.title === seed.title);
+      expect(pick?.at.toISOString()).toBe(new Date(seed.at).toISOString());
+    }
+  });
+
   // Baseline gap: the paraphrase shares no content word, so lexical overlap
   // scores zero. This is the case #293 (BM25) / #294 (embeddings) are measured
   // against; when either lands, this assertion flips to `true`.
@@ -50,5 +67,27 @@ describe('memory corpus retrieval (#289)', () => {
 
   it('does not surface a seed buried beyond the bounded pool', async () => {
     expect((await retrieve('retrieval-out-of-pool')).surfaced).toBe(false);
+  });
+
+  it('carries the expected fact into the block exactly when the slice surfaces', async () => {
+    // Stage 3's deterministic backbone asserts the with-arm block carries the
+    // expected fact. The block is built by `matchSnippet` (a 160-char window
+    // centred on the prompt match) under a 1200-char cap, so a fact outside the
+    // window — or pushed out when several slices compete — would make the
+    // backbone unreachable even though the slice surfaced: a fixture defect
+    // masquerading as a stage-3 failure. Conversely, on a by-construction miss
+    // the block is empty, so the fact must be absent. Assert the two agree for
+    // every scenario, not just the ones the baseline surfaces.
+    for (const scenario of MEMORY_SCENARIOS) {
+      await clearMemoryCorpus();
+      const idMap = await seedMemoryScenario(scenario);
+      const picks = await retrieveWorkspaceSlices(scenario.query, evalUserId.toHexString());
+      const expectedId = idMap[scenario.expectedSliceId];
+      const surfaced = picks.some((p) => p.id === expectedId);
+      const block = buildWorkspaceBlock(scenario.query, picks);
+      const factInBlock = block.toLowerCase().includes(scenario.expectedFact.toLowerCase());
+      expect({ id: scenario.id, factInBlock }).toEqual({ id: scenario.id, factInBlock: surfaced });
+    }
+    await clearMemoryCorpus();
   });
 });

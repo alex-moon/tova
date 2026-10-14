@@ -58,8 +58,30 @@ describe('memory corpus (#289)', () => {
       expect(scenario.seeds.some((seed) => seed.id === scenario.expectedSliceId)).toBe(true);
       expect(scenario.expectedFact.trim().length).toBeGreaterThan(0);
       expect(scenario.query.trim().length).toBeGreaterThan(0);
+      expect(scenario.description.trim().length).toBeGreaterThan(0);
       const seedIds = scenario.seeds.map((seed) => seed.id);
       expect(new Set(seedIds).size).toBe(seedIds.length);
+    }
+  });
+
+  it('marks expectSurfaced consistently with the category', () => {
+    // The retrieval metric counts a case as met when `surfaced === expectSurfaced`,
+    // so a scenario whose `expectSurfaced` contradicts its category silently
+    // inverts its contribution to `expectedMetRate`. The hard categories are
+    // expected to surface; `deleted-seed`/`out-of-pool` are misses by construction.
+    const missByConstruction = new Set(['deleted-seed', 'out-of-pool']);
+    for (const scenario of MEMORY_SCENARIOS) {
+      expect(scenario.expectSurfaced).toBe(!missByConstruction.has(scenario.category));
+    }
+  });
+
+  it('never puts the expected fact in the query (counterfactual stays valid)', () => {
+    // Stage 3's without-arm is the same query with a blank block. If the query
+    // already carried the expected fact, the responder could echo it without any
+    // injection, the with/without arms would both "contain" it, and the A/B delta
+    // would measure the query rather than the block.
+    for (const scenario of MEMORY_SCENARIOS) {
+      expect(scenario.query.toLowerCase()).not.toContain(scenario.expectedFact.toLowerCase());
     }
   });
 
