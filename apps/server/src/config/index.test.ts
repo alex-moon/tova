@@ -192,8 +192,10 @@ describe('config/index', () => {
     });
 
     it('memory-eval judge defaults are pinned; responder overrides stay undefined (#289)', () => {
-      expect(config.memoryEval.judgeModel).toBe('openai/gpt-oss-120b');
-      expect(config.memoryEval.judgeProvider).toBe('groq');
+      // Judge pin: owner judge-probe sweep 2026-10-14 (100%/100% validation,
+      // non-overlapping family vs gate and responder, cheapest finalist).
+      expect(config.memoryEval.judgeModel).toBe('Qwen/Qwen3-235B-A22B-Instruct-2507');
+      expect(config.memoryEval.judgeProvider).toBe('deepinfra');
       // Unset responder overrides fall through to the roster default in the
       // runner (T14c), so the getters must return undefined, not a pin.
       expect(config.memoryEval.responderModel).toBeUndefined();

@@ -5,7 +5,8 @@ import { config } from '../../config';
 
 /*
  * #289 T5 — judge-validation harness. Stage 3 trusts an LLM judge
- * (`openai/gpt-oss-120b`) to score the holistic helpfulness delta a substring
+ * (`Qwen/Qwen3-235B-A22B-Instruct-2507` since the 2026-10-14 judge-probe
+ * sweep) to score the holistic helpfulness delta a substring
  * check cannot reach, so the judge must be measured against labels before its
  * win-rate ratifies a bar (the ticket: "validate the judge against ~30–50
  * hand-labelled pairs before trusting it at scale").

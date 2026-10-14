@@ -136,8 +136,14 @@ export const config = {
 
   // #289: the stage-3 helpfulness eval. The judge is deliberately a different
   // model from the gate (`openai/gpt-oss-20b`) so self-preference bias cannot
-  // flatter the gate; the ticket pins it to `openai/gpt-oss-120b` on Groq.
-  // Overridable so a judge-family swap (OQ2) needs no code change.
+  // flatter the gate. Owner-selected (2026-10-14, judge-probe sweep): the
+  // original ticket pin (`openai/gpt-oss-120b` on Groq) kept the same family
+  // as the gate, and the validation sweep found `Qwen/Qwen3-235B-A22B-Instruct-
+  // 2507` scores 100%/100% on the judge-validation sets (vs the incumbent's
+  // 81.8%/100%), is a different family from the gate AND from the responder
+  // default (`zai-org/GLM-5.3-Flash`), rides the DeepInfra key the embeddings
+  // already use, and is the cheapest of the validated finalists. Overridable
+  // so a judge swap (OQ2/OQ29) needs no code change.
   //
   // The responder is the roster default (`resolveScheduledModels`), but pinned
   // here (T14c) so the arm is not moved silently by a `ROSTER_SEED` edit and a
@@ -147,10 +153,10 @@ export const config = {
   // run under the provider RPM (OQ32).
   memoryEval: {
     get judgeModel(): string {
-      return process.env.MEMORY_JUDGE_MODEL || 'openai/gpt-oss-120b';
+      return process.env.MEMORY_JUDGE_MODEL || 'Qwen/Qwen3-235B-A22B-Instruct-2507';
     },
     get judgeProvider(): LlmProvider {
-      return (process.env.MEMORY_JUDGE_PROVIDER as LlmProvider) || 'groq';
+      return (process.env.MEMORY_JUDGE_PROVIDER as LlmProvider) || 'deepinfra';
     },
     get responderModel(): string | undefined {
       return process.env.MEMORY_RESPONDER_MODEL || undefined;

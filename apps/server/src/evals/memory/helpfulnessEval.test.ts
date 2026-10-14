@@ -98,6 +98,13 @@ describe('buildJudgePrompt (#289)', () => {
       expect(prompt.toLowerCase()).not.toContain(leak);
     }
   });
+
+  it('pins the specificity-beats-fluency criterion (owner decision, judge-probe 2026-10-14)', () => {
+    const prompt = buildJudgePrompt('q', 'a', 'b').toLowerCase();
+    expect(prompt).toContain('specific information');
+    expect(prompt).toContain('even if it is terser');
+    expect(prompt).toContain('is not more helpful');
+  });
 });
 
 describe('helpfulnessMetrics (#289)', () => {

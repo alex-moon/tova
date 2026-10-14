@@ -68,8 +68,12 @@ export const resolveSwappedOutcome = (first: JudgeVerdict, second: JudgeVerdict)
 /*
  * The judge prompt is deliberately blind: it names no memory, no block, and no
  * arm. It only says which answer is more helpful, so the judge cannot key on
- * "this one had context". Reasoning models emit chain-of-thought ahead of the
- * token, hence the "ONLY one token" instruction and the last-match parser.
+ * "this one had context". It pins one judging criterion (owner decision,
+ * 2026-10-14): specificity beats fluency — without it every probed judge
+ * preferred a fluent refusal over a terse fact fragment (the T5 finding), the
+ * exact failure mode stage 3 exists to catch. Reasoning models emit
+ * chain-of-thought ahead of the token, hence the "ONLY one token" instruction
+ * and the last-match parser.
  */
 export const buildJudgePrompt = (query: string, answerA: string, answerB: string): string =>
   [
@@ -77,6 +81,10 @@ export const buildJudgePrompt = (query: string, answerA: string, answerB: string
     'Decide which answer is more helpful to the user — correct, relevant, and',
     'appropriately using any context it was given. You are not told how either',
     'answer was produced.',
+    'When the answers differ in specificity, prefer the one that contains the',
+    'specific information the user asked about, even if it is terser. A fluent',
+    'answer that does not address the question is not more helpful than a',
+    'direct one that does.',
     'Reply with ONLY one token: A, B, or TIE.',
     '',
     `User question:\n${query}`,
@@ -252,7 +260,8 @@ const defaultRespond = async (query: string, block: string): Promise<string> => 
 };
 
 /*
- * The judge is a reasoning model (`gpt-oss-120b`); its chain-of-thought counts
+ * The judge is a reasoning model (`Qwen/Qwen3-235B-A22B-Instruct-2507` since
+ * the 2026-10-14 judge-probe sweep); its chain-of-thought counts
  * against `max_tokens`. A 16-token budget truncates the completion to an empty
  * string *before* the verdict token — measured live: `max=16 => ""`,
  * `max=256 => "A"` (OQ21). 512 gives headroom for the reasoning plus the

@@ -1462,6 +1462,25 @@ depends on an answer to execute (the tasks that consume answers are T10, T12 and
 T13a, which *produce* input rather than being blocked; T5's harness is built
 without owner input; the only owner-gated terminal step is **T13b**).
 
+**Owner decisions recorded 2026-10-14 (owner chat; comment on the issue):**
+
+- **OQ1, OQ2, OQ12, OQ17, OQ19 and OQ36 are resolved** — see the inline
+  `[RESOLVED]` annotations below. In short: the agent-authored synthetic corpus
+  is accepted (toy app, one meaningful user); the stage-3 bar is the
+  deterministic backbone with the judge reported advisory; the judge itself is
+  re-pinned by a live probe sweep to `Qwen/Qwen3-235B-A22B-Instruct-2507` on
+  DeepInfra (100%/100% validation, non-overlapping family vs the gate and the
+  responder, cheapest finalist) after the judging criterion
+  (specificity-beats-fluency) was added to `buildJudgePrompt`; and bare deixis
+  is settled by a product rule — *the gate may only fire when
+  the referent is resolvable from visible history; otherwise stay quiet* —
+  which relabels the five no-history bare-deictic positives as negatives,
+  unblocks bare-deictic negatives, and hardens the negative set (OQ19). The
+  relabel is a small corpus change (five `corpus.ts` entries + the
+  `corpus.test.ts` invariants) to fold into the next implement pass, before T9
+  captures the baseline. The retrieval-layer mechanism behind the refusal
+  behaviour (rerank-and-cut) is ticket #305, out of this plan's scope.
+
 **Resolved by the ticket / issue comments (NOT open):**
 
 - The stage-3 **bar type** (pairwise judge win-rate), the **backbone**
@@ -1496,12 +1515,29 @@ unknowns):**
 **Open (methodological or policy):**
 
 - **OQ1 — Label independence (gates T10 ratification and T5's trusting step).**
+  **[RESOLVED — owner decision 2026-10-14:]** toy app, single meaningful user;
+  the agent-authored synthetic corpus is accepted as-is. Agent-authored
+  labelling counts as the labelling source of record (per-case notes keep it
+  auditable); the owner may refine labels later.
   Who authors and validates the hand labels (gate set, judge-validation pairs,
   scenario expectations), and does agent-authored labelling count as
   "hand-labelled"? If the same agent authors the corpus and tunes the gate, the
   labels are not independent evidence. T1/T2/T5 record the labelling source so
   this is auditable.
-- **OQ2 — Judge independence (gates trusting the judge).** The judge is
+- **OQ2 — Judge independence (gates trusting the judge).**
+  **[RESOLVED — owner decision 2026-10-14, settled by a live probe sweep:]**
+  after the specificity-beats-fluency criterion was added to
+  `buildJudgePrompt`, six judges were validated (`--validate-judge`):
+  Qwen3-235B-A22B-Instruct-2507 **100%/100%**, GLM-5.3-Flash 95.5%/80%,
+  DeepSeek-V4.1-Flash 86.4%/100%, MiMo-V2.6-Flash 86.4%/100%,
+  gpt-oss-120b 81.8%/100% (up from 63.6% — the prompt fix lifted every judge),
+  MiniMax-M3 54.5%/93.3% (still misaligned on memory-shaped pairs). The pin is
+  `Qwen/Qwen3-235B-A22B-Instruct-2507` on `deepinfra`: perfect agreement,
+  different family from both the `gpt-oss-20b` gate and the
+  `zai-org/GLM-5.3-Flash` responder (no self-preference either way), the
+  cheapest finalist ($0.09/$0.55 per Mtok), and the same provider key the
+  embeddings already use. Judge RPM leaves Groq's 30 RPM budget (OQ32).
+  The judge is
   `gpt-oss-120b`; the gate is `gpt-oss-20b` — same family. Is "not the gate
   model" sufficient, or does avoiding self-preference require a different family
   entirely? The judge id is config-sourced, so the answer is a config change.
@@ -1527,7 +1563,11 @@ unknowns):**
   denominator or counted (as a false negative for a positive case). The runner
   records the outcome either way, so the policy is an aggregation choice.
 - **OQ12 — Are the bare-deixis labels fair? (corrected pass 6: the whole
-  subtype, not just the misses.)** The corpus has **five** bare-deictic
+  subtype, not just the misses.)**
+  **[RESOLVED — owner decision 2026-10-14:]** the whole no-history
+  bare-deictic subtype is relabelled per the product rule ("the gate stays
+  quiet unless the referent is resolvable from visible history"); see OQ36.
+  The corpus has **five** bare-deictic
   positives with **no history** — `gate-same-as-before`, `gate-other-one`,
   `gate-and-that-one`, `gate-previous-version`, `gate-one-from-yesterday` — not
   the two the gate missed. With no history the referent is unresolvable in the
@@ -1567,7 +1607,11 @@ unknowns):**
   invalidate a ratified threshold (forcing re-ratification)? D15 records the
   model and corpus hash so the change is visible; the policy is open. Stage-3's
   models have the same problem and their recording is **OQ29**.
-- **OQ17 — Does the judge add signal?** On a synthetic personal-fact corpus the
+- **OQ17 — Does the judge add signal?**
+  **[RESOLVED — owner decision 2026-10-14:]** the deterministic backbone
+  (fact containment + counterfactual) is the stage-3 bar; the judge is reported
+  advisory-only. The T5 evidence below stands as the documented caveat.
+  On a synthetic personal-fact corpus the
   without-arm almost always fails, so a pairwise win is near-guaranteed and the
   judge may merely re-express the substring check. Does the corpus need
   "plausible-without" scenarios (fact inferable from general knowledge, or a
@@ -1589,7 +1633,11 @@ unknowns):**
   open: assert the fact against the surfaced slice's full text (isolates the
   fixture from block layout) or against the rendered block (production fidelity)?
 - **OQ19 — Is the negative set adversarial enough for precision to be
-  evidence? (premise corrected pass 6.)** The gate scores precision 100% on 18
+  evidence? (premise corrected pass 6.)**
+  **[RESOLVED — owner decision 2026-10-14:]** resolved via the OQ12/OQ36
+  relabel — the five no-history bare-deictic positives become negatives, so the
+  quiet-set is hard enough for precision to be evidence. Owner accepted.
+  The gate scores precision 100% on 18
   negatives. Eleven are easy fresh asks (capital of Australia, a poem, the time,
   arithmetic); **six are already memory-shaped fresh asks**
   (`gate-fresh-job-advice`, `gate-fresh-dinner`, `gate-fresh-trip`,
@@ -1715,7 +1763,14 @@ unknowns):**
   per-suite users as one follow-up. T6/T8 implement the global default, so no task
   depends on this.
 - **OQ36 — What distinguishes a bare-deictic refer-back from a bare-deictic
-  fresh ask? (new, pass 6; supersedes OQ12's two-case framing.)** Five positives
+  fresh ask? (new, pass 6; supersedes OQ12's two-case framing.)**
+  **[RESOLVED — owner decision 2026-10-14:]** the distinction is
+  *resolvability from visible history*: bare deixis with a resolvable referent
+  may fire; bare deixis with none stays quiet (a refusal is the best answer).
+  The five no-history positives are relabelled as negatives, so the corpus no
+  longer carries the same-shape positive/negative collision and bare-deictic
+  negatives are unblocked (per-subtype bare-deixis recall bar drops out).
+  Five positives
   are bare-deictic with no history (`gate-same-as-before`, `gate-other-one`,
   `gate-and-that-one`, `gate-previous-version`, `gate-one-from-yesterday`). The
   old T1b would have added "and that one?" as a **negative** — the same input
