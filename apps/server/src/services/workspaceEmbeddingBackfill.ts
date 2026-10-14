@@ -54,8 +54,15 @@ export const planEmbeddingWrites = (
   let truncated = 0;
 
   for (const slice of slices) {
-    const { text, truncated: wasTruncated } = truncateForEmbedding(slice.text);
-    if (!text.trim()) {
+    // `collectWorkspaceSlices` returns chat/task text untrimmed (it only
+    // checks `.trim()` to skip blanks); the shared ingest helper
+    // (`workspaceSliceText`) trims. Normalise here so both paths hash and embed
+    // byte-identical text — otherwise the skip rule re-embeds every slice the
+    // ingest path already wrote (and vice versa). Trimming the *collected*
+    // text reproduces the helper exactly for all three kinds, which only ever
+    // trim the final string.
+    const { text, truncated: wasTruncated } = truncateForEmbedding(slice.text.trim());
+    if (!text) {
       empty += 1;
       continue;
     }

@@ -1,11 +1,12 @@
 import { createHash } from 'crypto';
 
 /*
- * #294: the one place a workspace slice's embed text is derived. Both the
- * ingest hooks and the backfill go through `workspaceSliceText`, so the text
- * that gets embedded can never diverge between the two paths — which would
- * otherwise make the `textHash` skip logic wrong and silently re-embed (or
- * never re-embed) a slice.
+ * #294: the one place a workspace slice's embed text is derived. The ingest
+ * hooks call `workspaceSliceText` directly; the backfill feeds
+ * `collectWorkspaceSlices` text through `planEmbeddingWrites`, which trims to
+ * reproduce this helper exactly. So the text that gets embedded cannot diverge
+ * between the two paths — which would otherwise make the `textHash` skip logic
+ * wrong and silently re-embed (or never re-embed) a slice.
  *
  * The derivations mirror `collectWorkspaceSlices`:
  *   chat -> the message content

@@ -114,6 +114,35 @@ describe('embedTexts (#294)', () => {
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
+  it('keeps provider order when rows carry no numeric index', async () => {
+    // The `index` field is optional on the wire; when it is absent the client
+    // must not reorder, since there is nothing to sort by.
+    const fetchImpl = jest.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        data: [{ embedding: vector(4, 10) }, { embedding: vector(4, 20) }],
+      }),
+    }));
+    const result = await embedTexts(['a', 'b'], {
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+    expect(result).toEqual([vector(4, 10), vector(4, 20)]);
+  });
+
+  it('throws a response error when the body is not valid JSON', async () => {
+    const fetchImpl = jest.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => {
+        throw new Error('unexpected end of JSON');
+      },
+    }));
+    await expect(
+      embedTexts(['hello'], { fetchImpl: fetchImpl as unknown as typeof fetch }),
+    ).rejects.toBeInstanceOf(EmbeddingResponseError);
+  });
+
   it('throws a response error on a non-200', async () => {
     const fetchImpl = jest.fn(async () => ({ ok: false, status: 429, json: async () => ({}) }));
     await expect(

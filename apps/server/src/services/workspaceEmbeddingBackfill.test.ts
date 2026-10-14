@@ -3,7 +3,11 @@ import {
   planEmbeddingWrites,
   type EmbeddableSlice,
 } from './workspaceEmbeddingBackfill';
-import { EMBEDDING_MAX_CHARS, embeddingTextHash } from './workspaceEmbeddingText';
+import {
+  EMBEDDING_MAX_CHARS,
+  embeddingTextHash,
+  workspaceSliceText,
+} from './workspaceEmbeddingText';
 
 /*
  * #294: the backfill's idempotency rule. The plan is pure, so the skip/embed
@@ -80,6 +84,36 @@ describe('planEmbeddingWrites (#294)', () => {
     expect(plan.truncated).toBe(1);
     expect(plan.toEmbed[0].truncated).toBe(true);
     expect(plan.toEmbed[0].text).toHaveLength(EMBEDDING_MAX_CHARS);
+  });
+
+  it('normalises whitespace so the backfill hashes exactly what ingest writes (#294)', () => {
+    // collectWorkspaceSlices returns chat/task text untrimmed; workspaceSliceText
+    // (the ingest helper) trims. If the backfill did not normalise, the two
+    // paths would hash different text and never agree on "already embedded".
+    const cases: { slice: EmbeddableSlice; source: Parameters<typeof workspaceSliceText>[0] }[] = [
+      {
+        slice: slice({ kind: 'chat', id: 'c1', text: '  hello world  ' }),
+        source: { kind: 'chat', content: '  hello world  ' },
+      },
+      {
+        // collectWorkspaceSlices joins non-blank events verbatim, so a trailing
+        // whitespace content survives into the collected text.
+        slice: slice({ kind: 'task', id: 't1', text: 'do it\nworking  ' }),
+        source: {
+          kind: 'task',
+          events: [
+            { role: 'user', content: 'do it' },
+            { role: 'assistant', content: 'working  ' },
+          ],
+        },
+      },
+    ];
+    for (const { slice: input, source } of cases) {
+      const plan = planEmbeddingWrites([input], new Map(), MODEL);
+      const ingestText = workspaceSliceText(source);
+      expect(plan.toEmbed[0].text).toBe(ingestText);
+      expect(plan.toEmbed[0].textHash).toBe(embeddingTextHash(ingestText, MODEL));
+    }
   });
 
   it('is a no-op on a second run over the planned output', () => {
