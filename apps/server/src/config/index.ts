@@ -205,7 +205,9 @@ export const config = {
   // dimension is fixed at creation time: switching model is a config change
   // plus a re-index and re-backfill (the owner's "probe bge-m3/gte" path).
   // `timeoutMs` bounds the query embed + `$vectorSearch` on the chat hot path
-  // before retrieval degrades to the BM25 result. All parse+fallback like
+  // before retrieval degrades to the BM25 result; `backfillTimeoutMs` bounds
+  // one backfill batch (64 passages cold-embeds in seconds — the hot-path
+  // budget times out there). All parse+fallback like
   // `aux.enrichmentTimeoutMs` so a malformed env degrades to the default.
   embeddings: {
     get model(): string {
@@ -215,6 +217,11 @@ export const config = {
       const raw = process.env.EMBEDDING_DIM;
       const parsed = raw === undefined || raw === '' ? NaN : Number(raw);
       return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : 768;
+    },
+    get backfillTimeoutMs(): number {
+      const raw = process.env.EMBEDDING_BACKFILL_TIMEOUT_MS;
+      const parsed = raw === undefined || raw === '' ? NaN : Number(raw);
+      return Number.isFinite(parsed) && parsed > 0 ? parsed : 30000;
     },
     get timeoutMs(): number {
       const raw = process.env.EMBEDDING_TIMEOUT_MS;

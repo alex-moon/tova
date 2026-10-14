@@ -26,6 +26,11 @@ export interface EmbedOptions {
   kind?: EmbedKind;
   // Injectable for tests; defaults to global `fetch`.
   fetchImpl?: typeof fetch;
+  // Overrides `config.embeddings.timeoutMs` for this call. The config default
+  // bounds the one-text query embed on the chat hot path; a backfill batch of
+  // 64 passages needs far longer (observed: the 800ms default times out on
+  // real batches).
+  timeoutMs?: number;
 }
 
 // Thrown when the provider key is absent: a configuration fault the caller
@@ -64,7 +69,19 @@ const orderRows = (rows: EmbeddingRow[]): EmbeddingRow[] => {
  * validated against `config.embeddings.dim` (a mismatch means the configured
  * model and dimension have diverged, which would corrupt the Atlas index).
  * An empty batch short-circuits without a network call.
+ *
+ * Context-length recovery: BGE v1.5 models hard-reject any input over the
+ * model's 512-token context with a 400, and the client-side
+ * `EMBEDDING_MAX_CHARS` cap cannot see token density (code/YAML/OCR text
+ * tokenises far denser than the ~3.5 chars/token the cap assumes). On that
+ * error the batch falls back to per-text calls, each halving its text until it
+ * fits (deterministic per text, so the backfill's hash-skip rule stays
+ * correct); below `EMBED_MIN_CHARS` it fails loudly instead.
  */
+export const EMBED_MIN_CHARS = 32;
+
+export class ContextLengthError extends EmbeddingResponseError {}
+
 export const embedTexts = async (texts: string[], opts: EmbedOptions = {}): Promise<number[][]> => {
   if (texts.length === 0) return [];
 
@@ -76,43 +93,77 @@ export const embedTexts = async (texts: string[], opts: EmbedOptions = {}): Prom
   }
 
   const kind: EmbedKind = opts.kind ?? 'passage';
-  const input = texts.map((text) => (kind === 'query' ? `${EMBEDDING_QUERY_PREFIX}${text}` : text));
+  const withPrefix = texts.map((text) =>
+    kind === 'query' ? `${EMBEDDING_QUERY_PREFIX}${text}` : text,
+  );
   const doFetch = opts.fetchImpl ?? fetch;
+  const timeoutMs = opts.timeoutMs ?? config.embeddings.timeoutMs;
 
-  const response = await doFetch(EMBEDDINGS_URL, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ model: config.embeddings.model, input }),
-    signal: AbortSignal.timeout(config.embeddings.timeoutMs),
-  });
+  const request = async (inputs: string[]): Promise<number[][]> => {
+    const response = await doFetch(EMBEDDINGS_URL, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ model: config.embeddings.model, input: inputs }),
+      signal: AbortSignal.timeout(timeoutMs),
+    });
 
-  if (!response.ok) {
-    throw new EmbeddingResponseError(`DeepInfra embeddings returned HTTP ${response.status}`);
-  }
-
-  const body = (await response.json().catch(() => null)) as EmbeddingsBody | null;
-  const rows = Array.isArray(body?.data) ? (body.data as EmbeddingRow[]) : [];
-  const ordered = orderRows(rows);
-  if (ordered.length !== texts.length) {
-    throw new EmbeddingResponseError(
-      `DeepInfra embeddings returned ${ordered.length} vectors for ${texts.length} inputs`,
-    );
-  }
-
-  const dim = config.embeddings.dim;
-  return ordered.map((row, i) => {
-    const vector = row.embedding;
-    if (!Array.isArray(vector) || !vector.every((value) => typeof value === 'number')) {
-      throw new EmbeddingResponseError(`DeepInfra embeddings row ${i} is not a numeric vector`);
+    if (!response.ok) {
+      const body = typeof response.text === 'function' ? await response.text().catch(() => '') : '';
+      if (response.status === 400 && /context length|maximum input length/i.test(body)) {
+        throw new ContextLengthError(
+          `DeepInfra embeddings rejected the input length: ${body.slice(0, 200)}`,
+        );
+      }
+      throw new EmbeddingResponseError(`DeepInfra embeddings returned HTTP ${response.status}`);
     }
-    if (vector.length !== dim) {
+
+    const bodyJson = (await response.json().catch(() => null)) as EmbeddingsBody | null;
+    const rows = Array.isArray(bodyJson?.data) ? (bodyJson.data as EmbeddingRow[]) : [];
+    const ordered = orderRows(rows);
+    if (ordered.length !== inputs.length) {
       throw new EmbeddingResponseError(
-        `DeepInfra embeddings row ${i} has dimension ${vector.length}, expected ${dim}`,
+        `DeepInfra embeddings returned ${ordered.length} vectors for ${inputs.length} inputs`,
       );
     }
-    return vector as number[];
-  });
+
+    const dim = config.embeddings.dim;
+    return ordered.map((row, i) => {
+      const vector = row.embedding;
+      if (!Array.isArray(vector) || !vector.every((value) => typeof value === 'number')) {
+        throw new EmbeddingResponseError(`DeepInfra embeddings row ${i} is not a numeric vector`);
+      }
+      if (vector.length !== dim) {
+        throw new EmbeddingResponseError(
+          `DeepInfra embeddings row ${i} has dimension ${vector.length}, expected ${dim}`,
+        );
+      }
+      return vector as number[];
+    });
+  };
+
+  const run = async (inputs: string[]): Promise<number[][]> => {
+    try {
+      return await request(inputs);
+    } catch (err) {
+      if (!(err instanceof ContextLengthError)) throw err;
+      if (inputs.length > 1) {
+        const perText = await Promise.all(inputs.map((text) => run([text])));
+        return perText.flat();
+      }
+      const text = inputs[0];
+      const half = text.slice(0, Math.ceil(text.length / 2));
+      if (half.length < EMBED_MIN_CHARS) {
+        throw new EmbeddingResponseError(
+          `DeepInfra embeddings input exceeds the model context even after truncation ` +
+            `(${text.length} chars left)`,
+        );
+      }
+      return run([half]);
+    }
+  };
+
+  return run(withPrefix);
 };
