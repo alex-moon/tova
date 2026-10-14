@@ -142,6 +142,12 @@ export interface HelpfulnessCaseResult {
   outcome: PairOutcome | null;
   /** Raw verdicts `[with-arm-as-A, with-arm-as-B]`, when judged. */
   verdicts?: [JudgeVerdict, JudgeVerdict];
+  /**
+   * Responder finish reasons per arm (T14f). `length` on either arm means the
+   * answer was budget-truncated — a backbone miss from that case is a
+   * generation-budget artefact, not a helpfulness one (OQ34).
+   */
+  finishReasons?: { with?: string; without?: string };
 }
 
 export interface HelpfulnessMetrics {
@@ -163,6 +169,8 @@ export interface HelpfulnessMetrics {
   counterfactualHits: number;
   /** Cases where the with-arm block carried the fact AND the answer did, and the without-arm did not. */
   deterministicWins: number;
+  /** Cases where either arm stopped on `length` — a truncation artefact (T14f/OQ34). */
+  truncated: number;
 }
 
 export const helpfulnessMetrics = (results: HelpfulnessCaseResult[]): HelpfulnessMetrics => {
@@ -175,11 +183,18 @@ export const helpfulnessMetrics = (results: HelpfulnessCaseResult[]): Helpfulnes
   let factHits = 0;
   let counterfactualHits = 0;
   let deterministicWins = 0;
+  let truncated = 0;
   for (const r of results) {
     if (r.blockCarriesId) blockIds += 1;
     if (r.factHitWith) factHits += 1;
     if (r.counterfactualHit) counterfactualHits += 1;
     if (r.factInBlock && r.factHitWith && !r.counterfactualHit) deterministicWins += 1;
+    // T14f/OQ34: a `length` stop on either arm means the answer was
+    // budget-truncated — reported as its own count so a backbone miss from a
+    // truncated arm can be read as a generation-budget artefact.
+    if (r.finishReasons?.with === 'length' || r.finishReasons?.without === 'length') {
+      truncated += 1;
+    }
     // Errors are reported as their own count and excluded from the win-rate
     // denominator (the shipped OQ20 default): a failed judge call is not a tie.
     if (r.outcome === 'error') {
@@ -205,6 +220,7 @@ export const helpfulnessMetrics = (results: HelpfulnessCaseResult[]): Helpfulnes
     factHitRate: total ? factHits / total : 0,
     counterfactualHits,
     deterministicWins,
+    truncated,
   };
 };
 
@@ -216,7 +232,7 @@ export interface HelpfulnessDeps {
   clear?: () => Promise<void>;
   retrieve?: (query: string, userId: string) => Promise<WorkspaceSlice[]>;
   /** Answer `query` with `block` injected; `''` is the counterfactual arm. */
-  respond?: (query: string, block: string) => Promise<string>;
+  respond?: (query: string, block: string) => Promise<RespondResult>;
   /** Return the better answer (`'A'`/`'B'`) or `'tie'` for one blinded presentation. */
   judge?: (query: string, answerA: string, answerB: string) => Promise<JudgeVerdict>;
   /** Inter-call delay before each live responder/judge call (T15d). */
@@ -241,9 +257,18 @@ const containsFact = (answer: string, fact: string): boolean =>
  * chat path assembles, block envelope included, so the with-arm is faithful to
  * production. The model is the scheduled eval default (cheapest roster entry)
  * unless `config.memoryEval.responder*` overrides it (T14c) — so a model sweep
- * (OQ24/OQ29) is a config change, not a source edit.
+ * (OQ24/OQ29) is a config change, not a source edit. The budget is 1024, the
+ * production output-token floor, so a fact late in a long answer cannot be
+ * truncated out of the arm (OQ34); the finish reason rides back so a `length`
+ * stop is recorded per case rather than silently scoring a backbone miss
+ * (T14f).
  */
-const defaultRespond = async (query: string, block: string): Promise<string> => {
+export interface RespondResult {
+  content: string;
+  finishReason?: string;
+}
+
+const defaultRespond = async (query: string, block: string): Promise<RespondResult> => {
   const [{ provider: scheduledProvider, model: scheduledModel }] = resolveScheduledModels({});
   const completion = await inferenceService.createToolFreeCompletion({
     provider: config.memoryEval.responderProvider ?? scheduledProvider,
@@ -253,10 +278,13 @@ const defaultRespond = async (query: string, block: string): Promise<string> => 
       { role: 'user', content: query },
     ],
     temperature: config.memoryEval.responderTemperature,
-    max_tokens: 512,
+    max_tokens: 1024,
     trace: { tags: ['memory-eval:helpfulness:respond'] },
   });
-  return completion.choices[0]?.message?.content ?? '';
+  return {
+    content: completion.choices[0]?.message?.content ?? '',
+    finishReason: completion.choices[0]?.finishReason,
+  };
 };
 
 /*
@@ -333,13 +361,17 @@ export const runHelpfulnessEval = async (
       const factInBlock = containsFact(block, scenario.expectedFact);
 
       await pace();
-      const withAnswer = await respond(scenario.query, block);
+      const withResponse = await respond(scenario.query, block);
+      const withAnswer = withResponse.content;
       // No block → the two arms are byte-identical, so reuse the answer instead
       // of paying for a duplicate call (and the counterfactual is trivially true).
       let withoutAnswer = withAnswer;
+      let withoutFinishReason = withResponse.finishReason;
       if (block.trim()) {
         await pace();
-        withoutAnswer = await respond(scenario.query, '');
+        const withoutResponse = await respond(scenario.query, '');
+        withoutAnswer = withoutResponse.content;
+        withoutFinishReason = withoutResponse.finishReason;
       }
       const factHitWith = containsFact(withAnswer, scenario.expectedFact);
       const counterfactualHit = containsFact(withoutAnswer, scenario.expectedFact);
@@ -370,6 +402,7 @@ export const runHelpfulnessEval = async (
         counterfactualHit,
         outcome,
         verdicts,
+        finishReasons: { with: withResponse.finishReason, without: withoutFinishReason },
       });
     }
   } finally {

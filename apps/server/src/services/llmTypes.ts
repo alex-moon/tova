@@ -102,6 +102,12 @@ export interface NeutralCompletion {
     message?: {
       content?: string | null;
     };
+    /**
+     * Why the provider stopped ('stop' | 'length' | ...). Absent when the
+     * provider reported nothing. Consumers: the stage-3 eval flags
+     * `length` so a truncation cannot score as a backbone miss (T14f/OQ34).
+     */
+    finishReason?: string;
   }>;
   /**
    * Web search tool (issue #16): every completed tool call on this response,

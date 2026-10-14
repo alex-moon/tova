@@ -21,7 +21,9 @@ describe('helpfulness eval integration (#289)', () => {
     const { results, metrics } = await runHelpfulnessEval({
       scenarios: [scenario],
       respond: async (_query, block) =>
-        block ? `Your partner is a ${scenario.expectedFact}.` : 'I have nothing on that.',
+        block
+          ? { content: `Your partner is a ${scenario.expectedFact}.` }
+          : { content: 'I have nothing on that.' },
       judge: async (_query, a, b) => {
         judgeOrders.push([a, b]);
         // A judge that always picks the first answer: with-arm-as-A wins, and

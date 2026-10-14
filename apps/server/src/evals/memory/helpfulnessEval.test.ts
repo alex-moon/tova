@@ -199,7 +199,7 @@ describe('runHelpfulnessEval (#289)', () => {
       clear: async () => {},
       seed: async () => ({ 'seed-a': 'real-1' }),
       retrieve: async () => [slice('the fact')],
-      respond: async (_query, block) => responses[block ? 'block' : 'blank'],
+      respond: async (_query, block) => ({ content: responses[block ? 'block' : 'blank'] }),
       pace: noPace,
       judge: async (_query, a, b) => {
         judgeCalls.push([a, b]);
@@ -227,7 +227,7 @@ describe('runHelpfulnessEval (#289)', () => {
       clear: async () => {},
       seed: async () => ({ 'seed-a': 'real-1' }),
       retrieve: async () => [slice('the fact')],
-      respond: async () => 'the fact is here',
+      respond: async () => ({ content: 'the fact is here' }),
       pace: noPace,
       judge: async () => 'tie',
     });
@@ -235,6 +235,27 @@ describe('runHelpfulnessEval (#289)', () => {
     expect(results[0].factHitWith).toBe(true);
     expect(metrics.counterfactualHits).toBe(1);
     expect(metrics.deterministicWins).toBe(0);
+    expect(metrics.truncated).toBe(0);
+  });
+
+  it('flags a length-stopped arm as truncated (T14f/OQ34)', async () => {
+    // A truncated arm must be visible as its own count, not silently read as a
+    // backbone miss: a fact cut off by the budget is a generation-budget
+    // artefact, not a helpfulness one.
+    const { results, metrics } = await runHelpfulnessEval({
+      scenarios: [scenario('s1', 'fact')],
+      clear: async () => {},
+      seed: async () => ({ 'seed-a': 'real-1' }),
+      retrieve: async () => [slice('the fact')],
+      respond: async (_query, block) =>
+        block
+          ? { content: 'the fact is', finishReason: 'length' }
+          : { content: 'the fact is here', finishReason: 'stop' },
+      pace: noPace,
+      judge: async () => 'tie',
+    });
+    expect(results[0].finishReasons).toEqual({ with: 'length', without: 'stop' });
+    expect(metrics.truncated).toBe(1);
   });
 
   it('skips the A/B when retrieval surfaced nothing (no block to inject)', async () => {
@@ -244,7 +265,7 @@ describe('runHelpfulnessEval (#289)', () => {
       clear: async () => {},
       seed: async () => ({ 'seed-a': 'real-1' }),
       retrieve: async () => [],
-      respond: async (_query, block) => (block ? 'with' : 'without'),
+      respond: async (_query, block) => ({ content: block ? 'with' : 'without' }),
       pace: noPace,
       judge: async () => {
         judged += 1;
@@ -269,7 +290,7 @@ describe('runHelpfulnessEval (#289)', () => {
       retrieve: async () => [],
       respond: async () => {
         respondCalls += 1;
-        return 'nothing on that';
+        return { content: 'nothing on that' };
       },
       pace: noPace,
       judge: async () => 'A',
@@ -284,7 +305,7 @@ describe('runHelpfulnessEval (#289)', () => {
       clear: async () => {},
       seed: async () => ({ 'seed-a': 'real-1' }),
       retrieve: async () => [slice('the fact')],
-      respond: async (_query, block) => (block ? 'the fact is here' : 'I do not know'),
+      respond: async (_query, block) => ({ content: block ? 'the fact is here' : 'I do not know' }),
       pace: noPace,
       judge: async () => {
         throw new Error('429 rate limited');
@@ -311,7 +332,7 @@ describe('runHelpfulnessEval (#289)', () => {
           calls += 1;
           // s1 makes two responder calls (with + blank); s2's first call throws.
           if (calls === 3) throw new Error('provider down');
-          return 'the fact is here';
+          return { content: 'the fact is here' };
         },
         pace: noPace,
         judge: async () => 'A',
@@ -336,7 +357,7 @@ describe('runHelpfulnessEval (#289)', () => {
           throw new Error('mongo down');
         },
         retrieve: async () => [slice('the fact')],
-        respond: async () => 'the fact is here',
+        respond: async () => ({ content: 'the fact is here' }),
         pace: noPace,
         judge: async () => 'A',
       }),

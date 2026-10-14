@@ -152,14 +152,15 @@ const main = async (): Promise<void> => {
         console.log(
           `  ${r.outcome ?? 'skip'} [${r.category}] ${r.scenarioId} ` +
             `blockId=${r.blockCarriesId} factHit=${r.factHitWith} ` +
-            `counterfactual=${r.counterfactualHit} verdicts=${r.verdicts?.join('/') ?? '-'}`,
+            `counterfactual=${r.counterfactualHit} verdicts=${r.verdicts?.join('/') ?? '-'} ` +
+            `finish=${r.finishReasons?.with ?? '-'}${r.finishReasons ? '/' : ''}${r.finishReasons?.without ?? ''}`,
         );
       }
       console.log(
         `  winRate=${pct(metrics.winRate)} (wins=${metrics.wins} losses=${metrics.losses} ` +
           `ties=${metrics.ties} errors=${metrics.errors} n=${metrics.judged}) ` +
           `factHitRate=${pct(metrics.factHitRate)} blockIdRate=${pct(metrics.blockIdRate)} ` +
-          `counterfactual=${metrics.counterfactualHits}`,
+          `counterfactual=${metrics.counterfactualHits} truncated=${metrics.truncated}`,
       );
     }
 

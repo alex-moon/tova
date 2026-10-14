@@ -1074,7 +1074,11 @@ const buildConnector = (provider: LlmProvider): LlmConnector => {
         mastraMessagesFor(provider, rest),
         { ...callOptionsFrom(options, 'plain', mergedInstructions('', system)), maxSteps: 1 },
       );
-      return { choices: [{ message: { content: result.text ?? null } }] };
+      // T14f: thread the finish reason through so a `length` stop (truncation)
+      // is observable by callers instead of silently scoring as a short answer.
+      return {
+        choices: [{ message: { content: result.text ?? null }, finishReason: result.finishReason }],
+      };
     },
   };
 };
