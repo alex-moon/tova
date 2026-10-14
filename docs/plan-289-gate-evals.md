@@ -105,17 +105,28 @@ position-swapped pairwise judge over the holistic delta.
 
 - **Deterministic backbone:** the with-arm block must carry the expected slice id
   (read via `retrieveWorkspaceSlices`, since the rendered block carries no ids) and
-  the expected fact; `factInBlock`/`factHitWith` record it.
+  the expected fact; `factInBlock`/`factHitWith` record it. The fact check is
+  `normaliseFact` (casefold + whitespace-collapse), so a fact split by a newline
+  or double space is not a layout false miss (T14a).
 - **Counterfactual is run, not assumed:** `counterfactualHit` flags a without-arm
   that already answers correctly — injection did not help and a judge-only setup
   would never see it.
 - **Blinded + position-swapped:** the judge is told nothing about which arm had the
   block and every pair is judged twice with the arms swapped. `resolveSwappedOutcome`
   counts only an order-consistent win as a win; a flip (or a judge `tie`) is a tie.
-  Ties score 0.5 in `winRate` (OQ3's provisional rule).
+  Ties score 0.5 in `winRate` (OQ3's provisional rule). A failed presentation
+  (empty/unparseable reply or a thrown call) is an **`error`**, distinct from a
+  `tie` and excluded from the win-rate denominator (T14b/OQ20).
 - **Judge model:** `openai/gpt-oss-120b` on Groq, from `config.memoryEval`
   (`MEMORY_JUDGE_MODEL`/`MEMORY_JUDGE_PROVIDER`), deliberately not the gate model
-  `openai/gpt-oss-20b`. Same-family independence is OQ2 (owner-gated).
+  `openai/gpt-oss-20b`. Same-family independence is OQ2 (owner-gated). The judge
+  budget is 512 tokens: at the original 16 the reasoning model returned an empty
+  completion (CoT truncated before the verdict), which the preflight caught live
+  (OQ21). `npm run evals:memory -- --preflight-judge` asserts a parseable verdict
+  in both orders before a run is trusted (T14d).
+- **Responder + pacing:** the responder is the roster default, overridable via
+  `config.memoryEval.responder*` (T14c); live responder/judge calls are paced by
+  `MEMORY_EVAL_PACE_MS` (default 1000ms, T15d) to stay under the provider RPM.
 - **Manual-only:** runs via `npm run evals:memory -- --helpfulness`; the default
   deterministic path is unchanged, and the scheduled suite does not yet include it
   (OQ6). The judge is **wired but not trusted**: it must be validated against

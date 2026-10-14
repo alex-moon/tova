@@ -38,19 +38,26 @@ import type { MemoryScenario, ScenarioCategory } from './types';
 
 /* --------------------------------- judging --------------------------------- */
 
-/** The judge's reply for one presentation of a pair. */
-export type JudgeVerdict = 'A' | 'B' | 'tie';
+/**
+ * The judge's reply for one presentation of a pair. `error` is distinct from
+ * `tie`: a tie is a considered "no preference", an error is an empty or
+ * unparseable reply (or a thrown provider call), which must not be scored as
+ * half a win (T14b, OQ20).
+ */
+export type JudgeVerdict = 'A' | 'B' | 'tie' | 'error';
 
 /** The with-arm's outcome across the two (position-swapped) presentations. */
-export type PairOutcome = 'win' | 'loss' | 'tie';
+export type PairOutcome = 'win' | 'loss' | 'tie' | 'error';
 
 /**
  * Fold the two position-swapped verdicts into one outcome for the with-arm.
  * `first` is the verdict when the with-arm was presented as A; `second` when it
  * was presented as B. Only an order-consistent win counts as a win; a flip
- * (the judge preferring whichever answer it saw first) is a tie.
+ * (the judge preferring whichever answer it saw first) is a tie. If either
+ * presentation errored the pair is `error` — it cannot be scored (T14b).
  */
 export const resolveSwappedOutcome = (first: JudgeVerdict, second: JudgeVerdict): PairOutcome => {
+  if (first === 'error' || second === 'error') return 'error';
   const withWon = first === 'A' && second === 'B';
   const withoutWon = first === 'B' && second === 'A';
   if (withWon) return 'win';
@@ -79,10 +86,14 @@ export const buildJudgePrompt = (query: string, answerA: string, answerB: string
     `Answer B:\n${answerB}`,
   ].join('\n');
 
-/** Last standalone A/B/TIE token wins; anything unparseable degrades to `tie`. */
+/**
+ * Last standalone A/B/TIE token wins. An empty or unparseable reply is an
+ * `error`, not a `tie`: a dead or truncated judge must not read as a
+ * considered "no preference" that scores 0.5 (T14b, OQ20/OQ21).
+ */
 export const parseJudgeVerdict = (raw: string): JudgeVerdict => {
   const matches = raw.match(/\b(A|B|TIE)\b/gi);
-  if (!matches?.length) return 'tie';
+  if (!matches?.length) return 'error';
   const last = matches[matches.length - 1].toUpperCase();
   if (last === 'A') return 'A';
   if (last === 'B') return 'B';
@@ -111,11 +122,13 @@ export interface HelpfulnessCaseResult {
 
 export interface HelpfulnessMetrics {
   total: number;
-  /** Cases with a non-empty block, i.e. pairs the judge scored. */
+  /** Cases with a decisive-or-tie outcome, i.e. pairs the judge scored. */
   judged: number;
   wins: number;
   losses: number;
   ties: number;
+  /** Pairs where a presentation failed (empty/unparseable reply or a throw). */
+  errors: number;
   /** (wins + 0.5 × ties) / judged; null when nothing was judged. */
   winRate: number | null;
   /** Fraction of all cases where retrieval surfaced the expected slice id. */
@@ -133,6 +146,7 @@ export const helpfulnessMetrics = (results: HelpfulnessCaseResult[]): Helpfulnes
   let wins = 0;
   let losses = 0;
   let ties = 0;
+  let errors = 0;
   let blockIds = 0;
   let factHits = 0;
   let counterfactualHits = 0;
@@ -142,6 +156,12 @@ export const helpfulnessMetrics = (results: HelpfulnessCaseResult[]): Helpfulnes
     if (r.factHitWith) factHits += 1;
     if (r.counterfactualHit) counterfactualHits += 1;
     if (r.factInBlock && r.factHitWith && !r.counterfactualHit) deterministicWins += 1;
+    // Errors are reported as their own count and excluded from the win-rate
+    // denominator (the shipped OQ20 default): a failed judge call is not a tie.
+    if (r.outcome === 'error') {
+      errors += 1;
+      continue;
+    }
     if (r.outcome === null) continue;
     judged += 1;
     if (r.outcome === 'win') wins += 1;
@@ -155,6 +175,7 @@ export const helpfulnessMetrics = (results: HelpfulnessCaseResult[]): Helpfulnes
     wins,
     losses,
     ties,
+    errors,
     winRate: judged ? (wins + 0.5 * ties) / judged : null,
     blockIdRate: total ? blockIds / total : 0,
     factHitRate: total ? factHits / total : 0,
@@ -174,32 +195,55 @@ export interface HelpfulnessDeps {
   respond?: (query: string, block: string) => Promise<string>;
   /** Return the better answer (`'A'`/`'B'`) or `'tie'` for one blinded presentation. */
   judge?: (query: string, answerA: string, answerB: string) => Promise<JudgeVerdict>;
+  /** Inter-call delay before each live responder/judge call (T15d). */
+  pace?: () => Promise<void>;
 }
 
+/**
+ * Normalise a fact/answer before substring containment: casefold and collapse
+ * internal whitespace. A fact split by a newline or a double space (a common
+ * model formatting choice) must not read as a backbone miss for a layout
+ * reason (T14a, OQ22). The residual — whether normalisation can mask a genuinely
+ * absent fact — is OQ22.
+ */
+export const normaliseFact = (text: string): string =>
+  text.toLowerCase().replace(/\s+/g, ' ').trim();
+
 const containsFact = (answer: string, fact: string): boolean =>
-  answer.toLowerCase().includes(fact.toLowerCase());
+  normaliseFact(answer).includes(normaliseFact(fact));
 
 /*
  * Live responder: a real product model answers with the same system prompt the
  * chat path assembles, block envelope included, so the with-arm is faithful to
  * production. The model is the scheduled eval default (cheapest roster entry)
- * unless the caller injects another.
+ * unless `config.memoryEval.responder*` overrides it (T14c) — so a model sweep
+ * (OQ24/OQ29) is a config change, not a source edit.
  */
 const defaultRespond = async (query: string, block: string): Promise<string> => {
-  const [{ provider, model }] = resolveScheduledModels({});
+  const [{ provider: scheduledProvider, model: scheduledModel }] = resolveScheduledModels({});
   const completion = await inferenceService.createToolFreeCompletion({
-    provider,
-    model,
+    provider: config.memoryEval.responderProvider ?? scheduledProvider,
+    model: config.memoryEval.responderModel ?? scheduledModel,
     messages: [
       { role: 'system', content: buildSystemContent(null, null, true, null, block) },
       { role: 'user', content: query },
     ],
-    temperature: 0,
+    temperature: config.memoryEval.responderTemperature,
     max_tokens: 512,
     trace: { tags: ['memory-eval:helpfulness:respond'] },
   });
   return completion.choices[0]?.message?.content ?? '';
 };
+
+/*
+ * The judge is a reasoning model (`gpt-oss-120b`); its chain-of-thought counts
+ * against `max_tokens`. A 16-token budget truncates the completion to an empty
+ * string *before* the verdict token — measured live: `max=16 => ""`,
+ * `max=256 => "A"` (OQ21). 512 gives headroom for the reasoning plus the
+ * one-token verdict; the preflight (`runJudgePreflight`) fails loudly if a
+ * future model change re-breaks this rather than silently scoring `error`.
+ */
+const JUDGE_MAX_TOKENS = 512;
 
 const defaultJudge = async (
   query: string,
@@ -211,10 +255,23 @@ const defaultJudge = async (
     model: config.memoryEval.judgeModel,
     messages: [{ role: 'user', content: buildJudgePrompt(query, answerA, answerB) }],
     temperature: 0,
-    max_tokens: 16,
+    max_tokens: JUDGE_MAX_TOKENS,
     trace: { tags: ['memory-eval:helpfulness:judge'] },
   });
   return parseJudgeVerdict(completion.choices[0]?.message?.content ?? '');
+};
+
+const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+
+/*
+ * Default inter-call pacing (T15d): a full run makes ~2 responder + ~2 judge
+ * calls per judged scenario, which can trip the provider RPM. The delay is
+ * config-sourced (`MEMORY_EVAL_PACE_MS`) so the exact budget (OQ32) is a config
+ * change; tests inject a no-op.
+ */
+const defaultPace = async (): Promise<void> => {
+  const ms = config.memoryEval.paceMs;
+  if (ms > 0) await sleep(ms);
 };
 
 /**
@@ -222,6 +279,11 @@ const defaultJudge = async (
  * was a block to inject) score the pair blinded and position-swapped. Scenarios
  * whose retrieval missed by construction carry no block, so there is nothing to
  * A/B — they are recorded with `outcome: null` and excluded from `judged`.
+ *
+ * Fixtures are cleared in a `finally` (T14e), so a thrown responder/provider
+ * error cannot leak seeded rows under the shared `evalUserId`. A thrown judge
+ * error is caught per pair into an `error` outcome (T14b), so one dead call does
+ * not abort the run (the OQ30 record-and-continue default).
  */
 export const runHelpfulnessEval = async (
   deps: HelpfulnessDeps = {},
@@ -232,45 +294,86 @@ export const runHelpfulnessEval = async (
   const retrieve = deps.retrieve ?? retrieveWorkspaceSlices;
   const respond = deps.respond ?? defaultRespond;
   const judge = deps.judge ?? defaultJudge;
+  const pace = deps.pace ?? defaultPace;
 
   const results: HelpfulnessCaseResult[] = [];
-  for (const scenario of scenarios) {
-    await clear();
-    const idMap = await seed(scenario);
-    const picks = await retrieve(scenario.query, evalUserId.toHexString());
-    const expectedId = idMap[scenario.expectedSliceId];
-    const blockCarriesId = expectedId !== undefined && picks.some((p) => p.id === expectedId);
-    const block = buildWorkspaceBlock(scenario.query, picks);
-    const factInBlock = containsFact(block, scenario.expectedFact);
+  try {
+    for (const scenario of scenarios) {
+      await clear();
+      const idMap = await seed(scenario);
+      const picks = await retrieve(scenario.query, evalUserId.toHexString());
+      const expectedId = idMap[scenario.expectedSliceId];
+      const blockCarriesId = expectedId !== undefined && picks.some((p) => p.id === expectedId);
+      const block = buildWorkspaceBlock(scenario.query, picks);
+      const factInBlock = containsFact(block, scenario.expectedFact);
 
-    const withAnswer = await respond(scenario.query, block);
-    // No block → the two arms are byte-identical, so reuse the answer instead
-    // of paying for a duplicate call (and the counterfactual is trivially true).
-    const withoutAnswer = block.trim() ? await respond(scenario.query, '') : withAnswer;
-    const factHitWith = containsFact(withAnswer, scenario.expectedFact);
-    const counterfactualHit = containsFact(withoutAnswer, scenario.expectedFact);
+      await pace();
+      const withAnswer = await respond(scenario.query, block);
+      // No block → the two arms are byte-identical, so reuse the answer instead
+      // of paying for a duplicate call (and the counterfactual is trivially true).
+      let withoutAnswer = withAnswer;
+      if (block.trim()) {
+        await pace();
+        withoutAnswer = await respond(scenario.query, '');
+      }
+      const factHitWith = containsFact(withAnswer, scenario.expectedFact);
+      const counterfactualHit = containsFact(withoutAnswer, scenario.expectedFact);
 
-    let outcome: PairOutcome | null = null;
-    let verdicts: [JudgeVerdict, JudgeVerdict] | undefined;
-    if (block.trim()) {
-      const first = await judge(scenario.query, withAnswer, withoutAnswer);
-      const second = await judge(scenario.query, withoutAnswer, withAnswer);
-      verdicts = [first, second];
-      outcome = resolveSwappedOutcome(first, second);
+      let outcome: PairOutcome | null = null;
+      let verdicts: [JudgeVerdict, JudgeVerdict] | undefined;
+      if (block.trim()) {
+        try {
+          await pace();
+          const first = await judge(scenario.query, withAnswer, withoutAnswer);
+          await pace();
+          const second = await judge(scenario.query, withoutAnswer, withAnswer);
+          verdicts = [first, second];
+          outcome = resolveSwappedOutcome(first, second);
+        } catch {
+          // A thrown provider error is an `error` pair, not a run abort (T14b).
+          outcome = 'error';
+        }
+      }
+
+      results.push({
+        scenarioId: scenario.id,
+        category: scenario.category,
+        expectedSliceId: scenario.expectedSliceId,
+        blockCarriesId,
+        factInBlock,
+        factHitWith,
+        counterfactualHit,
+        outcome,
+        verdicts,
+      });
     }
-
-    results.push({
-      scenarioId: scenario.id,
-      category: scenario.category,
-      expectedSliceId: scenario.expectedSliceId,
-      blockCarriesId,
-      factInBlock,
-      factHitWith,
-      counterfactualHit,
-      outcome,
-      verdicts,
-    });
+  } finally {
+    await clear();
   }
-  await clear();
   return { results, metrics: helpfulnessMetrics(results) };
+};
+
+/**
+ * Live judge preflight (T14d): issue one judge call over a fixed constructed
+ * pair (A clearly better than B) in both orders and require a *parseable*
+ * verdict — not merely a non-error reply. A truncated reasoning model or an
+ * unavailable model therefore fails the preflight rather than silently
+ * degrading every verdict to `tie`/`error` (OQ21). Throws on failure so the
+ * caller stops instead of substituting a model silently.
+ */
+export const runJudgePreflight = async (
+  judge: (query: string, answerA: string, answerB: string) => Promise<JudgeVerdict> = defaultJudge,
+): Promise<{ first: JudgeVerdict; second: JudgeVerdict }> => {
+  const query = 'Which answer correctly names the capital of Australia?';
+  const good = 'The capital of Australia is Canberra.';
+  const bad = 'The capital of Australia is Sydney.';
+  const first = await judge(query, good, bad);
+  const second = await judge(query, bad, good);
+  if (first === 'error' || second === 'error') {
+    throw new Error(
+      `judge preflight failed: unparseable verdict (first=${first}, second=${second}); ` +
+        'the model may be unavailable or the token budget may be truncating it (OQ21)',
+    );
+  }
+  return { first, second };
 };

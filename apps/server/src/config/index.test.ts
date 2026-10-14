@@ -30,6 +30,12 @@ const keys = [
   'TOVA_EVAL_PROVIDER',
   'TASK_MAX_STEPS',
   'TASK_MAX_COST_USD',
+  'MEMORY_JUDGE_MODEL',
+  'MEMORY_JUDGE_PROVIDER',
+  'MEMORY_RESPONDER_MODEL',
+  'MEMORY_RESPONDER_PROVIDER',
+  'MEMORY_RESPONDER_TEMPERATURE',
+  'MEMORY_EVAL_PACE_MS',
 ] as const;
 
 const backup: Record<string, string | undefined> = {};
@@ -178,6 +184,37 @@ describe('config/index', () => {
       process.env.TASK_MAX_COST_USD = '2.5';
       expect(config.task.maxSteps).toBe(40);
       expect(config.task.maxCostUsd).toBe(2.5);
+    });
+
+    it('memory-eval judge defaults are pinned; responder overrides stay undefined (#289)', () => {
+      expect(config.memoryEval.judgeModel).toBe('openai/gpt-oss-120b');
+      expect(config.memoryEval.judgeProvider).toBe('groq');
+      // Unset responder overrides fall through to the roster default in the
+      // runner (T14c), so the getters must return undefined, not a pin.
+      expect(config.memoryEval.responderModel).toBeUndefined();
+      expect(config.memoryEval.responderProvider).toBeUndefined();
+      expect(config.memoryEval.responderTemperature).toBe(0);
+      expect(config.memoryEval.paceMs).toBe(1000);
+    });
+
+    it('memory-eval responder overrides and pacing parse from env (#289)', () => {
+      process.env.MEMORY_RESPONDER_MODEL = 'openai/gpt-oss-20b';
+      process.env.MEMORY_RESPONDER_PROVIDER = 'groq';
+      process.env.MEMORY_RESPONDER_TEMPERATURE = '0.4';
+      process.env.MEMORY_EVAL_PACE_MS = '250';
+      expect(config.memoryEval.responderModel).toBe('openai/gpt-oss-20b');
+      expect(config.memoryEval.responderProvider).toBe('groq');
+      expect(config.memoryEval.responderTemperature).toBe(0.4);
+      expect(config.memoryEval.paceMs).toBe(250);
+    });
+
+    it('memory-eval temperature and pacing fall back on malformed or negative values (#289)', () => {
+      for (const bad of ['garbage', '', '-1', 'Infinity']) {
+        process.env.MEMORY_RESPONDER_TEMPERATURE = bad;
+        process.env.MEMORY_EVAL_PACE_MS = bad;
+        expect(config.memoryEval.responderTemperature).toBe(0);
+        expect(config.memoryEval.paceMs).toBe(1000);
+      }
     });
   });
 

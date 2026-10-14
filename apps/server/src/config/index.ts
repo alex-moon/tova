@@ -138,12 +138,35 @@ export const config = {
   // model from the gate (`openai/gpt-oss-20b`) so self-preference bias cannot
   // flatter the gate; the ticket pins it to `openai/gpt-oss-120b` on Groq.
   // Overridable so a judge-family swap (OQ2) needs no code change.
+  //
+  // The responder is the roster default (`resolveScheduledModels`), but pinned
+  // here (T14c) so the arm is not moved silently by a `ROSTER_SEED` edit and a
+  // model sweep (OQ24/OQ29) is a config change. `responderModel`/`Provider`
+  // return `undefined` when unset, so the caller keeps the roster fallback.
+  // `paceMs` (T15d) is the inter-call delay that keeps a ~4-call-per-scenario
+  // run under the provider RPM (OQ32).
   memoryEval: {
     get judgeModel(): string {
       return process.env.MEMORY_JUDGE_MODEL || 'openai/gpt-oss-120b';
     },
     get judgeProvider(): LlmProvider {
       return (process.env.MEMORY_JUDGE_PROVIDER as LlmProvider) || 'groq';
+    },
+    get responderModel(): string | undefined {
+      return process.env.MEMORY_RESPONDER_MODEL || undefined;
+    },
+    get responderProvider(): LlmProvider | undefined {
+      return (process.env.MEMORY_RESPONDER_PROVIDER as LlmProvider) || undefined;
+    },
+    get responderTemperature(): number {
+      const raw = process.env.MEMORY_RESPONDER_TEMPERATURE;
+      const parsed = raw === undefined || raw === '' ? NaN : Number(raw);
+      return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
+    },
+    get paceMs(): number {
+      const raw = process.env.MEMORY_EVAL_PACE_MS;
+      const parsed = raw === undefined || raw === '' ? NaN : Number(raw);
+      return Number.isFinite(parsed) && parsed >= 0 ? parsed : 1000;
     },
   },
 

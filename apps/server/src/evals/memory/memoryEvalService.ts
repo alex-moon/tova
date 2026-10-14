@@ -202,25 +202,31 @@ export const runRetrievalEval = async (
   const seed = deps.seed ?? seedMemoryScenario;
   const clear = deps.clear ?? clearMemoryCorpus;
   const results: RetrievalCaseResult[] = [];
-  for (const scenario of scenarios) {
-    // Reseed per scenario so one scenario's slices cannot contaminate another.
+  // Clear in a `finally` (T14e): a thrown seed/retrieve/provider error must not
+  // leak seeded rows under the shared `evalUserId` and pollute the next run or
+  // the tool-use suite (OQ28).
+  try {
+    for (const scenario of scenarios) {
+      // Reseed per scenario so one scenario's slices cannot contaminate another.
+      await clear();
+      const idMap = await seed(scenario);
+      const picks = await retrieve(scenario.query, evalUserId.toHexString());
+      const surfacedIds = picks.map((slice) => slice.id);
+      const expectedId = idMap[scenario.expectedSliceId];
+      const surfaced = expectedId !== undefined && surfacedIds.includes(expectedId);
+      results.push({
+        scenarioId: scenario.id,
+        category: scenario.category,
+        expected: scenario.expectSurfaced,
+        surfaced,
+        pass: surfaced === scenario.expectSurfaced,
+        expectedSliceId: scenario.expectedSliceId,
+        surfacedIds,
+      });
+    }
+  } finally {
     await clear();
-    const idMap = await seed(scenario);
-    const picks = await retrieve(scenario.query, evalUserId.toHexString());
-    const surfacedIds = picks.map((slice) => slice.id);
-    const expectedId = idMap[scenario.expectedSliceId];
-    const surfaced = expectedId !== undefined && surfacedIds.includes(expectedId);
-    results.push({
-      scenarioId: scenario.id,
-      category: scenario.category,
-      expected: scenario.expectSurfaced,
-      surfaced,
-      pass: surfaced === scenario.expectSurfaced,
-      expectedSliceId: scenario.expectedSliceId,
-      surfacedIds,
-    });
   }
-  await clear();
   return { results, metrics: retrievalMetrics(results) };
 };
 

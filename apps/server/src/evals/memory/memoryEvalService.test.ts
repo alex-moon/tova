@@ -202,6 +202,27 @@ describe('runRetrievalEval (#289)', () => {
     expect(results[0]).toMatchObject({ pass: false, surfaced: false, expected: true });
     expect(results[1]).toMatchObject({ pass: true, surfaced: false, expected: false });
   });
+
+  it('clears fixtures in a finally when retrieve throws (T14e)', async () => {
+    let cleared = 0;
+    let calls = 0;
+    await expect(
+      runRetrievalEval({
+        scenarios: [scenario, { ...scenario, id: 's2' }],
+        clear: async () => {
+          cleared += 1;
+        },
+        seed: async () => ({ 'seed-a': 'real-1' }),
+        retrieve: async () => {
+          calls += 1;
+          if (calls === 2) throw new Error('mongo down');
+          return [slice('real-1')];
+        },
+      }),
+    ).rejects.toThrow('mongo down');
+    // One clear at s1 start, one at s2 start, one in the finally.
+    expect(cleared).toBe(3);
+  });
 });
 
 describe('pushMemoryCorpusToLangSmith (#289)', () => {

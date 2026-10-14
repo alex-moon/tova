@@ -2,9 +2,11 @@ import type { WorkspaceSlice } from '../../services/workspaceRetrievalService';
 import {
   buildJudgePrompt,
   helpfulnessMetrics,
+  normaliseFact,
   parseJudgeVerdict,
   resolveSwappedOutcome,
   runHelpfulnessEval,
+  runJudgePreflight,
   type HelpfulnessCaseResult,
 } from './helpfulnessEval';
 import type { MemoryScenario } from './types';
@@ -35,6 +37,12 @@ describe('resolveSwappedOutcome (#289)', () => {
     expect(resolveSwappedOutcome('A', 'tie')).toBe('tie');
     expect(resolveSwappedOutcome('tie', 'tie')).toBe('tie');
   });
+
+  it('marks a pair with an errored presentation as an error, not a tie', () => {
+    expect(resolveSwappedOutcome('error', 'B')).toBe('error');
+    expect(resolveSwappedOutcome('A', 'error')).toBe('error');
+    expect(resolveSwappedOutcome('error', 'error')).toBe('error');
+  });
 });
 
 describe('parseJudgeVerdict (#289)', () => {
@@ -48,9 +56,20 @@ describe('parseJudgeVerdict (#289)', () => {
     expect(parseJudgeVerdict('Weighing A against B, the better answer is B.')).toBe('B');
   });
 
-  it('degrades unparseable replies to a tie', () => {
-    expect(parseJudgeVerdict('')).toBe('tie');
-    expect(parseJudgeVerdict('I cannot decide.')).toBe('tie');
+  it('treats an empty or unparseable reply as an error, not a tie', () => {
+    expect(parseJudgeVerdict('')).toBe('error');
+    expect(parseJudgeVerdict('I cannot decide.')).toBe('error');
+  });
+});
+
+describe('normaliseFact (#289 T14a)', () => {
+  it('collapses whitespace so a fact split by a newline still matches', () => {
+    expect(normaliseFact('Twelve   thousand\npounds')).toBe('twelve thousand pounds');
+  });
+
+  it('does not match a genuinely absent fact after normalisation', () => {
+    const fact = normaliseFact('community paediatrician');
+    expect(normaliseFact('I have nothing on that.').includes(fact)).toBe(false);
   });
 });
 
@@ -102,6 +121,17 @@ describe('helpfulnessMetrics (#289)', () => {
     expect(metrics.winRate).toBeNull();
   });
 
+  it('counts errors separately and excludes them from the win-rate denominator', () => {
+    const metrics = helpfulnessMetrics([
+      row({ outcome: 'win' }),
+      row({ outcome: 'loss' }),
+      row({ outcome: 'error' }),
+    ]);
+    expect(metrics.errors).toBe(1);
+    expect(metrics.judged).toBe(2);
+    expect(metrics.winRate).toBe(0.5);
+  });
+
   it('flags the counterfactual and withholds the deterministic win', () => {
     const metrics = helpfulnessMetrics([row({ counterfactualHit: true })]);
     expect(metrics.counterfactualHits).toBe(1);
@@ -136,6 +166,8 @@ describe('runHelpfulnessEval (#289)', () => {
     text,
     at: new Date(),
   });
+  // Pacing is a live-call concern; tests must not sleep (T15d).
+  const noPace = async (): Promise<void> => {};
 
   it('runs both arms and judges the pair blinded and position-swapped', async () => {
     const responses: Record<string, string> = { block: 'the fact is here', blank: 'I do not know' };
@@ -146,6 +178,7 @@ describe('runHelpfulnessEval (#289)', () => {
       seed: async () => ({ 'seed-a': 'real-1' }),
       retrieve: async () => [slice('the fact')],
       respond: async (_query, block) => responses[block ? 'block' : 'blank'],
+      pace: noPace,
       judge: async (_query, a, b) => {
         judgeCalls.push([a, b]);
         // First presentation (with-arm as A): pick A. Swapped: pick B (with-arm).
@@ -173,6 +206,7 @@ describe('runHelpfulnessEval (#289)', () => {
       seed: async () => ({ 'seed-a': 'real-1' }),
       retrieve: async () => [slice('the fact')],
       respond: async () => 'the fact is here',
+      pace: noPace,
       judge: async () => 'tie',
     });
     expect(results[0].counterfactualHit).toBe(true);
@@ -189,6 +223,7 @@ describe('runHelpfulnessEval (#289)', () => {
       seed: async () => ({ 'seed-a': 'real-1' }),
       retrieve: async () => [],
       respond: async (_query, block) => (block ? 'with' : 'without'),
+      pace: noPace,
       judge: async () => {
         judged += 1;
         return 'A';
@@ -214,9 +249,67 @@ describe('runHelpfulnessEval (#289)', () => {
         respondCalls += 1;
         return 'nothing on that';
       },
+      pace: noPace,
       judge: async () => 'A',
     });
     expect(respondCalls).toBe(1);
     expect(results[0].outcome).toBeNull();
+  });
+
+  it('records a thrown judge error as an error outcome and does not abort the run', async () => {
+    const { results, metrics } = await runHelpfulnessEval({
+      scenarios: [scenario('s1', 'fact')],
+      clear: async () => {},
+      seed: async () => ({ 'seed-a': 'real-1' }),
+      retrieve: async () => [slice('the fact')],
+      respond: async (_query, block) => (block ? 'the fact is here' : 'I do not know'),
+      pace: noPace,
+      judge: async () => {
+        throw new Error('429 rate limited');
+      },
+    });
+    expect(results[0].outcome).toBe('error');
+    expect(metrics.errors).toBe(1);
+    expect(metrics.judged).toBe(0);
+    expect(metrics.winRate).toBeNull();
+  });
+
+  it('clears fixtures in a finally when the responder throws (T14e)', async () => {
+    let clears = 0;
+    let calls = 0;
+    await expect(
+      runHelpfulnessEval({
+        scenarios: [scenario('s1', 'fact'), scenario('s2', 'fact')],
+        clear: async () => {
+          clears += 1;
+        },
+        seed: async () => ({ 'seed-a': 'real-1' }),
+        retrieve: async () => [slice('the fact')],
+        respond: async () => {
+          calls += 1;
+          // s1 makes two responder calls (with + blank); s2's first call throws.
+          if (calls === 3) throw new Error('provider down');
+          return 'the fact is here';
+        },
+        pace: noPace,
+        judge: async () => 'A',
+      }),
+    ).rejects.toThrow('provider down');
+    // One clear per scenario start (2) plus the finally clear (1).
+    expect(clears).toBe(3);
+  });
+});
+
+describe('runJudgePreflight (#289 T14d)', () => {
+  it('passes when the judge returns a parseable verdict in both orders', async () => {
+    const { first, second } = await runJudgePreflight(async (_q, a) =>
+      a.includes('Canberra') ? 'A' : 'B',
+    );
+    expect(first).toBe('A');
+    expect(second).toBe('B');
+  });
+
+  it('throws when a presentation is unparseable (truncated or dead judge)', async () => {
+    await expect(runJudgePreflight(async () => 'error')).rejects.toThrow(/preflight failed/);
   });
 });

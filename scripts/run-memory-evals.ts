@@ -22,7 +22,11 @@ import {
   pushMemoryCorpusToLangSmith,
   runMemoryEvals,
 } from '../apps/server/src/evals/memory/memoryEvalService';
-import { runHelpfulnessEval } from '../apps/server/src/evals/memory/helpfulnessEval';
+import {
+  runHelpfulnessEval,
+  runJudgePreflight,
+} from '../apps/server/src/evals/memory/helpfulnessEval';
+import { config } from '../apps/server/src/config';
 
 const pct = (value: number | null): string =>
   value === null ? 'n/a' : `${(value * 100).toFixed(1)}%`;
@@ -35,7 +39,24 @@ const pct = (value: number | null): string =>
  */
 const wantsHelpfulness = (): boolean => process.argv.slice(2).includes('--helpfulness');
 
+/*
+ * `--preflight-judge` (T14d) issues one judge call in both orders and requires a
+ * parseable verdict, so a truncated/unavailable judge fails loudly here rather
+ * than silently degrading every stage-3 verdict. It needs no Mongo, so it runs
+ * before the connection.
+ */
+const wantsPreflight = (): boolean => process.argv.slice(2).includes('--preflight-judge');
+
 const main = async (): Promise<void> => {
+  if (wantsPreflight()) {
+    const { first, second } = await runJudgePreflight();
+    console.log(
+      `\nJudge preflight ok: first=${first} second=${second} ` +
+        `(model=${config.memoryEval.judgeModel} provider=${config.memoryEval.judgeProvider})`,
+    );
+    return;
+  }
+
   const langsmithClient = await langsmithClientFromEnv(process.env.LANGSMITH_API_KEY);
   await mongoose.connect(buildMongoUri());
   try {
@@ -82,8 +103,9 @@ const main = async (): Promise<void> => {
       }
       console.log(
         `  winRate=${pct(metrics.winRate)} (wins=${metrics.wins} losses=${metrics.losses} ` +
-          `ties=${metrics.ties} n=${metrics.judged}) factHitRate=${pct(metrics.factHitRate)} ` +
-          `blockIdRate=${pct(metrics.blockIdRate)} counterfactual=${metrics.counterfactualHits}`,
+          `ties=${metrics.ties} errors=${metrics.errors} n=${metrics.judged}) ` +
+          `factHitRate=${pct(metrics.factHitRate)} blockIdRate=${pct(metrics.blockIdRate)} ` +
+          `counterfactual=${metrics.counterfactualHits}`,
       );
     }
 
