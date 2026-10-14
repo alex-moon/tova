@@ -64,13 +64,13 @@ const main = async (): Promise<void> => {
 
     console.log('\nStage 1 — gate precision/recall (workspace vote vs hand label):');
     for (const r of gate.results) {
-      console.log(
-        `  ${r.pass ? 'ok  ' : 'MISS'} ${r.caseId} expected=${r.expected} observed=${r.observed}`,
-      );
+      const tag = r.failed ? (r.timeout ? 'TMO ' : 'ERR ') : r.pass ? 'ok  ' : 'MISS';
+      console.log(`  ${tag} ${r.caseId} expected=${r.expected} observed=${r.observed}`);
     }
     console.log(
       `  precision=${pct(gate.metrics.precision)} recall=${pct(gate.metrics.recall)} ` +
-        `fireRate=${pct(gate.metrics.fireRate)} (n=${gate.metrics.total})`,
+        `fireRate=${pct(gate.metrics.fireRate)} (evaluated=${gate.metrics.evaluated} ` +
+        `errors=${gate.metrics.errors} timeouts=${gate.metrics.timeouts} n=${gate.metrics.total})`,
     );
     for (const [subtype, m] of Object.entries(gate.metrics.recallBySubtype)) {
       console.log(`    ${subtype}: recall ${pct(m.recall)} (${m.truePos}/${m.total})`);

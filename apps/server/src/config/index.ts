@@ -168,6 +168,14 @@ export const config = {
       const parsed = raw === undefined || raw === '' ? NaN : Number(raw);
       return Number.isFinite(parsed) && parsed >= 0 ? parsed : 1000;
     },
+    // T15c: the gate stage makes one aux call per case (36 at n=36), which can
+    // trip the aux provider's RPM. 2000ms keeps a burst under Groq's 30 RPM;
+    // config-sourced so the budget (OQ32) is a config change.
+    get gatePaceMs(): number {
+      const raw = process.env.MEMORY_EVAL_GATE_PACE_MS;
+      const parsed = raw === undefined || raw === '' ? NaN : Number(raw);
+      return Number.isFinite(parsed) && parsed >= 0 ? parsed : 2000;
+    },
   },
 
   chat: {

@@ -1,6 +1,8 @@
 import { Types } from 'mongoose';
 import { Asset } from '../models/Asset';
 import {
+  classifyFileIntentForEval,
+  classifyFileIntentStrict,
   enrichmentLibraryBlock as enrich,
   enrichmentVotes,
   filesVoteFromReply,
@@ -99,6 +101,37 @@ describe('enrichmentService', () => {
       mockCreateToolFree.mockClear();
       expect(await enrichmentVotes('x')).toEqual({ files: false, workspace: false });
       expect(mockCreateToolFree).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('classifyFileIntentStrict / classifyFileIntentForEval (T15b)', () => {
+    it('strict rethrows a provider failure instead of swallowing it', async () => {
+      mockCreateToolFree.mockRejectedValueOnce(new Error('429'));
+      await expect(classifyFileIntentStrict('x')).rejects.toThrow('429');
+    });
+
+    it('probe reports an error outcome on a thrown call', async () => {
+      mockCreateToolFree.mockRejectedValueOnce(new Error('429'));
+      expect(await classifyFileIntentForEval('x')).toEqual({ outcome: 'error' });
+    });
+
+    it('probe reports an ok outcome with both votes', async () => {
+      mockCreateToolFree.mockResolvedValueOnce(voteResponse('{"files":"no","workspace":"yes"}'));
+      expect(await classifyFileIntentForEval('x')).toEqual({
+        outcome: 'ok',
+        files: false,
+        workspace: true,
+      });
+    });
+
+    it('probe reports a timeout when the cap fires', async () => {
+      mockCreateToolFree.mockImplementationOnce(
+        () =>
+          new Promise((resolve) =>
+            setTimeout(() => resolve(voteResponse('{"workspace":"yes"}')), 200),
+          ),
+      );
+      expect(await classifyFileIntentForEval('x', [], 10)).toEqual({ outcome: 'timeout' });
     });
   });
 

@@ -1,5 +1,10 @@
 import type { Client } from 'langsmith';
-import { enrichmentVotes } from '../../services/enrichmentService';
+import {
+  classifyFileIntentForEval,
+  isEnrichmentEnabled,
+  type EnrichmentProbe,
+} from '../../services/enrichmentService';
+import { config } from '../../config';
 import {
   retrieveWorkspaceSlices,
   type WorkspaceSlice,
@@ -29,7 +34,27 @@ export interface GateCaseResult {
   pass: boolean;
   /** Refer-back subtype of a positive; absent on negatives. */
   subtype?: GateSubtype;
+  /** The provider call failed (a throw or a timeout); excluded from metrics (T15b). */
+  failed?: boolean;
+  /** The provider call hit the enrichment timeout cap (T15b/OQ33). */
+  timeout?: boolean;
 }
+
+/*
+ * #289 T15a: the gate eval reads the live enrichment classifier, and the
+ * production path (`enrichmentVotes`) returns all-false when `ENRICHMENT_ENABLED`
+ * is off. Running the gate with enrichment off would post a 0% recall that looks
+ * like a gate failure but is a misconfiguration, so fail loudly instead of
+ * silently reporting a 0% gate.
+ */
+export const assertEnrichmentEnabled = (): void => {
+  if (!isEnrichmentEnabled()) {
+    throw new Error(
+      'memory gate eval requires ENRICHMENT_ENABLED; enrichmentVotes returns all-false when off, ' +
+        'which would score recall 0',
+    );
+  }
+};
 
 /** Recall over one refer-back subtype (positives only). */
 export interface SubtypeRecall {
@@ -43,6 +68,8 @@ export interface SubtypeRecall {
 
 export interface GateMetrics {
   total: number;
+  /** Cases with a usable vote (total minus errors and timeouts). */
+  evaluated: number;
   truePos: number;
   falsePos: number;
   trueNeg: number;
@@ -51,8 +78,12 @@ export interface GateMetrics {
   precision: number | null;
   /** tp / (tp + fn); null when there are no positive labels. */
   recall: number | null;
-  /** Fraction of turns the gate fired on (the base-rate companion to precision). */
+  /** Fraction of evaluated turns the gate fired on (the base-rate companion). */
   fireRate: number;
+  /** Provider failures (a thrown call), excluded from precision/recall (T15b). */
+  errors: number;
+  /** Provider timeouts (the ENRICHMENT_TIMEOUT_MS cap), excluded (T15b/OQ33). */
+  timeouts: number;
   /** Recall per refer-back subtype, so a bar can be set per subtype (T1b-i/OQ12). */
   recallBySubtype: Record<string, SubtypeRecall>;
 }
@@ -62,8 +93,17 @@ export const gateMetrics = (results: GateCaseResult[]): GateMetrics => {
   let falsePos = 0;
   let trueNeg = 0;
   let falseNeg = 0;
+  let errors = 0;
+  let timeouts = 0;
   const bySubtype: Record<string, { total: number; truePos: number; falseNeg: number }> = {};
   for (const r of results) {
+    // A provider failure is not a "no": count it separately and drop it from the
+    // confusion matrix so it cannot inflate false negatives (T15b, OQ11/OQ33).
+    if (r.failed) {
+      if (r.timeout) timeouts += 1;
+      else errors += 1;
+      continue;
+    }
     if (r.expected && r.observed) truePos += 1;
     else if (!r.expected && r.observed) falsePos += 1;
     else if (!r.expected && !r.observed) trueNeg += 1;
@@ -75,6 +115,7 @@ export const gateMetrics = (results: GateCaseResult[]): GateMetrics => {
       else if (r.expected && !r.observed) bucket.falseNeg += 1;
     }
   }
+  const evaluated = results.length - errors - timeouts;
   const positives = truePos + falsePos;
   const labelled = truePos + falseNeg;
   const recallBySubtype: Record<string, SubtypeRecall> = {};
@@ -86,13 +127,16 @@ export const gateMetrics = (results: GateCaseResult[]): GateMetrics => {
   }
   return {
     total: results.length,
+    evaluated,
     truePos,
     falsePos,
     trueNeg,
     falseNeg,
     precision: positives ? truePos / positives : null,
     recall: labelled ? truePos / labelled : null,
-    fireRate: results.length ? positives / results.length : 0,
+    fireRate: evaluated ? positives / evaluated : 0,
+    errors,
+    timeouts,
     recallBySubtype,
   };
 };
@@ -158,15 +202,17 @@ export const retrievalMetrics = (results: RetrievalCaseResult[]): RetrievalMetri
 export interface MemoryEvalDeps {
   gateCases?: GateCase[];
   scenarios?: MemoryScenario[];
-  /** Defaults to the live enrichment gate; injected in tests. */
+  /** Defaults to the strict eval probe; injected in tests. */
   classify?: (
     prompt: string,
     history: { role: 'user' | 'assistant'; content: string }[],
-  ) => Promise<{ files: boolean; workspace: boolean }>;
+  ) => Promise<EnrichmentProbe>;
   /** Defaults to the real retrieval read; injected in tests. */
   retrieve?: (query: string, userId: string) => Promise<WorkspaceSlice[]>;
   seed?: (scenario: MemoryScenario) => Promise<SeedIdMap>;
   clear?: () => Promise<void>;
+  /** Inter-call delay before each live gate call (T15c); injected in tests. */
+  pace?: () => Promise<void>;
 }
 
 export interface MemoryEvalReport {
@@ -174,15 +220,47 @@ export interface MemoryEvalReport {
   retrieval: { results: RetrievalCaseResult[]; metrics: RetrievalMetrics };
 }
 
+const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+
+/*
+ * #289 T15c: a 36-case gate burst can trip the aux provider's RPM, and (before
+ * T15b) a 429 was silently scored as a false negative. Pace each call so the run
+ * stays under the limit; the delay is config-sourced
+ * (`MEMORY_EVAL_GATE_PACE_MS`) so the budget is a config change (OQ32). No retry
+ * by default: a 429 is still recorded as `failed` (T15b), not masked.
+ */
+const defaultGatePace = async (): Promise<void> => {
+  const ms = config.memoryEval.gatePaceMs;
+  if (ms > 0) await sleep(ms);
+};
+
 export const runGateEval = async (
   deps: MemoryEvalDeps = {},
 ): Promise<{ results: GateCaseResult[]; metrics: GateMetrics }> => {
+  // T15a: fail loudly rather than post a 0% gate when enrichment is off.
+  assertEnrichmentEnabled();
   const cases = deps.gateCases ?? GATE_CASES;
-  const classify = deps.classify ?? enrichmentVotes;
+  const classify = deps.classify ?? classifyFileIntentForEval;
+  const pace = deps.pace ?? defaultGatePace;
   const results: GateCaseResult[] = [];
   for (const testCase of cases) {
-    const votes = await classify(testCase.prompt, testCase.history ?? []);
-    const observed = votes.workspace;
+    await pace();
+    const probe = await classify(testCase.prompt, testCase.history ?? []);
+    if (probe.outcome !== 'ok') {
+      // Record the failure distinctly (T15b): `observed:false` is a placeholder,
+      // not a vote — `gateMetrics` excludes `failed` rows from the matrix.
+      results.push({
+        caseId: testCase.id,
+        expected: testCase.refersBack,
+        observed: false,
+        pass: false,
+        subtype: testCase.subtype,
+        failed: true,
+        timeout: probe.outcome === 'timeout',
+      });
+      continue;
+    }
+    const observed = probe.workspace;
     results.push({
       caseId: testCase.id,
       expected: testCase.refersBack,
