@@ -23,6 +23,7 @@ import { collectWorkspaceSlices } from '../apps/server/src/services/workspaceRet
 import { embedTexts } from '../apps/server/src/services/embeddingService';
 import {
   embeddingKey,
+  existingEmbeddingHashes,
   planEmbeddingWrites,
   type EmbeddableSlice,
 } from '../apps/server/src/services/workspaceEmbeddingBackfill';
@@ -77,10 +78,10 @@ const main = async (): Promise<void> => {
       }
     }
 
-    const rows = await WorkspaceEmbedding.find({ model }).select('kind sourceId textHash').lean();
-    const existingHashes = new Map(
-      rows.map((row) => [embeddingKey(row.kind, row.sourceId, row.model), row.textHash] as const),
-    );
+    const rows = await WorkspaceEmbedding.find({ model })
+      .select('kind sourceId model textHash')
+      .lean();
+    const existingHashes = existingEmbeddingHashes(rows, model);
 
     const plan = planEmbeddingWrites(slices, existingHashes, model);
     const totalChars = plan.toEmbed.reduce((sum, item) => sum + item.text.length, 0);

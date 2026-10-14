@@ -443,6 +443,28 @@ describe('workspaceRetrievalService', () => {
       expect(search.mock.calls[0][0]).toMatchObject({ limit: 100, numCandidates: 100 });
     });
 
+    it('passes the userId and model through to the search filter', async () => {
+      // The Atlas filter compares exactly: a string `userId` against an ObjectId
+      // field would silently match nothing, so the stage must forward the raw
+      // ids unchanged (the default search casts `userId` at the driver edge).
+      const search = jest.fn(async () => []);
+      await vectorCandidates(query, 'user-1', 'model-x', 6, {
+        embed: async () => [[1]],
+        search,
+      });
+      expect(search.mock.calls[0][0]).toMatchObject({ userId: 'user-1', model: 'model-x' });
+    });
+
+    it('returns [] without searching when the embed returns no vector at all', async () => {
+      const search = jest.fn();
+      const hits = await vectorCandidates(query, 'user', 'model-x', 6, {
+        embed: async () => [],
+        search,
+      });
+      expect(hits).toEqual([]);
+      expect(search).not.toHaveBeenCalled();
+    });
+
     it('grows the ANN window with n so numCandidates stays >= limit', async () => {
       const search = jest.fn(async () => []);
       await vectorCandidates(query, 'user', 'model-x', 100, { embed: async () => [[1]], search });

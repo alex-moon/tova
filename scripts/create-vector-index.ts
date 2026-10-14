@@ -33,8 +33,11 @@ const main = async (): Promise<void> => {
   const client = new MongoClient(url);
   try {
     await client.connect();
+    // `db()` with no name uses the database from the connection string (the
+    // app connects to the same one), so a non-`tova` Atlas/eval target is
+    // honoured instead of silently creating the index on `tova`.
     const collection = client
-      .db('tova')
+      .db()
       .collection('workspace_embeddings') as unknown as SearchIndexManager;
     const result = await ensureVectorIndex(collection, dim);
     console.log(

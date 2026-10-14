@@ -1,5 +1,6 @@
 import {
   embeddingKey,
+  existingEmbeddingHashes,
   planEmbeddingWrites,
   type EmbeddableSlice,
 } from './workspaceEmbeddingBackfill';
@@ -114,6 +115,44 @@ describe('planEmbeddingWrites (#294)', () => {
       expect(plan.toEmbed[0].text).toBe(ingestText);
       expect(plan.toEmbed[0].textHash).toBe(embeddingTextHash(ingestText, MODEL));
     }
+  });
+
+  it('keys an existing row by the run model even when the projection omits `model` (#294)', () => {
+    // Regression: the backfill projected `kind sourceId textHash` only, so
+    // `row.model` was `undefined` and the key became `chat|m1|undefined` while
+    // the plan looked up `chat|m1|<model>`. The skip never matched and every
+    // run re-embedded the whole corpus. The row here has no `model`, as a
+    // projection that omits it would return.
+    const text = 'hello world';
+    const hashes = existingEmbeddingHashes(
+      [{ kind: 'chat', sourceId: 'm1', textHash: embeddingTextHash(text, MODEL) }],
+      MODEL,
+    );
+    expect(hashes.get(embeddingKey('chat', 'm1', MODEL))).toBe(embeddingTextHash(text, MODEL));
+    const plan = planEmbeddingWrites([slice({ text })], hashes, MODEL);
+    expect(plan.toEmbed).toEqual([]);
+    expect(plan.skipped).toBe(1);
+  });
+
+  it('keys a row by its own model, so a foreign-model row never satisfies the run model', () => {
+    // Multi-model rows coexist (the bge-m3/gte probe), and each stores its own
+    // `model`. The skip lookup uses the run model, so a bge-m3 row must not be
+    // mistaken for a bge-base row for the same slice.
+    const text = 'hello world';
+    const hashes = existingEmbeddingHashes(
+      [
+        {
+          kind: 'chat',
+          sourceId: 'm1',
+          model: 'BAAI/bge-m3',
+          textHash: embeddingTextHash(text, MODEL),
+        },
+      ],
+      MODEL,
+    );
+    const plan = planEmbeddingWrites([slice({ text })], hashes, MODEL);
+    expect(plan.toEmbed).toHaveLength(1);
+    expect(plan.skipped).toBe(0);
   });
 
   it('is a no-op on a second run over the planned output', () => {

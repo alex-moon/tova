@@ -38,6 +38,32 @@ export interface BackfillPlan {
 export const embeddingKey = (kind: EmbeddableKind, sourceId: string, model: string): string =>
   `${kind}|${sourceId}|${model}`;
 
+export interface ExistingEmbeddingRow {
+  kind: string;
+  sourceId: string;
+  model?: string;
+  textHash: string;
+}
+
+/*
+ * Build the `embeddingKey -> textHash` map the skip rule consults. `model`
+ * defaults to the run's model: a row projection that omits `model` (the field
+ * is redundant with the `find({ model })` filter that produced the rows) must
+ * still key correctly, or the lookup falls through and the backfill re-embeds
+ * every slice on every run. Keeping this here — not inline in the script —
+ * makes that idempotency invariant unit-testable.
+ */
+export const existingEmbeddingHashes = (
+  rows: ExistingEmbeddingRow[],
+  model: string,
+): Map<string, string> =>
+  new Map(
+    rows.map((row) => [
+      embeddingKey(row.kind as EmbeddableKind, row.sourceId, row.model ?? model),
+      row.textHash,
+    ]),
+  );
+
 /*
  * Decide which slices need a (re-)embed. `existingHashes` is keyed by
  * `embeddingKey`; a slice is skipped when its current hash already matches.
