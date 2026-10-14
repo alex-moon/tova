@@ -59,28 +59,86 @@ checked-in corpus uses **synthetic analogues** (same structure, no personal data
 
 ## Scope of this increment
 
-Built here: corpus (types + data), Mongo seeder/clearer, the retrieval-ID split, the
-deterministic gate + retrieval runner, the LangSmith corpus export, and a CLI.
+Built: corpus (types + data), Mongo seeder/clearer, the retrieval-ID split, the
+deterministic gate + retrieval runner, the stage-3 helpfulness runner (deterministic
+backbone + blinded/position-swapped judge, manual-only), the LangSmith corpus export,
+and a CLI.
 
-Deferred (follow-ups on #289): the stage-3 judge runner + judge validation; persisting
-metrics to a rollup; the go/no-go on `WORKSPACE_MEMORY_ENABLED`.
+Deferred (follow-ups on #289): judge validation against hand labels; persisting
+metrics to a rollup; the assistant-turns corpus decision; the go/no-go on
+`WORKSPACE_MEMORY_ENABLED`.
 
-## Baseline (2026-10-13, local stack)
+## Baseline (2026-10-14, local stack, n grown)
 
-`npm run evals:memory` against the current gate + retrieval:
+`npm run evals:memory` against the current gate + retrieval (corpus since grown;
+n=8 was noise, this is the first real read):
 
-- **Stage 1 — gate:** precision 100%, recall 100%, fireRate 50% (n=8). **Caveat:** eight
-  easy cases is below any minimum-N bar (a percentage over single digits is noise). The
-  gate set needs harder positives (indirect refer-backs) before these numbers mean
-  anything.
-- **Stage 2 — retrieval:** expectedMet 83.3%, surfacedRate 50% (n=6). The misses are the
-  designed ones: `paraphrase` (no lexical overlap — the gap #293/#294 close) and
-  `deleted-seed` / `out-of-pool` (excluded by construction). `direct`, `file`, and `task`
-  all surface.
+- **Stage 1 — gate:** precision 100%, recall 83.3%, fireRate 41.7% (n=36, 18 pos /
+  18 neg). The three misses are all false negatives: `gate-other-one` ("use the
+  other one instead") and `gate-one-from-yesterday` (bare deixis, no history in
+  the input the gate sees — see OQ12), and `gate-finish-draft` (a continuation
+  whose refer-back is in `history`).
+- **Stage 2 — retrieval:** expectedMet 77.3%, surfacedRate 59.1% (n=22). `direct`
+  3/3, `file` 5/5, `task` 5/5 surface; `paraphrase` 0/5 (no lexical overlap — the
+  gap #293/#294 close); `deleted-seed` 0/2 and `out-of-pool` 0/2 are misses by
+  construction.
 - Corpus pushed to the LangSmith `tova-memory-evals` dataset.
 
 These are the provisional-50% measurements, not the ship bars: the go-live bars are
-ratified from a larger, harder baseline (ticket: "baseline first, then ratify").
+ratified from the evidence (ticket: "baseline first, then ratify"). Every bar needs
+a stated minimum N; n=36 gate / n=22 retrieval now clear the per-category floors
+pinned in `corpus.test.ts`.
+
+## Stage 3 — helpfulness (wired, not yet validated)
+
+`evals/memory/helpfulnessEval.ts` runs the ticket's mixed stage: the same query
+answered **with** and **without** the retrieved block, then a blinded,
+position-swapped pairwise judge over the holistic delta.
+
+- **Deterministic backbone:** the with-arm block must carry the expected slice id
+  (read via `retrieveWorkspaceSlices`, since the rendered block carries no ids) and
+  the expected fact; `factInBlock`/`factHitWith` record it.
+- **Counterfactual is run, not assumed:** `counterfactualHit` flags a without-arm
+  that already answers correctly — injection did not help and a judge-only setup
+  would never see it.
+- **Blinded + position-swapped:** the judge is told nothing about which arm had the
+  block and every pair is judged twice with the arms swapped. `resolveSwappedOutcome`
+  counts only an order-consistent win as a win; a flip (or a judge `tie`) is a tie.
+  Ties score 0.5 in `winRate` (OQ3's provisional rule).
+- **Judge model:** `openai/gpt-oss-120b` on Groq, from `config.memoryEval`
+  (`MEMORY_JUDGE_MODEL`/`MEMORY_JUDGE_PROVIDER`), deliberately not the gate model
+  `openai/gpt-oss-20b`. Same-family independence is OQ2 (owner-gated).
+- **Manual-only:** runs via `npm run evals:memory -- --helpfulness`; the default
+  deterministic path is unchanged, and the scheduled suite does not yet include it
+  (OQ6). The judge is **wired but not trusted**: it must be validated against
+  ~30–50 hand-labelled pairs (OQ1) before its win-rate ratifies a bar.
+
+## Open questions (owner-gated — do not decide silently)
+
+These gate threshold ratification, not implementation. Recorded so the plan and the
+issue stay in sync:
+
+- **OQ1 label independence** — who authors/validates the hand labels (gate set,
+  judge-validation pairs, scenario expectations)? Agent-authored labels are marked
+  `note: 'agent-authored'` in `corpus.ts` so the provenance is auditable; whether
+  that counts as "hand-labelled" is the owner's call.
+- **OQ2 judge independence** — is `gpt-oss-120b` (same family as the gate
+  `gpt-oss-20b`) independent enough, or is a different family required? The judge id
+  is config-sourced, so this is a config change.
+- **OQ3 position-swap scoring** — order-disagreement is provisionally a tie (0.5);
+  confirm, or count it as a loss and/or make ties 0.
+- **OQ4 helpfulness bar** — is pairwise win-rate the right bar, and what floor
+  (e.g. ≥ 60%)?
+- **OQ6 stage-3 scheduling** — should the daily run include the live judge/responder
+  calls, or stay manual-only?
+- **OQ11 provider rate limits** — `enrichmentVotes` maps *any* failure (incl. a Groq
+  429) to `{workspace:false}`, so a rate-limited positive is scored as a gate "no"
+  and inflates false negatives. Options: pace/retry, surface failures as a distinct
+  excluded outcome, or both.
+- **OQ12 bare-deixis fairness** — `gate-other-one`/`gate-one-from-yesterday` have no
+  history, so the referent is unresolvable in what the gate sees. Split explicit /
+  continuation refer-backs from bare-deixis and set bars per subtype? If judged
+  unfair, recall rises to 94.4% (34/36).
 
 ## Done
 
@@ -89,17 +147,21 @@ ratified from a larger, harder baseline (ticket: "baseline first, then ratify").
 - [x] `evals/memory/`: types, synthetic corpus (gate + scenarios), tests
 - [x] `evals/memory/memorySource.ts`: seed/clear scenarios in Mongo
 - [x] `evals/memory/memoryEvalService.ts`: gate + retrieval runner with metrics
+- [x] `evals/memory/helpfulnessEval.ts`: stage-3 runner (both arms, counterfactual,
+      blinded + position-swapped judge) with `config.memoryEval` judge id
 - [x] `pushMemoryCorpusToLangSmith` (`tova-memory-evals`)
-- [x] `scripts/run-memory-evals.ts` + `npm run evals:memory`
-- [x] `npm run ci` green (101 suites, 1236 tests)
-- [x] Baseline run recorded above
+- [x] `scripts/run-memory-evals.ts` + `npm run evals:memory` (+ `--helpfulness`)
+- [x] `npm run ci` green
+- [x] Baseline run recorded above (gate n=36, retrieval n=22)
 
 ## Follow-ups
 
-- Grow the gate set with harder positives; raise N above the minimum-N bar before
-  ratifying thresholds.
-- Stage-3 judge runner (`gpt-oss-120b` on Groq), blinded + position-swapped, validated
-  against ~30–50 hand-labelled pairs.
+- Grow the gate set further and split bare-deixis from explicit/continuation
+  refer-backs (OQ12) before ratifying thresholds.
+- Validate the stage-3 judge (`gpt-oss-120b` on Groq) against ~30–50 hand-labelled
+  pairs (OQ1) before its win-rate ratifies a bar.
 - Persist memory-eval metrics (new shape or collection) and surface them in the admin
   Evals tab.
+- Decide the assistant-turns corpus question (only `role: 'user'` is indexed today)
+  from the retrieval evidence.
 - Go/no-go for `WORKSPACE_MEMORY_ENABLED=1` on live.

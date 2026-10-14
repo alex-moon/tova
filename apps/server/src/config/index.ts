@@ -134,6 +134,19 @@ export const config = {
     },
   },
 
+  // #289: the stage-3 helpfulness eval. The judge is deliberately a different
+  // model from the gate (`openai/gpt-oss-20b`) so self-preference bias cannot
+  // flatter the gate; the ticket pins it to `openai/gpt-oss-120b` on Groq.
+  // Overridable so a judge-family swap (OQ2) needs no code change.
+  memoryEval: {
+    get judgeModel(): string {
+      return process.env.MEMORY_JUDGE_MODEL || 'openai/gpt-oss-120b';
+    },
+    get judgeProvider(): LlmProvider {
+      return (process.env.MEMORY_JUDGE_PROVIDER as LlmProvider) || 'groq';
+    },
+  },
+
   chat: {
     get maxOutputTokens(): string | undefined {
       return process.env.CHAT_MAX_OUTPUT_TOKENS;

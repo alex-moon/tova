@@ -1,0 +1,192 @@
+import type { WorkspaceSlice } from '../../services/workspaceRetrievalService';
+import {
+  buildJudgePrompt,
+  helpfulnessMetrics,
+  parseJudgeVerdict,
+  resolveSwappedOutcome,
+  runHelpfulnessEval,
+  type HelpfulnessCaseResult,
+} from './helpfulnessEval';
+import type { MemoryScenario } from './types';
+
+/*
+ * #289 stage-3 logic, exercised with injected dependencies so no Mongo,
+ * provider, or judge is needed: the swap fold, the judge-reply parser, the
+ * blinded prompt, the metric arithmetic, and the two-arm runner loop (including
+ * the "no block, no A/B" skip and the counterfactual arm).
+ */
+
+describe('resolveSwappedOutcome (#289)', () => {
+  it('counts only an order-consistent win as a win', () => {
+    expect(resolveSwappedOutcome('A', 'B')).toBe('win');
+  });
+
+  it('counts an order-consistent loss as a loss', () => {
+    expect(resolveSwappedOutcome('B', 'A')).toBe('loss');
+  });
+
+  it('collapses a position flip to a tie (weak judge cannot be flattered)', () => {
+    expect(resolveSwappedOutcome('A', 'A')).toBe('tie');
+    expect(resolveSwappedOutcome('B', 'B')).toBe('tie');
+  });
+
+  it('treats any judge tie as a tie', () => {
+    expect(resolveSwappedOutcome('tie', 'B')).toBe('tie');
+    expect(resolveSwappedOutcome('A', 'tie')).toBe('tie');
+    expect(resolveSwappedOutcome('tie', 'tie')).toBe('tie');
+  });
+});
+
+describe('parseJudgeVerdict (#289)', () => {
+  it('reads the token case-insensitively', () => {
+    expect(parseJudgeVerdict('A')).toBe('A');
+    expect(parseJudgeVerdict('b')).toBe('B');
+    expect(parseJudgeVerdict('tie')).toBe('tie');
+  });
+
+  it('takes the last standalone token after chain-of-thought', () => {
+    expect(parseJudgeVerdict('Weighing A against B, the better answer is B.')).toBe('B');
+  });
+
+  it('degrades unparseable replies to a tie', () => {
+    expect(parseJudgeVerdict('')).toBe('tie');
+    expect(parseJudgeVerdict('I cannot decide.')).toBe('tie');
+  });
+});
+
+describe('buildJudgePrompt (#289)', () => {
+  it('is blinded — it never names the block, memory, or an arm', () => {
+    const prompt = buildJudgePrompt('What did we decide?', 'with answer', 'without answer');
+    expect(prompt).toContain('What did we decide?');
+    expect(prompt).toContain('with answer');
+    expect(prompt).toContain('without answer');
+    for (const leak of ['workspace', 'memory', 'inject', 'block', 'context block']) {
+      expect(prompt.toLowerCase()).not.toContain(leak);
+    }
+  });
+});
+
+describe('helpfulnessMetrics (#289)', () => {
+  const row = (over: Partial<HelpfulnessCaseResult>): HelpfulnessCaseResult => ({
+    scenarioId: 's',
+    category: 'direct',
+    expectedSliceId: 'seed',
+    blockCarriesId: true,
+    factInBlock: true,
+    factHitWith: true,
+    counterfactualHit: false,
+    outcome: 'win',
+    ...over,
+  });
+
+  it('scores ties as half a win and splits the rates', () => {
+    const metrics = helpfulnessMetrics([
+      row({}),
+      row({ outcome: 'loss' }),
+      row({ outcome: 'tie' }),
+      row({ outcome: null, blockCarriesId: false, factInBlock: false, factHitWith: false }),
+    ]);
+    expect(metrics.total).toBe(4);
+    expect(metrics.judged).toBe(3);
+    expect(metrics.wins).toBe(1);
+    expect(metrics.losses).toBe(1);
+    expect(metrics.ties).toBe(1);
+    expect(metrics.winRate).toBeCloseTo((1 + 0.5) / 3);
+    expect(metrics.blockIdRate).toBeCloseTo(3 / 4);
+    expect(metrics.factHitRate).toBeCloseTo(3 / 4);
+  });
+
+  it('reports null win-rate when nothing was judged', () => {
+    const metrics = helpfulnessMetrics([row({ outcome: null })]);
+    expect(metrics.judged).toBe(0);
+    expect(metrics.winRate).toBeNull();
+  });
+
+  it('flags the counterfactual and withholds the deterministic win', () => {
+    const metrics = helpfulnessMetrics([row({ counterfactualHit: true })]);
+    expect(metrics.counterfactualHits).toBe(1);
+    expect(metrics.deterministicWins).toBe(0);
+  });
+});
+
+describe('runHelpfulnessEval (#289)', () => {
+  const scenario = (id: string, fact: string): MemoryScenario => ({
+    id,
+    description: 'test',
+    category: 'direct',
+    seeds: [{ id: 'seed-a', kind: 'chat', title: 't', text: `the ${fact} fact`, at: '2026-01-01' }],
+    query: 'what is the fact',
+    expectedSliceId: 'seed-a',
+    expectSurfaced: true,
+    expectedFact: fact,
+  });
+  const slice = (text: string): WorkspaceSlice => ({
+    kind: 'chat',
+    id: 'real-1',
+    title: 't',
+    text,
+    at: new Date(),
+  });
+
+  it('runs both arms and judges the pair blinded and position-swapped', async () => {
+    const responses: Record<string, string> = { block: 'the fact is here', blank: 'I do not know' };
+    const judgeCalls: string[][] = [];
+    const { results, metrics } = await runHelpfulnessEval({
+      scenarios: [scenario('s1', 'fact')],
+      clear: async () => {},
+      seed: async () => ({ 'seed-a': 'real-1' }),
+      retrieve: async () => [slice('the fact')],
+      respond: async (_query, block) => responses[block ? 'block' : 'blank'],
+      judge: async (_query, a, b) => {
+        judgeCalls.push([a, b]);
+        // First presentation (with-arm as A): pick A. Swapped: pick B (with-arm).
+        return a === responses.block ? 'A' : 'B';
+      },
+    });
+    expect(judgeCalls).toEqual([
+      [responses.block, responses.blank],
+      [responses.blank, responses.block],
+    ]);
+    expect(results[0]).toMatchObject({
+      blockCarriesId: true,
+      factInBlock: true,
+      factHitWith: true,
+      counterfactualHit: false,
+      outcome: 'win',
+    });
+    expect(metrics.winRate).toBe(1);
+  });
+
+  it('records a counterfactual hit when the blank arm already answers correctly', async () => {
+    const { results, metrics } = await runHelpfulnessEval({
+      scenarios: [scenario('s1', 'fact')],
+      clear: async () => {},
+      seed: async () => ({ 'seed-a': 'real-1' }),
+      retrieve: async () => [slice('the fact')],
+      respond: async () => 'the fact is here',
+      judge: async () => 'tie',
+    });
+    expect(results[0].counterfactualHit).toBe(true);
+    expect(results[0].factHitWith).toBe(true);
+    expect(metrics.counterfactualHits).toBe(1);
+    expect(metrics.deterministicWins).toBe(0);
+  });
+
+  it('skips the A/B when retrieval surfaced nothing (no block to inject)', async () => {
+    let judged = 0;
+    const { results } = await runHelpfulnessEval({
+      scenarios: [scenario('s1', 'fact')],
+      clear: async () => {},
+      seed: async () => ({ 'seed-a': 'real-1' }),
+      retrieve: async () => [],
+      respond: async (_query, block) => (block ? 'with' : 'without'),
+      judge: async () => {
+        judged += 1;
+        return 'A';
+      },
+    });
+    expect(judged).toBe(0);
+    expect(results[0].outcome).toBeNull();
+    expect(results[0].blockCarriesId).toBe(false);
+  });
+});
