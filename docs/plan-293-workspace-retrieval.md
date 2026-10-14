@@ -222,7 +222,7 @@ or synonym dictionaries; persisting memory-eval metrics to a rollup; the
 
 | Stage | Baseline (#289) | After #293 |
 | --- | --- | --- |
-| 1 — gate precision / recall / fireRate | 100% / 100% / 50% (n=8) | 100% / 75% / 37.5% (n=8) — see note |
+| 1 — gate precision / recall / fireRate | 100% / 100% / 50% (n=8) | stochastic, independent of #293 — see note |
 | 2 — retrieval expectedMetRate / surfacedRate | 83.3% / 50% (n=6) | 83.3% / **66.7%** (n=6) |
 | 2 — by category | direct 1/1, file 1/1, task 1/1, paraphrase 0/1, deleted-seed 0/1, out-of-pool 0/1 | direct 1/1, file 1/1, task 1/1, paraphrase 0/1, deleted-seed 0/1, **out-of-pool 1/1** |
 | 3 — helpfulness (judge) | not run | not run (not wired) |
@@ -236,10 +236,12 @@ because the flipped `out-of-pool` expectation now matches its (surfaced) observa
 shared content words, so it is #294's case. `deleted-seed` stays excluded by `deletedAt`.
 
 Stage 1 is a separate classifier (the gate model, not the retrieval ranker), so #293
-cannot affect it; its rerun observed 100% / 75% / 37.5% (`gate-move-decision` missed) versus
-the #289 baseline 100% / 100% / 50%. That is the stochastic aux model, not this change —
-stage 1 never calls the retrieval service (the vote gates the call, per decision 8). The
-retrieval-stage numbers are the deterministic part of the suite and are exact.
+cannot affect it; its rerun observed 100% / 75% / 37.5% (`gate-move-decision` missed) on
+one run and 100% / 100% / 50% on a later one, versus the #289 baseline 100% / 100% / 50%.
+That is the stochastic aux model, not this change — stage 1 never calls the retrieval
+service (the vote gates the call, per decision 8), so its number must not be read as an
+#293 "after" value. The retrieval-stage numbers are the deterministic part of the suite
+and are exact.
 
 **Precision tradeoff.** Not measurable with this corpus: it has no labelled distractor
 seeds, so "fraction of surfaced slices that are relevant" cannot be computed. Reading
@@ -304,6 +306,18 @@ seed is reachable, not that filler was ignored.
 7. **Title as document text.** Chat/task titles are display-only today (scoring is
    text-only). Should titles contribute to the BM25 document? Left unchanged to avoid an
    unmeasured recall shift.
+8. **The new `messages` index migration has no automated test (NEW).** The repo has no
+   migration test harness — jest roots are `apps/server/src` and `apps/shared/src`, and no
+   existing migration carries a test — so the `{ sessionId: 1, timestamp: -1 }` migration
+   (existence check, collection-create path, `down` dropIndex-by-spec) is verified only by
+   inspection and a manual `npm run db:migrate`. Is a lightweight migration harness
+   (mongodb-memory-server, one suite) wanted so this and future migrations are CI-covered?
+9. **`$in(sessionIds)` grows with the number of sessions (NEW).** The whole-corpus read
+   builds a `sessionId: { $in: [...] }` array sized to the user's session count, so the
+   query document itself is O(sessions) and is sent on every retrieval turn. At thousands
+   of sessions this is both a query-size and a planner concern. Options: page the session
+   set, denormalise a `userId` onto `messages` and read by owner, or accept it at personal
+   scale. Left unaddressed pending the same cost measurement as Open question 3.
 
 ## Follow-ups
 

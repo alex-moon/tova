@@ -92,13 +92,32 @@ describe('workspaceRetrievalService', () => {
     // N=3; A=`rare`, B=`common`, C=`common`; q=`rare common`. The rarer term
     // carries the higher IDF, so A outranks B.
     it('weights rare terms above common terms (IDF)', () => {
+      const at = new Date('2026-06-01');
       const picks = pickTopSlices('rare common', [
-        slice({ id: 'A', text: 'rare' }),
-        slice({ id: 'B', text: 'common' }),
-        slice({ id: 'C', text: 'common' }),
+        slice({ id: 'A', text: 'rare', at }),
+        slice({ id: 'B', text: 'common', at }),
+        slice({ id: 'C', text: 'common', at }),
       ]);
       expect(picks.map((p) => p.slice.id)).toEqual(['A', 'B', 'C']);
       expect(picks[0].score).toBeGreaterThan(picks[1].score);
+    });
+
+    // The non-negative IDF form keeps a term that appears in *every* document
+    // slightly positive, so a ubiquitous-but-relevant slice still surfaces
+    // (classic BM25 IDF can go negative and drop it).
+    it('still scores a term present in every document', () => {
+      const picks = pickTopSlices('budget', [
+        slice({ id: 'A', text: 'budget' }),
+        slice({ id: 'B', text: 'budget' }),
+      ]);
+      expect(picks.map((p) => p.slice.id)).toEqual(['A', 'B']);
+      expect(picks[0].score).toBeGreaterThan(0);
+    });
+
+    it('ignores a query term absent from every document', () => {
+      const withAbsent = pickTopSlices('budget zzzz', [slice({ id: 'A', text: 'budget' })]);
+      const withoutAbsent = pickTopSlices('budget', [slice({ id: 'A', text: 'budget' })]);
+      expect(withAbsent).toEqual(withoutAbsent);
     });
 
     it('breaks equal scores by recency (at desc) then id asc', () => {

@@ -120,7 +120,19 @@ export const pickTopSlices = (
   const queryTerms = [...promptWords(prompt)];
   if (queryTerms.length === 0) return [];
 
-  const docs = slices.map((slice) => tokenize(slice.text));
+  // Tokenise each document once into a term-frequency map plus its token
+  // count. Building the maps up front means `df` is a `has` lookup per term
+  // (O(total tokens + Q·D)) rather than a re-scan of every document per query
+  // term — the full-corpus read makes that difference matter.
+  const docs = slices.map((slice) => {
+    const tf = new Map<string, number>();
+    let length = 0;
+    for (const term of tokenize(slice.text)) {
+      tf.set(term, (tf.get(term) ?? 0) + 1);
+      length += 1;
+    }
+    return { tf, length };
+  });
   const avgdl = docs.reduce((sum, doc) => sum + doc.length, 0) / N;
   // Every document tokenises to nothing (avgdl 0): IDF/length maths divides by
   // zero and no term can overlap, so nothing is rankable.
@@ -129,23 +141,21 @@ export const pickTopSlices = (
   const df = new Map<string, number>();
   for (const term of queryTerms) {
     let count = 0;
-    for (const doc of docs) if (doc.includes(term)) count += 1;
+    for (const doc of docs) if (doc.tf.has(term)) count += 1;
     df.set(term, count);
   }
 
   return (
     slices
       .map((slice, i) => {
-        const doc = docs[i];
-        const tf = new Map<string, number>();
-        for (const term of doc) tf.set(term, (tf.get(term) ?? 0) + 1);
+        const { tf, length } = docs[i];
         let score = 0;
         for (const term of queryTerms) {
           const freq = tf.get(term);
           if (!freq) continue;
           const termDf = df.get(term) ?? 0;
           const idf = Math.log(1 + (N - termDf + 0.5) / (termDf + 0.5));
-          const norm = freq + BM25_K1 * (1 - BM25_B + BM25_B * (doc.length / avgdl));
+          const norm = freq + BM25_K1 * (1 - BM25_B + BM25_B * (length / avgdl));
           score += idf * ((freq * (BM25_K1 + 1)) / norm);
         }
         return { slice, score };
