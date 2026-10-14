@@ -154,6 +154,27 @@ describe('runEvalSchedulerTick (#225/#289)', () => {
     );
     expect(toolRuns).toBe(1);
   });
+
+  it('#289 T8: a throwing idempotency check does not skip the next suite', async () => {
+    // A transient Mongo error in one suite's `hasRun` must not abort the whole
+    // tick (which would silently skip the next suite for the window).
+    let memoryRuns = 0;
+    await runEvalSchedulerTick(
+      [
+        {
+          kind: 'tool-use',
+          hasRun: async () => {
+            throw new Error('mongo blip');
+          },
+          run: async () => undefined,
+        },
+        memorySuite('memory', async () => void (memoryRuns += 1)),
+      ],
+      opts,
+      at('2026-10-07T12:00:00Z'),
+    );
+    expect(memoryRuns).toBe(1);
+  });
 });
 
 describe('startEvalScheduler (#225)', () => {

@@ -131,12 +131,14 @@ export const runEvalSchedulerTick = async (
   if (!opts.enabled) return;
   if (!dueNow(opts, now)) return;
   for (const suite of suites) {
-    if (await suite.hasRun(now)) continue;
+    // Both the per-kind idempotency check and the run are isolated per suite:
+    // a transient Mongo error in one suite's `hasRun` must not skip the next
+    // suite for the tick (the run service settles its own lease to `error`).
     try {
+      if (await suite.hasRun(now)) continue;
       await suite.run();
     } catch {
-      // A failed suite must not block the next one; the run service settles
-      // the lease to `error` itself, so there is nothing to rethrow here.
+      // A failed suite must not block the next one.
     }
   }
 };
