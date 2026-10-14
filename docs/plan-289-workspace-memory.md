@@ -1096,7 +1096,7 @@ possible.
   and assert `clear` was called on the way out.
 - Verify: `npm run ci`.
 
-### T14f — Responder generation budget guard (stage-3 hardening)  [dep: none; before T9]
+### T14f — Responder generation budget guard (stage-3 hardening)  [DONE]
 
 - The stage-3 responder uses `max_tokens: 512` (`helpfulnessEval.ts:232`); a fact
   late in a long answer can be truncated, scoring a backbone miss for a
@@ -1317,7 +1317,7 @@ scheduled** (D13/OQ6). The task depends on no open question.
   failure does not block the tool-use suite (and vice versa).
 - Verify: `npm run ci`.
 
-### T9 — Enlarged baseline (all three stages)  [dep: T1b-i, T14a, T14e, T14f, T15a–d]
+### T9 — Enlarged baseline (all three stages)  [DONE — captured 2026-10-14, see the Done list for the numbers]
 
 Deliverable: a recorded, reproducible baseline for all three stages, and the
 run-to-run delta that tests the determinism assumption.
@@ -1937,6 +1937,24 @@ unknowns):**
   in both `runHelpfulnessEval` and `runRetrievalEval`; unit tests assert `clear`
   runs on the way out when the responder/retrieve throws.
 - [ ] T14f responder generation-budget guard (raise `max_tokens`, flag truncation).
+  **Done 2026-10-14:** `finishReason` plumbed through `NeutralCompletion.choices`
+  (one shared `buildConnector` covers all three providers — Mastra's `FullOutput`
+  already carried it; the pass-5 "connector-shape change" blocker was smaller than
+  it looked). Responder budget raised 512 → 1024 (the production output-token
+  floor, so the eval stays production-faithful — OQ34). `finishReasons` recorded
+  per case; `helpfulnessMetrics.truncated` counts a `length` stop on either arm;
+  CLI prints both.
+- [x] T9 enlarged baseline (all three stages, twice). **Captured 2026-10-14, post
+  relabel + Qwen judge.** Stage 1 (two runs): precision 78.6% / 80.0%, recall
+  91.7% / 92.3%; explicit recall 100% both runs, continuation 75% (3/4) both;
+  the three relabelled bare-deixis false positives are stable across runs;
+  errors 0, timeouts 0-2 (recorded distinctly per T15b). Stage 2 (deterministic,
+  identical both runs): surfacedRate 68.2% (15/22), expectedMetRate 77.3%;
+  direct 3/3, file 5/5, task 5/5, out-of-pool 2/2, deleted-seed 0/2,
+  paraphrase 0/5 (the #294 vector target — vector stage inactive without Atlas).
+  Stage 3 (Qwen3-235B judge, two runs): winRate 96.7% / 93.3% (n=15 judged;
+  27 wins, 0 losses, 3 ties, 0 errors across both runs), factHitRate 63.6%,
+  truncated 0/0. See the issue for the full tables and the T10 proposal.
   **Open, with a named blocker:** `NeutralCompletion` (`llmTypes.ts:100`) carries
   no `finish_reason`, so flagging truncation needs connector plumbing (see the
   task for the split-into-follow-up option); deferred to its own pass.
