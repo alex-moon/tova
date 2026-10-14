@@ -15,6 +15,24 @@ describe('memory corpus (#289)', () => {
     expect(GATE_CASES.some((c) => !c.refersBack)).toBe(true);
   });
 
+  it('gate set clears the minimum-N bar with both labels well represented', () => {
+    // A percentage over single digits is noise; the plan's provisional bar is
+    // >= 30 cases with >= 12 of each label before a threshold is ratified.
+    expect(GATE_CASES.length).toBeGreaterThanOrEqual(30);
+    const positives = GATE_CASES.filter((c) => c.refersBack).length;
+    const negatives = GATE_CASES.filter((c) => !c.refersBack).length;
+    expect(positives).toBeGreaterThanOrEqual(12);
+    expect(negatives).toBeGreaterThanOrEqual(12);
+  });
+
+  it('has history-only positives and history-bearing negatives', () => {
+    // A continuation's refer-back lives only in the transcript, so it must
+    // carry `history`; conversely a fresh ask can follow history without
+    // referring back, so history alone must not imply a positive.
+    expect(GATE_CASES.some((c) => c.refersBack && (c.history?.length ?? 0) > 0)).toBe(true);
+    expect(GATE_CASES.some((c) => !c.refersBack && (c.history?.length ?? 0) > 0)).toBe(true);
+  });
+
   it('scenarios have unique ids, resolvable expected seeds, and a fact', () => {
     const ids = MEMORY_SCENARIOS.map((s) => s.id);
     expect(new Set(ids).size).toBe(ids.length);
