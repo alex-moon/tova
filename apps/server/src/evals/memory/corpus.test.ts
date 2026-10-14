@@ -63,13 +63,42 @@ describe('memory corpus (#289)', () => {
     }
   });
 
-  it('the paraphrase scenario shares no content word between query and seed', () => {
-    const scenario = MEMORY_SCENARIOS.find((s) => s.category === 'paraphrase');
-    expect(scenario).toBeDefined();
-    const queryWords = promptWords(scenario!.query);
-    for (const seed of scenario!.seeds) {
-      const overlap = [...promptWords(seed.text)].filter((word) => queryWords.has(word));
-      expect(overlap).toEqual([]);
+  it('every paraphrase scenario shares no content word between query and seed', () => {
+    // Asserted per scenario, not just the first: a paraphrase that accidentally
+    // shares a keyword would be scored by lexical retrieval and stop being a
+    // RAG-headroom case, silently shrinking the #293/#294 target set.
+    const paraphrases = MEMORY_SCENARIOS.filter((s) => s.category === 'paraphrase');
+    expect(paraphrases.length).toBeGreaterThanOrEqual(5);
+    for (const scenario of paraphrases) {
+      const queryWords = promptWords(scenario.query);
+      for (const seed of scenario.seeds) {
+        const overlap = [...promptWords(seed.text)].filter((word) => queryWords.has(word));
+        expect(overlap).toEqual([]);
+      }
+    }
+  });
+
+  it('clears the per-category minimum-N bars', () => {
+    // A percentage over a handful of cases is noise, so the plan sets a floor
+    // per category before a retrieval/hit-rate threshold is treated as evidence.
+    const count = (category: string) =>
+      MEMORY_SCENARIOS.filter((s) => s.category === category).length;
+    expect(MEMORY_SCENARIOS.length).toBeGreaterThanOrEqual(20);
+    expect(count('paraphrase')).toBeGreaterThanOrEqual(5);
+    expect(count('file')).toBeGreaterThanOrEqual(5);
+    expect(count('task')).toBeGreaterThanOrEqual(5);
+    expect(count('deleted-seed')).toBeGreaterThanOrEqual(2);
+    expect(count('out-of-pool')).toBeGreaterThanOrEqual(2);
+  });
+
+  it('carries the expected fact in the expected seed (stage-3 backbone is reachable)', () => {
+    // Stage 3 asserts the with-arm answer contains `expectedFact`; that is only
+    // a fair check if the fact the answer should echo is actually in the slice
+    // retrieval is expected to surface.
+    for (const scenario of MEMORY_SCENARIOS) {
+      const seed = scenario.seeds.find((s) => s.id === scenario.expectedSliceId);
+      expect(seed).toBeDefined();
+      expect(seed!.text.toLowerCase()).toContain(scenario.expectedFact.toLowerCase());
     }
   });
 
