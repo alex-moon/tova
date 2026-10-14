@@ -51,6 +51,9 @@ const main = async (): Promise<void> => {
       `  precision=${pct(gate.metrics.precision)} recall=${pct(gate.metrics.recall)} ` +
         `fireRate=${pct(gate.metrics.fireRate)} (n=${gate.metrics.total})`,
     );
+    for (const [subtype, m] of Object.entries(gate.metrics.recallBySubtype)) {
+      console.log(`    ${subtype}: recall ${pct(m.recall)} (${m.truePos}/${m.total})`);
+    }
 
     console.log('\nStage 2 — retrieval hit-rate (expected slice surfaced):');
     for (const r of retrieval.results) {

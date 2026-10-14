@@ -25,6 +25,41 @@ describe('memory corpus (#289)', () => {
     expect(negatives).toBeGreaterThanOrEqual(12);
   });
 
+  it('records a refer-back subtype on every positive and none on negatives', () => {
+    // T1b-i/OQ12: a per-subtype recall bar is only possible if every positive
+    // carries its subtype. Negatives are fresh asks, so they carry none.
+    const subtypes = new Set(['explicit', 'continuation', 'bare-deixis']);
+    for (const testCase of GATE_CASES) {
+      if (testCase.refersBack) {
+        expect(subtypes.has(testCase.subtype ?? '')).toBe(true);
+      } else {
+        expect(testCase.subtype).toBeUndefined();
+      }
+    }
+  });
+
+  it('pins the subtype counts so the set cannot silently rebalance', () => {
+    const count = (subtype: string) => GATE_CASES.filter((c) => c.subtype === subtype).length;
+    expect(count('explicit')).toBe(9);
+    expect(count('continuation')).toBe(4);
+    expect(count('bare-deixis')).toBe(5);
+  });
+
+  it('keeps every bare-deixis positive history-free and every continuation history-bearing', () => {
+    // Bare deixis is the ambiguous subtype (OQ12): the referent is unresolvable
+    // in the input the gate sees, so a bare-deictic positive must not smuggle a
+    // transcript that would make it resolvable. A continuation is the opposite —
+    // its refer-back lives only in the transcript, so it must carry one.
+    for (const testCase of GATE_CASES) {
+      if (testCase.subtype === 'bare-deixis') {
+        expect(testCase.history?.length ?? 0).toBe(0);
+      }
+      if (testCase.subtype === 'continuation') {
+        expect(testCase.history?.length ?? 0).toBeGreaterThan(0);
+      }
+    }
+  });
+
   it('has history-only positives and history-bearing negatives', () => {
     // A continuation's refer-back lives only in the transcript, so it must
     // carry `history`; conversely a fresh ask can follow history without

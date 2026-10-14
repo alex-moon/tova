@@ -7,7 +7,7 @@ import {
 import { evalUserId } from '../mongoSource';
 import { GATE_CASES, MEMORY_SCENARIOS } from './corpus';
 import { clearMemoryCorpus, seedMemoryScenario, type SeedIdMap } from './memorySource';
-import type { GateCase, MemoryScenario, ScenarioCategory } from './types';
+import type { GateCase, GateSubtype, MemoryScenario, ScenarioCategory } from './types';
 
 /*
  * #289 memory-eval runner: the deterministic stages, over the corpus in
@@ -27,6 +27,18 @@ export interface GateCaseResult {
   expected: boolean;
   observed: boolean;
   pass: boolean;
+  /** Refer-back subtype of a positive; absent on negatives. */
+  subtype?: GateSubtype;
+}
+
+/** Recall over one refer-back subtype (positives only). */
+export interface SubtypeRecall {
+  /** Positives of this subtype. */
+  total: number;
+  truePos: number;
+  falseNeg: number;
+  /** tp / total; null when the subtype has no cases. */
+  recall: number | null;
 }
 
 export interface GateMetrics {
@@ -41,6 +53,8 @@ export interface GateMetrics {
   recall: number | null;
   /** Fraction of turns the gate fired on (the base-rate companion to precision). */
   fireRate: number;
+  /** Recall per refer-back subtype, so a bar can be set per subtype (T1b-i/OQ12). */
+  recallBySubtype: Record<string, SubtypeRecall>;
 }
 
 export const gateMetrics = (results: GateCaseResult[]): GateMetrics => {
@@ -48,14 +62,28 @@ export const gateMetrics = (results: GateCaseResult[]): GateMetrics => {
   let falsePos = 0;
   let trueNeg = 0;
   let falseNeg = 0;
+  const bySubtype: Record<string, { total: number; truePos: number; falseNeg: number }> = {};
   for (const r of results) {
     if (r.expected && r.observed) truePos += 1;
     else if (!r.expected && r.observed) falsePos += 1;
     else if (!r.expected && !r.observed) trueNeg += 1;
     else falseNeg += 1;
+    if (r.subtype) {
+      const bucket = (bySubtype[r.subtype] ??= { total: 0, truePos: 0, falseNeg: 0 });
+      bucket.total += 1;
+      if (r.expected && r.observed) bucket.truePos += 1;
+      else if (r.expected && !r.observed) bucket.falseNeg += 1;
+    }
   }
   const positives = truePos + falsePos;
   const labelled = truePos + falseNeg;
+  const recallBySubtype: Record<string, SubtypeRecall> = {};
+  for (const [subtype, bucket] of Object.entries(bySubtype)) {
+    recallBySubtype[subtype] = {
+      ...bucket,
+      recall: bucket.total ? bucket.truePos / bucket.total : null,
+    };
+  }
   return {
     total: results.length,
     truePos,
@@ -65,6 +93,7 @@ export const gateMetrics = (results: GateCaseResult[]): GateMetrics => {
     precision: positives ? truePos / positives : null,
     recall: labelled ? truePos / labelled : null,
     fireRate: results.length ? positives / results.length : 0,
+    recallBySubtype,
   };
 };
 
@@ -159,6 +188,7 @@ export const runGateEval = async (
       expected: testCase.refersBack,
       observed,
       pass: observed === testCase.refersBack,
+      subtype: testCase.subtype,
     });
   }
   return { results, metrics: gateMetrics(results) };

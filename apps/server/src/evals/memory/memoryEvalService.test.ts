@@ -51,6 +51,34 @@ describe('gateMetrics (#289)', () => {
     expect(metrics.recall).toBe(0);
     expect(metrics.fireRate).toBe(0);
   });
+
+  it('reports recall per refer-back subtype, ignoring negatives', () => {
+    const withSubtype = (
+      subtype: GateCaseResult['subtype'],
+      expected: boolean,
+      observed: boolean,
+    ): GateCaseResult => ({ ...gate(expected, observed), subtype });
+    const metrics = gateMetrics([
+      withSubtype('explicit', true, true),
+      withSubtype('explicit', true, true),
+      withSubtype('continuation', true, false),
+      withSubtype('bare-deixis', true, true),
+      gate(false, false),
+    ]);
+    expect(metrics.recallBySubtype.explicit).toEqual({
+      total: 2,
+      truePos: 2,
+      falseNeg: 0,
+      recall: 1,
+    });
+    expect(metrics.recallBySubtype.continuation).toEqual({
+      total: 1,
+      truePos: 0,
+      falseNeg: 1,
+      recall: 0,
+    });
+    expect(metrics.recallBySubtype['bare-deixis'].recall).toBe(1);
+  });
 });
 
 describe('retrievalMetrics (#289)', () => {

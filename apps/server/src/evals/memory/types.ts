@@ -62,6 +62,15 @@ export interface MemoryScenario {
   poolFill?: number;
 }
 
+/**
+ * How a positive turn refers back. `explicit` names the referent; `continuation`
+ * carries it only in `history`; `bare-deixis` relies on a pronoun/deictic with no
+ * content word and (by construction) no history. Recording the subtype lets
+ * recall be reported per subtype (T1b-i): a bar set on bare deixis is a
+ * different claim from one set on explicit refer-backs (OQ12/OQ36).
+ */
+export type GateSubtype = 'explicit' | 'continuation' | 'bare-deixis';
+
 /** One hand-labelled gate case: does this turn refer back to the user's past work? */
 export interface GateCase {
   id: string;
@@ -70,5 +79,7 @@ export interface GateCase {
   history?: { role: 'user' | 'assistant'; content: string }[];
   /** Hand label: true = the workspace gate should fire. */
   refersBack: boolean;
+  /** Refer-back subtype; set on every positive, absent on negatives. */
+  subtype?: GateSubtype;
   note?: string;
 }
