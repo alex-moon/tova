@@ -23,6 +23,8 @@
     "db:restore": "tsx scripts/db-sync.ts restore",
     "db:sync": "tsx scripts/db-sync.ts sync",
     "db:password": "tsx scripts/db-sync.ts password",
+    "db:backfill-embeddings": "tsx scripts/backfill-embeddings.ts",
+    "db:vector-index": "tsx scripts/create-vector-index.ts",
     "logs": "tsx scripts/loki.ts",
     "evals": "tsx scripts/run-evals.ts",
     "evals:memory": "tsx scripts/run-memory-evals.ts",
