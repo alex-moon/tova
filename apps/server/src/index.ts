@@ -25,12 +25,13 @@ import { startTaskPoller } from './services/taskService';
 import { processTaskJob } from './services/taskProcessor';
 import { startTraceStatsPoller } from './services/traceStatsCacheService';
 import { processAssetConversionJob } from './services/assetJobProcessor';
-import { startEvalScheduler } from './services/evalScheduler';
+import { startEvalScheduler, hasRunForUtcDay } from './services/evalScheduler';
 import {
   resolveScheduledModels,
   startEvalRun,
   langsmithClientFromEnv,
 } from './services/evalRunService';
+import { startMemoryEvalRun } from './services/memoryEvalRunService';
 import { config } from './config';
 import { attachConsoleCapture } from './services/logService';
 import { requestLog } from './middleware/requestLog';
@@ -167,25 +168,42 @@ export const startServer = async (): Promise<Server> => {
     // is the queue/model/runtime, not the driver).
     startTaskPoller(processTaskJob);
 
-    // #225: daily eval suite. Off unless TOVA_EVAL_SCHEDULE=daily; started in
-    // the same non-test block so tests never inherit a live provider job.
+    // #225/#289: daily eval suites. Off unless TOVA_EVAL_SCHEDULE=daily;
+    // started in the same non-test block so tests never inherit a live provider
+    // job. Both suites run in one tick, strictly sequentially (D19), each with
+    // its own per-kind idempotency (a tool-use run does not suppress memory).
     startEvalScheduler(
-      async () => {
-        // Best-effort LangSmith export (Decision 4), resolved from config so
-        // the service never reaches for env ad hoc (#142).
-        const langsmithClient = await langsmithClientFromEnv(config.langsmith.apiKey);
-        return startEvalRun(
-          {
-            models: resolveScheduledModels({
-              models: config.evals.models,
-              model: config.evals.model,
-              provider: config.evals.provider,
-            }),
-            trigger: 'scheduled',
+      [
+        {
+          kind: 'tool-use',
+          hasRun: (now) => hasRunForUtcDay(now, 'tool-use'),
+          run: async () => {
+            // Best-effort LangSmith export (Decision 4), resolved from config
+            // so the service never reaches for env ad hoc (#142).
+            const langsmithClient = await langsmithClientFromEnv(config.langsmith.apiKey);
+            return startEvalRun(
+              {
+                models: resolveScheduledModels({
+                  models: config.evals.models,
+                  model: config.evals.model,
+                  provider: config.evals.provider,
+                }),
+                trigger: 'scheduled',
+              },
+              { langsmithClient },
+            );
           },
-          { langsmithClient },
-        );
-      },
+        },
+        {
+          kind: 'memory',
+          hasRun: (now) => hasRunForUtcDay(now, 'memory'),
+          // Stage 2 only (D13/OQ26): the 36 live gate calls (stage 1) and the
+          // judge/responder calls (stage 3) stay off the unattended path. The
+          // model identities are config-sourced in `memoryEvalRunService`, so a
+          // future stage-1/stage-3 schedule is a config change, not a code one.
+          run: () => startMemoryEvalRun({ stages: ['retrieval'], trigger: 'scheduled' }),
+        },
+      ],
       {
         enabled: config.evals.schedule === 'daily',
         hourUtc: config.evals.hourUtc ? Number(config.evals.hourUtc) : undefined,
