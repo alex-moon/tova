@@ -123,8 +123,12 @@ describe('workspaceRetrievalService', () => {
     });
 
     it('ignores a query term absent from every document', () => {
-      const withAbsent = pickTopSlices('budget zzzz', [slice({ id: 'A', text: 'budget' })]);
-      const withoutAbsent = pickTopSlices('budget', [slice({ id: 'A', text: 'budget' })]);
+      // Pin `at` so the two runs differ only by the absent term; the default
+      // `new Date()` can straddle a millisecond between calls and flip
+      // deep-equality (same latent flake from #293 as above).
+      const at = new Date('2026-06-01');
+      const withAbsent = pickTopSlices('budget zzzz', [slice({ id: 'A', text: 'budget', at })]);
+      const withoutAbsent = pickTopSlices('budget', [slice({ id: 'A', text: 'budget', at })]);
       expect(withAbsent).toEqual(withoutAbsent);
     });
 
