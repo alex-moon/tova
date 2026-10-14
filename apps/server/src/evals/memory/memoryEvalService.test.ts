@@ -135,6 +135,36 @@ describe('gateMetrics (#289)', () => {
     // fireRate is over evaluated cases, so a dead call cannot depress it.
     expect(metrics.fireRate).toBe(0.5);
   });
+
+  it('keeps the subtype partition intact when a positive case failed (T15b x T1b-i)', () => {
+    // A failed positive carries its subtype but must be excluded from *both* the
+    // overall confusion matrix and the subtype buckets, or per-subtype recall
+    // would diverge from overall recall. A regression that counted the failed
+    // row in `recallBySubtype` but not `falseNeg` (or vice versa) would move a
+    // per-subtype bar without moving overall recall, so pin the partition.
+    const withSubtype = (
+      subtype: GateCaseResult['subtype'],
+      expected: boolean,
+      observed: boolean,
+    ): GateCaseResult => ({ ...gate(expected, observed), subtype });
+    const metrics = gateMetrics([
+      withSubtype('explicit', true, true),
+      withSubtype('continuation', true, false),
+      { ...withSubtype('bare-deixis', true, false), failed: true },
+      gate(false, false),
+    ]);
+    expect(metrics.evaluated).toBe(3);
+    expect(metrics.errors).toBe(1);
+    expect(metrics.falseNeg).toBe(1);
+    // The failed bare-deixis positive is not a false negative and not bucketed.
+    expect(metrics.recallBySubtype['bare-deixis']).toBeUndefined();
+    const buckets = Object.values(metrics.recallBySubtype);
+    const sum = (pick: (b: (typeof buckets)[number]) => number) =>
+      buckets.reduce((n, b) => n + pick(b), 0);
+    expect(sum((b) => b.total)).toBe(metrics.truePos + metrics.falseNeg);
+    expect(sum((b) => b.truePos)).toBe(metrics.truePos);
+    expect(sum((b) => b.falseNeg)).toBe(metrics.falseNeg);
+  });
 });
 
 describe('retrievalMetrics (#289)', () => {

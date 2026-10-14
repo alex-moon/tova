@@ -298,6 +298,30 @@ describe('runHelpfulnessEval (#289)', () => {
     // One clear per scenario start (2) plus the finally clear (1).
     expect(clears).toBe(3);
   });
+
+  it('clears fixtures in a finally when seeding throws (T14e)', async () => {
+    // A thrown seed (a Mongo write failure) must not leak the partially-seeded
+    // scenario under the shared `evalUserId` — the same class of leak the
+    // responder-throw case covers, via the other fixture seam.
+    let clears = 0;
+    await expect(
+      runHelpfulnessEval({
+        scenarios: [scenario('s1', 'fact')],
+        clear: async () => {
+          clears += 1;
+        },
+        seed: async () => {
+          throw new Error('mongo down');
+        },
+        retrieve: async () => [slice('the fact')],
+        respond: async () => 'the fact is here',
+        pace: noPace,
+        judge: async () => 'A',
+      }),
+    ).rejects.toThrow('mongo down');
+    // One clear at the scenario start, one in the finally.
+    expect(clears).toBe(2);
+  });
 });
 
 describe('runJudgePreflight (#289 T14d)', () => {
