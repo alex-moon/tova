@@ -16,10 +16,11 @@ import { config } from '../config';
  * retrieval time; nothing is copied into a new store (the ticket's "no eager
  * copies into library-shaped docs").
  *
- * Retrieval is personal-scale and lexical (#251: no vector infra in v1):
- * keyword-overlap scoring over a recent bounded candidate pool, recency as a
- * tiebreak only. An overlap of zero scores zero, so recency alone cannot drag
- * an unrelated slice into the block.
+ * Retrieval is personal-scale and lexical (#251: no vector infra in v1): since
+ * #293 it ranks the user's whole non-deleted chat corpus with BM25, over one
+ * candidate set assembled at read time (see `collectWorkspaceSlices`). A slice
+ * with zero query-term overlap scores zero, so recency alone cannot drag an
+ * unrelated slice into the block.
  *
  * The gate (does a turn deserve retrieval at all?) lives in
  * `enrichmentService.ts`; this module is pure retrieval + layout so scoring
@@ -31,7 +32,9 @@ import { config } from '../config';
  * `entityRetrievalService`, #256). Lowercase, split on non-word characters,
  * drop single characters and stopwords that carry no linking signal — "the
  * hotel" still matches a slice mentioning "hotel" via `hotel`, but 'the'
- * alone must not surface unrelated slices.
+ * alone must not surface unrelated slices. Returns terms **with multiplicity**
+ * so BM25 can measure document term frequency; `promptWords` wraps it in a
+ * `Set` for the callers that only need membership.
  */
 const WORD_PATTERN = /[a-z0-9']+/g;
 
@@ -60,10 +63,12 @@ const STOPWORDS = new Set([
   'was',
 ]);
 
-export const promptWords = (prompt: string): Set<string> => {
-  const words = prompt.toLowerCase().replace(/\s+/g, ' ').trim().match(WORD_PATTERN) ?? [];
-  return new Set(words.filter((word) => word.length > 1 && !STOPWORDS.has(word)));
+export const tokenize = (text: string): string[] => {
+  const words = text.toLowerCase().replace(/\s+/g, ' ').trim().match(WORD_PATTERN) ?? [];
+  return words.filter((word) => word.length > 1 && !STOPWORDS.has(word));
 };
+
+export const promptWords = (prompt: string): Set<string> => new Set(tokenize(prompt));
 
 // #251/decision: kill switch. Default OFF — a wrong injection pollutes every
 // turn, so the block ships opt-in until the gate evals exist (see
@@ -74,8 +79,7 @@ export const isWorkspaceMemoryEnabled = (): boolean => config.workspaceMemory.en
 // index in the same prompt budget (plan decision 4).
 export const BLOCK_CAP = 1200;
 
-// Candidate pool sizes: bounded so cost is flat regardless of history length.
-const MESSAGE_POOL = 200;
+// Asset/task candidate pools: still bounded (see the corpus-read comment).
 const ASSET_POOL = 50;
 const TASK_POOL = 50;
 const MAX_SLICES = 6;
@@ -89,32 +93,75 @@ export type WorkspaceSlice = {
 };
 
 /*
- * Deterministic score = keyword overlap × 10 + a small recency nudge, with a
- * hard floor at zero overlap (recency never lifts an irrelevant slice in).
- * The recency nudge is scaled so it can only reorder equals, not outrank a
- * slice with strictly more overlap.
+ * #293: BM25 ranking, replacing the naive overlap score. Parameters are
+ * standard defaults, exported so a future tuning change is a visible diff.
+ *
+ * score(q, d) = Σ_{t ∈ distinct(q)} idf(t) · (tf(t,d) · (k1 + 1))
+ *               / (tf(t,d) + k1 · (1 - b + b · |d| / avgdl))
+ * idf(t) = ln(1 + (N - df(t) + 0.5) / (df(t) + 0.5))   (non-negative form)
+ *
+ * `df` counts documents containing a term (set membership); query term
+ * frequency is fixed at 1. A query term absent from every document contributes
+ * nothing, and a slice with no query term at all scores 0 — so the
+ * "recency alone cannot surface an unrelated slice" invariant is preserved.
+ * BM25 is corpus-relative (IDF, `avgdl`), so there is no single-document
+ * `scoreSlice`; the ranker is pure (no Mongo, no `Date.now()`).
  */
-export const scoreSlice = (prompt: string, slice: { text: string; at: Date }): number => {
-  const words = promptWords(prompt);
-  if (words.size === 0) return 0;
-  const sliceWords = promptWords(slice.text);
-  let overlap = 0;
-  for (const word of words) if (sliceWords.has(word)) overlap += 1;
-  if (overlap === 0) return 0;
-  const ageDays = Math.max(0, Date.now() - new Date(slice.at).getTime()) / 86400000;
-  return overlap * 10 + Math.max(0, 5 - ageDays);
-};
+export const BM25_K1 = 1.2;
+export const BM25_B = 0.75;
 
 export const pickTopSlices = (
   prompt: string,
   slices: WorkspaceSlice[],
   n = MAX_SLICES,
-): { slice: WorkspaceSlice; score: number }[] =>
-  slices
-    .map((slice) => ({ slice, score: scoreSlice(prompt, slice) }))
-    .filter(({ score }) => score > 0)
-    .sort((a, b) => b.score - a.score)
-    .slice(0, n);
+): { slice: WorkspaceSlice; score: number }[] => {
+  const N = slices.length;
+  if (N === 0) return [];
+  const queryTerms = [...promptWords(prompt)];
+  if (queryTerms.length === 0) return [];
+
+  const docs = slices.map((slice) => tokenize(slice.text));
+  const avgdl = docs.reduce((sum, doc) => sum + doc.length, 0) / N;
+  // Every document tokenises to nothing (avgdl 0): IDF/length maths divides by
+  // zero and no term can overlap, so nothing is rankable.
+  if (avgdl === 0) return [];
+
+  const df = new Map<string, number>();
+  for (const term of queryTerms) {
+    let count = 0;
+    for (const doc of docs) if (doc.includes(term)) count += 1;
+    df.set(term, count);
+  }
+
+  return (
+    slices
+      .map((slice, i) => {
+        const doc = docs[i];
+        const tf = new Map<string, number>();
+        for (const term of doc) tf.set(term, (tf.get(term) ?? 0) + 1);
+        let score = 0;
+        for (const term of queryTerms) {
+          const freq = tf.get(term);
+          if (!freq) continue;
+          const termDf = df.get(term) ?? 0;
+          const idf = Math.log(1 + (N - termDf + 0.5) / (termDf + 0.5));
+          const norm = freq + BM25_K1 * (1 - BM25_B + BM25_B * (doc.length / avgdl));
+          score += idf * ((freq * (BM25_K1 + 1)) / norm);
+        }
+        return { slice, score };
+      })
+      .filter(({ score }) => score > 0)
+      // Total order: BM25 desc, then recency (`at` desc), then id asc, so the
+      // ranking is deterministic regardless of the engine's sort stability.
+      .sort(
+        (a, b) =>
+          b.score - a.score ||
+          new Date(b.slice.at).getTime() - new Date(a.slice.at).getTime() ||
+          (a.slice.id < b.slice.id ? -1 : a.slice.id > b.slice.id ? 1 : 0),
+      )
+      .slice(0, n)
+  );
+};
 
 /*
  * A bounded snippet centred on where the prompt actually matched, so the model
@@ -191,18 +238,27 @@ export const buildWorkspaceBlock = (
 };
 
 /*
- * The corpus read: a recent bounded pool of the user's messages (joined to
- * their session titles), extracted-asset text, and task streams, assembled into
+ * The corpus read: the user's whole non-deleted chat history (joined to session
+ * titles), extracted-asset text, and task streams, assembled into
  * prompt-independent `WorkspaceSlice[]`. Pure data — scoring and layout happen
  * in the callers, so the #289 hit-rate eval can match on slice IDs while the
  * chat path only ever wants the rendered block.
  *
+ * #293: the chat corpus is no longer a recency-bounded pool. A bounded window
+ * made an old relevant chat unreachable by construction — no amount of scoring
+ * fixes a candidate that was never fetched — so all of the user's non-deleted
+ * sessions and their `role:'user'` messages are read. The bound is now the
+ * user's own corpus (personal scale), not recency; the message read no longer
+ * sorts, because BM25 ignores insertion order and the read is bounded by the
+ * corpus. Assets and tasks keep explicit caps (their "old item unreachable"
+ * defect is tracked separately, not this ticket's stated failure).
+ *
  * Ownership is resolved session-first: `messages` is keyed by `sessionId`, not
  * by `userId`, so the user's sessions are the join key. Fetching the sessions
- * first (bounded, indexed by `{ userId, deletedAt, lastMessageAt }`) then
- * filtering messages by `sessionId` keeps the pool owned by construction — a
- * global `Message.find({ role: 'user' })` would be dominated by other users'
- * recent turns and could starve this user's own history out of the window.
+ * first (indexed by `{ userId, deletedAt, lastMessageAt }`) then filtering
+ * messages by `sessionId` keeps the corpus owned by construction — a global
+ * `Message.find({ role: 'user' })` would be dominated by other users' recent
+ * turns and could starve this user's own history out.
  * Tasks are owned directly (`Task.userId`) and read the same pool-first way.
  *
  * `excludeMessageId` drops the just-saved current turn (the routes run
@@ -231,11 +287,7 @@ export const collectWorkspaceSlices = async (
   excludeAssetId?: string,
 ): Promise<WorkspaceSlice[]> => {
   const uid = new mongoose.Types.ObjectId(userId);
-  const sessions = await Session.find({ userId: uid, deletedAt: null })
-    .sort({ lastMessageAt: -1 })
-    .limit(MESSAGE_POOL)
-    .select('title')
-    .lean();
+  const sessions = await Session.find({ userId: uid, deletedAt: null }).select('title').lean();
 
   const titleById = new Map(sessions.map((s) => [String(s._id), s.title as string] as const));
   const sessionIds = sessions.map((s) => s._id as mongoose.Types.ObjectId);
@@ -248,8 +300,6 @@ export const collectWorkspaceSlices = async (
       sessionId: { $in: sessionIds },
       _id: { $ne: excludeMessageId ?? null },
     })
-      .sort({ timestamp: -1 })
-      .limit(MESSAGE_POOL)
       .select('sessionId content timestamp')
       .lean(),
     Asset.find({

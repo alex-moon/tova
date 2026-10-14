@@ -351,6 +351,39 @@ describe('Chat route routing metadata', () => {
       }
     });
 
+    // #293: ranking changes must not alter flag-off behaviour. With the kill
+    // switch unset, the workspace vote firing still injects nothing and the
+    // retrieval service is never reached.
+    it('injects no workspace block when the flag is off, even if the vote fires (#293)', async () => {
+      const app = createApp();
+      const cookies = await registerUser(app, 'prompt-workspace-off@example.com');
+
+      const { enrichmentVotes } = jest.requireMock('../services/enrichmentService') as {
+        enrichmentVotes: jest.Mock;
+      };
+      enrichmentVotes.mockResolvedValueOnce({ files: false, workspace: true });
+      const retrieve = jest.spyOn(
+        jest.requireActual<typeof import('../services/workspaceRetrievalService')>(
+          '../services/workspaceRetrievalService',
+        ),
+        'retrieveWorkspaceBlock',
+      );
+      delete process.env.WORKSPACE_MEMORY_ENABLED;
+
+      try {
+        const response = await request(app)
+          .post('/api/chat')
+          .set('Cookie', Array.isArray(cookies) ? cookies : [cookies])
+          .send({ content: 'what did we decide about the budget' });
+
+        expect(response.status).toBe(200);
+        expect(systemContentFromCall()).not.toContain('<user:workspace>');
+        expect(retrieve).not.toHaveBeenCalled();
+      } finally {
+        retrieve.mockRestore();
+      }
+    });
+
     it("never leaks one user's customInstructions into another user's request", async () => {
       const app = createApp();
       const ownerCookies = await registerUser(app, 'prompt-owner@example.com');

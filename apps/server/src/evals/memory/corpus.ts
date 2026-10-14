@@ -8,8 +8,9 @@ import type { GateCase, MemoryScenario } from './types';
  *
  * The scenario categories are deliberate: `direct` and `file` are the easy
  * baseline, `paraphrase` and `task` are where lexical scoring is expected to
- * struggle, and `deleted-seed` / `out-of-pool` are misses by construction that
- * document the corpus's own limits (and the headroom #293/#294 measure).
+ * struggle, and `deleted-seed` is a miss by construction (excluded by
+ * `deletedAt`). `out-of-pool` was a miss by construction under the pre-#293
+ * bounded read; #293 searches the whole corpus, so it now expects a hit.
  */
 
 /** Hand-labelled gate set. Positives read as continuations; negatives are fresh asks. */
@@ -163,7 +164,7 @@ export const MEMORY_SCENARIOS: MemoryScenario[] = [
   },
   {
     id: 'retrieval-out-of-pool',
-    description: 'Seed buried beyond MESSAGE_POOL by newer messages: unreachable today.',
+    description: 'Seed buried beyond the old bounded pool by newer messages: reachable since #293.',
     category: 'out-of-pool',
     seeds: [
       {
@@ -176,7 +177,7 @@ export const MEMORY_SCENARIOS: MemoryScenario[] = [
     ],
     query: 'What is my travel insurance policy number?',
     expectedSliceId: 'seed-old-policy',
-    expectSurfaced: false,
+    expectSurfaced: true,
     expectedFact: 'AX-4471',
     poolFill: 210,
   },
