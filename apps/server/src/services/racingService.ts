@@ -22,17 +22,20 @@ import {
 import { overloadCoolOffMinutes } from './modelConfigService';
 
 /*
- * #232: hedged provider racing.
+ * #232: hedged provider racing. #316: flat four-way race.
  *
- * For the primary roster model (weighted pick in `rosterConfig`), every turn
- * fires the request to BOTH of its providers concurrently and keeps whichever
- * stream yields its first token first, aborting the loser immediately. On
- * total failure of the primary across both providers, the next model in the
- * roster is tried (up to a bounded number of attempts), reusing the #213 error
- * classification for transient vs hard errors.
+ * Every turn fires the request at EVERY live (model, provider) combo of the
+ * roster concurrently and keeps whichever stream yields its first token
+ * first; the losers abort themselves. No model is pre-picked — the race
+ * measures current latency per combo, which is the dominant variable (provider
+ * load), rather than guessing from stale history. The weighted primary
+ * (`pickPrimary`) survives for the non-streaming path and the pre-race `meta`
+ * prediction only.
  *
- * The winner's TTFT is recorded against (model, provider) so the next turn's
- * weighted pick reflects it.
+ * Every combo that reaches a first chunk records its TTFT (input tokens are
+ * fully billed regardless of abort timing, so observing a loser costs at most
+ * one discarded chunk), so the rolling means per (model, provider) are no
+ * longer winner-biased.
  */
 
 /** A stream plus the fact that its first chunk has already been read. */
@@ -71,8 +74,9 @@ export interface RosterRoutingResult {
 }
 
 /*
- * Hard cap on roster attempts (mirrors MAX_ATTEMPTS in `modelFailover`): the
- * roster is 3 models / up to 6 provider calls, so this is generous but bounded.
+ * Hard cap on completion-path attempts (mirrors MAX_ATTEMPTS in
+ * `modelFailover`): only the non-streaming path still walks models one at a
+ * time. Generous but bounded.
  */
 export const MAX_RACE_ATTEMPTS = 6;
 
@@ -139,12 +143,13 @@ type StreamIterator = AsyncIterator<Chunk>;
 type FirstResult =
   | {
       kind: 'won';
+      model: RosterModel;
       provider: RosterProviderRef;
       iterator: StreamIterator;
       first: Chunk;
       ttftMs: number;
     }
-  | { kind: 'failed'; provider: RosterProviderRef; error: unknown };
+  | { kind: 'failed'; model: RosterModel; provider: RosterProviderRef; error: unknown };
 
 /*
  * Wrap an already-advanced iterator (its first chunk consumed) into a stream
@@ -164,82 +169,149 @@ const resumeStream = (first: Chunk, iterator: StreamIterator): NeutralChunkStrea
 };
 
 /*
- * Race one model's providers. Starts every provider's stream concurrently,
- * resolves with the first to yield a chunk (returning a resumed stream), and
- * aborts the rest. If every provider fails (or yields an empty stream),
- * rejects with the last non-abort error.
+ * Race every (model, provider) combo. Starts every combo's stream
+ * concurrently, resolves with the first to yield a chunk (returning a resumed
+ * stream); losers abort THEMSELVES once their own first chunk arrives — after
+ * recording its TTFT — so a loser mid-prefill is observed, not killed
+ * (#316). Any model whose EVERY combo failed with a provider fault is cooled
+ * off in the background (a hung provider must not be re-fired next turn); a
+ * winner being present does not excuse a dead model.
  *
  * The caller's `abortSignal` (client disconnect) is preserved on every call;
- * racing adds a per-provider controller so the loser is aborted independently.
+ * each combo gets its own controller so losers abort independently.
  */
-const raceProviders = async (
-  model: RosterModel,
+const raceCombos = async (
+  combos: { model: RosterModel; ref: RosterProviderRef }[],
   options: Omit<CompletionOptions, 'provider' | 'model'>,
   deps: RaceDeps,
-): Promise<{ provider: RosterProviderRef; stream: NeutralChunkStream; ttftMs: number }> => {
+): Promise<RacedStream> => {
   const start =
     deps.startStream ?? ((o: CompletionOptions) => inferenceService.createStreamingCompletion(o));
   const clock = nowFromDeps(deps);
-  const controller = new AbortController();
   const started = clock();
-  /*
-   * The caller's abort signal (client disconnect) must still cancel every
-   * provider call; the race controller cancels the losers. Each call gets a
-   * combined signal so either source aborts it.
-   */
   const clientSignal = options.abortSignal;
+  // Sync check-and-set: the first combo to yield a chunk claims the win; any
+  // combo arriving after aborts itself (its TTFT is recorded either way).
+  let winnerClaimed = false;
+  const controllers = combos.map(() => new AbortController());
 
-  const attempts = model.providers.map(async (providerRef): Promise<FirstResult> => {
-    const perCall = new AbortController();
-    const abortChild = () => perCall.abort();
-    controller.signal.addEventListener('abort', abortChild, { once: true });
+  const attempts = combos.map(async ({ model, ref }, i): Promise<FirstResult> => {
+    const perCall = controllers[i];
     try {
       const signal = clientSignal ? combineSignals(clientSignal, perCall.signal) : perCall.signal;
-      const provider = providerRef.provider as LlmProvider;
+      const provider = ref.provider as LlmProvider;
       const stream = await start({
         ...options,
         provider,
-        model: providerRef.modelId,
+        model: ref.modelId,
         abortSignal: signal,
         trace: raceTrace(options.trace, provider),
       });
       const iterator = stream[Symbol.asyncIterator]();
       const next = await iterator.next();
       if (next.done) throw new Error('Empty stream from provider');
-      return {
-        kind: 'won',
-        provider: providerRef,
-        iterator,
-        first: next.value,
-        ttftMs: Math.max(0, clock() - started),
-      };
+      const ttftMs = Math.max(0, clock() - started);
+      // Fire-and-forget: a metrics write must never fail the turn.
+      void recordTtft(model.modelId, ref.provider, ttftMs);
+      if (winnerClaimed) perCall.abort();
+      else winnerClaimed = true;
+      return { kind: 'won', model, provider: ref, iterator, first: next.value, ttftMs };
     } catch (error) {
-      return { kind: 'failed', provider: providerRef, error };
-    } finally {
-      controller.signal.removeEventListener('abort', abortChild);
+      return { kind: 'failed', model, provider: ref, error };
     }
   });
 
+  /*
+   * Cool off every combo of a model whose attempts ALL failed with a provider
+   * fault (mirrors today's model-level bench on total failure). Client
+   * aborts, prompt-size errors and rate limits are not the provider's fault —
+   * they never cooled a model off.
+   */
+  const coolOffDeadModels = async (settled: FirstResult[]): Promise<void> => {
+    const disable = deps.disable ?? disableRosterProvider;
+    await Promise.all(
+      candidatesToCool(combos, settled).map(({ model, ref }) => {
+        const error = settled.find(
+          (r) => r.kind === 'failed' && r.model.modelId === model.modelId && r.provider === ref,
+        );
+        const failedError = error && error.kind === 'failed' ? error.error : undefined;
+        const ttl = isOverloadError(failedError) ? overloadCoolOffMinutes() * 60 * 1000 : undefined;
+        return disable(model.modelId, ref.provider, ttl);
+      }),
+    );
+  };
+
   const winner = await firstWin(attempts);
   if (winner) {
-    // Abort every loser (per-provider controllers).
-    controller.abort();
+    // Bookkeeping without blocking the turn: dead-model cool-offs once every
+    // attempt settles (losers may still be running to their first chunk).
+    void Promise.all(attempts)
+      .then(coolOffDeadModels)
+      .catch(() => {});
+    // Abort losers still in flight when the winner's stream completes — a
+    // hung provider must not outlive the turn.
+    const loserControllers = controllers.filter((_, i) => combos[i].ref !== winner.provider);
+    const winnerStream = resumeStream(winner.first, winner.iterator);
     return {
+      model: winner.model,
       provider: winner.provider,
-      stream: resumeStream(winner.first, winner.iterator),
       ttftMs: winner.ttftMs,
+      stream: (async function* (): AsyncGenerator<Chunk, void, unknown> {
+        try {
+          for await (const chunk of winnerStream) yield chunk;
+        } finally {
+          for (const controller of loserControllers) controller.abort();
+        }
+      })(),
     };
   }
 
-  // No provider won: every attempt settled as `failed`. Surface a non-abort
-  // error if any, else the first (an all-abort result means the client hung
-  // up and the caller's abort classification handles it).
+  // No combo won: every attempt settled as `failed`. Cool off the dead
+  // models, then surface the most actionable error: a non-abort error if any
+  // (prompt-size and rate limits included — today's code threw those before
+  // any fallback), else the first abort (an all-abort result means the client
+  // hung up).
   const settled = await Promise.all(attempts);
+  await coolOffDeadModels(settled);
   const errors = settled
     .filter((r): r is Extract<FirstResult, { kind: 'failed' }> => r.kind === 'failed')
     .map((r) => r.error);
   const failed = errors.find((e) => !isClientAbort(e)) ?? errors[0];
   throw failed ?? new Error('All providers failed');
+};
+
+/*
+ * The combos to cool off: every combo of a model whose attempts all failed,
+ * where every failure is a provider fault (not a client abort, prompt-size
+ * error or rate limit).
+ */
+const candidatesToCool = (
+  combos: { model: RosterModel; ref: RosterProviderRef }[],
+  settled: FirstResult[],
+): { model: RosterModel; ref: RosterProviderRef }[] => {
+  const isProviderFault = (error: unknown): boolean =>
+    !isClientAbort(error) &&
+    !isPromptSizeError(error) &&
+    !(isRateLimitError(error) && !isOverloadError(error));
+  const byModel = new Map<string, { model: RosterModel; combos: typeof combos }>();
+  for (const combo of combos) {
+    const entry = byModel.get(combo.model.modelId) ?? { model: combo.model, combos: [] };
+    entry.combos.push(combo);
+    byModel.set(combo.model.modelId, entry);
+  }
+  const dead: { model: RosterModel; ref: RosterProviderRef }[] = [];
+  for (const { model, combos: modelCombos } of byModel.values()) {
+    const results = modelCombos.map((c) =>
+      settled.find((r) => r.model.modelId === model.modelId && r.provider === c.ref),
+    );
+    const allSettled = results.every((r) => r !== undefined);
+    const allFailed = results.every((r) => r?.kind === 'failed');
+    const allProviderFault = results.every(
+      (r) => r !== undefined && r.kind === 'failed' && isProviderFault(r.error),
+    );
+    if (allSettled && allFailed && allProviderFault) dead.push(...modelCombos);
+  }
+  return dead;
 };
 
 /*
@@ -283,52 +355,22 @@ const firstWin = (
 };
 
 /*
- * Run one turn through the roster: pick the weighted primary, race its
- * providers, and on total failure cool off that model's providers and fall
- * through to the next roster model. Returns the winning stream and the model /
- * provider metadata.
+ * Run one streaming turn through the roster: fire every live (model, provider)
+ * combo of every eligible model concurrently and keep the first token's
+ * stream. There is no fallback loop — every combo is already in flight; if
+ * all of them fail, `raceCombos` has cooled off the provider-fault combos and
+ * the error surfaces directly.
  */
 export const raceRoster = async (
   options: Omit<CompletionOptions, 'provider' | 'model'>,
-  hasImage: boolean,
   deps: RaceDeps = {},
 ): Promise<RaceOutcome> => {
   const roster = await readRoster(deps);
-  const candidates = rosterModelsForTurn(roster, hasImage);
-
-  let lastError: unknown;
-  let attempts = 0;
-  // Track models already tried so fallback walks the roster without repeating.
-  const tried = new Set<string>();
-
-  while (attempts < MAX_RACE_ATTEMPTS) {
-    const remaining = candidates.filter((m) => !tried.has(m.modelId));
-    const primary = pickPrimary(remaining);
-    if (!primary) break;
-    attempts += 1;
-    tried.add(primary.modelId);
-    try {
-      const raced = await raceProviders(primary, options, deps);
-      const ttftMs = raced.ttftMs;
-      // Fire-and-forget: a metrics write must never fail the turn.
-      void recordTtft(primary.modelId, raced.provider.provider, ttftMs);
-      return {
-        result: { model: primary, provider: raced.provider, stream: raced.stream, ttftMs },
-        attempts,
-      };
-    } catch (err) {
-      lastError = err;
-      if (isClientAbort(err)) throw err;
-      if (isPromptSizeError(err)) throw err;
-      if (isRateLimitError(err) && !isOverloadError(err)) throw err;
-      // Transient/hard failure of the whole model: cool off each provider for
-      // the appropriate TTL and fall through to the next model.
-      const ttl = isOverloadError(err) ? overloadCoolOffMinutes() * 60 * 1000 : undefined;
-      const disable = deps.disable ?? disableRosterProvider;
-      await Promise.all(primary.providers.map((p) => disable(primary.modelId, p.provider, ttl)));
-    }
-  }
-  throw lastError ?? new Error('No roster models available');
+  const candidates = rosterModelsForTurn(roster);
+  const combos = candidates.flatMap((model) => model.providers.map((ref) => ({ model, ref })));
+  if (combos.length === 0) throw new Error('No roster models available');
+  const raced = await raceCombos(combos, options, deps);
+  return { result: raced, attempts: 1 };
 };
 
 /*
@@ -355,11 +397,10 @@ export interface CompletionOutcome {
 
 export const raceRosterCompletion = async (
   options: Omit<CompletionOptions, 'provider' | 'model'>,
-  hasImage: boolean,
   deps: RaceDeps = {},
 ): Promise<CompletionOutcome> => {
   const roster = await readRoster(deps);
-  const candidates = rosterModelsForTurn(roster, hasImage);
+  const candidates = rosterModelsForTurn(roster);
 
   const start =
     deps.startCompletion ?? ((o: CompletionOptions) => inferenceService.createCompletion(o));
@@ -463,12 +504,9 @@ const firstCompletionWin = (
  * provider's name for the pre-race `meta`; the winner is persisted from the
  * race outcome.
  */
-export const pickRosterRoute = async (
-  hasImage: boolean,
-  deps: RaceDeps = {},
-): Promise<RosterRoutingResult | null> => {
+export const pickRosterRoute = async (deps: RaceDeps = {}): Promise<RosterRoutingResult | null> => {
   const roster = await readRoster(deps);
-  const primary = pickPrimary(rosterModelsForTurn(roster, hasImage));
+  const primary = pickPrimary(rosterModelsForTurn(roster));
   if (!primary) return null;
   const providerRef = primary.providers[0];
   return {
@@ -487,10 +525,9 @@ export const pickRosterRoute = async (
  */
 export const routeAndStream = async (
   options: Omit<CompletionOptions, 'provider' | 'model'>,
-  hasImage: boolean,
   deps: RaceDeps = {},
 ): Promise<{ routing: RosterRoutingResult; outcome: RaceOutcome }> => {
-  const outcome = await raceRoster(options, hasImage, deps);
+  const outcome = await raceRoster(options, deps);
   const { model, provider, ttftMs } = outcome.result;
   return {
     routing: {
@@ -513,10 +550,9 @@ export const routeAndStream = async (
  */
 export const routeAndComplete = async (
   options: Omit<CompletionOptions, 'provider' | 'model'>,
-  hasImage: boolean,
   deps: RaceDeps = {},
 ): Promise<{ routing: RosterRoutingResult; outcome: CompletionOutcome }> => {
-  const outcome = await raceRosterCompletion(options, hasImage, deps);
+  const outcome = await raceRosterCompletion(options, deps);
   const { model, provider } = outcome.result;
   return {
     routing: {

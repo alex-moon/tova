@@ -101,8 +101,9 @@ const modelRosterSchema = new mongoose.Schema({
   },
   /*
    * Capability + pricing metadata, owned once per model (not per provider):
-   * `tools`/`vision` gate eligibility, `contextLength` sizes the output
-   * budget, and the two prices feed the weighted score and the cost view.
+   * `tools`/`vision` are descriptive capability flags (nothing gates on them
+   * at runtime since #316), `contextLength` sizes the output budget, and the
+   * two prices feed the weighted score and the cost view.
    */
   tools: {
     type: Boolean,

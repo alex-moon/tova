@@ -133,7 +133,7 @@ export const runTaskStep = async (
   // Size the output budget against the picked model's window (D5), mirroring
   // the chat path: the non-streaming route reads the primary's `contextLength`
   // before the call. Unknown window sends the base budget untouched.
-  const picking = await pickRosterRoute(false, deps);
+  const picking = await pickRosterRoute(deps);
   const options: Omit<CompletionOptions, 'provider' | 'model'> = {
     messages,
     userId: String(task.userId),
@@ -144,6 +144,6 @@ export const runTaskStep = async (
     max_tokens: outputTokensFor(picking?.contextLength, promptCharsFrom(messages)),
     trace: { tags: ['task', `task:${String(task._id)}`], metadata: { taskId: String(task._id) } },
   };
-  const outcome = await raceRosterCompletion(options, false, deps);
+  const outcome = await raceRosterCompletion(options, deps);
   return parseStepOutcome(outcome);
 };

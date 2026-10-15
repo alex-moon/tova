@@ -17,7 +17,7 @@ describe('migration SeedModelRoster', () => {
     db = mongoose.connection.db as unknown as Db;
   });
 
-  it('up inserts the three roster models with both providers, down removes them', async () => {
+  it('up inserts the roster models with both providers, down removes them', async () => {
     await new SeedModelRoster().up(db);
     expect(await db.collection('modelrosters').countDocuments()).toBe(ROSTER_SEED.length);
 
@@ -27,7 +27,6 @@ describe('migration SeedModelRoster', () => {
     expect(flash).toMatchObject({
       label: 'DeepSeek V4.1 Flash',
       tools: true,
-      vision: true,
       contextLength: 1048576,
       inputPrice: 0.2,
       outputPrice: 0.6,
@@ -43,11 +42,12 @@ describe('migration SeedModelRoster', () => {
       ]),
     );
 
-    // MiniMax M3 must be text-only (excluded from image turns).
+    // #316: MiniMax is out of the roster and must not be seeded into a fresh
+    // database — it would otherwise join every turn's race as eligible.
     const minimax = await db
       .collection('modelrosters')
       .findOne({ modelId: 'MiniMaxAI/MiniMax-M3' });
-    expect(minimax).toMatchObject({ vision: false });
+    expect(minimax).toBeNull();
 
     await new SeedModelRoster().down(db);
     expect(await db.collection('modelrosters').countDocuments()).toBe(0);
@@ -66,7 +66,6 @@ describe('migration SeedModelRoster', () => {
       expect(row).toMatchObject({
         label: seed.label,
         tools: seed.tools,
-        vision: seed.vision,
         contextLength: seed.contextLength,
         inputPrice: seed.inputPrice,
         outputPrice: seed.outputPrice,

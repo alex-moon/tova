@@ -41,8 +41,9 @@ describe('modelConfigService survivors (#233)', () => {
   });
 
   describe('sweepModels (#233 roster bridge)', () => {
-    it('enumerates the roster as provider:model rows', () => {
+    it('enumerates the roster as provider:model rows (#316: two models, four rows)', () => {
       const models = sweepModels();
+      expect(models).toHaveLength(4);
       expect(models).toContainEqual({
         provider: 'deepinfra',
         model: 'deepseek-ai/DeepSeek-V4.1-Flash',
@@ -51,7 +52,6 @@ describe('modelConfigService survivors (#233)', () => {
         provider: 'fireworks',
         model: 'accounts/fireworks/models/deepseek-v4p1-flash',
       });
-      expect(models).toContainEqual({ provider: 'deepinfra', model: 'MiniMaxAI/MiniMax-M3' });
     });
 
     it('narrows to the requested providers', () => {

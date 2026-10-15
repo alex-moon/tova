@@ -17,7 +17,6 @@ const model = (overrides: Partial<RosterModel> = {}): RosterModel => ({
   modelId: 'm-primary',
   label: 'Primary',
   tools: true,
-  vision: true,
   contextLength: 1048576,
   inputPrice: 0.2,
   outputPrice: 0.6,
