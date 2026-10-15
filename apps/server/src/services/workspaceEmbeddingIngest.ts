@@ -119,10 +119,13 @@ export const embedWorkspaceUser = async (
   const model = config.embeddings.model;
 
   const collected = await collectWorkspaceSlices(userId);
+  // #309: the slice title (a file's filename) rides along so the planned embed
+  // text is byte-identical with the ingest path's folded text.
   const slices: EmbeddableSlice[] = collected.map((slice) => ({
     kind: slice.kind,
     id: slice.id,
     text: slice.text,
+    title: slice.title,
   }));
 
   const rows = await WorkspaceEmbedding.find({ model, userId: uid })

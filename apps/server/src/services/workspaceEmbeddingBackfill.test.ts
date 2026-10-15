@@ -117,6 +117,38 @@ describe('planEmbeddingWrites (#294)', () => {
     }
   });
 
+  it('folds the file title into the planned text, byte-identical with ingest (#309)', () => {
+    const planned = slice({
+      kind: 'file',
+      id: 'f1',
+      title: 'agi-final.md',
+      text: 'The rollout completes in three phases.',
+    });
+    const source = {
+      kind: 'file' as const,
+      filename: 'agi-final.md',
+      textExtracted: 'The rollout completes in three phases.',
+    };
+    const plan = planEmbeddingWrites([planned], new Map(), MODEL);
+    const ingestText = workspaceSliceText(source);
+    expect(plan.toEmbed[0].text).toBe('agi-final.md\nThe rollout completes in three phases.');
+    expect(plan.toEmbed[0].textHash).toBe(embeddingTextHash(ingestText, MODEL));
+  });
+
+  it('re-embeds a file when its title changes (#309)', () => {
+    const text = 'The rollout completes in three phases.';
+    const existing = new Map([
+      [embeddingKey('file', 'f1', MODEL), embeddingTextHash(`agi-final.md\n${text}`, MODEL)],
+    ]);
+    const plan = planEmbeddingWrites(
+      [slice({ kind: 'file', id: 'f1', title: 'agi-final-v2.md', text })],
+      existing,
+      MODEL,
+    );
+    expect(plan.skipped).toBe(0);
+    expect(plan.toEmbed).toHaveLength(1);
+  });
+
   it('keys an existing row by the run model even when the projection omits `model` (#294)', () => {
     // Regression: the backfill projected `kind sourceId textHash` only, so
     // `row.model` was `undefined` and the key became `chat|m1|undefined` while

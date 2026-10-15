@@ -114,6 +114,26 @@ export type WorkspaceSlice = {
 export const BM25_K1 = 1.2;
 export const BM25_B = 0.75;
 
+/*
+ * #309: how many extra occurrences each title token contributes to a slice's
+ * document stream. The title (a file's filename, a task's instruction line, a
+ * chat's session title) carries terms the content cannot supply — "that AGI
+ * file" must match `agi-final.md` even when "AGI" appears nowhere in the text.
+ * Boost of 2 means a title-only term matches (tf 2) and a term also present in
+ * the content is pulled toward the title. Exported/diffable like K1/B.
+ */
+export const BM25_TITLE_BOOST = 2;
+
+// The doc token stream for one slice: the content plus the title tokens
+// repeated `BM25_TITLE_BOOST` times, so tf and length derive from one stream.
+const sliceTokens = (slice: WorkspaceSlice): string[] => {
+  const titleTokens = tokenize(slice.title);
+  return [
+    ...tokenize(slice.text),
+    ...Array.from({ length: BM25_TITLE_BOOST }, () => titleTokens).flat(),
+  ];
+};
+
 export const pickTopSlices = (
   prompt: string,
   slices: WorkspaceSlice[],
@@ -131,7 +151,7 @@ export const pickTopSlices = (
   const docs = slices.map((slice) => {
     const tf = new Map<string, number>();
     let length = 0;
-    for (const term of tokenize(slice.text)) {
+    for (const term of sliceTokens(slice)) {
       tf.set(term, (tf.get(term) ?? 0) + 1);
       length += 1;
     }

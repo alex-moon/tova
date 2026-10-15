@@ -7,6 +7,7 @@ import { TaskEvent } from '../models/TaskEvent';
 import {
   BM25_B,
   BM25_K1,
+  BM25_TITLE_BOOST,
   buildWorkspaceBlock,
   isWorkspaceMemoryEnabled,
   matchSnippet,
@@ -76,16 +77,20 @@ describe('workspaceRetrievalService', () => {
     });
 
     it('returns no picks when every document tokenises to nothing', () => {
-      expect(pickTopSlices('budget', [slice({ text: 'the a of' })])).toEqual([]);
+      // #309: title tokens count as document tokens, so a truly empty doc needs
+      // an empty title as well as empty text.
+      expect(pickTopSlices('budget', [slice({ text: 'the a of', title: '' })])).toEqual([]);
     });
 
     // N=3; A=`budget`, B=`budget move`, C=`move`; q=`budget`; avgdl=4/3.
     // Hand-computed BM25: A ≈ 0.5236 (shorter doc wins), B ≈ 0.3902, C = 0.
+    // Title-neutral (`title: ''`) so the pins stay text-only — the title fold
+    // is pinned separately in pickTopSlices' #309 tests.
     it('normalises by document length and drops zero-overlap docs', () => {
       const picks = pickTopSlices('budget', [
-        slice({ id: 'A', text: 'budget' }),
-        slice({ id: 'B', text: 'budget move' }),
-        slice({ id: 'C', text: 'move' }),
+        slice({ id: 'A', title: '', text: 'budget' }),
+        slice({ id: 'B', title: '', text: 'budget move' }),
+        slice({ id: 'C', title: '', text: 'move' }),
       ]);
       expect(picks.map((p) => p.slice.id)).toEqual(['A', 'B']);
       expect(picks[0].score).toBeCloseTo(0.5236, 3);
@@ -157,7 +162,7 @@ describe('workspaceRetrievalService', () => {
     it('drops zero-score slices and ranks by score', () => {
       const picks = pickTopSlices('budget for the move', [
         slice({ id: 'a', text: 'budget move' }),
-        slice({ id: 'b', text: 'unrelated birdwatching notes' }),
+        slice({ id: 'b', title: 'birdwatching', text: 'unrelated birdwatching notes' }),
         slice({ id: 'c', text: 'budget' }),
       ]);
       expect(picks.map((p) => p.slice.id)).toEqual(['a', 'c']);
@@ -166,6 +171,37 @@ describe('workspaceRetrievalService', () => {
     it('caps the number of picks', () => {
       const many = Array.from({ length: 20 }, (_, i) => slice({ id: String(i) }));
       expect(pickTopSlices('budget', many, 3)).toHaveLength(3);
+    });
+
+    // #309: the title (a file's filename) carries terms the content cannot
+    // supply — "that AGI file" must match `agi-final.md` with no content hit.
+    it('matches a title-only term when the content shares nothing (#309)', () => {
+      const picks = pickTopSlices('that AGI file, give me a summary of it', [
+        slice({ id: 'agi', title: 'agi-final.md', text: 'the rollout completes in three phases' }),
+        slice({ id: 'other', title: 'venue-details.md', text: 'the old mill barn on church lane' }),
+      ]);
+      expect(picks.map((p) => p.slice.id)).toEqual(['agi']);
+    });
+
+    it('pulls a shared term toward the title via the boost (#309)', () => {
+      const boosted = slice({
+        id: 'named',
+        title: 'insurance-policy.md',
+        text: 'the excess per claim',
+      });
+      const plain = slice({
+        id: 'plain',
+        title: 'notes.md',
+        text: 'the excess per claim and the premium',
+      });
+      const picks = pickTopSlices('insurance policy excess', [boosted, plain]);
+      // Both share "excess" with the query; only the title terms ("insurance",
+      // "policy") break the tie — and must favour the filename match.
+      expect(picks[0].slice.id).toBe('named');
+    });
+
+    it('records the title boost so the weight is a visible, diffable param (#309)', () => {
+      expect(BM25_TITLE_BOOST).toBeGreaterThanOrEqual(1);
     });
   });
 
@@ -751,11 +787,15 @@ describe('workspaceRetrievalService', () => {
     });
     const b = slice({
       id: 'b',
+      // #309: an unrelated title too — the title now carries BM25 weight, so a
+      // 'Budget chat' title would leak a match into the non-matching control.
+      title: 'Weather chat',
       text: 'an unrelated note about the weather',
       at: new Date('2024-01-02'),
     });
     const c = slice({
       id: 'c',
+      title: 'Misc chat',
       text: 'a slice with no lexical overlap at all',
       at: new Date('2024-01-03'),
     });

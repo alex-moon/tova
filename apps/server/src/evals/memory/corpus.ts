@@ -588,6 +588,47 @@ export const MEMORY_SCENARIOS: MemoryScenario[] = [
     expectSurfaced: true,
     expectedFact: 'January',
   },
+  // #309: filename-reference cases — the query's pointer term lives only in
+  // the slice title (the filename), not the content. Both scored 0 before the
+  // title fold, so they pin the fix.
+  {
+    id: 'retrieval-file-title-only',
+    description:
+      'Query names the file by its title term only; the content shares no query word (#309).',
+    category: 'file',
+    seeds: [
+      {
+        id: 'seed-agi-rollout',
+        kind: 'file',
+        title: 'agi-final.md',
+        text: 'The rollout completes in three phases with the pilot first.',
+        at: '2026-09-06T10:00:00.000Z',
+      },
+    ],
+    query: 'That AGI file, give me a summary of it',
+    expectedSliceId: 'seed-agi-rollout',
+    expectSurfaced: true,
+    expectedFact: 'three phases',
+  },
+  {
+    id: 'retrieval-file-title-boost',
+    description:
+      'Query overlaps the content on one word and the filename on the stronger terms (#309 title boost).',
+    category: 'file',
+    seeds: [
+      {
+        id: 'seed-insurance-policy',
+        kind: 'file',
+        title: 'insurance-policy.md',
+        text: 'The excess is two hundred and fifty pounds per claim.',
+        at: '2026-09-07T10:00:00.000Z',
+      },
+    ],
+    query: 'What does the insurance policy say about the excess?',
+    expectedSliceId: 'seed-insurance-policy',
+    expectSurfaced: true,
+    expectedFact: 'two hundred and fifty pounds',
+  },
   // More `task` cases (#298): the fact lives in the `assistant` TaskEvent.
   {
     id: 'retrieval-task-heatpump',

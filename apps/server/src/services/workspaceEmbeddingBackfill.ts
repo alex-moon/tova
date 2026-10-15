@@ -1,4 +1,4 @@
-import { embeddingTextHash, truncateForEmbedding } from './workspaceEmbeddingText';
+import { embeddingTextHash, truncateForEmbedding, withEmbedTitle } from './workspaceEmbeddingText';
 
 /*
  * #294: pure planning for the embedding backfill. The script
@@ -17,6 +17,11 @@ export interface EmbeddableSlice {
   kind: EmbeddableKind;
   id: string;
   text: string;
+  // #309: the slice title (a file's filename), folded into the embed text for
+  // file slices through `withEmbedTitle` — the same fold the ingest path
+  // applies, so the hashed text stays byte-identical between the two paths.
+  // Absent passes through unchanged.
+  title?: string;
 }
 
 export interface PlannedEmbedding {
@@ -86,8 +91,11 @@ export const planEmbeddingWrites = (
     // byte-identical text — otherwise the skip rule re-embeds every slice the
     // ingest path already wrote (and vice versa). Trimming the *collected*
     // text reproduces the helper exactly for all three kinds, which only ever
-    // trim the final string.
-    const { text, truncated: wasTruncated } = truncateForEmbedding(slice.text.trim());
+    // trim the final string. #309: file slices fold their title (the filename)
+    // in first, through the same shared helper the ingest path uses.
+    const { text, truncated: wasTruncated } = truncateForEmbedding(
+      withEmbedTitle(slice.title, slice.text.trim()),
+    );
     if (!text) {
       empty += 1;
       continue;
