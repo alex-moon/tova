@@ -7,8 +7,9 @@ import {
 } from '../../services/enrichmentService';
 import { config } from '../../config';
 import {
+  collectWorkspaceSlices,
   isWorkspaceMemoryEnabled,
-  retrieveWorkspaceSlices,
+  rankWorkspaceSlicesWithCut,
   type WorkspaceSlice,
 } from '../../services/workspaceRetrievalService';
 import { embedWorkspaceUser } from '../../services/workspaceEmbeddingIngest';
@@ -155,6 +156,12 @@ export interface RetrievalCaseResult {
   pass: boolean;
   expectedSliceId: string;
   surfacedIds: string[];
+  /**
+   * #305: candidates existed but the rerank cut removed every one — the
+   * graceful-refusal path. Absent when the stage ran with no candidates at all
+   * or with the rerank stage disabled.
+   */
+  cutEmpty?: boolean;
 }
 
 export interface CategoryMetric {
@@ -171,6 +178,8 @@ export interface RetrievalMetrics {
   expectedMetRate: number;
   /** Raw surfacing rate, the number #293/#294 move. */
   surfacedRate: number;
+  /** #305: how many retrieval cases ended empty-after-cut (graceful refusal). */
+  cutEmpty: number;
   byCategory: Record<string, CategoryMetric>;
 }
 
@@ -178,6 +187,7 @@ export const retrievalMetrics = (results: RetrievalCaseResult[]): RetrievalMetri
   const byCategory: Record<string, CategoryMetric> = {};
   let surfaced = 0;
   let expectedMet = 0;
+  let cutEmpty = 0;
   for (const r of results) {
     const bucket = (byCategory[r.category] ??= { total: 0, surfaced: 0, expectedMet: 0 });
     bucket.total += 1;
@@ -189,6 +199,7 @@ export const retrievalMetrics = (results: RetrievalCaseResult[]): RetrievalMetri
       bucket.expectedMet += 1;
       expectedMet += 1;
     }
+    if (r.cutEmpty) cutEmpty += 1;
   }
   return {
     total: results.length,
@@ -196,6 +207,7 @@ export const retrievalMetrics = (results: RetrievalCaseResult[]): RetrievalMetri
     expectedMet,
     expectedMetRate: results.length ? expectedMet / results.length : 0,
     surfacedRate: results.length ? surfaced / results.length : 0,
+    cutEmpty,
     byCategory,
   };
 };
@@ -301,6 +313,18 @@ const defaultEmbedUser = async (userId: string): Promise<void> => {
   await embedWorkspaceUser(userId);
 };
 
+/*
+ * #305: the live default retrieve reports the cut diagnostics alongside the
+ * ranked slices, so the run can count empty-after-cut (graceful refusal) cases.
+ */
+let lastCutDiagnostics: { candidateCount: number } | null = null;
+const defaultLiveRetrieve = async (query: string, userId: string): Promise<WorkspaceSlice[]> => {
+  const slices = await collectWorkspaceSlices(userId);
+  const { ranked, candidateCount } = await rankWorkspaceSlicesWithCut(query, userId, slices);
+  lastCutDiagnostics = { candidateCount };
+  return ranked;
+};
+
 export const runRetrievalEval = async (
   deps: MemoryEvalDeps = {},
 ): Promise<{
@@ -309,7 +333,7 @@ export const runRetrievalEval = async (
   vectorEnabled: boolean;
 }> => {
   const scenarios = deps.scenarios ?? MEMORY_SCENARIOS;
-  const retrieve = deps.retrieve ?? retrieveWorkspaceSlices;
+  const retrieve = deps.retrieve ?? defaultLiveRetrieve;
   const seed = deps.seed ?? seedMemoryScenario;
   const clear = deps.clear ?? clearMemoryCorpus;
   const embed = deps.embed ?? defaultEmbedUser;
@@ -335,6 +359,14 @@ export const runRetrievalEval = async (
       const surfacedIds = picks.map((slice) => slice.id);
       const expectedId = idMap[scenario.expectedSliceId];
       const surfaced = expectedId !== undefined && surfacedIds.includes(expectedId);
+      // #305: the empty-after-cut diagnostic — candidates existed, the cut took
+      // them all. Only measurable on the default live retrieve (an injected
+      // stub returns ranked slices only).
+      let cutEmpty: boolean | undefined;
+      if (retrieve === defaultLiveRetrieve) {
+        cutEmpty = (lastCutDiagnostics?.candidateCount ?? 0) > 0 && picks.length === 0;
+        lastCutDiagnostics = null;
+      }
       results.push({
         scenarioId: scenario.id,
         category: scenario.category,
@@ -343,6 +375,7 @@ export const runRetrievalEval = async (
         pass: surfaced === scenario.expectSurfaced,
         expectedSliceId: scenario.expectedSliceId,
         surfacedIds,
+        ...(cutEmpty !== undefined ? { cutEmpty } : {}),
       });
     }
   } finally {

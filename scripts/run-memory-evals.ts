@@ -134,12 +134,13 @@ const main = async (): Promise<void> => {
     for (const r of retrieval.results) {
       console.log(
         `  ${r.pass ? 'ok  ' : 'MISS'} [${r.category}] ${r.scenarioId} ` +
-          `expected=${r.expected} surfaced=${r.surfaced}`,
+          `expected=${r.expected} surfaced=${r.surfaced}${r.cutEmpty ? ' cut-empty' : ''}`,
       );
     }
     console.log(
       `  expectedMet=${pct(retrieval.metrics.expectedMetRate)} ` +
-        `surfacedRate=${pct(retrieval.metrics.surfacedRate)} (n=${retrieval.metrics.total})`,
+        `surfacedRate=${pct(retrieval.metrics.surfacedRate)} (n=${retrieval.metrics.total})` +
+        ` · empty-after-cut=${retrieval.metrics.cutEmpty}`,
     );
     for (const [category, m] of Object.entries(retrieval.metrics.byCategory)) {
       console.log(`    ${category}: surfaced ${m.surfaced}/${m.total}`);

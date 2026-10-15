@@ -8,6 +8,7 @@ import { WorkspaceEmbedding } from '../models/WorkspaceEmbedding';
 import { config } from '../config';
 import { VECTOR_INDEX_NAME } from './atlasVectorIndex';
 import { embedTexts } from './embeddingService';
+import { rerankQuery } from './rerankerService';
 import { withTimeout } from './markdownConversion';
 
 /*
@@ -635,7 +636,85 @@ export interface RetrievalDeps {
     deps?: VectorSearchDeps,
   ) => Promise<VectorHit[]>;
   weights?: RrfWeights;
+  // #305: injectable rerank; defaults to the DeepInfra cross-encoder. One score
+  // per candidate in input order, or null when the stage cannot run — null
+  // degrades to the un-cut fused ranking (exactly the pre-#305 behaviour).
+  rerank?: (query: string, documents: string[]) => Promise<number[] | null>;
 }
+
+/*
+ * #305: the post-retrieval relevance bar. The reranker grades each fused
+ * candidate against the query and returns a relevance probability in [0, 1];
+ * candidates below `RERANK_CUT` are dropped — including *all* of them, which
+ * is the graceful refusal path (an empty block renders as no block).
+ *
+ * The threshold is calibrated, not intuited (probe over the #289 corpus,
+ * 2026-10-15): relevant pairs median 0.9985, true-irrelevant pairs <= 0.0009,
+ * and the bare-deixis prompts the plan-306 product rule wants quiet max out at
+ * 0.0036 — so 0.005 sits a clear decade above "irrelevant" while keeping every
+ * pair the reranker grades confidently relevant (>= 0.0087 in the probe). The
+ * known trade-off: paraphrase pairs ("What does my partner do?" vs "She is a
+ * doctor...") grade weakly because the slice alone cannot resolve the
+ * referent — one locally-surfaced paraphrase case falls below the bar.
+ */
+export const RERANK_CUT = 0.005;
+
+// The text a candidate is graded on: the title (the filename — #309's
+// metadata matters for reranking too) above the content.
+const rerankDocText = (slice: WorkspaceSlice): string =>
+  slice.title ? `${slice.title}\n${slice.text}` : slice.text;
+
+export const rerankAndCut = async (
+  prompt: string,
+  fused: WorkspaceSlice[],
+  deps: RetrievalDeps,
+): Promise<WorkspaceSlice[]> => {
+  if (fused.length === 0) return [];
+  const rerank = deps.rerank ?? rerankQuery;
+  const scores = await rerank(prompt, fused.map(rerankDocText));
+  // Degradation: a failed/unavailable reranker behaves exactly as pre-#305.
+  if (!scores) return fused;
+  return fused
+    .map((slice, i) => ({ slice, score: scores[i] ?? 0 }))
+    .filter(({ score }) => score >= RERANK_CUT)
+    .sort((x, y) => y.score - x.score) // stable: equal scores keep fused order
+    .map(({ slice }) => slice);
+};
+
+export interface RankedWithCut {
+  ranked: WorkspaceSlice[];
+  /** Fused candidates the reranker graded (#305: ≤ ~12). */
+  candidateCount: number;
+  /** Candidates the cut removed — all of them is the graceful-refusal path. */
+  cutCount: number;
+}
+
+export const rankWorkspaceSlicesWithCut = async (
+  prompt: string,
+  userId: string,
+  slices: WorkspaceSlice[],
+  n = MAX_SLICES,
+  deps: RetrievalDeps = {},
+): Promise<RankedWithCut> => {
+  if (slices.length === 0) return { ranked: [], candidateCount: 0, cutCount: 0 };
+  const bm25 = pickTopSlices(prompt, slices, n);
+  const vector = isWorkspaceMemoryEnabled()
+    ? await (deps.vectorCandidates ?? vectorCandidates)(prompt, userId, config.embeddings.model, n)
+    : [];
+  const fused = rrfFuse(slices, bm25, vector, deps.weights);
+  // #305: the rerank stage shares the kill switch — with the flag off the
+  // result is the pre-#305 fused ranking exactly and no reranker call is made.
+  if (!isWorkspaceMemoryEnabled()) {
+    const ranked = fused.slice(0, n);
+    return { ranked, candidateCount: 0, cutCount: 0 };
+  }
+  const reranked = await rerankAndCut(prompt, fused, deps);
+  return {
+    ranked: reranked.slice(0, n),
+    candidateCount: fused.length,
+    cutCount: fused.length - reranked.length,
+  };
+};
 
 export const rankWorkspaceSlices = async (
   prompt: string,
@@ -643,11 +722,5 @@ export const rankWorkspaceSlices = async (
   slices: WorkspaceSlice[],
   n = MAX_SLICES,
   deps: RetrievalDeps = {},
-): Promise<WorkspaceSlice[]> => {
-  if (slices.length === 0) return [];
-  const bm25 = pickTopSlices(prompt, slices, n);
-  const vector = isWorkspaceMemoryEnabled()
-    ? await (deps.vectorCandidates ?? vectorCandidates)(prompt, userId, config.embeddings.model, n)
-    : [];
-  return rrfFuse(slices, bm25, vector, deps.weights).slice(0, n);
-};
+): Promise<WorkspaceSlice[]> =>
+  (await rankWorkspaceSlicesWithCut(prompt, userId, slices, n, deps)).ranked;
