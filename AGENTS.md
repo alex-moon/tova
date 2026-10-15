@@ -17,7 +17,7 @@ In short: it is aiming to be an application-layer service for inference provider
 
 - `docs/overview.md`: a high-level summary of the overall intent
 - `docs/workflow.md`: the standard process for new work (see "Standard workflow" below)
-- `docs/plan-<ticket>-<summary>.md`: plan docs for in-flight work; archived to `docs/done/` after merge
+- `docs/plan-<ticket>-<summary>.md`: plan docs for in-flight work; archived to `docs/done/` when the work is ready for review — the archive rides the PR, so merges need no follow-up archive commit
 - `docs/progress.md`: static delivery log; history lives here, not a live tracker
 
 ### Working rules for agents
@@ -35,8 +35,7 @@ Follow `docs/workflow.md` as the specification. In short, every piece of work la
 3. **Plan** — document the plan in `docs/` following the specification in `docs/workflow.md`.
 4. **Implement** — complete the work, keeping the plan doc updated as decisions and scope change.
 5. **Verify** — run lint, format, test, and (where possible) e2e; fix any issues. See "Code quality commands" below.
-6. **Ship** — push the branch and open a PR with a short summary.
-7. **Archive** — move the plan doc to `docs/done/`.
+6. **Ship** — once the work is ready for review (implemented, verified, CI green), move the plan doc to `docs/done/`, push the branch, and open a PR with a short summary. Fixes that come in after this point — review comments, merge conflicts — are updates to the PR, not a reopening of the plan.
 
 Tweaks (trivial one-line fixes, typos, config nudges) may skip steps 1–3 but still require verification and a PR.
 

@@ -47,11 +47,7 @@ Run lint, format, typecheck, and tests; run e2e where possible. Fix any issues. 
 
 ### 6. Ship
 
-Push the branch and open a PR against `main` with a short summary and the plan doc linked.
-
-### 7. Archive
-
-Once the PR merges, move the plan doc to `docs/done/` (create the directory if it does not exist).
+Once the work is ready for review — implemented, verified, CI green — move the plan doc to `docs/done/` (create the directory if it does not exist), then push the branch and open a PR against `main` with a short summary and the plan doc linked. The archive rides the PR: reviewers see the decision log, and a merge needs no follow-up archive commit. Fixes that come in after this point — review comments, merge conflicts — are updates to the PR, not a reopening of the plan.
 
 ## Epics
 
@@ -60,9 +56,8 @@ An **epic** is a set of related tickets shipped as one body of work. It is repre
 1. **Umbrella ticket**: create the epic issue first, label it `epic`, and list the slice tickets in its body. Slices are ordinary tickets and follow the standard process (steps 1–7) with the modifications below.
 2. **Branch**: create `epic/<n>-<summary>` from `main` (e.g. `epic/251-workspace`), where `<n>` is the epic ticket number.
 3. **Plan doc**: the epic has its own plan doc, `docs/plan-<n>-<summary>.md`, with the same minimum content as a ticket plan doc. It lives on the **epic branch** and is always updated there — it is the decision log for the whole epic.
-4. **Slice branches and PRs**: cut slice branches from the **epic branch** (not `main`), named per the standard convention. Slice PRs target the epic branch instead of `main`; a slice's plan doc is archived to `docs/done/` when its PR merges (into the epic branch).
+4. **Slice branches and PRs**: cut slice branches from the **epic branch** (not `main`), named per the standard convention. Slice PRs target the epic branch instead of `main`; a slice's plan doc is archived to `docs/done/` when the slice is ready for review, riding the slice PR.
 5. **Cross-merges**: ticket branches may merge each other as needed — a slice that depends on another can merge that branch directly.
-6. **Ship the epic**: once all slices are done, open **one big PR from the epic branch to `main`**, linking the epic plan doc. The full quality gate (`npm run ci`) runs on it like any other PR.
-7. **Archive**: move the epic plan doc to `docs/done/` once the epic PR merges.
+6. **Ship the epic**: once all slices are done, move the epic plan doc to `docs/done/` (same ready-for-review trigger as the standard workflow) and open **one big PR from the epic branch to `main`**, linking that doc. The full quality gate (`npm run ci`) runs on it like any other PR.
 
 Everything else follows the standard process unchanged.
