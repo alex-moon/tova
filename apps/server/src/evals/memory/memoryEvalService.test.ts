@@ -1,173 +1,22 @@
 import type { Client } from 'langsmith';
 import type { WorkspaceSlice } from '../../services/workspaceRetrievalService';
 import {
-  assertEnrichmentEnabled,
-  gateMetrics,
   MEMORY_DATASET_NAME,
   memoryCorpusHash,
   pushMemoryCorpusToLangSmith,
   retrievalMetrics,
-  runGateEval,
   runMemoryEvals,
   runRetrievalEval,
-  type GateCaseResult,
   type RetrievalCaseResult,
 } from './memoryEvalService';
-import type { EnrichmentProbe } from '../../services/enrichmentService';
 import type { MemoryScenario } from './types';
 
 /*
  * #289 runner logic, exercised with injected dependencies so no Mongo, provider,
- * or LangSmith is needed: metric arithmetic, the gate comparison, the per-
- * scenario reseed/retrieve loop, and the dataset export.
+ * or LangSmith is needed: retrieval metric arithmetic, the per-scenario
+ * reseed/retrieve loop, and the dataset export. #310 retired the gate stage —
+ * the labelled GATE_CASES corpus stays as the product-rule record.
  */
-
-const gate = (expected: boolean, observed: boolean): GateCaseResult => ({
-  caseId: 'x',
-  expected,
-  observed,
-  pass: expected === observed,
-});
-
-describe('gateMetrics (#289)', () => {
-  it('computes precision/recall/fire-rate from the confusion matrix', () => {
-    const metrics = gateMetrics([
-      gate(true, true),
-      gate(true, false),
-      gate(false, true),
-      gate(false, false),
-    ]);
-    expect(metrics).toMatchObject({
-      total: 4,
-      truePos: 1,
-      falsePos: 1,
-      trueNeg: 1,
-      falseNeg: 1,
-      precision: 0.5,
-      recall: 0.5,
-      fireRate: 0.5,
-    });
-  });
-
-  it('reports null precision when the gate never fires (base-rate blind)', () => {
-    const metrics = gateMetrics([gate(true, false), gate(false, false)]);
-    expect(metrics.precision).toBeNull();
-    expect(metrics.recall).toBe(0);
-    expect(metrics.fireRate).toBe(0);
-  });
-
-  it('reports recall per refer-back subtype, ignoring negatives', () => {
-    const withSubtype = (
-      subtype: GateCaseResult['subtype'],
-      expected: boolean,
-      observed: boolean,
-    ): GateCaseResult => ({ ...gate(expected, observed), subtype });
-    const metrics = gateMetrics([
-      withSubtype('explicit', true, true),
-      withSubtype('explicit', true, true),
-      withSubtype('continuation', true, false),
-      withSubtype('bare-deixis', true, true),
-      gate(false, false),
-    ]);
-    expect(metrics.recallBySubtype.explicit).toEqual({
-      total: 2,
-      truePos: 2,
-      falseNeg: 0,
-      recall: 1,
-    });
-    expect(metrics.recallBySubtype.continuation).toEqual({
-      total: 1,
-      truePos: 0,
-      falseNeg: 1,
-      recall: 0,
-    });
-    expect(metrics.recallBySubtype['bare-deixis'].recall).toBe(1);
-  });
-
-  it('partitions the positive labels across subtypes (bucket sums match overall recall)', () => {
-    // Every subtype row is a positive, so the subtype buckets must exactly
-    // partition the overall tp/fn. A regression that double-counted or dropped
-    // a subtype would silently move a per-subtype bar without changing overall
-    // recall, so the partition is the invariant that keeps them consistent.
-    const withSubtype = (
-      subtype: GateCaseResult['subtype'],
-      expected: boolean,
-      observed: boolean,
-    ): GateCaseResult => ({ ...gate(expected, observed), subtype });
-    const metrics = gateMetrics([
-      withSubtype('explicit', true, true),
-      withSubtype('explicit', true, false),
-      withSubtype('continuation', true, true),
-      withSubtype('bare-deixis', true, false),
-      withSubtype('bare-deixis', true, true),
-      gate(false, true),
-      gate(false, false),
-    ]);
-    const buckets = Object.values(metrics.recallBySubtype);
-    const sum = (pick: (b: (typeof buckets)[number]) => number) =>
-      buckets.reduce((n, b) => n + pick(b), 0);
-    expect(sum((b) => b.total)).toBe(metrics.truePos + metrics.falseNeg);
-    expect(sum((b) => b.truePos)).toBe(metrics.truePos);
-    expect(sum((b) => b.falseNeg)).toBe(metrics.falseNeg);
-  });
-
-  it('excludes failed/timeout cases from the matrix and counts them (T15b)', () => {
-    const failedRow = (timeout: boolean): GateCaseResult => ({
-      caseId: 'x',
-      expected: true,
-      observed: false,
-      pass: false,
-      failed: true,
-      timeout,
-    });
-    const metrics = gateMetrics([
-      gate(true, true),
-      gate(false, false),
-      failedRow(false),
-      failedRow(true),
-    ]);
-    // Only the two usable cases are scored: no false negative from the failures.
-    expect(metrics.total).toBe(4);
-    expect(metrics.evaluated).toBe(2);
-    expect(metrics.truePos).toBe(1);
-    expect(metrics.falseNeg).toBe(0);
-    expect(metrics.errors).toBe(1);
-    expect(metrics.timeouts).toBe(1);
-    expect(metrics.recall).toBe(1);
-    // fireRate is over evaluated cases, so a dead call cannot depress it.
-    expect(metrics.fireRate).toBe(0.5);
-  });
-
-  it('keeps the subtype partition intact when a positive case failed (T15b x T1b-i)', () => {
-    // A failed positive carries its subtype but must be excluded from *both* the
-    // overall confusion matrix and the subtype buckets, or per-subtype recall
-    // would diverge from overall recall. A regression that counted the failed
-    // row in `recallBySubtype` but not `falseNeg` (or vice versa) would move a
-    // per-subtype bar without moving overall recall, so pin the partition.
-    const withSubtype = (
-      subtype: GateCaseResult['subtype'],
-      expected: boolean,
-      observed: boolean,
-    ): GateCaseResult => ({ ...gate(expected, observed), subtype });
-    const metrics = gateMetrics([
-      withSubtype('explicit', true, true),
-      withSubtype('continuation', true, false),
-      { ...withSubtype('bare-deixis', true, false), failed: true },
-      gate(false, false),
-    ]);
-    expect(metrics.evaluated).toBe(3);
-    expect(metrics.errors).toBe(1);
-    expect(metrics.falseNeg).toBe(1);
-    // The failed bare-deixis positive is not a false negative and not bucketed.
-    expect(metrics.recallBySubtype['bare-deixis']).toBeUndefined();
-    const buckets = Object.values(metrics.recallBySubtype);
-    const sum = (pick: (b: (typeof buckets)[number]) => number) =>
-      buckets.reduce((n, b) => n + pick(b), 0);
-    expect(sum((b) => b.total)).toBe(metrics.truePos + metrics.falseNeg);
-    expect(sum((b) => b.truePos)).toBe(metrics.truePos);
-    expect(sum((b) => b.falseNeg)).toBe(metrics.falseNeg);
-  });
-});
 
 describe('retrievalMetrics (#289)', () => {
   const row = (
@@ -198,86 +47,11 @@ describe('retrievalMetrics (#289)', () => {
     expect(metrics.byCategory.direct).toEqual({ total: 1, surfaced: 1, expectedMet: 1 });
     expect(metrics.byCategory.paraphrase).toEqual({ total: 1, surfaced: 0, expectedMet: 0 });
   });
-});
 
-describe('runGateEval (#289)', () => {
-  beforeEach(() => {
-    delete process.env.ENRICHMENT_ENABLED;
-  });
-
-  const ok = (workspace: boolean): EnrichmentProbe => ({ outcome: 'ok', files: false, workspace });
-
-  it('compares the workspace vote to the hand label', async () => {
-    const { results, metrics } = await runGateEval({
-      gateCases: [
-        { id: 'a', prompt: 'recall', refersBack: true },
-        { id: 'b', prompt: 'fresh', refersBack: false },
-      ],
-      classify: async (prompt) => ok(prompt === 'recall'),
-    });
-    expect(results.map((r) => r.pass)).toEqual([true, true]);
-    expect(metrics.precision).toBe(1);
-    expect(metrics.recall).toBe(1);
-  });
-
-  it('records a provider error as failed, not a false negative (T15b)', async () => {
-    const { results, metrics } = await runGateEval({
-      gateCases: [{ id: 'a', prompt: 'recall', refersBack: true }],
-      classify: async () => ({ outcome: 'error' }),
-    });
-    expect(results[0]).toMatchObject({ failed: true, timeout: false, observed: false });
-    expect(metrics.errors).toBe(1);
-    expect(metrics.falseNeg).toBe(0);
-    expect(metrics.recall).toBeNull();
-  });
-
-  it('records a timeout distinctly (T15b/OQ33)', async () => {
-    const { results, metrics } = await runGateEval({
-      gateCases: [{ id: 'a', prompt: 'recall', refersBack: true }],
-      classify: async () => ({ outcome: 'timeout' }),
-    });
-    expect(results[0]).toMatchObject({ failed: true, timeout: true });
-    expect(metrics.timeouts).toBe(1);
-    expect(metrics.errors).toBe(0);
-  });
-
-  it('paces before every gate call (T15c)', async () => {
-    let paced = 0;
-    await runGateEval({
-      gateCases: [
-        { id: 'a', prompt: 'x', refersBack: true },
-        { id: 'b', prompt: 'y', refersBack: false },
-      ],
-      classify: async () => ok(false),
-      pace: async () => {
-        paced += 1;
-      },
-    });
-    expect(paced).toBe(2);
-  });
-
-  it('throws when enrichment is disabled rather than posting a 0% gate (T15a)', async () => {
-    process.env.ENRICHMENT_ENABLED = '0';
-    await expect(runGateEval({ gateCases: [] })).rejects.toThrow(/ENRICHMENT_ENABLED/);
-    delete process.env.ENRICHMENT_ENABLED;
-  });
-});
-
-describe('assertEnrichmentEnabled (#289)', () => {
-  afterEach(() => {
-    delete process.env.ENRICHMENT_ENABLED;
-  });
-
-  it('passes when enrichment is on or unset', () => {
-    delete process.env.ENRICHMENT_ENABLED;
-    expect(() => assertEnrichmentEnabled()).not.toThrow();
-    process.env.ENRICHMENT_ENABLED = '1';
-    expect(() => assertEnrichmentEnabled()).not.toThrow();
-  });
-
-  it('throws when ENRICHMENT_ENABLED=0', () => {
-    process.env.ENRICHMENT_ENABLED = '0';
-    expect(() => assertEnrichmentEnabled()).toThrow(/ENRICHMENT_ENABLED/);
+  it('counts empty-after-cut cases (#305)', () => {
+    const withCut = { ...row('file', false, true), cutEmpty: true };
+    const without = { ...row('direct', false, true), cutEmpty: false };
+    expect(retrievalMetrics([withCut, withCut, without]).cutEmpty).toBe(2);
   });
 });
 
@@ -410,13 +184,12 @@ describe('memoryCorpusHash (#289 T6/D15)', () => {
   });
 });
 
-describe('runMemoryEvals stage selector (#289 T6)', () => {
+describe('runMemoryEvals stage selector (#289 T6, #310)', () => {
   it('runs only the requested stages', async () => {
     const retrievalOnly = await runMemoryEvals(
       { scenarios: [], clear: async () => {}, seed: async () => ({}), retrieve: async () => [] },
       ['retrieval'],
     );
-    expect(retrievalOnly.gate).toBeUndefined();
     expect(retrievalOnly.retrieval?.metrics.total).toBe(0);
   });
 });

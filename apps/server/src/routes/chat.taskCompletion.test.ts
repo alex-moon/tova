@@ -23,16 +23,11 @@ jest.mock('../services/followupService', () => ({
   generateFollowups: jest.fn().mockResolvedValue([]),
 }));
 
-jest.mock('../services/enrichmentService', () => ({
-  // #308: the gate/metadata helpers are pure — keep them real so the routes'
-  // trace metadata is derived from the mocked votes.
-  ...jest.requireActual('../services/enrichmentService'),
-  enrichmentVotes: jest.fn().mockResolvedValue({ files: false, workspace: false }),
-  libraryIndexFor: jest.fn().mockResolvedValue(''),
-  // #308: the real workspaceGateFrom consults this — true keeps the mocked
-  // votes (not the stub) driving the trace metadata.
-  isEnrichmentEnabled: () => true,
-}));
+// #310: the enrichment gate is retired — no vote to stub. The trace-fact
+// helpers stay real so the routes' metadata is derived from the live retrieval.
+jest.mock('../services/workspaceTraceFacts', () =>
+  jest.requireActual('../services/workspaceTraceFacts'),
+);
 
 const MOCK_ROUTING = { model: 'mock-small-model', provider: 'deepinfra', reason: 'roster-pick' };
 

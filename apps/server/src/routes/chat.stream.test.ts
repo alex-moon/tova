@@ -70,16 +70,11 @@ jest.mock('../services/titleService', () => ({
 
 // #238: the enrichment pass is a separate aux call; the route tests pin the
 // main completion's arguments, so stub enrichment to a no-op block.
-jest.mock('../services/enrichmentService', () => ({
-  // #308: the gate/metadata helpers are pure — keep them real so the routes'
-  // trace metadata is derived from the mocked votes.
-  ...jest.requireActual('../services/enrichmentService'),
-  enrichmentVotes: jest.fn().mockResolvedValue({ files: false, workspace: false }),
-  libraryIndexFor: jest.fn().mockResolvedValue(''),
-  // #308: the real workspaceGateFrom consults this — true keeps the mocked
-  // votes (not the stub) driving the trace metadata.
-  isEnrichmentEnabled: () => true,
-}));
+// #310: the enrichment gate is retired — no vote to stub. The trace-fact
+// helpers stay real so the routes' metadata is derived from the live retrieval.
+jest.mock('../services/workspaceTraceFacts', () =>
+  jest.requireActual('../services/workspaceTraceFacts'),
+);
 
 const isClassifierCall = (args?: { messages?: { role: string; content: string }[] }) =>
   args?.messages?.[0]?.content.startsWith('Classify the user prompt') ?? false;
@@ -243,17 +238,13 @@ describe('Chat streaming route', () => {
     );
   });
 
-  // #253: the workspace-memory block is injected only when the gate's
-  // `workspace` vote fires and the feature flag is on; the route wires the
-  // retrieved block into the system content on the persisted path.
-  it('injects the workspace-memory block when the vote fires and the flag is on (#253)', async () => {
+  // #253/#310: the workspace-memory block is retrieved unconditionally when the
+  // feature flag is on; the route wires the retrieved block into the system
+  // content on the persisted path.
+  it('injects the workspace-memory block when the flag is on (#253, #310)', async () => {
     const cookies = await registerUser('stream-workspace@example.com');
     await mockStream(['ok']);
 
-    const { enrichmentVotes } = jest.requireMock('../services/enrichmentService') as {
-      enrichmentVotes: jest.Mock;
-    };
-    enrichmentVotes.mockResolvedValueOnce({ files: false, workspace: true });
     const retrieve = jest
       .spyOn(
         jest.requireActual<typeof import('../services/workspaceRetrievalService')>(
@@ -280,7 +271,7 @@ describe('Chat streaming route', () => {
       ];
       expect(options.instructions).toContain('<user:workspace>');
       expect(options.instructions).toContain('budget is twelve thousand');
-      // #308: the guard outcome + hit count ride the main call's trace metadata.
+      // #308: the retrieval outcome + hit count ride the main call's trace metadata.
       expect(options.tracingOptions?.metadata).toMatchObject({
         tova_workspace_gate: 'yes',
         tova_workspace_hits: 1,

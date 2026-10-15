@@ -19,7 +19,6 @@ import { config } from '../config';
 import {
   memoryCorpusHash,
   runMemoryEvals,
-  type GateCaseResult,
   type MemoryEvalReport,
   type MemoryEvalStage,
   type RetrievalCaseResult,
@@ -52,23 +51,11 @@ const resolveRunDeps = (deps: MemoryEvalRunDeps) => ({
 });
 
 /*
- * The per-case drill-down. `score` is the closest `pass|partial|fail|error`
- * reading of the case's assertion: a gate case passes when the vote matches the
- * hand label (a provider failure is `error`); a retrieval case passes when
- * surfacing matches `expectSurfaced`. The authoritative rates live in
- * `metrics`; these rows are only for the admin drill-down.
+ * The per-case drill-down. `score` is the closest `pass|fail` reading of the
+ * case's assertion: a retrieval case passes when surfacing matches
+ * `expectSurfaced`. The authoritative rates live in `metrics`; these rows are
+ * only for the admin drill-down.
  */
-const gateScore = (r: GateCaseResult): 'pass' | 'fail' | 'error' =>
-  r.failed ? 'error' : r.pass ? 'pass' : 'fail';
-
-const gateRow = (r: GateCaseResult) => ({
-  caseId: `gate:${r.caseId}`,
-  model: 'memory',
-  provider: 'memory',
-  score: gateScore(r),
-  report: `expected=${r.expected} observed=${r.observed}${r.subtype ? ` subtype=${r.subtype}` : ''}`,
-});
-
 const retrievalRow = (r: RetrievalCaseResult) => ({
   caseId: `retrieval:${r.scenarioId}`,
   model: 'memory',
@@ -85,14 +72,11 @@ const buildMetrics = (
   const metrics: AdminEvalMemoryMetrics = {
     stages,
     corpusHash: memoryCorpusHash(),
-    gateModel: config.aux.model,
-    gateProvider: config.aux.provider,
     responderModel: config.memoryEval.responderModel ?? responder.model,
     responderProvider: config.memoryEval.responderProvider ?? responder.provider,
     judgeModel: config.memoryEval.judgeModel,
     judgeProvider: config.memoryEval.judgeProvider,
   };
-  if (report.gate) metrics.gate = report.gate.metrics;
   if (report.retrieval) metrics.retrieval = report.retrieval.metrics;
   return metrics;
 };
@@ -132,10 +116,7 @@ export const executeMemoryEvalRun = async (
   const { stages } = options;
   try {
     const report = await run(stages);
-    const results = [
-      ...(report.gate?.results ?? []).map(gateRow),
-      ...(report.retrieval?.results ?? []).map(retrievalRow),
-    ];
+    const results = [...(report.retrieval?.results ?? []).map(retrievalRow)];
     await updateRecord(id, {
       $set: {
         status: 'done',

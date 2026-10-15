@@ -1,12 +1,6 @@
 import { createHash } from 'node:crypto';
 import type { Client } from 'langsmith';
 import {
-  classifyFileIntentForEval,
-  isEnrichmentEnabled,
-  type EnrichmentProbe,
-} from '../../services/enrichmentService';
-import { config } from '../../config';
-import {
   collectWorkspaceSlices,
   isWorkspaceMemoryEnabled,
   rankWorkspaceSlicesWithCut,
@@ -16,134 +10,18 @@ import { embedWorkspaceUser } from '../../services/workspaceEmbeddingIngest';
 import { evalUserId } from '../mongoSource';
 import { GATE_CASES, MEMORY_SCENARIOS } from './corpus';
 import { clearMemoryCorpus, seedMemoryScenario, type SeedIdMap } from './memorySource';
-import type { GateCase, GateSubtype, MemoryScenario, ScenarioCategory } from './types';
+import type { GateCase, MemoryScenario, ScenarioCategory } from './types';
 
 /*
- * #289 memory-eval runner: the deterministic stages, over the corpus in
- * `corpus.ts`. Stage 1 scores the gate vote against its hand label; stage 2
- * scores retrieval hit-rate by slice ID. Stage 3 (helpfulness) is encoded in
- * the corpus (`expectedFact`) but its judge runner is a follow-up — the ticket
- * requires the judge to be validated against hand labels before it is trusted.
+ * #289 memory-eval runner over the corpus in `corpus.ts`. Stage 2 scores
+ * retrieval hit-rate by slice ID; stage 3 (helpfulness) is manual-only.
+ * #310 retired the gate (stage 1): the aux vote it measured no longer exists —
+ * workspace retrieval runs unconditionally and the relevance bar is #305's
+ * rerank-and-cut.
  *
  * Every dependency is injectable so the logic is unit-testable without Mongo,
  * live providers, or LangSmith (same seam style as `evalRunService`).
  */
-
-/* ------------------------------- stage 1: gate ------------------------------ */
-
-export interface GateCaseResult {
-  caseId: string;
-  expected: boolean;
-  observed: boolean;
-  pass: boolean;
-  /** Refer-back subtype of a positive; absent on negatives. */
-  subtype?: GateSubtype;
-  /** The provider call failed (a throw or a timeout); excluded from metrics (T15b). */
-  failed?: boolean;
-  /** The provider call hit the enrichment timeout cap (T15b/OQ33). */
-  timeout?: boolean;
-}
-
-/*
- * #289 T15a: the gate eval reads the live enrichment classifier, and the
- * production path (`enrichmentVotes`) returns all-false when `ENRICHMENT_ENABLED`
- * is off. Running the gate with enrichment off would post a 0% recall that looks
- * like a gate failure but is a misconfiguration, so fail loudly instead of
- * silently reporting a 0% gate.
- */
-export const assertEnrichmentEnabled = (): void => {
-  if (!isEnrichmentEnabled()) {
-    throw new Error(
-      'memory gate eval requires ENRICHMENT_ENABLED; enrichmentVotes returns all-false when off, ' +
-        'which would score recall 0',
-    );
-  }
-};
-
-/** Recall over one refer-back subtype (positives only). */
-export interface SubtypeRecall {
-  /** Positives of this subtype. */
-  total: number;
-  truePos: number;
-  falseNeg: number;
-  /** tp / total; null when the subtype has no cases. */
-  recall: number | null;
-}
-
-export interface GateMetrics {
-  total: number;
-  /** Cases with a usable vote (total minus errors and timeouts). */
-  evaluated: number;
-  truePos: number;
-  falsePos: number;
-  trueNeg: number;
-  falseNeg: number;
-  /** tp / (tp + fp); null when the gate never fired (no positive predictions). */
-  precision: number | null;
-  /** tp / (tp + fn); null when there are no positive labels. */
-  recall: number | null;
-  /** Fraction of evaluated turns the gate fired on (the base-rate companion). */
-  fireRate: number;
-  /** Provider failures (a thrown call), excluded from precision/recall (T15b). */
-  errors: number;
-  /** Provider timeouts (the ENRICHMENT_TIMEOUT_MS cap), excluded (T15b/OQ33). */
-  timeouts: number;
-  /** Recall per refer-back subtype, so a bar can be set per subtype (T1b-i/OQ12). */
-  recallBySubtype: Record<string, SubtypeRecall>;
-}
-
-export const gateMetrics = (results: GateCaseResult[]): GateMetrics => {
-  let truePos = 0;
-  let falsePos = 0;
-  let trueNeg = 0;
-  let falseNeg = 0;
-  let errors = 0;
-  let timeouts = 0;
-  const bySubtype: Record<string, { total: number; truePos: number; falseNeg: number }> = {};
-  for (const r of results) {
-    // A provider failure is not a "no": count it separately and drop it from the
-    // confusion matrix so it cannot inflate false negatives (T15b, OQ11/OQ33).
-    if (r.failed) {
-      if (r.timeout) timeouts += 1;
-      else errors += 1;
-      continue;
-    }
-    if (r.expected && r.observed) truePos += 1;
-    else if (!r.expected && r.observed) falsePos += 1;
-    else if (!r.expected && !r.observed) trueNeg += 1;
-    else falseNeg += 1;
-    if (r.subtype) {
-      const bucket = (bySubtype[r.subtype] ??= { total: 0, truePos: 0, falseNeg: 0 });
-      bucket.total += 1;
-      if (r.expected && r.observed) bucket.truePos += 1;
-      else if (r.expected && !r.observed) bucket.falseNeg += 1;
-    }
-  }
-  const evaluated = results.length - errors - timeouts;
-  const positives = truePos + falsePos;
-  const labelled = truePos + falseNeg;
-  const recallBySubtype: Record<string, SubtypeRecall> = {};
-  for (const [subtype, bucket] of Object.entries(bySubtype)) {
-    recallBySubtype[subtype] = {
-      ...bucket,
-      recall: bucket.total ? bucket.truePos / bucket.total : null,
-    };
-  }
-  return {
-    total: results.length,
-    evaluated,
-    truePos,
-    falsePos,
-    trueNeg,
-    falseNeg,
-    precision: positives ? truePos / positives : null,
-    recall: labelled ? truePos / labelled : null,
-    fireRate: evaluated ? positives / evaluated : 0,
-    errors,
-    timeouts,
-    recallBySubtype,
-  };
-};
 
 /* ---------------------------- stage 2: retrieval ---------------------------- */
 
@@ -215,26 +93,16 @@ export const retrievalMetrics = (results: RetrievalCaseResult[]): RetrievalMetri
 /* ---------------------------------- runner ---------------------------------- */
 
 export interface MemoryEvalDeps {
-  gateCases?: GateCase[];
   scenarios?: MemoryScenario[];
-  /** Defaults to the strict eval probe; injected in tests. */
-  classify?: (
-    prompt: string,
-    history: { role: 'user' | 'assistant'; content: string }[],
-  ) => Promise<EnrichmentProbe>;
   /** Defaults to the real retrieval read; injected in tests. */
   retrieve?: (query: string, userId: string) => Promise<WorkspaceSlice[]>;
   seed?: (scenario: MemoryScenario) => Promise<SeedIdMap>;
   clear?: () => Promise<void>;
-  /** Inter-call delay before each live gate call (T15c); injected in tests. */
-  pace?: () => Promise<void>;
   /** Embeds the eval user's corpus after seeding; injected in tests. */
   embed?: (userId: string) => Promise<void>;
 }
 
 export interface MemoryEvalReport {
-  /** Absent when the run's `stages` selector excluded the gate. */
-  gate?: { results: GateCaseResult[]; metrics: GateMetrics };
   /** Absent when the run's `stages` selector excluded retrieval. */
   retrieval?: {
     results: RetrievalCaseResult[];
@@ -248,58 +116,6 @@ export interface MemoryEvalReport {
     vectorEnabled: boolean;
   };
 }
-
-const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
-
-/*
- * #289 T15c: a 36-case gate burst can trip the aux provider's RPM, and (before
- * T15b) a 429 was silently scored as a false negative. Pace each call so the run
- * stays under the limit; the delay is config-sourced
- * (`MEMORY_EVAL_GATE_PACE_MS`) so the budget is a config change (OQ32). No retry
- * by default: a 429 is still recorded as `failed` (T15b), not masked.
- */
-const defaultGatePace = async (): Promise<void> => {
-  const ms = config.memoryEval.gatePaceMs;
-  if (ms > 0) await sleep(ms);
-};
-
-export const runGateEval = async (
-  deps: MemoryEvalDeps = {},
-): Promise<{ results: GateCaseResult[]; metrics: GateMetrics }> => {
-  // T15a: fail loudly rather than post a 0% gate when enrichment is off.
-  assertEnrichmentEnabled();
-  const cases = deps.gateCases ?? GATE_CASES;
-  const classify = deps.classify ?? classifyFileIntentForEval;
-  const pace = deps.pace ?? defaultGatePace;
-  const results: GateCaseResult[] = [];
-  for (const testCase of cases) {
-    await pace();
-    const probe = await classify(testCase.prompt, testCase.history ?? []);
-    if (probe.outcome !== 'ok') {
-      // Record the failure distinctly (T15b): `observed:false` is a placeholder,
-      // not a vote — `gateMetrics` excludes `failed` rows from the matrix.
-      results.push({
-        caseId: testCase.id,
-        expected: testCase.refersBack,
-        observed: false,
-        pass: false,
-        subtype: testCase.subtype,
-        failed: true,
-        timeout: probe.outcome === 'timeout',
-      });
-      continue;
-    }
-    const observed = probe.workspace;
-    results.push({
-      caseId: testCase.id,
-      expected: testCase.refersBack,
-      observed,
-      pass: observed === testCase.refersBack,
-      subtype: testCase.subtype,
-    });
-  }
-  return { results, metrics: gateMetrics(results) };
-};
 
 /*
  * Default per-scenario embedding for the semantic measurement: with the flag on
@@ -385,20 +201,19 @@ export const runRetrievalEval = async (
 };
 
 /** The deterministic memory stages the runner can execute. */
-export type MemoryEvalStage = 'gate' | 'retrieval';
+export type MemoryEvalStage = 'retrieval';
 
 /**
- * Runs the requested deterministic stages, in order. Stage 3 (judge) is
- * manual-only and not part of this runner. The `stages` selector exists so a
- * scheduled run can take **retrieval only** without making the 36 live gate
- * calls unattended (D13/OQ26). Defaults to both, the manual-CLI shape.
+ * Runs the requested deterministic stages. Stage 3 (judge) is manual-only and
+ * not part of this runner; #310 retired the gate stage (the aux vote it
+ * measured no longer exists). The `stages` selector exists so a scheduled run
+ * can take **retrieval only** — the only stage there is.
  */
 export const runMemoryEvals = async (
   deps: MemoryEvalDeps = {},
-  stages: MemoryEvalStage[] = ['gate', 'retrieval'],
+  stages: MemoryEvalStage[] = ['retrieval'],
 ): Promise<MemoryEvalReport> => {
   const report: MemoryEvalReport = {};
-  if (stages.includes('gate')) report.gate = await runGateEval(deps);
   if (stages.includes('retrieval')) report.retrieval = await runRetrievalEval(deps);
   return report;
 };

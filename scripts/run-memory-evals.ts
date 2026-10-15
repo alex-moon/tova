@@ -1,6 +1,6 @@
 /*
  * #289 memory-eval runner. Seeds the corpus into the reserved eval user's
- * workspace, scores the two deterministic stages (gate precision/recall,
+ * workspace, scores the deterministic retrieval stage (hit-rate by slice ID),
  * retrieval hit-rate by slice ID), prints the metrics, and — when
  * LANGSMITH_API_KEY is present — loads the corpus into the `tova-memory-evals`
  * dataset (best-effort). Not part of CI.
@@ -11,10 +11,9 @@
  *   npx tsx scripts/run-memory-evals.ts --validate-judge
  *   npm run evals:memory
  *
- * Needs: local MongoDB (fixtures). The gate stage needs GROQ_API_KEY (the aux
- * model); the retrieval stage is Mongo-only. Stage 3 (helpfulness) runs only
- * with `--helpfulness` and needs the responder + judge providers. See
- * docs/plan-289-gate-evals.md.
+ * Needs: local MongoDB (fixtures); the retrieval stage is Mongo-only. Stage 3
+ * (helpfulness) runs only with `--helpfulness` and needs the responder + judge
+ * providers. See docs/plan-289-gate-evals.md.
  */
 import 'dotenv/config';
 import mongoose from 'mongoose';
@@ -109,26 +108,12 @@ const main = async (): Promise<void> => {
   const langsmithClient = await langsmithClientFromEnv(process.env.LANGSMITH_API_KEY);
   await mongoose.connect(buildMongoUri());
   try {
-    const { gate, retrieval } = await runMemoryEvals();
-    if (!gate || !retrieval)
-      throw new Error('default memory eval must run both deterministic stages');
-
-    console.log('\nStage 1 — gate precision/recall (workspace vote vs hand label):');
-    for (const r of gate.results) {
-      const tag = r.failed ? (r.timeout ? 'TMO ' : 'ERR ') : r.pass ? 'ok  ' : 'MISS';
-      console.log(`  ${tag} ${r.caseId} expected=${r.expected} observed=${r.observed}`);
-    }
-    console.log(
-      `  precision=${pct(gate.metrics.precision)} recall=${pct(gate.metrics.recall)} ` +
-        `fireRate=${pct(gate.metrics.fireRate)} (evaluated=${gate.metrics.evaluated} ` +
-        `errors=${gate.metrics.errors} timeouts=${gate.metrics.timeouts} n=${gate.metrics.total})`,
-    );
-    for (const [subtype, m] of Object.entries(gate.metrics.recallBySubtype)) {
-      console.log(`    ${subtype}: recall ${pct(m.recall)} (${m.truePos}/${m.total})`);
-    }
+    // #310: the gate stage is retired — retrieval is the only deterministic stage.
+    const { retrieval } = await runMemoryEvals();
+    if (!retrieval) throw new Error('memory eval did not run the retrieval stage');
 
     console.log(
-      `\nStage 2 — retrieval hit-rate (expected slice surfaced)` +
+      `\nRetrieval hit-rate (expected slice surfaced)` +
         ` [vector stage ${retrieval.vectorEnabled ? 'enabled' : 'off (BM25 baseline)'}]:`,
     );
     for (const r of retrieval.results) {

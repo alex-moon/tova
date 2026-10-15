@@ -125,13 +125,6 @@ export const config = {
     get provider(): LlmProvider {
       return (process.env.AUX_PROVIDER as LlmProvider) || 'groq';
     },
-    // #238: hard cap on the serial enrichment pre-pass so a slow aux call
-    // degrades to "no block" instead of delaying the chat turn.
-    get enrichmentTimeoutMs(): number {
-      const raw = process.env.ENRICHMENT_TIMEOUT_MS;
-      const parsed = raw === undefined || raw === '' ? NaN : Number(raw);
-      return Number.isFinite(parsed) && parsed > 0 ? parsed : 1500;
-    },
   },
 
   // #289: the stage-3 helpfulness eval. The judge is deliberately a different
@@ -207,8 +200,8 @@ export const config = {
   // `timeoutMs` bounds the query embed + `$vectorSearch` on the chat hot path
   // before retrieval degrades to the BM25 result; `backfillTimeoutMs` bounds
   // one backfill batch (64 passages cold-embeds in seconds — the hot-path
-  // budget times out there). All parse+fallback like
-  // `aux.enrichmentTimeoutMs` so a malformed env degrades to the default.
+  // budget times out there). All parse+fallback so a malformed env degrades to
+  // the default.
   embeddings: {
     get model(): string {
       return process.env.EMBEDDING_MODEL || 'BAAI/bge-base-en-v1.5';

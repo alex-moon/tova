@@ -27,13 +27,7 @@ import { zdrHistorySchema } from '../validation';
 import { redactForLog } from '../services/logRedaction';
 import { decideTurn } from '../services/zdrTurn';
 import { AllModelsDisabledError } from '../services/modelConfigService';
-import {
-  enrichmentVotes,
-  libraryIndexFor,
-  workspaceGateFrom,
-  workspaceTraceMetadata,
-  type EnrichmentVotes,
-} from '../services/enrichmentService';
+import { workspaceGateFrom, workspaceTraceMetadata } from '../services/workspaceTraceFacts';
 import {
   isWorkspaceMemoryEnabled,
   retrieveWorkspaceBlock,
@@ -479,22 +473,6 @@ const messagesFromPersistedHistory = (
     };
   });
 
-/*
- * #238: the aux enrichment prompt wants plain text history, oldest first, and
- * WITHOUT the just-saved current turn (it rides separately as the query). The
- * persisted find is newest-first and includes the current turn, so it is
- * dropped by id and the tail reversed — the pre-#232 `guardHistoryFromDocs`
- * shape, non-mutating this time (the same `history` array is reused below).
- */
-const enrichmentHistoryFromDocs = (
-  docs: { _id: unknown; role: string; content: string }[],
-  currentMessageId: unknown,
-): { role: 'user' | 'assistant'; content: string }[] =>
-  [...docs]
-    .filter((m) => String(m._id) !== String(currentMessageId))
-    .reverse()
-    .map((m) => ({ role: m.role as 'user' | 'assistant', content: m.content }));
-
 // Throwaway chat attachments (#116): as soon as the turn that consumed them
 // completes, the row and its Spaces object go. Never throws — cleanup must
 // not turn a finished answer into an error.
@@ -566,50 +544,36 @@ const saveUserMessageWithMetrics = async (
 };
 
 /*
- * #238/#253: one aux vote, two reads. The gate decides whether the turn refers
- * to a library file (`files`) and/or to past work (`workspace`); the reads are
- * independent Mongo lookups. A negative vote skips its read; a disabled gate
- * (or a timeout inside `enrichmentVotes`) yields both-false. Never throws —
- * enrichment must not degrade a chat turn.
+ * #253: the workspace-memory read. #310 retired the aux gate — retrieval runs
+ * unconditionally on every text turn that reaches here (the relevance bar is
+ * #305's rerank-and-cut, not an aux vote). Never throws — memory must not
+ * degrade a chat turn.
  *
- * `skipWorkspace` (ZDR turns, image turns) suppresses the memory read while
- * leaving the files vote intact; the library read is separately suppressed by
- * the caller for image turns via `skipFiles`.
+ * `skipWorkspace` (image turns) suppresses the read entirely.
  *
  * `excludeMessageId` drops the just-saved current turn from the workspace
  * corpus (the routes run retrieval after persisting it, so without it the turn
  * could be retrieved and injected back as its own "past work").
  * `excludeAssetId` drops the current turn's attached file for the same reason:
- * it is not past work, and its text already rides the `<user_content>` envelope
- * (or the file-library index).
+ * it is not past work, and its text already rides the `<user_content>` envelope.
  */
-const enrichmentBlocksFor = async (
+const workspaceBlockFor = async (
   prompt: string,
-  history: { role: 'user' | 'assistant'; content: string }[],
   userId: string,
   opts: {
-    skipFiles?: boolean;
     skipWorkspace?: boolean;
     excludeMessageId?: string;
     excludeAssetId?: string;
-    // #308: threads the guard's aux run under the chat session when present
-    // (ZDR turns have no durable session and stay unthreaded).
-    sessionId?: string;
   } = {},
-): Promise<{ libraryBlock: string; workspaceBlock: string; votes: EnrichmentVotes }> => {
-  const votes = await enrichmentVotes(prompt, history, opts.sessionId);
-  const libraryBlock = !opts.skipFiles && votes.files ? await libraryIndexFor(userId) : '';
-  let workspaceBlock = '';
-  if (!opts.skipWorkspace && votes.workspace && isWorkspaceMemoryEnabled()) {
-    workspaceBlock = await retrieveWorkspaceBlock(
-      prompt,
-      userId,
-      undefined,
-      opts.excludeMessageId,
-      opts.excludeAssetId,
-    );
-  }
-  return { libraryBlock, workspaceBlock, votes };
+): Promise<string> => {
+  if (opts.skipWorkspace || !isWorkspaceMemoryEnabled()) return '';
+  return retrieveWorkspaceBlock(
+    prompt,
+    userId,
+    undefined,
+    opts.excludeMessageId,
+    opts.excludeAssetId,
+  );
 };
 
 /*
@@ -758,30 +722,19 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
       /*
        * #253: matching the streaming route and plan decision 6, a ZDR turn MAY
        * read the workspace (read-only) — it writes nothing, so it is absent from
-       * the corpus by construction. The library index is never injected on ZDR
-       * ("the write-nothing turn injects no index"), so `skipFiles` avoids the
-       * wasted read that the streaming route already skips.
+       * the corpus by construction.
        */
-      const zdrBlocks = await enrichmentBlocksFor(content, zdrHistory.value, userId as string, {
-        skipFiles: true,
-      });
+      const zdrWorkspaceBlock = await workspaceBlockFor(content, userId as string);
 
       /*
        * ZDR continuity is the client replay; the prompt is assembled once and
-       * raced (#232). Racing never calls the guard, so there is no library
-       * index to inject on a raced turn.
+       * raced (#232).
        */
       const zdrMessages = (): ReturnType<typeof buildZdrMessages> => {
         const turnMessages = buildZdrMessages(zdrHistory.value, content);
         turnMessages.unshift({
           role: 'system',
-          content: buildSystemContent(
-            userDoc,
-            '',
-            true,
-            userDoc.settings?.timezone,
-            zdrBlocks.workspaceBlock,
-          ),
+          content: buildSystemContent(userDoc, true, userDoc.settings?.timezone, zdrWorkspaceBlock),
         });
         appendAssetBlock(turnMessages, attachedAsset);
         return turnMessages;
@@ -854,31 +807,18 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
     // service itself never throws, so chat cannot block hard on it.
     await ensureUserLocation(userDoc, req.ip);
     /*
-     * #238/#253: the enrichment pass (bounded serial) decides whether to inject
-     * the file-library index and/or the workspace-memory block. Text-only:
-     * image turns skip both reads, matching the retired guard's files gating.
-     * `enrichmentHistoryFromDocs` is non-mutating so the same `history` array
-     * survives for `withSystemAndAsset`.
+     * #253/#310: the workspace-memory block is retrieved unconditionally — no
+     * aux vote. Image turns skip the read (text-only for memory).
      */
-    const { libraryBlock, workspaceBlock, votes } = await enrichmentBlocksFor(
-      content,
-      enrichmentHistoryFromDocs(
-        history as { _id: unknown; role: string; content: string }[],
-        userMessage._id,
-      ),
-      userId as string,
-      {
-        skipFiles: hasImage,
-        skipWorkspace: hasImage,
-        excludeMessageId: String(userMessage._id),
-        excludeAssetId: attachedAsset ? String(attachedAsset._id) : undefined,
-        sessionId: String(session!._id),
-      },
-    );
-    // #308: the guard outcome + retrieval hit count ride the main call's trace
+    const workspaceBlock = await workspaceBlockFor(content, userId as string, {
+      skipWorkspace: hasImage,
+      excludeMessageId: String(userMessage._id),
+      excludeAssetId: attachedAsset ? String(attachedAsset._id) : undefined,
+    });
+    // #308: the retrieval outcome + hit count ride the main call's trace
     // metadata so the admin Traces tab can show them per turn.
     const workspaceMetadata = workspaceTraceMetadata(
-      workspaceGateFrom(votes, hasImage),
+      workspaceGateFrom(workspaceBlock, hasImage),
       workspaceBlock,
     );
     const withSystemAndAsset = async (systemContent: string) => {
@@ -896,8 +836,8 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
 
     /*
      * #232: the turn races the fixed roster. Racing selects the model
-     * internally, so the prompt is assembled once (#238: the enrichment pass
-     * supplies the library block) and the budget is sized against the pre-race
+     * internally, so the prompt is assembled once (#310: the workspace block is
+     * retrieved unconditionally) and the budget is sized against the pre-race
      * pick's window. The winner re-shapes routing for persistence. An empty
      * roster (no model could be picked) is surfaced as the all-disabled error.
      */
@@ -910,7 +850,6 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
     const turnMessages = await withSystemAndAsset(
       buildSystemContent(
         userDoc,
-        libraryBlock,
         false,
         userDoc.settings?.timezone,
         workspaceBlock,
@@ -1112,17 +1051,12 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
 
     await ensureUserLocation(streamUserDoc, req.ip);
     /*
-     * #238/#253: the enrichment pass supplies the file-library block and the
-     * workspace-memory block (empty on ZDR — the write-nothing turn injects no
-     * index, as before — and on image turns, which are text-only for
-     * enrichment). ZDR turns may still READ the workspace (read-only, matching
+     * #253/#310: the workspace-memory block is retrieved unconditionally — no
+     * aux vote. ZDR turns may still READ the workspace (read-only, matching
      * plan task 8); they never write corpus items, so they are absent from the
-     * corpus by construction.
+     * corpus by construction. Image turns skip the read (text-only for memory).
      */
-    let libraryBlock = '';
     let streamWorkspaceBlock = '';
-    // #308: the guard vote, kept for the trace metadata on the main call.
-    let streamVotes: EnrichmentVotes = { files: false, workspace: false };
     // #255 (F4): completed background tasks for this session, drained into the
     // persisted turn's context below (empty on ZDR — a ZDR turn cannot create a
     // task, D7, so it has nothing to drain). The ids are marked notified only
@@ -1134,12 +1068,7 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
       // Continuity comes from the client replay (#116); nothing is read back.
       messages = buildZdrMessages(zdrHistory, content);
       routingResult = rosterRoute;
-      // No sessionId: a ZDR turn has no durable session to thread the run under.
-      const zdrBlocks = await enrichmentBlocksFor(content, zdrHistory, userId as string, {
-        skipFiles: true,
-      });
-      streamWorkspaceBlock = zdrBlocks.workspaceBlock;
-      streamVotes = zdrBlocks.votes;
+      streamWorkspaceBlock = await workspaceBlockFor(content, userId as string);
     } else {
       // Save user message
       const userMessage = await saveUserMessageWithMetrics(
@@ -1155,24 +1084,11 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
         .sort({ timestamp: -1 })
         .limit(10);
 
-      const blocks = await enrichmentBlocksFor(
-        content,
-        enrichmentHistoryFromDocs(
-          history as { _id: unknown; role: string; content: string }[],
-          userMessage._id,
-        ),
-        userId as string,
-        {
-          skipFiles: hasImage,
-          skipWorkspace: hasImage,
-          excludeMessageId: String(userMessage._id),
-          excludeAssetId: attachedAsset ? String(attachedAsset._id) : undefined,
-          sessionId: String(session!._id),
-        },
-      );
-      libraryBlock = blocks.libraryBlock;
-      streamWorkspaceBlock = blocks.workspaceBlock;
-      streamVotes = blocks.votes;
+      streamWorkspaceBlock = await workspaceBlockFor(content, userId as string, {
+        skipWorkspace: hasImage,
+        excludeMessageId: String(userMessage._id),
+        excludeAssetId: attachedAsset ? String(attachedAsset._id) : undefined,
+      });
       // #255: drain completed origin tasks (queued write) into this turn.
       const streamTaskCompletion = await taskCompletionBlockFor(
         userId as string,
@@ -1197,7 +1113,6 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
       // known (storage stays UTC).
       content: buildSystemContent(
         streamUserDoc,
-        libraryBlock,
         zdr,
         streamUserDoc.settings?.timezone,
         streamWorkspaceBlock,
@@ -1268,14 +1183,14 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
           abortSignal: abortController.signal,
           // #224: attach the chat session to this turn's trace (ZDR turns have
           // no session — nothing durable can be joined). #308: the workspace
-          // gate outcome + retrieval hit count ride the trace metadata.
+          // retrieval outcome + hit count ride the trace metadata.
           ...(zdr
             ? {}
             : {
                 trace: {
                   sessionId: String(session!._id),
                   metadata: workspaceTraceMetadata(
-                    workspaceGateFrom(streamVotes, hasImage),
+                    workspaceGateFrom(streamWorkspaceBlock, hasImage),
                     streamWorkspaceBlock,
                   ),
                 },

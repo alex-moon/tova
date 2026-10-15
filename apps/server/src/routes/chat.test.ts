@@ -64,16 +64,11 @@ jest.mock('../services/titleService', () => ({
 // #238: the enrichment pass is a separate aux call; the route tests pin the
 // main completion's arguments, so stub enrichment to a no-op block and keep
 // it off `inferenceService.mock.calls`.
-jest.mock('../services/enrichmentService', () => ({
-  // #308: the gate/metadata helpers are pure — keep them real so the routes'
-  // trace metadata is derived from the mocked votes.
-  ...jest.requireActual('../services/enrichmentService'),
-  enrichmentVotes: jest.fn().mockResolvedValue({ files: false, workspace: false }),
-  libraryIndexFor: jest.fn().mockResolvedValue(''),
-  // #308: the real workspaceGateFrom consults this — true keeps the mocked
-  // votes (not the stub) driving the trace metadata.
-  isEnrichmentEnabled: () => true,
-}));
+// #310: the enrichment gate is retired — no vote to stub. The trace-fact
+// helpers stay real so the routes' metadata is derived from the live retrieval.
+jest.mock('../services/workspaceTraceFacts', () =>
+  jest.requireActual('../services/workspaceTraceFacts'),
+);
 
 const registerUser = async (app: ReturnType<typeof createApp>, email: string) => {
   const response = await request(app)
@@ -319,17 +314,13 @@ describe('Chat route routing metadata', () => {
       expect(content).toContain('<user:preferred_name>\nAlex\n</user:preferred_name>');
     });
 
-    // #253: the non-streaming route injects the workspace-memory block when the
-    // gate's `workspace` vote fires and the flag is on — the same wiring the
-    // streaming route has, so the two cannot drift.
-    it('injects the workspace-memory block when the vote fires and the flag is on (#253)', async () => {
+    // #253/#310: the non-streaming route injects the workspace-memory block
+    // whenever the flag is on — the same wiring the streaming route has, so the
+    // two cannot drift.
+    it('injects the workspace-memory block when the flag is on (#253, #310)', async () => {
       const app = createApp();
       const cookies = await registerUser(app, 'prompt-workspace@example.com');
 
-      const { enrichmentVotes } = jest.requireMock('../services/enrichmentService') as {
-        enrichmentVotes: jest.Mock;
-      };
-      enrichmentVotes.mockResolvedValueOnce({ files: false, workspace: true });
       const retrieve = jest
         .spyOn(
           jest.requireActual<typeof import('../services/workspaceRetrievalService')>(
@@ -356,17 +347,12 @@ describe('Chat route routing metadata', () => {
       }
     });
 
-    // #293: ranking changes must not alter flag-off behaviour. With the kill
-    // switch unset, the workspace vote firing still injects nothing and the
-    // retrieval service is never reached.
-    it('injects no workspace block when the flag is off, even if the vote fires (#293)', async () => {
+    // #293/#310: with the kill switch unset, no workspace block is injected and
+    // the retrieval service is never reached.
+    it('injects no workspace block when the flag is off (#293)', async () => {
       const app = createApp();
       const cookies = await registerUser(app, 'prompt-workspace-off@example.com');
 
-      const { enrichmentVotes } = jest.requireMock('../services/enrichmentService') as {
-        enrichmentVotes: jest.Mock;
-      };
-      enrichmentVotes.mockResolvedValueOnce({ files: false, workspace: true });
       const retrieve = jest.spyOn(
         jest.requireActual<typeof import('../services/workspaceRetrievalService')>(
           '../services/workspaceRetrievalService',
