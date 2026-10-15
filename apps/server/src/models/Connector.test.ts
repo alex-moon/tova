@@ -1,17 +1,17 @@
 import mongoose from 'mongoose';
-import { McpServer } from './McpServer';
+import { Connector } from './Connector';
 
-describe('McpServer model', () => {
+describe('Connector model', () => {
   beforeAll(async () => {
     // Mongoose builds indexes asynchronously on connect; under CI load the
     // unique partial index on (scope, userId, url) may not exist yet when the
     // first write lands. Await the build explicitly so the duplicate-key
     // expectation is deterministic.
-    await McpServer.init();
+    await Connector.init();
   });
 
   it('strips the headers envelope from toJSON output', async () => {
-    const doc = new McpServer({
+    const doc = new Connector({
       scope: 'user',
       userId: new mongoose.Types.ObjectId(),
       name: 'mine',
@@ -25,7 +25,7 @@ describe('McpServer model', () => {
   });
 
   it('defaults scope-driven fields', async () => {
-    const doc = new McpServer({
+    const doc = new Connector({
       scope: 'platform',
       name: 'builtin',
       url: 'https://mcp.tova.dev',
@@ -40,20 +40,20 @@ describe('McpServer model', () => {
 
   it('persists and keeps the user-scope unique index on url', async () => {
     const userId = new mongoose.Types.ObjectId();
-    await McpServer.create({
+    await Connector.create({
       scope: 'user',
       userId,
       name: 'first',
       url: 'https://mcp.example.com',
     });
-    await McpServer.create({
+    await Connector.create({
       scope: 'user',
       userId: new mongoose.Types.ObjectId(),
       name: 'same-url-different-user',
       url: 'https://mcp.example.com',
     });
     await expect(
-      McpServer.create({
+      Connector.create({
         scope: 'user',
         userId,
         name: 'dup',
@@ -62,7 +62,7 @@ describe('McpServer model', () => {
     ).rejects.toThrow(/duplicate key/u);
     // Same URL at platform scope does not collide with user scope.
     await expect(
-      McpServer.create({
+      Connector.create({
         scope: 'platform',
         name: 'platform-same-url',
         url: 'https://mcp.example.com',
@@ -71,11 +71,37 @@ describe('McpServer model', () => {
   });
 
   it('rejects an unknown status value', async () => {
-    const doc = new McpServer({
+    const doc = new Connector({
       scope: 'platform',
       name: 'bad',
       url: 'https://mcp.example.com',
       status: 'exploded',
+    });
+    await expect(doc.validate()).rejects.toThrow();
+  });
+
+  it('defaults type to mcp.pat so pre-migration rows behave unchanged (#329)', async () => {
+    const doc = new Connector({
+      scope: 'user',
+      userId: new mongoose.Types.ObjectId(),
+      name: 'pre-migration',
+      url: 'https://mcp.example.com',
+    });
+    await expect(doc.validate()).resolves.toBeUndefined();
+    expect(doc.type).toBe('mcp.pat');
+  });
+
+  it('rejects connector types outside the storable enum (#329)', async () => {
+    // mcp.oauth / api / sdk are contract-level names; only mcp.pat is
+    // storable until #327 extends the enum.
+    const doc = new Connector({
+      scope: 'user',
+      userId: new mongoose.Types.ObjectId(),
+      name: 'bad-type',
+      url: 'https://mcp.example.com',
+      // Runtime value the static enum cannot express yet; the model must
+      // still refuse to store it.
+      type: 'api' as unknown as 'mcp.pat',
     });
     await expect(doc.validate()).rejects.toThrow();
   });
@@ -87,7 +113,7 @@ describe('McpServer model', () => {
       'https://',
       'file:///etc/passwd',
     ]) {
-      const doc = new McpServer({
+      const doc = new Connector({
         scope: 'user',
         userId: new mongoose.Types.ObjectId(),
         name: 'bad-url',
@@ -98,7 +124,7 @@ describe('McpServer model', () => {
   });
 
   it('accepts a valid https url', async () => {
-    const doc = new McpServer({
+    const doc = new Connector({
       scope: 'user',
       userId: new mongoose.Types.ObjectId(),
       name: 'good',
@@ -111,14 +137,14 @@ describe('McpServer model', () => {
 
   it('requires userId on user scope and forbids it on platform scope', async () => {
     await expect(
-      new McpServer({
+      new Connector({
         scope: 'user',
         name: 'ownerless',
         url: 'https://mcp.example.com',
       }).validate(),
     ).rejects.toThrow(/ownership mismatch/u);
     await expect(
-      new McpServer({
+      new Connector({
         scope: 'platform',
         userId: new mongoose.Types.ObjectId(),
         name: 'owned-platform',

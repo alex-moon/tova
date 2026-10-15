@@ -3,7 +3,7 @@ import { Session } from '../models/Session';
 import { Message } from '../models/Message';
 import { Asset } from '../models/Asset';
 import { AssetJob } from '../models/AssetJob';
-import { McpServer } from '../models/McpServer';
+import { Connector } from '../models/Connector';
 import { purgeAllUserData } from './userDataPurge';
 
 // Data-level coverage for purgeAllUserData (issue #143 T1): every
@@ -62,7 +62,7 @@ const seedAssetsAndMcp = async (uid: mongoose.Types.ObjectId) => {
     status: 'ready',
   });
   await AssetJob.create({ assetId: asset._id });
-  const mcpServer = await McpServer.create({
+  const connector = await Connector.create({
     scope: 'user',
     userId: uid,
     name: 'remote-tools',
@@ -70,7 +70,7 @@ const seedAssetsAndMcp = async (uid: mongoose.Types.ObjectId) => {
     headers: { iv: 'iv', tag: 'tag', ciphertext: 'cipher' },
     headersConfigured: true,
   });
-  return { asset, mcpServer };
+  return { asset, connector };
 };
 
 describe('purgeAllUserData (issue #143: factory reset)', () => {
@@ -93,7 +93,7 @@ describe('purgeAllUserData (issue #143: factory reset)', () => {
     const owner = userId();
     const other = userId();
     // A platform server is ownerless and must never be swept by any user's reset.
-    await McpServer.create({
+    await Connector.create({
       scope: 'platform',
       name: 'platform-tools',
       url: 'https://p.example.com',
@@ -114,10 +114,10 @@ describe('purgeAllUserData (issue #143: factory reset)', () => {
     expect(await Asset.countDocuments({ userId: owner })).toBe(0);
     // AssetJob has no userId: swept by the owner's asset ids only.
     expect(await AssetJob.countDocuments({ assetId: otherAsset.asset._id })).toBe(1);
-    // User-scoped MCP server configs (urls + encrypted auth headers) die too.
-    expect(await McpServer.countDocuments({ scope: 'user', userId: owner })).toBe(0);
+    // User-scoped connector configs (urls + encrypted auth headers) die too.
+    expect(await Connector.countDocuments({ scope: 'user', userId: owner })).toBe(0);
     // The ownerless platform server is untouched.
-    expect(await McpServer.countDocuments({ scope: 'platform' })).toBe(1);
+    expect(await Connector.countDocuments({ scope: 'platform' })).toBe(1);
 
     // Other user: nothing changed.
     const otherSessions = await Session.find({ userId: other }).lean();

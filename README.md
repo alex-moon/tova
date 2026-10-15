@@ -1,14 +1,14 @@
 # Tova
 
-Tova is a chat application with authenticated users, persistent MongoDB-backed chat sessions, and an intelligent router that races a fixed roster of models across multiple providers per turn — with a built-in tool-calling agent, an asset library, and per-user MCP extensions. Think of it as an application layer that puts model routing, tools, and storage behind a single chat product.
+Tova is a chat application with authenticated users, persistent MongoDB-backed chat sessions, and an intelligent router that races a fixed roster of models across multiple providers per turn — with a built-in tool-calling agent, an asset library, and per-user connector extensions. Think of it as an application layer that puts model routing, tools, and storage behind a single chat product.
 
 ## Features
 
 - **Intelligent Routing**: A fixed model roster (MongoDB `modelroster`) is ranked by measured TTFT and price; each turn hedges the chosen model across its serverless providers (DeepInfra + Fireworks) and keeps the first to respond.
-- **Tool-calling Agent**: Chat runs through a Mastra agent loop with optional `web_search` (Brave Search API), the current time (`current_datetime`), user-scoped MCP server tools, and asset tools (`list_files`, `read_file`, `generate_file`). The SSE stream emits structured `tool` call/result events.
+- **Tool-calling Agent**: Chat runs through a Mastra agent loop with optional `web_search` (Brave Search API), the current time (`current_datetime`), user-scoped connector tools, and asset tools (`list_files`, `read_file`, `generate_file`). The SSE stream emits structured `tool` call/result events.
 - **Persistent Chat**: Session-based chat history in MongoDB, with per-message routing `metrics` and user thumbs up/down feedback, followup suggestions, and auto-generated session titles.
 - **Asset Library**: File uploads to DigitalOcean Spaces with presigned uploads/downloads, text extraction for documents, and per-message attachments.
-- **MCP Servers**: Per-user MCP server CRUD; auth tokens are encrypted at rest with AES-256-GCM (`MCP_ENCRYPTION_KEY`).
+- **Connectors** (#329): per-user connector CRUD (`/api/connectors`; the `/api/mcp-servers` path is a deprecated alias); auth tokens are encrypted at rest with AES-256-GCM (`MCP_ENCRYPTION_KEY`).
 - **Optional Observability**: LangSmith tracing of every LLM call (agent → step → inference → llm) when configured.
 - **Secure Auth**: JWT-based authentication with HTTP-only cookies, plus Google sign-in.
 - **Modern UI**: React chat interface with drag-drop asset panel and markdown rendering.
@@ -33,7 +33,7 @@ Backing services (MongoDB) run in Docker Compose; the backend and frontend run d
    npm install
    ```
 
-2. **Configure environment** — copy `.env.example` to `.env` in the repo root (it is the canonical list). Required: `GROQ_API_KEY`, `JWT_SECRET`, `MONGODB_URL` (full Mongo connection string; Atlas uses the `mongodb+srv://` scheme) or `MONGODB_PASSWORD` (dev fallback assembled from it), `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_CALLBACK_URL`. Optional per feature: `BRAVE_SEARCH_API_KEY` (web search tool), `DO_SPACES_KEY`/`DO_SPACES_SECRET`/`DO_SPACES_BUCKET`/`DO_SPACES_REGION` (asset library), `MCP_ENCRYPTION_KEY` (MCP servers with auth headers), `LANGSMITH_API_KEY` + `LANGCHAIN_PROJECT` (tracing), `ADMIN_PASSWORD` (default `admin`), `GOOGLE_SAFE_BROWSING_API_KEY` (safe link check for `fetch_url`; `GOOGLE_API_KEY` also accepted).
+2. **Configure environment** — copy `.env.example` to `.env` in the repo root (it is the canonical list). Required: `GROQ_API_KEY`, `JWT_SECRET`, `MONGODB_URL` (full Mongo connection string; Atlas uses the `mongodb+srv://` scheme) or `MONGODB_PASSWORD` (dev fallback assembled from it), `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_CALLBACK_URL`. Optional per feature: `BRAVE_SEARCH_API_KEY` (web search tool), `DO_SPACES_KEY`/`DO_SPACES_SECRET`/`DO_SPACES_BUCKET`/`DO_SPACES_REGION` (asset library), `MCP_ENCRYPTION_KEY` (connectors with token auth), `LANGSMITH_API_KEY` + `LANGCHAIN_PROJECT` (tracing), `ADMIN_PASSWORD` (default `admin`), `GOOGLE_SAFE_BROWSING_API_KEY` (safe link check for `fetch_url`; `GOOGLE_API_KEY` also accepted).
 3. **Start the stack** (MongoDB in Docker)
 
    ```bash
@@ -120,14 +120,14 @@ Inference runs through Mastra connectors across multiple providers. Chat respons
 - **Web search** (`BRAVE_SEARCH_API_KEY`): enables the agent's `web_search` tool. Unset → no search tool at all.
 - **Safe link checking** (`GOOGLE_SAFE_BROWSING_API_KEY`, falls back to `GOOGLE_API_KEY`): screens every URL the agent fetches via `fetch_url` (including redirect targets) against Google Safe Browsing's threatMatches endpoint, with a 24h domain-level cache. Unset → `fetch_url` works unchanged, unchecked (issue #120).
 - **Assets** (`DO_SPACES_*`): DigitalOcean Spaces storage with presigned PUT/GET; objects stay private. Unset → the asset library is disabled.
-- **MCP servers** (`MCP_ENCRYPTION_KEY`): users register personal MCP servers; auth headers are encrypted at rest. Unset → MCP servers with auth headers cannot be added.
+- **Connectors** (`MCP_ENCRYPTION_KEY`): users register personal connectors; auth material is encrypted at rest. Unset → connectors with token auth cannot be added.
 - **Tracing** (`LANGSMITH_API_KEY`, `LANGCHAIN_PROJECT`): hierarchical LangSmith traces of every LLM call. Unset → nothing is exported.
 
 ## Implementation Pointers
 
 - Backend entry: `apps/server/src/main.ts`
 - Server app bootstrap: `apps/server/src/index.ts`
-- Routes: `apps/server/src/routes/` (chat, auth, assets, mcpServers, feedback, profile, admin)
+- Routes: `apps/server/src/routes/` (chat, auth, assets, connectors, feedback, profile, admin)
 - Services: `apps/server/src/services/` (roster config + provider racing, Mastra agent + connectors, search/MCP/assets, metrics)
 - Frontend app: `apps/client/src/App.tsx`
 - Product overview: `docs/overview.md`

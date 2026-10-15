@@ -1,30 +1,32 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, cleanup, waitFor } from '@testing-library/react';
 import McpServersSection from './McpServersSection';
-import type { McpServerInfo } from '../services/mcp';
+import type { ConnectorInfo } from '@shared/connectors';
 import { MCP_SUGGESTIONS } from './mcpSuggestions';
 
 const list = vi.fn();
 const add = vi.fn();
 const remove = vi.fn();
 
-vi.mock('../services/mcp', async () => {
-  const actual = await vi.importActual<typeof import('../services/mcp')>('../services/mcp');
-  const MockedMcpServerService = {
+vi.mock('../services/connectors', async () => {
+  const actual =
+    await vi.importActual<typeof import('../services/connectors')>('../services/connectors');
+  const MockedConnectorService = {
     list: (...args: unknown[]) => list(...args),
     add: (...args: unknown[]) => add(...args),
     remove: (...args: unknown[]) => remove(...args),
   };
-  return { ...actual, default: MockedMcpServerService };
+  return { ...actual, default: MockedConnectorService };
 });
 
-const server: McpServerInfo = {
+const server: ConnectorInfo = {
   id: '1',
   scope: 'user',
+  type: 'mcp.pat',
   name: 'my-tools',
   url: 'https://mcp.example.com/mcp',
   status: 'connected',
-  headersConfigured: true,
+  authConfigured: true,
   tools: [
     { name: 'weather', description: 'Get weather' },
     { name: 'forecast', description: 'Get forecast' },
@@ -55,6 +57,7 @@ describe('McpServersSection (issues #36, #80)', () => {
 
     await waitFor(() =>
       expect(add).toHaveBeenCalledWith({
+        type: 'mcp.pat',
         name: 'new',
         url: 'https://new.example.com/mcp',
         authToken: 'sk-tok:en-1',
