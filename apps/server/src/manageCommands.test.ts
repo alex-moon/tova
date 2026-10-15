@@ -31,6 +31,9 @@ describe('formatSeconds', () => {
 
 describe('formatRosterRow', () => {
   it('renders one line per provider entry with eligibility, TTFT and cool-off', () => {
+    // Relative to now: the fixture once hardcoded a date that aged into the
+    // past, and the formatter (correctly) drops expired cool-offs.
+    const coolOff = new Date(Date.now() + 60 * 60 * 1000);
     const lines = formatRosterRow({
       modelId: 'zai-org/GLM-5.3-Flash',
       eligible: true,
@@ -41,7 +44,7 @@ describe('formatRosterRow', () => {
           enabled: true,
           ttftMs: 18500,
           ttftSamples: 31,
-          disabledUntil: new Date('2026-10-15T18:00:00Z'),
+          disabledUntil: coolOff,
         },
       ],
     });
@@ -52,7 +55,15 @@ describe('formatRosterRow', () => {
     expect(lines[0]).toContain('33');
     expect(lines[1]).toContain('fireworks');
     expect(lines[1]).toContain('18.5s');
-    expect(lines[1]).toContain('until 2026-10-15 18:00');
+    expect(lines[1]).toContain(`until ${coolOff.toISOString().slice(0, 16).replace('T', ' ')}`);
+  });
+
+  it('renders an expired cool-off as uncooled', () => {
+    const lines = formatRosterRow({
+      modelId: 'm',
+      providers: [{ provider: 'deepinfra', disabledUntil: new Date(Date.now() - 1000) }],
+    });
+    expect(lines[0].trimEnd().endsWith('-')).toBe(true);
   });
 
   it('renders a fresh (uncooled) provider without a cool-off date', () => {
