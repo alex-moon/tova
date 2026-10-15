@@ -7,6 +7,7 @@ import { buildTracingOptions } from '@mastra/observability';
 import { withLangsmithMetadata } from '@mastra/langsmith';
 import { RedactedLangSmithExporter } from './traceRedaction';
 import { createTool } from '@mastra/core/tools';
+import { createTwoFilesPatch } from 'diff';
 import { z } from 'zod';
 import mongoose from 'mongoose';
 import { Asset } from '../models/Asset';
@@ -693,7 +694,7 @@ const generateFileExecute = async (
  * asset, so without this the agent had no way to "update the notes" short of
  * regenerating the whole document under a new name. Edits are search/replace
  * blocks — cost is proportional to the edit, and the model must anchor its
- * change to exact existing text. Only `system-generated` files are editable;
+ * change to existing text. Only `system-generated` files are editable;
  * the asset's provenance is left untouched (it still names the originating
  * chat/task). Each write snapshots a new version (see assetEditService).
  */
@@ -703,10 +704,14 @@ export const editFileTool = createTool({
     'Edit a markdown file that you previously created with `generate_file` in the ' +
     'calling user’s file library. Use it to update, revise or fix an existing file ' +
     'instead of generating a new one. Provide the file id (from `list_files`) and one ' +
-    'or more search/replace edits: each `oldText` must be an exact, unique block of the ' +
+    'or more search/replace edits: each `oldText` must be a unique block of the ' +
     'file’s current text and `newText` its replacement. Call `read_file` first to get ' +
-    'the exact current text when unsure. The file keeps its id and provenance; every ' +
-    'edit is kept as a new version.',
+    'the current text when unsure; preserve exact indentation and never include ' +
+    'line-number prefixes in oldText. If there is no exact match, the edit retries ' +
+    'while ignoring typographic quote, dash, and space variants, then trailing ' +
+    'whitespace on each line — but it still fails if oldText is absent or matches ' +
+    'more than one place. The file keeps its id and provenance; every edit is kept ' +
+    'as a new version.',
   inputSchema: z.object({
     id: z.string().min(1).describe('The file id from `list_files`'),
     edits: z
@@ -715,7 +720,7 @@ export const editFileTool = createTool({
           oldText: z
             .string()
             .min(1)
-            .describe('Exact existing text to replace; must occur exactly once in the file'),
+            .describe('Existing text to replace; must occur exactly once in the file'),
           newText: z.string().describe('Replacement text (may be empty to delete the block)'),
         }),
       )
@@ -733,6 +738,10 @@ export const editFileTool = createTool({
         createdAt: z.string().describe('Creation time as an ISO 8601 UTC timestamp'),
       })
       .optional(),
+    diff: z
+      .string()
+      .optional()
+      .describe('Unified diff of the edit (before → after), so the change is auditable'),
     error: z.string().optional(),
     note: z.string().optional(),
   }),
@@ -752,6 +761,7 @@ const editFileExecute = async (
     version: number;
     createdAt: string;
   };
+  diff?: string;
   error?: string;
   note?: string;
 }> => {
@@ -762,6 +772,9 @@ const editFileExecute = async (
   try {
     const asset = await Asset.findOne({ _id: id, userId, status: 'ready' });
     if (!asset) return { error: 'not_found' };
+    // Captured before the write: the unified diff of the edit is returned in
+    // the tool result so the change is auditable in the conversation.
+    const before = asset.textExtracted ?? '';
     const result = await applyAssetEdits(asset, edits);
     if (!result.ok) return { error: result.code, note: result.message };
     const file = result.asset;
@@ -774,6 +787,7 @@ const editFileExecute = async (
         version: file.version ?? 1,
         createdAt: (file.createdAt ?? new Date()).toISOString(),
       },
+      diff: createTwoFilesPatch(asset.filename, asset.filename, before, file.textExtracted ?? ''),
     };
   } catch {
     return { error: 'unavailable' };

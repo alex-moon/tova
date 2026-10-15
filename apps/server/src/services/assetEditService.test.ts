@@ -84,6 +84,44 @@ describe('applyEditsToContent (#325)', () => {
       index: 0,
     });
   });
+
+  it('reports no_change when an edit replaces text with itself', () => {
+    expect(applyEditsToContent('abc', [{ oldText: 'abc', newText: 'abc' }])).toEqual({
+      ok: false,
+      code: 'no_change',
+      index: 0,
+    });
+  });
+
+  // Tolerance ladder (ported from opencode's edit tool): when there is no
+  // exact match, the matcher retries while ignoring unicode variants, then
+  // trailing whitespace per line.
+  it('matches despite typographic quote and dash variants', () => {
+    expect(
+      applyEditsToContent('don’t worry — ok', [{ oldText: "don't worry - ok", newText: 'fine' }]),
+    ).toEqual({ ok: true, content: 'fine' });
+  });
+
+  it('matches despite trailing whitespace on the quoted lines', () => {
+    expect(
+      applyEditsToContent('keep  \nnext line', [
+        { oldText: 'keep\nnext line', newText: 'B\nnext line' },
+      ]),
+    ).toEqual({ ok: true, content: 'B\nnext line' });
+  });
+
+  it('preserves CRLF endings from the matched region', () => {
+    expect(applyEditsToContent('a\r\nb\r\nc', [{ oldText: 'a\nb', newText: 'A\nB' }])).toEqual({
+      ok: true,
+      content: 'A\r\nB\r\nc',
+    });
+  });
+
+  it('leaves line endings of untouched regions alone', () => {
+    const content = 'first\r\n\r\nsecond\r\n';
+    const out = applyEditsToContent(content, [{ oldText: 'second', newText: 'SECOND' }]);
+    expect(out).toEqual({ ok: true, content: 'first\r\n\r\nSECOND\r\n' });
+  });
 });
 
 describe('writeAssetContent (#325)', () => {
@@ -197,6 +235,14 @@ describe('applyAssetEdits (#325)', () => {
     const asset = await createGenerated('abc');
     const result = await applyAssetEdits(asset, [{ oldText: 'zzz', newText: 'y' }]);
     expect(result).toMatchObject({ ok: false, code: 'no_match' });
+    expect(mockPutObject).not.toHaveBeenCalled();
+    expect((await Asset.findById(asset._id))?.version).toBe(1);
+  });
+
+  it('surfaces no_change with a retry hint instead of writing', async () => {
+    const asset = await createGenerated('abc');
+    const result = await applyAssetEdits(asset, [{ oldText: 'abc', newText: 'abc' }]);
+    expect(result).toMatchObject({ ok: false, code: 'no_change' });
     expect(mockPutObject).not.toHaveBeenCalled();
     expect((await Asset.findById(asset._id))?.version).toBe(1);
   });

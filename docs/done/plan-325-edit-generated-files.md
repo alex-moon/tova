@@ -34,12 +34,24 @@ a past one.
   still name the originating chat/task, so an edit does not touch
   `Asset.provenance`. (An edit from a different conversation leaves the file
   attributed to where it was created.)
-- **Exact, unique match required.** An `oldText` that is absent fails
-  `no_match`; one that matches more than once fails `ambiguous` (the model adds
-  surrounding context). Replacing the first of several matches silently is
-  rejected — editing the wrong occurrence is worse than a retry.
+- **Unique match required, behind a tolerance ladder.** An `oldText` that is
+  absent fails `no_match`; one that matches more than once fails `ambiguous`
+  (the model adds surrounding context). Replacing the first of several matches
+  silently is rejected — editing the wrong occurrence is worse than a retry.
+  The matcher is ported from opencode's edit tool (MIT): when there is no exact
+  match it retries while ignoring typographic quote/dash/space variants, then
+  trailing whitespace per line, and it matches against the LF view so CRLF
+  endings neither block matches nor leak into untouched regions. Owner decision,
+  2026-10-15 (after reviewing how opencode does file editing).
 - **Edits apply sequentially** against the running content, so a call can make
   several changes and a later edit sees an earlier edit's output.
+- **The tool result carries a unified diff** (`diff` npm package, as opencode
+  does) of the before→after content, so the change is auditable in the
+  conversation. Rendering it in the client is a follow-up; the model-facing
+  cost stays proportional to the edit.
+- **An edit that replaces text with itself fails `no_change`** rather than
+  writing a version identical to the last (which would otherwise loop the model
+  through identical retries).
 - **`Asset.version` (default 1) is the current version number.** Version rows are
   created lazily on the first edit — a never-edited generated file has
   `version: 1` and no `AssetVersion` rows, so `generate_file`'s hot path is
