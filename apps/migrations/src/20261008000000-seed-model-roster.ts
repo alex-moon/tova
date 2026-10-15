@@ -17,8 +17,9 @@ import { Db } from 'mongodb';
  *                            fireworks `accounts/fireworks/models/deepseek-v4p1-flash`
  *   - GLM 5.3 Flash        → deepinfra `zai-org/GLM-5.3-Flash`,
  *                            fireworks `accounts/fireworks/models/glm-5p3-flash`
- *   - MiniMax M3           → deepinfra `MiniMaxAI/MiniMax-M3`,
- *                            fireworks `accounts/fireworks/models/minimax-m3`
+ *
+ * #316: MiniMax M3 is out of the roster (owner) and is no longer seeded — the
+ * row is set ineligible on already-migrated databases via the admin surface.
  *
  * `$setOnInsert` on purpose: an admin edit to an existing roster document
  * (eligibility, enabled providers, TTFT history) must never be clobbered by a
@@ -76,36 +77,6 @@ const ROWS = [
         modelId: 'accounts/fireworks/models/glm-5p3-flash',
         inputPrice: 0.15,
         outputPrice: 0.5,
-        enabled: true,
-        disabledUntil: null,
-      },
-    ],
-  },
-  {
-    modelId: 'MiniMaxAI/MiniMax-M3',
-    label: 'MiniMax M3',
-    tools: true,
-    // Text-only: Fireworks reports supports_image_input false; excluded from
-    // image turns (owner decision).
-    vision: false,
-    contextLength: 524288,
-    inputPrice: 0.28,
-    outputPrice: 1.1,
-    eligible: true,
-    providers: [
-      {
-        provider: 'deepinfra',
-        modelId: 'MiniMaxAI/MiniMax-M3',
-        inputPrice: 0.28,
-        outputPrice: 1.1,
-        enabled: true,
-        disabledUntil: null,
-      },
-      {
-        provider: 'fireworks',
-        modelId: 'accounts/fireworks/models/minimax-m3',
-        inputPrice: 0.3,
-        outputPrice: 1.2,
         enabled: true,
         disabledUntil: null,
       },

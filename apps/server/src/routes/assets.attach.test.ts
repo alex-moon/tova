@@ -28,19 +28,14 @@ const MOCK_ROUTING = { model: 'mock-small-model', provider: 'deepinfra', reason:
 // #233: routing runs through the fixed-roster racing path. Drive it with
 // `mockRacingState`; the mock delegates back through the (mocked)
 // `inferenceService` so the existing completion/stream mocks stay the seam.
-// The `hasImage` flag racing receives is recorded for assertions.
 const mockRacingState: {
   routing: typeof MOCK_ROUTING | null;
-  hasImage?: boolean;
 } = { routing: MOCK_ROUTING };
 
 jest.mock('../services/racingService', () => {
   const { inferenceService } = jest.requireMock('../services/inferenceService');
   return {
-    pickRosterRoute: async (hasImage: boolean) => {
-      mockRacingState.hasImage = hasImage;
-      return mockRacingState.routing;
-    },
+    pickRosterRoute: async () => mockRacingState.routing,
     routeAndComplete: async (opts: Record<string, unknown>) => {
       const completion = await inferenceService.createCompletion({
         ...opts,
@@ -49,8 +44,7 @@ jest.mock('../services/racingService', () => {
       });
       return { routing: mockRacingState.routing, outcome: { result: { completion } } };
     },
-    routeAndStream: async (opts: Record<string, unknown>, hasImage: boolean) => {
-      mockRacingState.hasImage = hasImage;
+    routeAndStream: async (opts: Record<string, unknown>) => {
       const stream = await inferenceService.createStreamingCompletion({
         ...opts,
         model: mockRacingState.routing?.model,
@@ -150,7 +144,6 @@ describe('Chat attach-to-message (issue #34)', () => {
     (classifyAndPersistPromptDimensions as jest.Mock).mockResolvedValue(undefined);
     mockAgentStream.mockImplementation(async () => fullStreamFrom(['ok']));
     mockRacingState.routing = MOCK_ROUTING;
-    mockRacingState.hasImage = undefined;
   });
 
   it('appends the extracted file text into the prompt but not the stored content', async () => {
@@ -282,7 +275,7 @@ describe('Chat image turn (#115)', () => {
     (classifyAndPersistPromptDimensions as jest.Mock).mockResolvedValue(undefined);
     mockAgentStream.mockImplementation(async () => fullStreamFrom(['ok']));
     mockRacingState.routing = MOCK_ROUTING;
-    mockRacingState.hasImage = undefined;
+
     mockIsStorageConfigured.mockReset().mockReturnValue(true);
     mockPresignGetUrl.mockReset().mockResolvedValue('https://spaces.example.com/signed-get-url');
   });
@@ -298,8 +291,6 @@ describe('Chat image turn (#115)', () => {
     });
 
     expect(response.status).toBe(200);
-    // Routing sees the image explicitly and skips the text-only envelope.
-    expect(mockRacingState.hasImage).toBe(true);
     expect(mockPresignGetUrl).toHaveBeenCalledWith(expect.stringContaining('photo.png'));
 
     const [callOptions] = mockAgentStream.mock.calls[0] as [
@@ -337,7 +328,6 @@ describe('Chat image turn (#115)', () => {
     const response = await streamMessage(cookies, { content: 'what is in it?', assetId });
     expect(response.status).toBe(200);
     expect(mockPresignGetUrl).not.toHaveBeenCalled();
-    expect(mockRacingState.hasImage).toBe(false);
     const [callOptions] = mockAgentStream.mock.calls[0] as [
       { messages: { role: string; content: string }[] },
       unknown,
@@ -372,7 +362,6 @@ describe('Chat image turn (#115)', () => {
     });
     expect(response.status).toBe(200);
     expect(mockPresignGetUrl).not.toHaveBeenCalled();
-    expect(mockRacingState.hasImage).toBe(false);
   });
 
   it('degrades a failed image asset the same as a pending one (#115)', async () => {
@@ -397,7 +386,6 @@ describe('Chat image turn (#115)', () => {
     });
     expect(response.status).toBe(200);
     expect(mockPresignGetUrl).not.toHaveBeenCalled();
-    expect(mockRacingState.hasImage).toBe(false);
   });
 
   it('keeps the text envelope and normal routing for non-image assets', async () => {
@@ -408,7 +396,6 @@ describe('Chat image turn (#115)', () => {
     const response = await streamMessage(cookies, { content: 'summarize my file', assetId });
     expect(response.status).toBe(200);
     expect(mockPresignGetUrl).not.toHaveBeenCalled();
-    expect(mockRacingState.hasImage).toBe(false);
     const [callOptions] = mockAgentStream.mock.calls[0] as [
       { messages: { role: string; content: string }[] },
       unknown,

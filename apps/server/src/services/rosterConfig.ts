@@ -35,7 +35,6 @@ export interface RosterModel {
   modelId: string;
   label: string;
   tools: boolean;
-  vision: boolean;
   contextLength?: number;
   inputPrice?: number;
   outputPrice?: number;
@@ -48,15 +47,15 @@ export interface RosterModel {
  * recovery.
  *
  * Constraints recorded in #232: every model >120B total params, serverless on
- * BOTH providers. MiniMax M3 is text-only on Fireworks
- * (`supports_image_input: false`), so it is excluded from image turns.
+ * BOTH providers. #316: MiniMax M3 is out of the roster (owner) — dropped from
+ * the seed so neither recovery path can resurrect it as race-eligible; its DB
+ * row is set ineligible separately (admin surface).
  */
 export const ROSTER_SEED: RosterModel[] = [
   {
     modelId: 'deepseek-ai/DeepSeek-V4.1-Flash',
     label: 'DeepSeek V4.1 Flash',
     tools: true,
-    vision: true,
     contextLength: 1048576,
     inputPrice: 0.2,
     outputPrice: 0.6,
@@ -79,7 +78,6 @@ export const ROSTER_SEED: RosterModel[] = [
     modelId: 'zai-org/GLM-5.3-Flash',
     label: 'GLM 5.3 Flash',
     tools: true,
-    vision: true,
     contextLength: 1048576,
     inputPrice: 0.15,
     outputPrice: 0.5,
@@ -95,31 +93,6 @@ export const ROSTER_SEED: RosterModel[] = [
         modelId: 'accounts/fireworks/models/glm-5p3-flash',
         inputPrice: 0.15,
         outputPrice: 0.5,
-      },
-    ],
-  },
-  {
-    modelId: 'MiniMaxAI/MiniMax-M3',
-    label: 'MiniMax M3',
-    tools: true,
-    // Text-only: Fireworks reports supports_image_input false; the
-    // conservative reading excludes it from image turns (owner decision).
-    vision: false,
-    contextLength: 524288,
-    inputPrice: 0.28,
-    outputPrice: 1.1,
-    providers: [
-      {
-        provider: 'deepinfra',
-        modelId: 'MiniMaxAI/MiniMax-M3',
-        inputPrice: 0.28,
-        outputPrice: 1.1,
-      },
-      {
-        provider: 'fireworks',
-        modelId: 'accounts/fireworks/models/minimax-m3',
-        inputPrice: 0.3,
-        outputPrice: 1.2,
       },
     ],
   },
@@ -244,7 +217,6 @@ interface RosterDoc {
   modelId: string;
   label: string;
   tools?: boolean;
-  vision?: boolean;
   contextLength?: number;
   inputPrice?: number;
   outputPrice?: number;
@@ -265,7 +237,6 @@ const toRosterModel = (doc: RosterDoc): RosterModel => ({
   modelId: doc.modelId,
   label: doc.label,
   tools: doc.tools !== false,
-  vision: doc.vision === true,
   ...(doc.contextLength !== undefined ? { contextLength: doc.contextLength } : {}),
   ...(doc.inputPrice !== undefined ? { inputPrice: doc.inputPrice } : {}),
   ...(doc.outputPrice !== undefined ? { outputPrice: doc.outputPrice } : {}),
@@ -290,7 +261,6 @@ const ensureSeed = async (): Promise<void> => {
             modelId: model.modelId,
             label: model.label,
             tools: model.tools,
-            vision: model.vision,
             ...(model.contextLength !== undefined ? { contextLength: model.contextLength } : {}),
             ...(model.inputPrice !== undefined ? { inputPrice: model.inputPrice } : {}),
             ...(model.outputPrice !== undefined ? { outputPrice: model.outputPrice } : {}),
@@ -338,24 +308,20 @@ export const listRoster = async (): Promise<RosterModel[]> => {
 
 /*
  * The enabled, non-cooling-off providers of a model — the set the runtime
- * actually races. `hasImage` restricts to vision-capable models upstream (see
- * `rosterModelsForTurn`), but a provider entry may still be cooling off.
+ * actually races. A provider entry may still be cooling off.
  */
 export const liveProviders = (model: RosterModel, now: Date = new Date()): RosterProviderRef[] =>
   model.providers.filter((p) => !isCoolingOff(p, now));
 
 /*
  * Roster candidates for a turn: eligible models that still have at least one
- * live provider. Image turns keep only `vision: true` models (MiniMax M3 is
- * text-only and is excluded). The weighted primary is picked from these.
+ * live provider (a provider entry may be cooling off). #316: the vision gate
+ * is gone — MiniMax is out of the roster entirely, so there is no text-only
+ * model left to exclude from image turns, and the racing data layer no longer
+ * carries a `vision` flag at all.
  */
-export const rosterModelsForTurn = (
-  roster: RosterModel[],
-  hasImage: boolean,
-  now: Date = new Date(),
-): RosterModel[] =>
+export const rosterModelsForTurn = (roster: RosterModel[], now: Date = new Date()): RosterModel[] =>
   roster
-    .filter((model) => (hasImage ? model.vision : true))
     .map((model) => ({ ...model, providers: liveProviders(model, now) }))
     .filter((model) => model.providers.length > 0);
 

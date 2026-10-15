@@ -743,19 +743,16 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
         appendAssetBlock(turnMessages, attachedAsset);
         return turnMessages;
       };
-      // ZDR turns never carry image parts (no buildImageTurn on this path), so
-      // image gating is moot: race the full text roster. An empty roster (no
-      // model could be picked) is surfaced as the all-disabled error.
-      const zdrPrePick = await pickRosterRoute(false);
+      // ZDR turns never carry image parts (no buildImageTurn on this path).
+      // An empty roster (no model could be picked) is surfaced as the
+      // all-disabled error.
+      const zdrPrePick = await pickRosterRoute();
       if (!zdrPrePick) throw new AllModelsDisabledError();
-      const raced = await routeAndComplete(
-        {
-          messages: zdrMessages(),
-          userId,
-          abortSignal: abortController.signal,
-        },
-        false,
-      );
+      const raced = await routeAndComplete({
+        messages: zdrMessages(),
+        userId,
+        abortSignal: abortController.signal,
+      });
       const routingResult: RosterRoutingResult = raced.routing;
       const chatCompletion = raced.outcome.result.completion;
       const zdrAssistantContent = chatCompletion.choices[0]?.message?.content ?? '';
@@ -845,7 +842,7 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
      * pick's window. The winner re-shapes routing for persistence. An empty
      * roster (no model could be picked) is surfaced as the all-disabled error.
      */
-    const rosterPrePick = await pickRosterRoute(hasImage);
+    const rosterPrePick = await pickRosterRoute();
     if (!rosterPrePick) throw new AllModelsDisabledError();
     // #255: completed background tasks ride this turn's context (queued write).
     // The ids are marked notified only after the assistant message persists, so
@@ -860,19 +857,16 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
         taskCompletion.block,
       ),
     );
-    const raced = await routeAndComplete(
-      {
-        messages: turnMessages,
-        max_tokens: outputTokensFor(rosterPrePick.contextLength, promptCharsFrom(turnMessages)),
-        userId,
-        abortSignal: abortController.signal,
-        // #252: tool-execution session (distinct from the trace) so
-        // generate_file can stamp provenance on the file it produces.
-        sessionId: String(session!._id),
-        trace: { sessionId: String(session!._id), metadata: workspaceMetadata },
-      },
-      hasImage,
-    );
+    const raced = await routeAndComplete({
+      messages: turnMessages,
+      max_tokens: outputTokensFor(rosterPrePick.contextLength, promptCharsFrom(turnMessages)),
+      userId,
+      abortSignal: abortController.signal,
+      // #252: tool-execution session (distinct from the trace) so
+      // generate_file can stamp provenance on the file it produces.
+      sessionId: String(session!._id),
+      trace: { sessionId: String(session!._id), metadata: workspaceMetadata },
+    });
     const routingResult: RosterRoutingResult = raced.routing;
     const chatCompletion = raced.outcome.result.completion;
 
@@ -1044,13 +1038,12 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
     const hasImage = turnsWithImage(attachedAsset);
 
     /*
-     * #232: the primary model comes from the weighted roster pick (no guard
-     * classifier). The actual race runs after the messages are assembled (the
-     * race needs the full prompt); this pick only supplies the `contextLength`
-     * for the output budget and the pre-race `meta` routing. An empty roster
-     * (no model could be picked) is surfaced as the all-disabled error.
+     * #232: the pre-race pick supplies the `contextLength` for the output
+     * budget and the pre-race `meta` routing; the flat race itself decides
+     * the winner from live first-token latency (#316). An empty roster (no
+     * model could be picked) is surfaced as the all-disabled error.
      */
-    const rosterRoute = await pickRosterRoute(hasImage);
+    const rosterRoute = await pickRosterRoute();
     if (!rosterRoute) throw new AllModelsDisabledError();
 
     await ensureUserLocation(streamUserDoc, req.ip);
@@ -1173,38 +1166,35 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
       });
 
       /*
-       * #232: `routeAndStream` hedges the weighted primary's providers, aborts
-       * the loser, and does its own roster fallback (retrying the next model
-       * on total failure). The winner's model/provider replace the pre-race
-       * pick for persistence.
+       * #232, #316: `routeAndStream` fires every live (model, provider) combo
+       * of the roster and keeps the first token's stream; the losers record
+       * their TTFT and abort themselves. The winner's model/provider replace
+       * the pre-race pick for persistence.
        */
-      const raced = await routeAndStream(
-        {
-          messages,
-          // #104: budget sized against the picked model's window.
-          max_tokens: outputTokensFor(routingResult.contextLength, promptCharsFrom(messages)),
-          userId,
-          abortSignal: abortController.signal,
-          // #224: attach the chat session to this turn's trace (ZDR turns have
-          // no session — nothing durable can be joined). #308: the workspace
-          // retrieval outcome + hit count ride the trace metadata.
-          ...(zdr
-            ? {}
-            : {
-                trace: {
-                  sessionId: String(session!._id),
-                  metadata: workspaceTraceMetadata(
-                    workspaceGateFrom(streamWorkspaceBlock, hasImage),
-                    streamWorkspaceBlock,
-                  ),
-                },
-              }),
-          // #252: the tool-execution session rides outside the trace guard for
-          // the same reason (ZDR turns have no durable session to attribute to).
-          ...(zdr ? {} : { sessionId: String(session!._id) }),
-        },
-        hasImage,
-      );
+      const raced = await routeAndStream({
+        messages,
+        // #104: budget sized against the picked model's window.
+        max_tokens: outputTokensFor(routingResult.contextLength, promptCharsFrom(messages)),
+        userId,
+        abortSignal: abortController.signal,
+        // #224: attach the chat session to this turn's trace (ZDR turns have
+        // no session — nothing durable can be joined). #308: the workspace
+        // retrieval outcome + hit count ride the trace metadata.
+        ...(zdr
+          ? {}
+          : {
+              trace: {
+                sessionId: String(session!._id),
+                metadata: workspaceTraceMetadata(
+                  workspaceGateFrom(streamWorkspaceBlock, hasImage),
+                  streamWorkspaceBlock,
+                ),
+              },
+            }),
+        // #252: the tool-execution session rides outside the trace guard for
+        // the same reason (ZDR turns have no durable session to attribute to).
+        ...(zdr ? {} : { sessionId: String(session!._id) }),
+      });
       routingResult = raced.routing;
       const stream = raced.outcome.result.stream;
 

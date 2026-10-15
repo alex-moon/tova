@@ -15,7 +15,6 @@ const model = (overrides: Partial<RosterModel>): RosterModel => ({
   modelId: 'm',
   label: 'M',
   tools: true,
-  vision: true,
   providers: [{ provider: 'deepinfra', modelId: 'di' }],
   ...overrides,
 });
@@ -93,19 +92,12 @@ describe('pickPrimary (#232)', () => {
   });
 });
 
-describe('rosterModelsForTurn (#232)', () => {
-  it('excludes text-only models from image turns', () => {
-    const textOnly = model({ modelId: 'text', vision: false });
-    const vision = model({ modelId: 'vision', vision: true });
-    const candidates = rosterModelsForTurn([textOnly, vision], true);
-    expect(candidates.map((m) => m.modelId)).toEqual(['vision']);
-  });
-
-  it('keeps all models for text turns', () => {
-    const textOnly = model({ modelId: 'text', vision: false });
-    const vision = model({ modelId: 'vision', vision: true });
-    const candidates = rosterModelsForTurn([textOnly, vision], false);
-    expect(candidates.map((m) => m.modelId)).toEqual(['text', 'vision']);
+describe('rosterModelsForTurn (#232, #316)', () => {
+  it('keeps every model with a live provider — no vision gating', () => {
+    const a = model({ modelId: 'a' });
+    const b = model({ modelId: 'b', providers: [{ provider: 'fireworks', modelId: 'fw' }] });
+    const candidates = rosterModelsForTurn([a, b]);
+    expect(candidates.map((m) => m.modelId)).toEqual(['a', 'b']);
   });
 
   it('drops a model whose providers are all cooling off', () => {
@@ -115,7 +107,7 @@ describe('rosterModelsForTurn (#232)', () => {
         { provider: 'deepinfra', modelId: 'di', disabledUntil: new Date(Date.now() + 60_000) },
       ],
     });
-    expect(rosterModelsForTurn([cooling], false)).toEqual([]);
+    expect(rosterModelsForTurn([cooling])).toEqual([]);
   });
 
   it('keeps a model with at least one live provider', () => {
@@ -126,7 +118,7 @@ describe('rosterModelsForTurn (#232)', () => {
         { provider: 'fireworks', modelId: 'fw' },
       ],
     });
-    const candidates = rosterModelsForTurn([halfCooling], false);
+    const candidates = rosterModelsForTurn([halfCooling]);
     expect(candidates).toHaveLength(1);
     expect(candidates[0].providers.map((p) => p.provider)).toEqual(['fireworks']);
   });
@@ -153,11 +145,10 @@ describe('routingPrice (#199, moved with the roster in #233)', () => {
 });
 
 describe('ROSTER_SEED (#232 owner-locked roster)', () => {
-  it('defines exactly the three owner-locked models', () => {
+  it('defines exactly the two owner-locked models (#316: MiniMax is out)', () => {
     expect(ROSTER_SEED.map((m) => m.modelId)).toEqual([
       'deepseek-ai/DeepSeek-V4.1-Flash',
       'zai-org/GLM-5.3-Flash',
-      'MiniMaxAI/MiniMax-M3',
     ]);
   });
 
@@ -174,13 +165,5 @@ describe('ROSTER_SEED (#232 owner-locked roster)', () => {
         expect(Number.isFinite(p.outputPrice)).toBe(true);
       }
     }
-  });
-
-  it('marks MiniMax M3 text-only and excludes it from image turns', () => {
-    const minimax = ROSTER_SEED.find((m) => m.modelId === 'MiniMaxAI/MiniMax-M3');
-    expect(minimax?.vision).toBe(false);
-    expect(rosterModelsForTurn(ROSTER_SEED, true).map((m) => m.modelId)).not.toContain(
-      'MiniMaxAI/MiniMax-M3',
-    );
   });
 });

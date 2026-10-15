@@ -56,8 +56,8 @@ describe('parseModelsFlag (#225)', () => {
   it('resolves `all` to the roster on both wired providers (#236)', () => {
     const messages: string[] = [];
     const models = parseModelsFlag('all', (m) => messages.push(m));
-    // 3 roster models × 2 providers = 6 runs.
-    expect(models).toHaveLength(6);
+    // 2 roster models × 2 providers = 4 runs (#316: MiniMax is out).
+    expect(models).toHaveLength(4);
     expect(models).toContainEqual({
       provider: 'deepinfra',
       model: 'zai-org/GLM-5.3-Flash',

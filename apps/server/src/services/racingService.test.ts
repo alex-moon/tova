@@ -3,7 +3,8 @@ import { RosterModel } from './rosterConfig';
 import type { CompletionOptions, NeutralCompletion, NeutralStreamChunk } from './llmTypes';
 
 /*
- * #232 racing runtime: hedge both providers, first token wins, loser aborted.
+ * #316 racing runtime: flat race across every live (model, provider) combo,
+ * first token wins, losers record their TTFT and abort themselves.
  *
  * Every dependency is injected (roster, stream factory, clock, cool-off
  * writer), so no Mongo or real provider is touched and TTFT is deterministic.
@@ -25,7 +26,6 @@ const model = (overrides: Partial<RosterModel> = {}): RosterModel => ({
   modelId: 'm-primary',
   label: 'Primary',
   tools: true,
-  vision: true,
   inputPrice: 0.2,
   outputPrice: 0.6,
   providers: [
@@ -56,14 +56,45 @@ const streamOf = (
   })();
 };
 
-describe('racingService (#232)', () => {
+const flush = (): Promise<void> => new Promise((r) => setTimeout(r, 0));
+
+describe('racingService (#316 flat race)', () => {
   beforeEach(() => {
     mockRecordTtft.mockClear();
   });
 
-  it('picks the first provider to yield a token and aborts the loser', async () => {
-    const aborted: string[] = [];
-    // Mutable clock: advanced by the slow provider's first-token arrival so
+  it('starts every roster combo and keeps the first token', async () => {
+    const seen: string[] = [];
+    const deps: RaceDeps = {
+      roster: [
+        model(),
+        model({
+          modelId: 'm-second',
+          label: 'Second',
+          providers: [
+            { provider: 'deepinfra', modelId: 'di-second' },
+            { provider: 'fireworks', modelId: 'fw-second' },
+          ],
+        }),
+      ],
+      now: () => 1,
+      startStream: async (options: CompletionOptions) => {
+        seen.push(options.model);
+        return streamOf([{ delta: 'ok' }]);
+      },
+    };
+
+    const outcome = await raceRoster({ messages: [] }, deps);
+    // All four combos are in flight — no pre-pick decides the model.
+    expect(seen).toEqual(
+      expect.arrayContaining(['di-primary', 'fw-primary', 'di-second', 'fw-second']),
+    );
+    expect(outcome.result.model.modelId).toBe('m-primary');
+    expect(outcome.result.provider.provider).toBe('deepinfra');
+  });
+
+  it('keeps the fastest combo even when it is not the first model', async () => {
+    // Mutable clock: advanced by the slow providers' first-token arrival so
     // the fast (fireworks) provider wins with the smaller TTFT.
     let clockMs = 0;
     const deps: RaceDeps = {
@@ -86,7 +117,7 @@ describe('racingService (#232)', () => {
       },
     };
 
-    const outcome = await raceRoster({ messages: [] }, false, deps);
+    const outcome = await raceRoster({ messages: [] }, deps);
     expect(outcome.result.provider.provider).toBe('fireworks');
     expect(outcome.result.provider.modelId).toBe('fw-primary');
     expect(outcome.result.ttftMs).toBe(10);
@@ -97,53 +128,91 @@ describe('racingService (#232)', () => {
     }
     expect(tokens).toEqual(['fast']);
     expect(mockRecordTtft).toHaveBeenCalledWith('m-primary', 'fireworks', 10);
-    // `aborted` is unused here (streams don't observe the signal in this
-    // variant); the abort assertion lives in the dedicated test below.
-    expect(aborted).toEqual([]);
   });
 
-  it('aborts the losing provider via the race controller', async () => {
+  it('records the loser’s TTFT too — it self-aborts after its first chunk (#316)', async () => {
+    let loserSignal: AbortSignal | undefined;
+    let clockMs = 0;
+    let releaseLoser!: () => void;
+    const loserGate = new Promise<void>((r) => {
+      releaseLoser = r;
+    });
+    const deps: RaceDeps = {
+      roster: [model()],
+      now: () => clockMs,
+      startStream: async (options: CompletionOptions) => {
+        if (options.provider === 'deepinfra') {
+          // The winner: first chunk immediately.
+          clockMs = 10;
+          return streamOf([{ delta: 'win' }]);
+        }
+        loserSignal = options.abortSignal;
+        // The loser: held mid-prefill until the test releases it, so its
+        // first chunk arrives AFTER the winner claimed the race.
+        return (async function* () {
+          await loserGate;
+          clockMs = 40;
+          yield { delta: 'loser' };
+        })();
+      },
+    };
+
+    const outcome = await raceRoster({ messages: [] }, deps);
+    releaseLoser();
+    await flush();
+
+    // The loser's observation landed (input was fully billed regardless) and
+    // it aborted itself — nobody consumes its stream.
+    expect(mockRecordTtft).toHaveBeenCalledWith('m-primary', 'fireworks', 40);
+    expect(loserSignal?.aborted).toBe(true);
+
+    // The winner's stream is unaffected.
+    const tokens: string[] = [];
+    for await (const chunk of outcome.result.stream) {
+      if (chunk.delta) tokens.push(chunk.delta);
+    }
+    expect(tokens).toEqual(['win']);
+  });
+
+  it('aborts losers still in flight when the winner’s stream completes', async () => {
     let loserSignal: AbortSignal | undefined;
     const deps: RaceDeps = {
       roster: [model()],
       now: () => 1,
       startStream: async (options: CompletionOptions) => {
-        if (options.provider === 'deepinfra') {
-          loserSignal = options.abortSignal;
-          // Never yields: it can only end by abort.
-          return (async function* () {
-            await new Promise((r) => setTimeout(r, 1000));
-            yield { delta: 'never' };
-          })();
-        }
-        return streamOf([{ delta: 'winner' }]);
+        if (options.provider === 'deepinfra') return streamOf([{ delta: 'win' }]);
+        loserSignal = options.abortSignal;
+        // Never yields: it can only end by the end-of-turn cleanup.
+        return (async function* () {
+          await new Promise((r) => setTimeout(r, 1000));
+          yield { delta: 'never' };
+        })();
       },
     };
-    await raceRoster({ messages: [] }, false, deps);
-    // The race aborts losers synchronously once a winner resolves.
+
+    const outcome = await raceRoster({ messages: [] }, deps);
+    expect(loserSignal?.aborted).toBe(false); // alive while the turn runs — its TTFT is pending
+    const tokens: string[] = [];
+    for await (const chunk of outcome.result.stream) {
+      if (chunk.delta) tokens.push(chunk.delta);
+    }
+    // Winner's stream done: the hung loser must not outlive the turn.
     expect(loserSignal?.aborted).toBe(true);
   });
 
-  it('tags both provider calls with race + provider trace context (#237)', async () => {
+  it('tags every combo’s provider call with race + provider trace context (#237)', async () => {
     const seen: CompletionOptions[] = [];
     const deps: RaceDeps = {
       roster: [model()],
       now: () => 1,
       startStream: async (options: CompletionOptions) => {
         seen.push(options);
-        // Fireworks yields first; deepinfra never yields (aborted loser).
-        return options.provider === 'fireworks'
-          ? streamOf([{ delta: 'win' }])
-          : (async function* () {
-              await new Promise((r) => setTimeout(r, 1000));
-              yield { delta: 'never' };
-            })();
+        return streamOf([{ delta: 'win' }]);
       },
     };
 
     await raceRoster(
       { messages: [], trace: { sessionId: 'sess-1', tags: ['chat'], metadata: { turn: 1 } } },
-      false,
       deps,
     );
 
@@ -168,7 +237,7 @@ describe('racingService (#232)', () => {
       now: () => 5,
       startStream: async () => streamOf([{ delta: 'A' }, { delta: 'B' }, { delta: 'C' }]),
     };
-    const outcome = await raceRoster({ messages: [] }, false, deps);
+    const outcome = await raceRoster({ messages: [] }, deps);
     const tokens: string[] = [];
     for await (const chunk of outcome.result.stream) {
       if (chunk.delta) tokens.push(chunk.delta);
@@ -176,22 +245,21 @@ describe('racingService (#232)', () => {
     expect(tokens).toEqual(['A', 'B', 'C']);
   });
 
-  it('falls through to the next model when the primary model totally fails', async () => {
+  it('a totally failed model cools off while another model’s combo serves the turn', async () => {
     const second: RosterModel = {
       modelId: 'm-second',
       label: 'Second',
       tools: true,
-      vision: true,
       inputPrice: 1,
       outputPrice: 1,
       providers: [{ provider: 'deepinfra', modelId: 'di-second' }],
     };
-    const disabled: Array<{ model: string; provider: string }> = [];
+    const disabled: Array<{ model: string; provider: string; ttl: number | undefined }> = [];
     const deps: RaceDeps = {
       roster: [model(), second],
       now: () => 1,
-      disable: async (modelId, provider) => {
-        disabled.push({ model: modelId, provider });
+      disable: async (modelId, provider, ttl) => {
+        disabled.push({ model: modelId, provider, ttl });
         return true;
       },
       startStream: async (options: CompletionOptions) => {
@@ -199,36 +267,17 @@ describe('racingService (#232)', () => {
         throw new Error(`boom ${options.model}`);
       },
     };
-    const outcome = await raceRoster({ messages: [] }, false, deps);
+    const outcome = await raceRoster({ messages: [] }, deps);
     expect(outcome.result.model.modelId).toBe('m-second');
+    // Provider-fault failures cool off both combos of the dead model; the
+    // winning model is untouched.
     expect(disabled).toEqual(
       expect.arrayContaining([
-        { model: 'm-primary', provider: 'deepinfra' },
-        { model: 'm-primary', provider: 'fireworks' },
+        { model: 'm-primary', provider: 'deepinfra', ttl: undefined },
+        { model: 'm-primary', provider: 'fireworks', ttl: undefined },
       ]),
     );
-  });
-
-  it('restricts image turns to vision-capable roster models', async () => {
-    const textOnly: RosterModel = {
-      modelId: 'text-only',
-      label: 'Text',
-      tools: true,
-      vision: false,
-      providers: [{ provider: 'deepinfra', modelId: 'di-text' }],
-    };
-    const visionModel = model({ modelId: 'vision', label: 'Vision' });
-    const seen: string[] = [];
-    const deps: RaceDeps = {
-      roster: [textOnly, visionModel],
-      now: () => 1,
-      startStream: async (options: CompletionOptions) => {
-        seen.push(options.model);
-        return streamOf([{ delta: 'ok' }]);
-      },
-    };
-    await raceRoster({ messages: [] }, true, deps);
-    expect(seen).not.toContain('di-text');
+    expect(disabled.some((d) => d.model === 'm-second')).toBe(false);
   });
 
   it('does not disable on a rate-limit (non-overload) error — fails loudly', async () => {
@@ -243,7 +292,7 @@ describe('racingService (#232)', () => {
         throw err;
       },
     };
-    await expect(raceRoster({ messages: [] }, false, deps)).rejects.toThrow(/rate limit/i);
+    await expect(raceRoster({ messages: [] }, deps)).rejects.toThrow(/rate limit/i);
     expect(disable).not.toHaveBeenCalled();
   });
 
@@ -259,16 +308,15 @@ describe('racingService (#232)', () => {
         throw err;
       },
     };
-    await expect(raceRoster({ messages: [] }, false, deps)).rejects.toThrow(/too large/i);
+    await expect(raceRoster({ messages: [] }, deps)).rejects.toThrow(/too large/i);
     expect(disable).not.toHaveBeenCalled();
   });
 
-  it('cools off an overloaded model with a short TTL and falls through', async () => {
+  it('cools off an overloaded combo with a short TTL while another combo serves', async () => {
     const second: RosterModel = {
       modelId: 'm-second',
       label: 'Second',
       tools: true,
-      vision: true,
       providers: [{ provider: 'deepinfra', modelId: 'di-second' }],
     };
     const ttlSeen: Array<number | undefined> = [];
@@ -284,36 +332,9 @@ describe('racingService (#232)', () => {
         throw new Error('engine_overloaded: Model busy, retry later');
       },
     };
-    const outcome = await raceRoster({ messages: [] }, false, deps);
+    const outcome = await raceRoster({ messages: [] }, deps);
     expect(outcome.result.model.modelId).toBe('m-second');
     expect(ttlSeen.every((t) => typeof t === 'number' && t > 0)).toBe(true);
-  });
-
-  it('uses the weighted score to pick the primary (cheaper wins at equal TTFT)', async () => {
-    const cheap = model({
-      modelId: 'cheap',
-      inputPrice: 0.1,
-      outputPrice: 0.1,
-      providers: [{ provider: 'deepinfra', modelId: 'di-cheap' }],
-    });
-    const pricey = model({
-      modelId: 'pricey',
-      inputPrice: 1,
-      outputPrice: 1,
-      providers: [{ provider: 'deepinfra', modelId: 'di-pricey' }],
-    });
-    let firstModel = '';
-    const deps: RaceDeps = {
-      roster: [pricey, cheap],
-      now: () => 1,
-      disable: async () => true,
-      startStream: async (options: CompletionOptions) => {
-        firstModel = options.model;
-        return streamOf([{ delta: 'ok' }]);
-      },
-    };
-    await raceRoster({ messages: [] }, false, deps);
-    expect(firstModel).toBe('di-cheap');
   });
 
   it('throws when the roster has no usable model', async () => {
@@ -323,7 +344,7 @@ describe('racingService (#232)', () => {
       disable: async () => true,
       startStream: async () => streamOf([{ delta: 'ok' }]),
     };
-    await expect(raceRoster({ messages: [] }, false, deps)).rejects.toThrow();
+    await expect(raceRoster({ messages: [] }, deps)).rejects.toThrow();
   });
 });
 
@@ -352,7 +373,7 @@ describe('racingService non-streaming (#232)', () => {
         return completionOf('fast');
       },
     };
-    const outcome = await raceRosterCompletion({ messages: [] }, false, deps);
+    const outcome = await raceRosterCompletion({ messages: [] }, deps);
     expect(outcome.result.provider.provider).toBe('fireworks');
     expect(outcome.result.completion.choices[0]?.message?.content).toBe('fast');
     expect(mockRecordTtft).toHaveBeenCalledWith('m-primary', 'fireworks', 7);
@@ -370,7 +391,7 @@ describe('racingService non-streaming (#232)', () => {
       now: () => 1,
       startCompletion: async () => completionOf('hi'),
     };
-    const { routing, outcome } = await routeAndComplete({ messages: [] }, false, deps);
+    const { routing, outcome } = await routeAndComplete({ messages: [] }, deps);
     expect(routing).toEqual({
       model: 'winner',
       provider: 'deepinfra',
@@ -385,7 +406,6 @@ describe('racingService non-streaming (#232)', () => {
       modelId: 'm-second',
       label: 'Second',
       tools: true,
-      vision: true,
       // Priced higher than the primary so the weighted pick still tries
       // `m-primary` first and exercises the fall-through.
       inputPrice: 1,
@@ -405,7 +425,7 @@ describe('racingService non-streaming (#232)', () => {
         throw new Error(`boom ${options.model}`);
       },
     };
-    const outcome = await raceRosterCompletion({ messages: [] }, false, deps);
+    const outcome = await raceRosterCompletion({ messages: [] }, deps);
     expect(outcome.result.model.modelId).toBe('m-second');
     expect(disabled).toEqual(
       expect.arrayContaining([
@@ -413,27 +433,5 @@ describe('racingService non-streaming (#232)', () => {
         { model: 'm-primary', provider: 'fireworks' },
       ]),
     );
-  });
-
-  it('excludes text-only models on image turns', async () => {
-    const textOnly: RosterModel = {
-      modelId: 'text',
-      label: 'Text',
-      tools: true,
-      vision: false,
-      providers: [{ provider: 'deepinfra', modelId: 'di-text' }],
-    };
-    const vision = model({ modelId: 'vision', label: 'Vision' });
-    const seen: string[] = [];
-    const deps: RaceDeps = {
-      roster: [textOnly, vision],
-      now: () => 1,
-      startCompletion: async (options: CompletionOptions) => {
-        seen.push(options.model);
-        return completionOf('ok');
-      },
-    };
-    await raceRosterCompletion({ messages: [] }, true, deps);
-    expect(seen).not.toContain('di-text');
   });
 });
