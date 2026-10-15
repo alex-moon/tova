@@ -251,6 +251,15 @@ export const assetBulkConfirmSchema = z
   .max(MAX_BULK_FILES, {
     message: `Bulk confirm is limited to ${MAX_BULK_FILES} assets per batch`,
   });
+// POST /api/assets/:id/restore body (#325): restore an assistant-generated
+// file to a prior version. The version number is the one returned by
+// GET /:id/versions.
+export const assetRestoreSchema = z.object({
+  version: z
+    .number({ message: 'version is required' })
+    .int({ message: 'version must be an integer' })
+    .positive({ message: 'version must be positive' }),
+});
 // POST /api/mcp-servers body (issue #36). Personal MCP servers only: the
 // route is authenticated and always writes scope:'user' owned by the caller.
 // https-only URLs keep the outbound connect surface (SSRF) off plain HTTP;

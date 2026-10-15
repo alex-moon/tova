@@ -643,6 +643,17 @@ describe('confirmationForToolResults (#195)', () => {
     expect(confirmationForToolResults([{ name: 'read_file', result: {} }])).toBe('Read the file.');
   });
 
+  it('names the file when edit_file succeeded (#325)', () => {
+    expect(
+      confirmationForToolResults([
+        { name: 'edit_file', result: { file: { filename: 'agi-final.md' } } },
+      ]),
+    ).toBe('Updated agi-final.md.');
+    expect(confirmationForToolResults([{ name: 'edit_file', result: { error: 'no_match' } }])).toBe(
+      'Updated the file.',
+    );
+  });
+
   it('falls back to a generic sentence for an unknown tool', () => {
     expect(confirmationForToolResults([{ name: 'list_repositories', result: {} }])).toBe(
       'Finished the task.',

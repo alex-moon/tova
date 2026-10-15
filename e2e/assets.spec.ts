@@ -168,3 +168,71 @@ test('library: pending assets cannot be selected', async ({ page }) => {
   // selection checkbox: a not-ready asset cannot be multi-selected.
   await expect(page.locator('[data-testid="asset-select"]').first()).toBeDisabled();
 });
+
+test('library: an edited file shows its version history and can restore one (#325)', async ({
+  page,
+}) => {
+  const generated = {
+    ...readyAsset,
+    filename: 'notes.md',
+    contentType: 'text/markdown',
+    version: 2,
+  };
+  await mockAssetApi(page, [generated]);
+  await page.route('**/api/assets/e2e-asset-1/content', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        asset: { ...generated, content: 'current body', format: 'markdown' },
+      }),
+    }),
+  );
+  await page.route('**/api/assets/e2e-asset-1/versions', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        versions: [
+          { version: 2, size: 12, createdAt: new Date().toISOString() },
+          { version: 1, size: 8, createdAt: new Date().toISOString() },
+        ],
+      }),
+    }),
+  );
+  await page.route('**/api/assets/e2e-asset-1/versions/1/content', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        version: {
+          version: 1,
+          size: 8,
+          content: 'old body',
+          format: 'markdown',
+          createdAt: new Date().toISOString(),
+        },
+      }),
+    }),
+  );
+  await page.route('**/api/assets/e2e-asset-1/restore', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ asset: { ...generated, version: 3 } }),
+    }),
+  );
+
+  await openFiles(page);
+  await page.locator('[data-testid="asset-preview-e2e-asset-1"]').click();
+  await expect(page.locator('[data-testid="assets-preview-body"]')).toContainText('current body');
+
+  await page.locator('[data-testid="assets-history-toggle"]').click();
+  await expect(page.locator('[data-testid="assets-history-item-2"]')).toContainText('Current');
+  await page.locator('[data-testid="assets-history-item-1"]').click();
+  await expect(page.locator('[data-testid="assets-version-banner"]')).toContainText('Version 1');
+  await expect(page.locator('[data-testid="assets-version-preview"]')).toContainText('old body');
+  await page.locator('[data-testid="assets-version-restore"]').click();
+  // Restoring closes the version view and returns to the current body.
+  await expect(page.locator('[data-testid="assets-version-preview"]')).toBeHidden();
+});

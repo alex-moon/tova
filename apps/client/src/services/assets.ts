@@ -32,6 +32,8 @@ export interface AssetSummary {
   thumbnailStatus?: string;
   // Issue #252: provenance, or null when unknown (legacy rows / untracked).
   provenance?: AssetProvenance | null;
+  // Issue #325: current content version; > 1 means the file has edit history.
+  version?: number;
   createdAt: string;
 }
 
@@ -56,6 +58,24 @@ export interface AssetContent {
   thumbnailStatus?: string;
   // Issue #252: provenance, or null when unknown.
   provenance?: AssetProvenance | null;
+  // Issue #325: current content version.
+  version?: number;
+  createdAt: string;
+}
+
+// Issue #325: one row of an assistant-generated file's content history.
+export interface AssetVersionInfo {
+  version: number;
+  size: number;
+  createdAt: string;
+}
+
+// Issue #325: the body of a single past version, for the read-only preview.
+export interface AssetVersionContent {
+  version: number;
+  size: number;
+  content: string | null;
+  format: 'text' | 'markdown';
   createdAt: string;
 }
 
@@ -248,6 +268,42 @@ const AssetService = {
   async downloadUrl(assetId: string): Promise<string> {
     const res = await axios.get<{ url: string }>(`/api/assets/${assetId}/url`);
     return res.data.url;
+  },
+
+  // Issue #325: content history of an assistant-generated file, newest first.
+  async versions(assetId: string): Promise<AssetVersionInfo[]> {
+    try {
+      const res = await axios.get<{ versions: AssetVersionInfo[] }>(
+        `/api/assets/${assetId}/versions`,
+      );
+      return res.data.versions;
+    } catch (err) {
+      throw toAssetError(err);
+    }
+  },
+
+  // Issue #325: read one past version's body for the read-only preview.
+  async versionContent(assetId: string, version: number): Promise<AssetVersionContent> {
+    try {
+      const res = await axios.get<{ version: AssetVersionContent }>(
+        `/api/assets/${assetId}/versions/${version}/content`,
+      );
+      return res.data.version;
+    } catch (err) {
+      throw toAssetError(err);
+    }
+  },
+
+  // Issue #325: restore a past version as a new current version.
+  async restore(assetId: string, version: number): Promise<AssetSummary> {
+    try {
+      const res = await axios.post<{ asset: AssetSummary }>(`/api/assets/${assetId}/restore`, {
+        version,
+      });
+      return res.data.asset;
+    } catch (err) {
+      throw toAssetError(err);
+    }
   },
 
   // Issue #208: presigned URL for the derived image thumbnail, plus the

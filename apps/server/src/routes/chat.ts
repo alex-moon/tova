@@ -178,7 +178,9 @@ const toolLabelFrom = (name: string): string =>
           ? 'Read a file'
           : name === 'generate_file'
             ? 'Created a file'
-            : name || 'Tool run';
+            : name === 'edit_file'
+              ? 'Updated a file'
+              : name || 'Tool run';
 
 /*
  * Tools that are internal bookkeeping, not user-facing "work". A turn whose
@@ -207,6 +209,12 @@ export const confirmationForToolResults = (
         typeof filename === 'string' && filename !== ''
           ? `Created ${filename}.`
           : 'Created the file.';
+    } else if (name === 'edit_file') {
+      const filename = (result as { file?: { filename?: unknown } } | null)?.file?.filename;
+      phrase =
+        typeof filename === 'string' && filename !== ''
+          ? `Updated ${filename}.`
+          : 'Updated the file.';
     } else if (name === 'web_search') {
       phrase = 'Searched the web.';
     } else if (name === 'fetch_url') {
@@ -377,6 +385,18 @@ export const toolResultEvent = (result: {
     };
   }
   if (result.name === 'generate_file') {
+    const payload = result.result as { file?: { filename?: unknown }; error?: unknown } | null;
+    const filename = payload?.file?.filename;
+    if (payload && typeof payload.error === 'string') {
+      return { ...base, status: 'empty' as const };
+    }
+    return {
+      ...base,
+      status: 'ok' as const,
+      ...(typeof filename === 'string' && filename !== '' ? { filename } : {}),
+    };
+  }
+  if (result.name === 'edit_file') {
     const payload = result.result as { file?: { filename?: unknown }; error?: unknown } | null;
     const filename = payload?.file?.filename;
     if (payload && typeof payload.error === 'string') {

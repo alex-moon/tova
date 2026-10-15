@@ -7,6 +7,7 @@ import { buildTracingOptions } from '@mastra/observability';
 import { withLangsmithMetadata } from '@mastra/langsmith';
 import { RedactedLangSmithExporter } from './traceRedaction';
 import { createTool } from '@mastra/core/tools';
+import { createTwoFilesPatch } from 'diff';
 import { z } from 'zod';
 import mongoose from 'mongoose';
 import { Asset } from '../models/Asset';
@@ -33,6 +34,7 @@ import {
 import { webSearch } from './webSearchService';
 import { fetchPage } from './webFetchService';
 import { createSystemAsset } from './systemAssetService';
+import { applyAssetEdits, type AssetEdit } from './assetEditService';
 import { spacesWorkspaceStorage } from './workspaceStorage';
 import { config } from '../config';
 
@@ -687,6 +689,112 @@ const generateFileExecute = async (
 };
 
 /*
+ * edit_file tool (#325): revise a file the assistant generated earlier, in the
+ * same conversation or a past one. `generate_file` only ever creates a new
+ * asset, so without this the agent had no way to "update the notes" short of
+ * regenerating the whole document under a new name. Edits are search/replace
+ * blocks — cost is proportional to the edit, and the model must anchor its
+ * change to existing text. Only `system-generated` files are editable;
+ * the asset's provenance is left untouched (it still names the originating
+ * chat/task). Each write snapshots a new version (see assetEditService).
+ */
+export const editFileTool = createTool({
+  id: 'edit_file',
+  description:
+    'Edit a markdown file that you previously created with `generate_file` in the ' +
+    'calling user’s file library. Use it to update, revise or fix an existing file ' +
+    'instead of generating a new one. Provide the file id (from `list_files`) and one ' +
+    'or more search/replace edits: each `oldText` must be a unique block of the ' +
+    'file’s current text and `newText` its replacement. Call `read_file` first to get ' +
+    'the current text when unsure; preserve exact indentation and never include ' +
+    'line-number prefixes in oldText. If there is no exact match, the edit retries ' +
+    'while ignoring typographic quote, dash, and space variants, then trailing ' +
+    'whitespace on each line — but it still fails if oldText is absent or matches ' +
+    'more than one place. The file keeps its id and provenance; every edit is kept ' +
+    'as a new version.',
+  inputSchema: z.object({
+    id: z.string().min(1).describe('The file id from `list_files`'),
+    edits: z
+      .array(
+        z.object({
+          oldText: z
+            .string()
+            .min(1)
+            .describe('Existing text to replace; must occur exactly once in the file'),
+          newText: z.string().describe('Replacement text (may be empty to delete the block)'),
+        }),
+      )
+      .min(1)
+      .describe('One or more search/replace edits, applied in order'),
+  }),
+  outputSchema: z.object({
+    file: z
+      .object({
+        id: z.string(),
+        filename: z.string(),
+        contentType: z.string(),
+        size: z.number(),
+        version: z.number().describe('The new version number after this edit'),
+        createdAt: z.string().describe('Creation time as an ISO 8601 UTC timestamp'),
+      })
+      .optional(),
+    diff: z
+      .string()
+      .optional()
+      .describe('Unified diff of the edit (before → after), so the change is auditable'),
+    error: z.string().optional(),
+    note: z.string().optional(),
+  }),
+  execute: ({ id, edits }, { requestContext }) => editFileExecute(id, edits, requestContext),
+});
+
+const editFileExecute = async (
+  id: string,
+  edits: AssetEdit[],
+  requestContext: { get: (key: string) => unknown },
+): Promise<{
+  file?: {
+    id: string;
+    filename: string;
+    contentType: string;
+    size: number;
+    version: number;
+    createdAt: string;
+  };
+  diff?: string;
+  error?: string;
+  note?: string;
+}> => {
+  const userId = requestContext.get('userId') as string | undefined;
+  if (!userId) return { error: 'unavailable' };
+  if (!spacesWorkspaceStorage.isConfigured()) return { error: 'unavailable' };
+  if (!id || !mongoose.isValidObjectId(id)) return { error: 'not_found' };
+  try {
+    const asset = await Asset.findOne({ _id: id, userId, status: 'ready' });
+    if (!asset) return { error: 'not_found' };
+    // Captured before the write: the unified diff of the edit is returned in
+    // the tool result so the change is auditable in the conversation.
+    const before = asset.textExtracted ?? '';
+    const result = await applyAssetEdits(asset, edits);
+    if (!result.ok) return { error: result.code, note: result.message };
+    const file = result.asset;
+    return {
+      file: {
+        id: String(file._id),
+        filename: file.filename,
+        contentType: file.contentType,
+        size: file.size,
+        version: file.version ?? 1,
+        createdAt: (file.createdAt ?? new Date()).toISOString(),
+      },
+      diff: createTwoFilesPatch(asset.filename, asset.filename, before, file.textExtracted ?? ''),
+    };
+  } catch {
+    return { error: 'unavailable' };
+  }
+};
+
+/*
  * Built-in clock tool (issue #52): deterministic, zero-dependency, no
  * external calls. It answers "what's the date/time" without a web-search
  * round trip. The tool is a per-agent singleton with no per-user context, so
@@ -824,7 +932,11 @@ const TOOL_INSTRUCTIONS =
   're-read a long document end to end. When the user asks you to ' +
   'save, generate or create a new file, note or document, call `generate_file` ' +
   'with a filename (ending in .md) and the full markdown content; the file then ' +
-  'appears in their library and in `list_files` output. When a request is ' +
+  'appears in their library and in `list_files` output. When the user asks to ' +
+  'update, revise, fix or add to a file you previously generated, do not create a ' +
+  'new one — call `edit_file` with that file’s id and search/replace edits whose ' +
+  '`oldText` is copied exactly from its current text (call `read_file` first if ' +
+  'unsure); each edit is saved as a new version. When a request is ' +
   'substantial background work — multi-step research, building a long document, ' +
   'anything that would take many tool calls — call `delegate_task` with a ' +
   'complete standalone instruction to hand it to the worker instead of doing it ' +
@@ -878,6 +990,7 @@ const agentFor = (provider: LlmProvider, model: string, tools?: boolean): Agent 
             list_files: listFilesTool,
             read_file: readFileTool,
             generate_file: generateFileTool,
+            edit_file: editFileTool,
             delegate_task: delegateTaskTool,
           },
         }

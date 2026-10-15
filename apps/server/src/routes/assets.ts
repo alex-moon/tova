@@ -2,6 +2,7 @@ import express from 'express';
 import archiver from 'archiver';
 import { isValidObjectId } from 'mongoose';
 import { Asset, type AssetDocument } from '../models/Asset';
+import { AssetVersion } from '../models/AssetVersion';
 import { Session } from '../models/Session';
 import { User } from '../models/User';
 import { authenticate, AuthRequest } from '../middleware/auth';
@@ -11,6 +12,7 @@ import {
   assetBulkDownloadQuerySchema,
   assetBulkPresignSchema,
   assetPresignSchema,
+  assetRestoreSchema,
 } from '../validation';
 import { spacesWorkspaceStorage } from '../services/workspaceStorage';
 // Presign/confirm domain cores live in services/assetPresign.ts and
@@ -18,6 +20,7 @@ import { spacesWorkspaceStorage } from '../services/workspaceStorage';
 // helpers in services/assetZip.ts; shared caps in services/assetLimits.ts.
 import { presignItemForUser } from '../services/assetPresign';
 import { confirmAsset } from '../services/assetConfirm';
+import { restoreAssetVersion } from '../services/assetEditService';
 import { previewAsset, safeAsset } from '../services/assetViews';
 import { dedupeEntryNames } from '../services/assetZip';
 import { BULK_MAX_TOTAL_SIZE, MAX_BULK_TOTAL_SIZE } from '../services/assetLimits';
@@ -358,6 +361,101 @@ router.get('/:id/content', authenticate, async (req: AuthRequest, res) => {
   } catch (err) {
     console.error('Asset content error:', err);
     return res.status(500).json({ message: 'Error loading asset content' });
+  }
+});
+
+// GET /api/assets/:id/versions — content history of an assistant-generated
+// file (#325), newest first. Only metadata; the text of a version is fetched
+// by the /content route below. Ownership-scoped.
+router.get('/:id/versions', authenticate, async (req: AuthRequest, res) => {
+  try {
+    const asset = await ownedAsset(req);
+    if (!asset) {
+      return res.status(404).json({ message: 'Asset not found' });
+    }
+    const rows = await AssetVersion.find({ assetId: asset._id, userId: req.user?.id })
+      .sort({ version: -1 })
+      .select('version size createdAt')
+      .lean();
+    return res.json({
+      versions: rows.map((row) => ({
+        version: row.version,
+        size: row.size,
+        createdAt: row.createdAt,
+      })),
+    });
+  } catch (err) {
+    console.error('Asset versions error:', err);
+    return res.status(500).json({ message: 'Error loading file versions' });
+  }
+});
+
+// GET /api/assets/:id/versions/:version/content — one version's body, for the
+// viewer's read-only version preview (#325). Ownership-scoped.
+router.get('/:id/versions/:version/content', authenticate, async (req: AuthRequest, res) => {
+  try {
+    const asset = await ownedAsset(req);
+    if (!asset) {
+      return res.status(404).json({ message: 'Asset not found' });
+    }
+    const version = Number(req.params.version);
+    if (!Number.isInteger(version) || version < 1) {
+      return res.status(400).json({ message: 'Invalid version' });
+    }
+    const row = await AssetVersion.findOne({
+      assetId: asset._id,
+      userId: req.user?.id,
+      version,
+    }).select('version size textExtracted createdAt');
+    if (!row) {
+      return res.status(404).json({ message: 'Version not found' });
+    }
+    return res.json({
+      version: {
+        version: row.version,
+        size: row.size,
+        content: row.textExtracted ?? null,
+        format: 'markdown',
+        createdAt: row.createdAt,
+      },
+    });
+  } catch (err) {
+    console.error('Asset version content error:', err);
+    return res.status(500).json({ message: 'Error loading file version' });
+  }
+});
+
+// POST /api/assets/:id/restore — restore a prior version as a NEW version
+// (#325), so a restore is itself undoable. Ownership-scoped; only
+// assistant-generated files are editable (enforced in the service).
+router.post('/:id/restore', authenticate, async (req: AuthRequest, res) => {
+  try {
+    const asset = await ownedAsset(req);
+    if (!asset) {
+      return res.status(404).json({ message: 'Asset not found' });
+    }
+    const parsed = assetRestoreSchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      return res
+        .status(400)
+        .json({ message: parsed.error.issues[0]?.message ?? 'Invalid request' });
+    }
+    const result = await restoreAssetVersion(asset, parsed.data.version);
+    if (!result.ok) {
+      const status =
+        result.code === 'not_found'
+          ? 404
+          : result.code === 'too_large'
+            ? 413
+            : result.code === 'unavailable'
+              ? 503
+              : 400;
+      return res.status(status).json({ message: result.message });
+    }
+    return res.json({ asset: safeAsset(result.asset) });
+  } catch (err) {
+    console.error('Asset restore error:', err);
+    return res.status(500).json({ message: 'Error restoring file version' });
   }
 });
 
