@@ -26,6 +26,7 @@
     "db:backfill-embeddings": "tsx scripts/backfill-embeddings.ts",
     "db:vector-index": "tsx scripts/create-vector-index.ts",
     "logs": "tsx scripts/loki.ts",
+    "manage": "tsx apps/server/src/manage.ts",
     "evals": "tsx scripts/run-evals.ts",
     "evals:memory": "tsx scripts/run-memory-evals.ts",
     "test": "NODE_OPTIONS=--experimental-vm-modules jest",
