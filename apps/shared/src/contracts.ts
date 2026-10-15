@@ -179,6 +179,11 @@ export interface AdminTraceRow {
   totalTokens: number | null;
   error: string | null;
   appPath?: string;
+  // #308: workspace-memory facts for the turn, read from the root run's
+  // metadata (the enrichment guard outcome and the rendered block's slice
+  // count). Absent on traces from before the metadata existed.
+  workspaceGate?: 'yes' | 'no' | 'timeout' | 'off';
+  workspaceHits?: number;
 }
 
 export interface AdminTracesPayload {

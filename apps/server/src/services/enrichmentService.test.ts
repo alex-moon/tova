@@ -7,6 +7,8 @@ import {
   enrichmentVotes,
   filesVoteFromReply,
   parseFilesVote,
+  workspaceGateFrom,
+  workspaceTraceMetadata,
   workspaceVoteFromReply,
 } from './enrichmentService';
 
@@ -101,6 +103,72 @@ describe('enrichmentService', () => {
       mockCreateToolFree.mockClear();
       expect(await enrichmentVotes('x')).toEqual({ files: false, workspace: false });
       expect(mockCreateToolFree).not.toHaveBeenCalled();
+    });
+
+    it('marks a timeout with timedOut so it is distinguishable from a real no (#308)', async () => {
+      process.env.ENRICHMENT_TIMEOUT_MS = '10';
+      mockCreateToolFree.mockImplementationOnce(
+        () =>
+          new Promise((resolve) =>
+            setTimeout(() => resolve(voteResponse('{"workspace":"yes"}')), 200),
+          ),
+      );
+      expect(await enrichmentVotes('x')).toEqual({
+        files: false,
+        workspace: false,
+        timedOut: true,
+      });
+      delete process.env.ENRICHMENT_TIMEOUT_MS;
+    });
+
+    it('threads sessionId into the aux call trace (#308)', async () => {
+      mockCreateToolFree.mockResolvedValueOnce(voteResponse('{"files":"no","workspace":"no"}'));
+      await enrichmentVotes('x', [], 'abc123');
+      const options = mockCreateToolFree.mock.calls[0][0] as { trace?: { sessionId?: string } };
+      expect(options.trace?.sessionId).toBe('abc123');
+    });
+
+    it('omits trace.sessionId when the caller has none (#308)', async () => {
+      mockCreateToolFree.mockResolvedValueOnce(voteResponse('{"files":"no","workspace":"no"}'));
+      await enrichmentVotes('x');
+      const options = mockCreateToolFree.mock.calls[0][0] as { trace?: { sessionId?: string } };
+      expect(options.trace?.sessionId).toBeUndefined();
+    });
+  });
+
+  describe('workspace trace facts (#308)', () => {
+    it('maps skip / kill switch / memory-disabled to off', () => {
+      const votes = { files: false, workspace: true };
+      expect(workspaceGateFrom(votes, true)).toBe('off');
+      process.env.ENRICHMENT_ENABLED = '0';
+      expect(workspaceGateFrom(votes, false)).toBe('off');
+      delete process.env.ENRICHMENT_ENABLED;
+      process.env.WORKSPACE_MEMORY_ENABLED = '0';
+      expect(workspaceGateFrom(votes, false)).toBe('off');
+      delete process.env.WORKSPACE_MEMORY_ENABLED;
+    });
+
+    it('maps a timeout to timeout and the vote to yes/no', () => {
+      process.env.WORKSPACE_MEMORY_ENABLED = '1';
+      expect(workspaceGateFrom({ files: false, workspace: false, timedOut: true }, false)).toBe(
+        'timeout',
+      );
+      expect(workspaceGateFrom({ files: false, workspace: true }, false)).toBe('yes');
+      expect(workspaceGateFrom({ files: false, workspace: false }, false)).toBe('no');
+      delete process.env.WORKSPACE_MEMORY_ENABLED;
+    });
+
+    it('renders flat namespaced metadata with the block slice count', () => {
+      expect(
+        workspaceTraceMetadata('yes', '- chat "a" (2026-01-01) — x\n- chat "b" (2026-01-02) — y'),
+      ).toEqual({
+        tova_workspace_gate: 'yes',
+        tova_workspace_hits: 2,
+      });
+      expect(workspaceTraceMetadata('no', '')).toEqual({
+        tova_workspace_gate: 'no',
+        tova_workspace_hits: 0,
+      });
     });
   });
 

@@ -200,7 +200,12 @@ describe('admin langsmith (#186)', () => {
         return Promise.resolve(
           jsonResponse(200, {
             runs: [
-              rootRun(),
+              rootRun({
+                // #308: the workspace facts ride the root run's metadata.
+                extra: {
+                  metadata: { tova_workspace_gate: 'yes', tova_workspace_hits: 3 },
+                },
+              }),
               rootRun({
                 id: 'run-2',
                 trace_id: 'trace-2',
@@ -242,6 +247,8 @@ describe('admin langsmith (#186)', () => {
       totalTokens: 150,
       error: null,
       appPath: '/o/org/projects/p/proj-1/r/run-1',
+      workspaceGate: 'yes',
+      workspaceHits: 3,
     });
     expect(failed).toMatchObject({
       id: 'run-2',
@@ -251,6 +258,49 @@ describe('admin langsmith (#186)', () => {
       error: 'model exploded',
     });
     expect(failed.appPath).toBeUndefined();
+    // A root without the metadata (pre-#308 or a non-chat run) surfaces neither
+    // field, and a garbage value is dropped rather than passed through.
+    expect(failed.workspaceGate).toBeUndefined();
+    expect(failed.workspaceHits).toBeUndefined();
+  });
+
+  it('surfaces the workspace gate no/timeout labels and drops malformed metadata (#308)', async () => {
+    const app = createApp();
+    const cookie = await registerAdmin(app, 'ls-workspace@example.com');
+
+    fetchSpy.mockImplementation((url: string, init?: FetchInit) => {
+      if (String(url).includes('/api/v1/sessions')) {
+        return Promise.resolve(jsonResponse(200, [{ id: 'proj-1', name: 'tova-dev' }]));
+      }
+      const body = JSON.parse(init?.body ?? '{}');
+      if (body.filter === 'eq(is_root, true)') {
+        return Promise.resolve(
+          jsonResponse(200, {
+            runs: [
+              rootRun({
+                id: 'run-1',
+                trace_id: 'trace-1',
+                extra: { metadata: { tova_workspace_gate: 'timeout' } },
+              }),
+              rootRun({
+                id: 'run-2',
+                trace_id: 'trace-2',
+                extra: { metadata: { tova_workspace_gate: 'bogus', tova_workspace_hits: 'many' } },
+              }),
+            ],
+          }),
+        );
+      }
+      return Promise.resolve(jsonResponse(200, { runs: [] }));
+    });
+
+    const res = await request(app).get('/api/admin/langsmith/traces').set('Cookie', cookie);
+    expect(res.status).toBe(200);
+    expect(res.body.traces[0]).toMatchObject({ workspaceGate: 'timeout' });
+    expect(res.body.traces[0].workspaceHits).toBeUndefined();
+    // Both values malformed → neither surfaces.
+    expect(res.body.traces[1].workspaceGate).toBeUndefined();
+    expect(res.body.traces[1].workspaceHits).toBeUndefined();
   });
 
   it('applies errorsOnly server-side and the model filter post-merge', async () => {

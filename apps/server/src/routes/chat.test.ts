@@ -65,9 +65,14 @@ jest.mock('../services/titleService', () => ({
 // main completion's arguments, so stub enrichment to a no-op block and keep
 // it off `inferenceService.mock.calls`.
 jest.mock('../services/enrichmentService', () => ({
+  // #308: the gate/metadata helpers are pure — keep them real so the routes'
+  // trace metadata is derived from the mocked votes.
+  ...jest.requireActual('../services/enrichmentService'),
   enrichmentVotes: jest.fn().mockResolvedValue({ files: false, workspace: false }),
   libraryIndexFor: jest.fn().mockResolvedValue(''),
-  isEnrichmentEnabled: () => false,
+  // #308: the real workspaceGateFrom consults this — true keeps the mocked
+  // votes (not the stub) driving the trace metadata.
+  isEnrichmentEnabled: () => true,
 }));
 
 const registerUser = async (app: ReturnType<typeof createApp>, email: string) => {

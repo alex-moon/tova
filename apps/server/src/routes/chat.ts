@@ -27,7 +27,13 @@ import { zdrHistorySchema } from '../validation';
 import { redactForLog } from '../services/logRedaction';
 import { decideTurn } from '../services/zdrTurn';
 import { AllModelsDisabledError } from '../services/modelConfigService';
-import { enrichmentVotes, libraryIndexFor } from '../services/enrichmentService';
+import {
+  enrichmentVotes,
+  libraryIndexFor,
+  workspaceGateFrom,
+  workspaceTraceMetadata,
+  type EnrichmentVotes,
+} from '../services/enrichmentService';
 import {
   isWorkspaceMemoryEnabled,
   retrieveWorkspaceBlock,
@@ -552,7 +558,7 @@ const saveUserMessageWithMetrics = async (
   });
 
   if (!triviallyNeutral) {
-    classifyAndPersistPromptDimensions(String(userMessage._id), content).catch((err) =>
+    classifyAndPersistPromptDimensions(String(userMessage._id), content, sessionId).catch((err) =>
       console.error('Prompt classification error:', redactForLog(err)),
     );
   }
@@ -586,9 +592,12 @@ const enrichmentBlocksFor = async (
     skipWorkspace?: boolean;
     excludeMessageId?: string;
     excludeAssetId?: string;
+    // #308: threads the guard's aux run under the chat session when present
+    // (ZDR turns have no durable session and stay unthreaded).
+    sessionId?: string;
   } = {},
-): Promise<{ libraryBlock: string; workspaceBlock: string }> => {
-  const votes = await enrichmentVotes(prompt, history);
+): Promise<{ libraryBlock: string; workspaceBlock: string; votes: EnrichmentVotes }> => {
+  const votes = await enrichmentVotes(prompt, history, opts.sessionId);
   const libraryBlock = !opts.skipFiles && votes.files ? await libraryIndexFor(userId) : '';
   let workspaceBlock = '';
   if (!opts.skipWorkspace && votes.workspace && isWorkspaceMemoryEnabled()) {
@@ -600,7 +609,7 @@ const enrichmentBlocksFor = async (
       opts.excludeAssetId,
     );
   }
-  return { libraryBlock, workspaceBlock };
+  return { libraryBlock, workspaceBlock, votes };
 };
 
 /*
@@ -851,7 +860,7 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
      * `enrichmentHistoryFromDocs` is non-mutating so the same `history` array
      * survives for `withSystemAndAsset`.
      */
-    const { libraryBlock, workspaceBlock } = await enrichmentBlocksFor(
+    const { libraryBlock, workspaceBlock, votes } = await enrichmentBlocksFor(
       content,
       enrichmentHistoryFromDocs(
         history as { _id: unknown; role: string; content: string }[],
@@ -863,7 +872,14 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
         skipWorkspace: hasImage,
         excludeMessageId: String(userMessage._id),
         excludeAssetId: attachedAsset ? String(attachedAsset._id) : undefined,
+        sessionId: String(session!._id),
       },
+    );
+    // #308: the guard outcome + retrieval hit count ride the main call's trace
+    // metadata so the admin Traces tab can show them per turn.
+    const workspaceMetadata = workspaceTraceMetadata(
+      workspaceGateFrom(votes, hasImage),
+      workspaceBlock,
     );
     const withSystemAndAsset = async (systemContent: string) => {
       const next = messagesFromPersistedHistory(
@@ -910,7 +926,7 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
         // #252: tool-execution session (distinct from the trace) so
         // generate_file can stamp provenance on the file it produces.
         sessionId: String(session!._id),
-        trace: { sessionId: String(session!._id) },
+        trace: { sessionId: String(session!._id), metadata: workspaceMetadata },
       },
       hasImage,
     );
@@ -1105,6 +1121,8 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
      */
     let libraryBlock = '';
     let streamWorkspaceBlock = '';
+    // #308: the guard vote, kept for the trace metadata on the main call.
+    let streamVotes: EnrichmentVotes = { files: false, workspace: false };
     // #255 (F4): completed background tasks for this session, drained into the
     // persisted turn's context below (empty on ZDR — a ZDR turn cannot create a
     // task, D7, so it has nothing to drain). The ids are marked notified only
@@ -1116,10 +1134,12 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
       // Continuity comes from the client replay (#116); nothing is read back.
       messages = buildZdrMessages(zdrHistory, content);
       routingResult = rosterRoute;
+      // No sessionId: a ZDR turn has no durable session to thread the run under.
       const zdrBlocks = await enrichmentBlocksFor(content, zdrHistory, userId as string, {
         skipFiles: true,
       });
       streamWorkspaceBlock = zdrBlocks.workspaceBlock;
+      streamVotes = zdrBlocks.votes;
     } else {
       // Save user message
       const userMessage = await saveUserMessageWithMetrics(
@@ -1147,10 +1167,12 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
           skipWorkspace: hasImage,
           excludeMessageId: String(userMessage._id),
           excludeAssetId: attachedAsset ? String(attachedAsset._id) : undefined,
+          sessionId: String(session!._id),
         },
       );
       libraryBlock = blocks.libraryBlock;
       streamWorkspaceBlock = blocks.workspaceBlock;
+      streamVotes = blocks.votes;
       // #255: drain completed origin tasks (queued write) into this turn.
       const streamTaskCompletion = await taskCompletionBlockFor(
         userId as string,
@@ -1245,8 +1267,19 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
           userId,
           abortSignal: abortController.signal,
           // #224: attach the chat session to this turn's trace (ZDR turns have
-          // no session — nothing durable can be joined).
-          ...(zdr ? {} : { trace: { sessionId: String(session!._id) } }),
+          // no session — nothing durable can be joined). #308: the workspace
+          // gate outcome + retrieval hit count ride the trace metadata.
+          ...(zdr
+            ? {}
+            : {
+                trace: {
+                  sessionId: String(session!._id),
+                  metadata: workspaceTraceMetadata(
+                    workspaceGateFrom(streamVotes, hasImage),
+                    streamWorkspaceBlock,
+                  ),
+                },
+              }),
           // #252: the tool-execution session rides outside the trace guard for
           // the same reason (ZDR turns have no durable session to attribute to).
           ...(zdr ? {} : { sessionId: String(session!._id) }),
@@ -1400,7 +1433,7 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
     // stays consistent; the client falls back to static placeholders when
     // the field is absent.
     if (!isTriviallyNeutral(content) && assistantContent) {
-      const suggestions = await generateFollowups(content, assistantContent);
+      const suggestions = await generateFollowups(content, assistantContent, String(session!._id));
       if (suggestions.length > 0) {
         assistantMessage.suggestions = suggestions;
         await assistantMessage.save();
