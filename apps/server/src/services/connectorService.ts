@@ -5,8 +5,8 @@ import { CallToolResultSchema } from '@modelcontextprotocol/sdk/types.js';
 import { createTool } from '@mastra/core/tools';
 import mongoose from 'mongoose';
 import { z } from 'zod';
-import type { McpServerDocument } from '../models/McpServer';
-import { McpServer } from '../models/McpServer';
+import type { ConnectorDocument } from '../models/Connector';
+import { Connector } from '../models/Connector';
 import { decryptEnvelope } from './crypto';
 import {
   degradedToolError,
@@ -17,18 +17,20 @@ import {
 } from './toolDegrade';
 
 /*
- * MCP client bridge (issue #36). Connects to platform and user-configured
- * MCP servers over HTTP transports (streamable first, legacy SSE fallback
- * per the SDK's documented pattern), caches tool lists, and wraps each MCP
- * tool as a Mastra tool that proxies `callTool` server-side. Stdio
- * transports are deliberately out of scope (#36): no child processes.
+ * Connector service (#329, epic #328) — the DB-facing layer over the MCP
+ * wire code. Resolves platform + personal connectors, dispatches auth per
+ * connector type (`authFor`), and wraps each MCP tool as a Mastra tool that
+ * proxies `callTool` server-side. The MCP protocol internals below
+ * (handshake, list/call, transports) are unchanged from the mcpService era:
+ * the wire still speaks MCP; only ownership moved to the connector concept.
+ * Stdio transports are deliberately out of scope (#36): no child processes.
  */
 
 const CONNECT_TIMEOUT_MS = 5000;
 const CALL_TIMEOUT_MS = 30000;
-// How long a cached DB snapshot of a user's MCP servers is trusted. Chat
+// How long a cached DB snapshot of a user's connectors is trusted. Chat
 // turns stay cheap: one query per window, not per message.
-const SERVERS_CACHE_TTL_MS = 2000;
+const CONNECTORS_CACHE_TTL_MS = 2000;
 // A cached connection is reused until a call proves it dead; the next access
 // reconnects lazily. (Handshake-on-failure keeps the primitive simple: no
 // background prober, no stale-clock.)
@@ -47,7 +49,7 @@ interface ConnectionEntry {
 
 const connectionCache = new Map<string, ConnectionEntry>();
 
-const serversCache = new Map<
+const toolsetsCache = new Map<
   string,
   {
     expiresAt: number;
@@ -58,12 +60,26 @@ const serversCache = new Map<
 const connectionCacheKey = (url: string, headers: Record<string, string> | undefined): string =>
   `${url}|${headers ? JSON.stringify(headers) : ''}`;
 
-const authHeaders = (server: McpServerDocument): Record<string, string> | undefined => {
-  if (!server.headers || !server.headersConfigured) return undefined;
+// mcp.pat auth: the encrypted header envelope. #327 adds the mcp.oauth
+// branch (token vault + refresh) to this switch.
+const patAuthHeaders = (connector: ConnectorDocument): Record<string, string> | undefined => {
+  if (!connector.headers || !connector.headersConfigured) return undefined;
   try {
-    return JSON.parse(decryptEnvelope(server.headers)) as Record<string, string>;
+    return JSON.parse(decryptEnvelope(connector.headers)) as Record<string, string>;
   } catch {
     return undefined;
+  }
+};
+
+// Type-dispatch seam (#329): per-type stored auth → wire headers for the MCP
+// client. Unknown types authenticate anonymously rather than throwing — a
+// connector whose type predates its auth support still lists tools.
+const authFor = (connector: ConnectorDocument): Record<string, string> | undefined => {
+  switch (connector.type) {
+    case 'mcp.pat':
+      return patAuthHeaders(connector);
+    default:
+      return undefined;
   }
 };
 
@@ -153,7 +169,7 @@ const handshake = async (
   throw lastError instanceof Error ? lastError : new Error('MCP handshake failed');
 };
 
-export const listMcpServerTools = async (
+export const listMcpTools = async (
   url: string,
   headers?: Record<string, string>,
 ): Promise<McpToolInfo[]> => {
@@ -179,7 +195,7 @@ export const listMcpServerTools = async (
 /*
  * Call an MCP tool through a (possibly cached) client. One failed call
  * triggers a single fresh handshake + retry; persistent failure degrades to
- * a descriptive `error` result (#82, issue wording) so a dead server can
+ * a descriptive `error` result (#82, issue wording) so a dead endpoint can
  * never hang or fail a turn, and the model is told the tool was tried and
  * failed — not left to guess between "unavailable tool" and "empty result".
  */
@@ -240,38 +256,38 @@ const sanitizeToolsetKey = (name: string): string =>
   `mcp_${name.replace(/[^a-zA-Z0-9_]+/g, '_').slice(0, 40)}`;
 
 /*
- * Per-user toolset resolution: platform servers plus the calling user's own.
- * Connections happen in parallel with a bounded connect timeout so a first
- * chat after adding N servers stays within that bound, never N× it. Any
- * unreachable server is dropped from the set (its tools stop being offered)
- * — chat proceeds degraded, not stalled.
+ * Per-user toolset resolution: platform connectors plus the calling user's
+ * own. Connections happen in parallel with a bounded connect timeout so a
+ * first chat after adding N connectors stays within that bound, never N× it.
+ * Any unreachable connector is dropped from the set (its tools stop being
+ * offered) — chat proceeds degraded, not stalled.
  */
-export const mcpToolsetsForUser = async (
+export const connectorToolsetsForUser = async (
   userId?: string,
 ): Promise<Record<string, Record<string, ReturnType<typeof createTool>>>> => {
   const now = Date.now();
   const cacheKey = userId ?? '__anon__';
-  const cached = serversCache.get(cacheKey);
+  const cached = toolsetsCache.get(cacheKey);
   if (cached && cached.expiresAt > now) return cached.promise;
 
   const promise = (async () => {
     // userId is a session-string elsewhere in the app, but the Mongo owner
     // field is a real ObjectId: a non-parseable id simply matches no
-    // user-scope rows (platform servers still resolve) instead of throwing.
+    // user-scope rows (platform connectors still resolve) instead of throwing.
     const ownerId =
       userId && mongoose.Types.ObjectId.isValid(userId)
         ? new mongoose.Types.ObjectId(userId)
         : null;
-    const servers = await McpServer.find({
+    const connectors = await Connector.find({
       enabled: true,
       $or: [{ scope: 'platform' }, { scope: 'user', userId: ownerId }],
     });
     const live = await Promise.all(
-      servers.map(async (server) => {
+      connectors.map(async (connector) => {
         try {
-          const headers = authHeaders(server);
-          const tools = await listMcpServerTools(server.url, headers);
-          return { server, headers, tools };
+          const headers = authFor(connector);
+          const tools = await listMcpTools(connector.url, headers);
+          return { connector, headers, tools };
         } catch {
           return null;
         }
@@ -280,7 +296,7 @@ export const mcpToolsetsForUser = async (
     const toolsets: Record<string, Record<string, ReturnType<typeof createTool>>> = {};
     for (const entry of live) {
       if (!entry) continue;
-      const setKey = sanitizeToolsetKey(entry.server.name);
+      const setKey = sanitizeToolsetKey(entry.connector.name);
       const tools: Record<string, ReturnType<typeof createTool>> = {};
       for (const toolInfo of entry.tools) {
         if (tools[toolInfo.name]) continue;
@@ -297,7 +313,7 @@ export const mcpToolsetsForUser = async (
             if (toolIsFailed(ctx, toolId))
               return { error: degradedToolError(toolId, toolDegradeReason(ctx, toolId)) };
             const { reason, ...visible } = (await callMcpTool(
-              entry.server.url,
+              entry.connector.url,
               entry.headers,
               toolInfo.name,
               inputData,
@@ -318,17 +334,17 @@ export const mcpToolsetsForUser = async (
   // The no-op catch keeps an unawaited cached promise silent; dropping the
   // entry on failure makes the next turn rebuild instead of re-serving a
   // poisoned entry until it expires.
-  serversCache.set(cacheKey, { expiresAt: now + SERVERS_CACHE_TTL_MS, promise });
+  toolsetsCache.set(cacheKey, { expiresAt: now + CONNECTORS_CACHE_TTL_MS, promise });
   promise.catch(() => undefined);
   try {
     return await promise;
   } catch (error) {
-    if (serversCache.get(cacheKey)?.promise === promise) serversCache.delete(cacheKey);
+    if (toolsetsCache.get(cacheKey)?.promise === promise) toolsetsCache.delete(cacheKey);
     throw error;
   }
 };
 
-export const clearMcpCachesForTests = (): void => {
+export const clearConnectorCachesForTests = (): void => {
   connectionCache.clear();
-  serversCache.clear();
+  toolsetsCache.clear();
 };

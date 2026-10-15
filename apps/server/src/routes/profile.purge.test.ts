@@ -6,7 +6,7 @@ import { Session } from '../models/Session';
 import { Message } from '../models/Message';
 import { Asset } from '../models/Asset';
 import { AssetJob } from '../models/AssetJob';
-import { McpServer } from '../models/McpServer';
+import { Connector } from '../models/Connector';
 import { FACTORY_RESET_CONFIRM } from '../validation';
 
 // Route-level coverage for the factory reset (issue #143), superseding the
@@ -45,7 +45,7 @@ const seedUserWorkspace = async (uid: mongoose.Types.ObjectId, count = 2) => {
     status: 'ready',
   });
   await AssetJob.create({ assetId: asset._id });
-  await McpServer.create({
+  await Connector.create({
     scope: 'user',
     userId: uid,
     name: 'remote-tools',
@@ -66,9 +66,9 @@ const expectNothingPIIBearingRemains = async (
   expect(await Asset.countDocuments({ userId: uid })).toBe(0);
   // AssetJob has no userId — it must have been swept via the user's asset ids.
   if (assetId) expect(await AssetJob.countDocuments({ assetId })).toBe(0);
-  // User-scoped MCP server configs carry urls + encrypted auth headers —
+  // User-scoped connector configs carry urls + encrypted auth headers —
   // secret material at rest — so they must be swept too.
-  expect(await McpServer.countDocuments({ scope: 'user', userId: uid })).toBe(0);
+  expect(await Connector.countDocuments({ scope: 'user', userId: uid })).toBe(0);
 };
 
 describe('POST /api/profile/factory-reset (issue #143)', () => {

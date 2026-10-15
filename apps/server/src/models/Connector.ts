@@ -1,13 +1,29 @@
 import mongoose from 'mongoose';
 
-const mcpServerSchema = new mongoose.Schema(
+/*
+ * Connector (#329, epic #328) — the model formerly known as McpServer. The
+ * product concept is "connectors"; `type` is the discriminator. Only
+ * `mcp.pat` is storable today (#329); #327 extends the enum with 'mcp.oauth'.
+ * `api` / `sdk` are reserved contract names (apps/shared/src/connectors.ts),
+ * rejected at validation, never stored.
+ */
+const connectorSchema = new mongoose.Schema(
   {
+    // Required with a default: the default makes any row that races the
+    // 20261016 migration (rename + type backfill) behave as a pat connector
+    // instead of failing validation.
+    type: {
+      type: String,
+      enum: ['mcp.pat'],
+      required: true,
+      default: 'mcp.pat',
+    },
     scope: {
       type: String,
       enum: ['platform', 'user'],
       required: true,
     },
-    // Required when scope is 'user'; null/absent for platform servers.
+    // Required when scope is 'user'; null/absent for platform connectors.
     userId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User',
@@ -34,12 +50,14 @@ const mcpServerSchema = new mongoose.Schema(
             return false;
           }
         },
-        message: 'MCP server url must be a valid https URL',
+        message: 'Connector url must be a valid https URL',
       },
     },
-    // AES-256-GCM envelope (apps/server/src/services/crypto.ts). Secret material at
-    // rest is only these three fields; the toJSON transform below strips the
-    // whole envelope so no API response ever echoes it.
+    // mcp.pat auth material: AES-256-GCM envelope
+    // (apps/server/src/services/crypto.ts) of the auth header set. Secret
+    // material at rest is only these three fields; the toJSON transform below
+    // strips the whole envelope so no API response ever echoes it. #327 adds
+    // the mcp.oauth token vault alongside, not inside, this field.
     headers: {
       type: {
         iv: { type: String, required: true },
@@ -48,8 +66,8 @@ const mcpServerSchema = new mongoose.Schema(
       },
       default: null,
     },
-    // Denormalized so the API can show "auth configured" without exposing
-    // anything about the header itself (name or value).
+    // Denormalized so the API can show "auth configured" (wire field
+    // `authConfigured`) without exposing anything about the header itself.
     headersConfigured: {
       type: Boolean,
       default: false,
@@ -79,18 +97,18 @@ const mcpServerSchema = new mongoose.Schema(
   },
 );
 
-// A user-scope server must carry its owner; platform servers must be ownerless.
+// A user-scope connector must carry its owner; platform ones must be ownerless.
 const validateScopeOwnership = function (this: { scope?: string; userId?: unknown }): boolean {
   if (this.scope === 'user') return !!this.userId;
   if (this.scope === 'platform') return this.userId == null;
   return false;
 };
-mcpServerSchema.path('userId').validate(validateScopeOwnership, 'userId ownership mismatch');
+connectorSchema.path('userId').validate(validateScopeOwnership, 'userId ownership mismatch');
 
-mcpServerSchema.index({ scope: 1, name: 1 });
-mcpServerSchema.index({ scope: 1, enabled: 1 });
+connectorSchema.index({ scope: 1, name: 1 });
+connectorSchema.index({ scope: 1, enabled: 1 });
 
-mcpServerSchema.index(
+connectorSchema.index(
   { scope: 1, userId: 1, url: 1 },
   {
     unique: true,
@@ -98,7 +116,7 @@ mcpServerSchema.index(
   },
 );
 
-mcpServerSchema.set('toJSON', {
+connectorSchema.set('toJSON', {
   virtuals: true,
   versionKey: false,
   transform: (_doc, ret) => {
@@ -107,8 +125,10 @@ mcpServerSchema.set('toJSON', {
   },
 });
 
-export type McpServerDocument = mongoose.HydratedDocument<
-  mongoose.InferSchemaType<typeof mcpServerSchema>
+export type ConnectorDocument = mongoose.HydratedDocument<
+  mongoose.InferSchemaType<typeof connectorSchema>
 >;
 
-export const McpServer = mongoose.model('McpServer', mcpServerSchema);
+// Collection name pinned explicitly: the 20261016 migration renames the
+// legacy `mcpservers` collection to exactly this.
+export const Connector = mongoose.model('Connector', connectorSchema, 'connectors');

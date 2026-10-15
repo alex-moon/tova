@@ -1,8 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import McpServerService, { type McpServerInfo } from '../services/mcp';
-import { McpError } from '../types/mcp';
+import ConnectorService, { ConnectorError } from '../services/connectors';
+import type { ConnectorInfo } from '@shared/connectors';
 
 /*
  * Personal MCP servers settings section (issues #36, #80). Platform servers
@@ -20,7 +20,7 @@ const statusDotColor = (status: string): string =>
   status === 'connected' ? 'bg-green-500' : status === 'unreachable' ? 'bg-red-500' : 'bg-gray-400';
 
 const McpServersSection: React.FC = () => {
-  const [servers, setServers] = useState<McpServerInfo[] | null>(null);
+  const [servers, setServers] = useState<ConnectorInfo[] | null>(null);
   const [name, setName] = useState('');
   const [url, setUrl] = useState('');
   const [authToken, setAuthToken] = useState('');
@@ -31,12 +31,12 @@ const McpServersSection: React.FC = () => {
 
   useEffect(() => {
     let alive = true;
-    McpServerService.list()
+    ConnectorService.list()
       .then((next) => {
         if (alive) setServers(next);
       })
       .catch((err) => {
-        if (alive && err instanceof McpError) setError(err.message);
+        if (alive && err instanceof ConnectorError) setError(err.message);
       });
     return () => {
       alive = false;
@@ -48,7 +48,8 @@ const McpServersSection: React.FC = () => {
     setError(null);
     try {
       const trimmedToken = authToken.trim();
-      const created = await McpServerService.add({
+      const created = await ConnectorService.add({
+        type: 'mcp.pat',
         name: name.trim(),
         url: url.trim(),
         ...(trimmedToken ? { authToken: trimmedToken } : {}),
@@ -58,8 +59,8 @@ const McpServersSection: React.FC = () => {
       setAuthToken('');
       setServers((prev) => [...(prev ?? []), created]);
     } catch (err) {
-      if (err instanceof McpError) setError(err.message);
-      else setError('Could not add MCP server.');
+      if (err instanceof ConnectorError) setError(err.message);
+      else setError('Could not add connector.');
     } finally {
       setPendingAdd(false);
     }
@@ -68,11 +69,11 @@ const McpServersSection: React.FC = () => {
   const remove = async (id: string) => {
     setError(null);
     try {
-      await McpServerService.remove(id);
+      await ConnectorService.remove(id);
       setServers((prev) => (prev ?? []).filter((s) => s.id !== id));
     } catch (err) {
-      if (err instanceof McpError) setError(err.message);
-      else setError('Could not remove MCP server.');
+      if (err instanceof ConnectorError) setError(err.message);
+      else setError('Could not remove connector.');
     }
   };
 
@@ -121,7 +122,7 @@ const McpServersSection: React.FC = () => {
                       platform
                     </span>
                   )}
-                  {server.headersConfigured && (
+                  {server.authConfigured && (
                     <span data-testid="mcp-auth-configured" className="text-[10px] uppercase">
                       auth set
                     </span>

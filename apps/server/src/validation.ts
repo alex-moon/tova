@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { CONNECTOR_TYPES } from '@tova/shared';
 import { MAX_BULK_TOTAL_SIZE } from './services/assetLimits';
 
 // Node's canonical IANA zone list (418 entries) plus the UTC/GMT aliases a
@@ -260,12 +261,23 @@ export const assetRestoreSchema = z.object({
     .int({ message: 'version must be an integer' })
     .positive({ message: 'version must be positive' }),
 });
-// POST /api/mcp-servers body (issue #36). Personal MCP servers only: the
+// POST /api/connectors body (issues #36, #329). Personal connectors only: the
 // route is authenticated and always writes scope:'user' owned by the caller.
 // https-only URLs keep the outbound connect surface (SSRF) off plain HTTP;
 // auth is submitted as a raw token (issue #80) — the server wraps it in
 // `Authorization: Bearer <token>` and stores that single header encrypted.
-export const mcpServerCreateSchema = z.strictObject({
+// `type` is required (#329): the full CONNECTOR_TYPES namespace parses so
+// reserved-but-known types get a "not supported yet" message, and anything
+// unknown is rejected by the enum.
+export const connectorCreateSchema = z.strictObject({
+  type: z
+    .enum(CONNECTOR_TYPES, {
+      error: (iss) =>
+        iss.input === undefined ? 'Connector type is required' : 'Unknown connector type',
+    })
+    .refine((value) => value === 'mcp.pat', {
+      message: 'This connector type is not supported yet',
+    }),
   name: z
     .string({ message: 'Name is required' })
     .min(1, { message: 'Name is required' })
