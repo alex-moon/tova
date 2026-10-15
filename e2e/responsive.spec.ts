@@ -235,11 +235,24 @@ const mockTasks = async (page: Page) => {
   });
 };
 
+// #331: the connectors grid renders its catalog statically; only the
+// connected-rows fetch needs mocking.
+const mockConnectors = async (page: Page) => {
+  await page.route('**/api/connectors', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ connectors: [] }),
+    }),
+  );
+};
+
 const routes: Array<{ path: string; ready: string }> = [
   { path: '/', ready: '[data-testid="chat-input"]' },
   { path: '/profile', ready: '[data-testid="profile-view"]' },
   { path: '/files', ready: '[data-testid="assets-view"]' },
   { path: '/tasks', ready: '[data-testid="tasks-view"]' },
+  { path: '/connectors', ready: '[data-testid="connectors-view"]' },
   { path: '/admin', ready: '[data-testid="admin-view"]' },
 ];
 
@@ -248,6 +261,7 @@ for (const { path, ready } of routes) {
     await mockAuth(page);
     if (path === '/admin') await mockAdminData(page);
     if (path === '/tasks') await mockTasks(page);
+    if (path === '/connectors') await mockConnectors(page);
     await page.goto(path);
     await expect(page.locator(ready)).toBeVisible();
 
