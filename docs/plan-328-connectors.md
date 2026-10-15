@@ -23,10 +23,16 @@ Order: 0 → {1, 3, 4}; 2 after 1; 5 anytime.
 ## Decisions
 
 - (recorded as slices land — see each slice's plan doc for detail)
+- Slice 0 (#329, PR #336): `ConnectorType = 'mcp.pat' | 'mcp.oauth' | 'api' | 'sdk'` lives
+  in `@tova/shared` (`apps/shared/src/connectors.ts`); only `mcp.pat` storable until #327.
+  Collection migrated `mcpservers` → `connectors` (renameCollection + `type` backfill).
+  Wire field `authConfigured` replaces `headersConfigured` as the type-agnostic seam.
+  `mcpService` → `connectorService` with a per-type `authFor` dispatch; MCP wire internals
+  unchanged; model-visible `mcp_` toolset key prefix kept (trace/eval churn avoidance).
 
 ## Done
 
-- [ ] #329 groundwork (connector model, types, shared contracts, migration)
+- [x] #329 groundwork (connector model, types, shared contracts, migration) — PR #336
 - [ ] #327 OAuth engine for `mcp.oauth` connectors
 - [ ] #330 curated OAuth connector catalog (hand-verified)
 - [ ] #331 `/connectors` UI (grid, modal, mobile-first)
