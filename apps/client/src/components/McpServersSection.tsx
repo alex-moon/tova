@@ -25,6 +25,7 @@ const McpServersSection: React.FC = () => {
   const [url, setUrl] = useState('');
   const [authToken, setAuthToken] = useState('');
   const [pendingAdd, setPendingAdd] = useState(false);
+  const [pendingOauth, setPendingOauth] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [expandedTools, setExpandedTools] = useState<Record<string, boolean>>({});
   const [showSuggestions, setShowSuggestions] = useState(false);
@@ -66,6 +67,32 @@ const McpServersSection: React.FC = () => {
     }
   };
 
+  // OAuth sign-in path (#327): probe discovery + redirect the browser to
+  // the provider consent screen; the /connectors/callback route completes
+  // the flow. A 422 here means the endpoint advertises no OAuth — the token
+  // form below is the fallback.
+  const connectWithSignin = async () => {
+    setPendingOauth(true);
+    setError(null);
+    try {
+      const authorizationUrl = await ConnectorService.startOAuth({
+        name: name.trim(),
+        url: url.trim(),
+      });
+      // Defense in depth with the server's https-only discovery guard:
+      // never navigate to anything that is not a https consent screen.
+      if (!authorizationUrl.startsWith('https://')) {
+        setError('The sign-in URL is not secure — this provider cannot be connected right now.');
+        return;
+      }
+      window.open(authorizationUrl, '_self');
+    } catch (err) {
+      if (err instanceof ConnectorError) setError(err.message);
+      else setError('Could not start sign-in.');
+      setPendingOauth(false);
+    }
+  };
+
   const remove = async (id: string) => {
     setError(null);
     try {
@@ -77,7 +104,23 @@ const McpServersSection: React.FC = () => {
     }
   };
 
+  const reconnect = async (id: string) => {
+    setError(null);
+    try {
+      const authorizationUrl = await ConnectorService.reauth(id);
+      if (!authorizationUrl.startsWith('https://')) {
+        setError('The sign-in URL is not secure — this provider cannot be connected right now.');
+        return;
+      }
+      window.open(authorizationUrl, '_self');
+    } catch (err) {
+      if (err instanceof ConnectorError) setError(err.message);
+      else setError('Could not start re-connect.');
+    }
+  };
+
   const canAdd = name.trim().length > 0 && url.trim().length > 0 && !pendingAdd;
+  const canSignin = name.trim().length > 0 && url.trim().length > 0 && !pendingOauth;
 
   const prefill = (suggestion: (typeof MCP_SUGGESTIONS)[number]) => {
     if (name.trim().length === 0) setName(suggestion.name);
@@ -126,6 +169,16 @@ const McpServersSection: React.FC = () => {
                     <span data-testid="mcp-auth-configured" className="text-[10px] uppercase">
                       auth set
                     </span>
+                  )}
+                  {server.authState === 'needs-reauth' && (
+                    <button
+                      type="button"
+                      data-testid={`mcp-reconnect-${server.name}`}
+                      onClick={() => reconnect(server.id)}
+                      className="text-[10px] uppercase text-destructive underline"
+                    >
+                      re-connect
+                    </button>
                   )}
                 </div>
                 <p className="truncate text-xs text-muted-foreground">{server.url}</p>
@@ -236,7 +289,15 @@ const McpServersSection: React.FC = () => {
             autoComplete="off"
           />
         </label>
-        <div className="flex justify-end">
+        <div className="flex flex-col gap-2 sm:flex-row sm:justify-end">
+          <Button
+            variant="outline"
+            onClick={connectWithSignin}
+            disabled={!canSignin}
+            data-testid="mcp-add-oauth"
+          >
+            {pendingOauth ? 'Opening sign-in...' : 'Connect with sign-in'}
+          </Button>
           <Button variant="outline" onClick={add} disabled={!canAdd} data-testid="mcp-add-save">
             {pendingAdd ? 'Testing connection...' : 'Add MCP server'}
           </Button>

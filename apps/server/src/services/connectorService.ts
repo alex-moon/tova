@@ -8,6 +8,7 @@ import { z } from 'zod';
 import type { ConnectorDocument } from '../models/Connector';
 import { Connector } from '../models/Connector';
 import { decryptEnvelope } from './crypto';
+import { oauthAuthHeaders } from './oauthConnectors';
 import {
   degradedToolError,
   markToolFailed,
@@ -60,8 +61,7 @@ const toolsetsCache = new Map<
 const connectionCacheKey = (url: string, headers: Record<string, string> | undefined): string =>
   `${url}|${headers ? JSON.stringify(headers) : ''}`;
 
-// mcp.pat auth: the encrypted header envelope. #327 adds the mcp.oauth
-// branch (token vault + refresh) to this switch.
+// mcp.pat auth: the encrypted header envelope.
 const patAuthHeaders = (connector: ConnectorDocument): Record<string, string> | undefined => {
   if (!connector.headers || !connector.headersConfigured) return undefined;
   try {
@@ -71,13 +71,19 @@ const patAuthHeaders = (connector: ConnectorDocument): Record<string, string> | 
   }
 };
 
-// Type-dispatch seam (#329): per-type stored auth → wire headers for the MCP
-// client. Unknown types authenticate anonymously rather than throwing — a
-// connector whose type predates its auth support still lists tools.
-const authFor = (connector: ConnectorDocument): Record<string, string> | undefined => {
+// Type-dispatch seam (#329, #327): per-type stored auth → wire headers for
+// the MCP client. mcp.oauth refreshes proactively here (and marks
+// needs-reauth on a dead grant). Unknown types authenticate anonymously
+// rather than throwing — a connector whose type predates its auth support
+// still lists tools.
+const authFor = async (
+  connector: ConnectorDocument,
+): Promise<Record<string, string> | undefined> => {
   switch (connector.type) {
     case 'mcp.pat':
       return patAuthHeaders(connector);
+    case 'mcp.oauth':
+      return oauthAuthHeaders(connector);
     default:
       return undefined;
   }
@@ -285,7 +291,7 @@ export const connectorToolsetsForUser = async (
     const live = await Promise.all(
       connectors.map(async (connector) => {
         try {
-          const headers = authFor(connector);
+          const headers = await authFor(connector);
           const tools = await listMcpTools(connector.url, headers);
           return { connector, headers, tools };
         } catch {

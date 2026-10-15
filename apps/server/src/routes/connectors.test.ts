@@ -1,7 +1,10 @@
 import request from 'supertest';
+import { Types } from 'mongoose';
 import { createApp } from '../index';
 import { MCP_ENCRYPTION_KEY_ENV_VAR } from '../services/crypto';
 import { Connector } from '../models/Connector';
+import { User } from '../models/User';
+import { ConnectorOAuthError } from '../services/oauthConnectors';
 
 jest.mock('../services/connectorService', () => ({
   listMcpTools: jest.fn(),
@@ -9,6 +12,20 @@ jest.mock('../services/connectorService', () => ({
   connectorToolsetsForUser: jest.fn(),
   clearConnectorCachesForTests: jest.fn(),
 }));
+
+// OAuth engine mocked at the module boundary; the pure helpers
+// (ConnectorOAuthError, hasVaultedAuth, redirectOriginFrom, readConnectorVault)
+// stay real so the routes' use of them is exercised.
+jest.mock('../services/oauthConnectors', () => ({
+  ...jest.requireActual('../services/oauthConnectors'),
+  startConnectorOAuth: jest.fn(),
+  completeConnectorOAuth: jest.fn(),
+}));
+
+const mockStartConnectorOAuth = jest.requireMock('../services/oauthConnectors')
+  .startConnectorOAuth as jest.Mock;
+const mockCompleteConnectorOAuth = jest.requireMock('../services/oauthConnectors')
+  .completeConnectorOAuth as jest.Mock;
 
 // The mocked module registry, resolved lazily (after jest.mock hoisting), so
 // the shared jest.fn instances are read from the mock, not typed imports.
@@ -32,6 +49,10 @@ beforeEach(() => {
     .mockResolvedValue([
       { name: 'weather', description: 'Get weather', inputSchema: { type: 'object' } },
     ]);
+  mockStartConnectorOAuth.mockReset().mockResolvedValue({
+    authorizationUrl: 'https://as.example.com/authorize?client_id=dcr',
+  });
+  mockCompleteConnectorOAuth.mockReset();
 });
 
 describe('POST /api/connectors (issues #36, #329)', () => {
@@ -56,7 +77,7 @@ describe('POST /api/connectors (issues #36, #329)', () => {
 
     // Reserved-but-known types (#329): a clear not-supported-yet message,
     // distinct from the unknown-type rejection.
-    for (const type of ['mcp.oauth', 'api', 'sdk']) {
+    for (const type of ['api', 'sdk']) {
       const reserved = await request(app)
         .post('/api/connectors')
         .set('Cookie', cookie)
@@ -64,6 +85,14 @@ describe('POST /api/connectors (issues #36, #329)', () => {
       expect(reserved.status).toBe(400);
       expect(reserved.body.message).toMatch(/not supported yet/u);
     }
+
+    // mcp.oauth (#327): a flow-specific pointer, not a token-form rejection.
+    const oauth = await request(app)
+      .post('/api/connectors')
+      .set('Cookie', cookie)
+      .send({ type: 'mcp.oauth', name: 'oauth', url: 'https://t.example.com/mcp' });
+    expect(oauth.status).toBe(400);
+    expect(oauth.body.message).toMatch(/OAuth sign-in/u);
     expect(mockListMcpTools).not.toHaveBeenCalled();
   });
 
@@ -268,5 +297,194 @@ describe('DELETE /api/connectors/:id (issues #36, #329)', () => {
       .delete(`/api/connectors/${platform.id}`)
       .set('Cookie', cookie);
     expect(resPlatform.status).toBe(404);
+  });
+});
+
+describe('POST /api/connectors/oauth/start (#327)', () => {
+  it('returns the consent URL and derives the redirect origin from the request', async () => {
+    const { app, cookie } = await registerUser('oauth-start@example.com');
+    const res = await request(app)
+      .post('/api/connectors/oauth/start')
+      .set('Cookie', cookie)
+      .set('Origin', 'https://app.example.com')
+      .send({ name: 'notion', url: 'https://mcp.notion.com/mcp' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.authorizationUrl).toContain('authorize');
+    expect(mockStartConnectorOAuth).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: 'notion',
+        url: 'https://mcp.notion.com/mcp',
+        redirectOrigin: 'https://app.example.com',
+        userId: expect.any(String),
+      }),
+    );
+  });
+
+  it('passes through the not-advertised-OAuth 422 so the token form stays the fallback', async () => {
+    const { app, cookie } = await registerUser('oauth-422@example.com');
+    mockStartConnectorOAuth.mockRejectedValue(
+      new ConnectorOAuthError(
+        'This endpoint does not advertise OAuth sign-in. Connect it with a token instead.',
+        422,
+      ),
+    );
+    const res = await request(app)
+      .post('/api/connectors/oauth/start')
+      .set('Cookie', cookie)
+      .send({ name: 'x', url: 'https://noauth.example.com/mcp' });
+    expect(res.status).toBe(422);
+    expect(res.body.message).toMatch(/token instead/u);
+  });
+
+  it('409s when the URL is already connected for the account', async () => {
+    const { app, cookie } = await registerUser('oauth-dup@example.com');
+    await Connector.create({
+      type: 'mcp.pat',
+      scope: 'user',
+      userId: '507f1f77bcf86cd799439011',
+      name: 'mine',
+      url: 'https://dup-oauth.example.com/mcp',
+    });
+    // The duplicate check keys on the caller; create via the API so the
+    // owner matches the cookie.
+    await mockListMcpTools.mockResolvedValue([{ name: 'w', description: '', inputSchema: {} }]);
+    await request(app)
+      .post('/api/connectors')
+      .set('Cookie', cookie)
+      .send({ type: 'mcp.pat', name: 'mine', url: 'https://dup-oauth-2.example.com/mcp' });
+
+    const res = await request(app)
+      .post('/api/connectors/oauth/start')
+      .set('Cookie', cookie)
+      .send({ name: 'again', url: 'https://dup-oauth-2.example.com/mcp' });
+    expect(res.status).toBe(409);
+  });
+
+  it('requires authentication and validates the body', async () => {
+    const app = createApp();
+    expect((await request(app).post('/api/connectors/oauth/start').send({})).status).toBe(401);
+
+    const { cookie } = await registerUser('oauth-badbody@example.com');
+    const res = await request(app)
+      .post('/api/connectors/oauth/start')
+      .set('Cookie', cookie)
+      .send({ name: 'x', url: 'http://insecure.example.com/mcp' });
+    expect(res.status).toBe(400);
+  });
+});
+
+describe('POST /api/connectors/oauth/callback (#327)', () => {
+  it('completes the flow and returns the created connector', async () => {
+    const { app, cookie } = await registerUser('oauth-cb@example.com');
+    const doc = await Connector.create({
+      type: 'mcp.oauth',
+      scope: 'user',
+      userId: new Types.ObjectId('507f1f77bcf86cd799439011'),
+      name: 'notion',
+      url: 'https://mcp.notion.com/mcp',
+      authState: 'ok',
+    });
+    mockCompleteConnectorOAuth.mockResolvedValue(doc);
+
+    const res = await request(app)
+      .post('/api/connectors/oauth/callback')
+      .set('Cookie', cookie)
+      .send({ code: 'auth-code', state: 'st@te' });
+
+    expect(res.status).toBe(201);
+    expect(res.body.connector).toMatchObject({ type: 'mcp.oauth', name: 'notion' });
+    expect(res.body.connector.oauth).toBeUndefined();
+    expect(JSON.stringify(res.body)).not.toContain('access_token');
+  });
+
+  it('maps engine errors to statuses (expired state 400, foreign session 404)', async () => {
+    const { app, cookie } = await registerUser('oauth-cb-err@example.com');
+    mockCompleteConnectorOAuth.mockRejectedValue(
+      new ConnectorOAuthError(
+        'This sign-in attempt expired or is not recognised. Start again.',
+        400,
+      ),
+    );
+    const expired = await request(app)
+      .post('/api/connectors/oauth/callback')
+      .set('Cookie', cookie)
+      .send({ code: 'c', state: 's' });
+    expect(expired.status).toBe(400);
+
+    mockCompleteConnectorOAuth.mockRejectedValue(
+      new ConnectorOAuthError('This sign-in attempt belongs to a different session', 404),
+    );
+    const foreign = await request(app)
+      .post('/api/connectors/oauth/callback')
+      .set('Cookie', cookie)
+      .send({ code: 'c', state: 's' });
+    expect(foreign.status).toBe(404);
+  });
+
+  it('validates the body (missing code or state)', async () => {
+    const { app, cookie } = await registerUser('oauth-cb-bad@example.com');
+    const res = await request(app)
+      .post('/api/connectors/oauth/callback')
+      .set('Cookie', cookie)
+      .send({ code: 'c' });
+    expect(res.status).toBe(400);
+    expect(mockCompleteConnectorOAuth).not.toHaveBeenCalled();
+  });
+});
+
+describe('POST /api/connectors/:id/reauth (#327)', () => {
+  it('restarts consent for an owned mcp.oauth connector, vault client reused', async () => {
+    const { app, cookie } = await registerUser('oauth-reauth@example.com');
+    const created = await request(app)
+      .post('/api/connectors')
+      .set('Cookie', cookie)
+      .send({ type: 'mcp.pat', name: 'pat-row', url: 'https://pat.example.com/mcp' });
+
+    // A pat connector is not re-authable (no grant to renew).
+    const patRes = await request(app)
+      .post(`/api/connectors/${created.body.connector.id}/reauth`)
+      .set('Cookie', cookie);
+    expect(patRes.status).toBe(404);
+
+    // An mcp.oauth row goes through the flow with its id; owned by the
+    // caller (the route re-checks ownership, so the row must match the cookie).
+    const caller = await User.findOne({ email: 'oauth-reauth@example.com' });
+    const doc = await Connector.create({
+      type: 'mcp.oauth',
+      scope: 'user',
+      userId: caller?._id,
+      name: 'notion',
+      url: 'https://mcp.notion.com/mcp',
+    });
+    const res = await request(app)
+      .post(`/api/connectors/${doc._id}/reauth`)
+      .set('Cookie', cookie)
+      .set('Origin', 'https://app.example.com');
+    expect(res.status).toBe(200);
+    expect(res.body.authorizationUrl).toContain('authorize');
+    expect(mockStartConnectorOAuth).toHaveBeenCalledWith(
+      expect.objectContaining({
+        connectorId: String(doc._id),
+        url: 'https://mcp.notion.com/mcp',
+        redirectOrigin: 'https://app.example.com',
+      }),
+    );
+  });
+
+  it('404s for another user’s connector', async () => {
+    const a = await registerUser('oauth-ra-a@example.com');
+    const b = await registerUser('oauth-ra-b@example.com');
+    const doc = await Connector.create({
+      type: 'mcp.oauth',
+      scope: 'user',
+      userId: new Types.ObjectId('507f1f77bcf86cd799439011'),
+      name: 'notion',
+      url: 'https://mcp.notion.com/mcp',
+    });
+    const res = await request(b.app)
+      .post(`/api/connectors/${doc._id}/reauth`)
+      .set('Cookie', a.cookie);
+    expect(res.status).toBe(404);
   });
 });

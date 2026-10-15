@@ -91,6 +91,35 @@ describe('Connector model', () => {
     expect(doc.type).toBe('mcp.pat');
   });
 
+  it('accepts the mcp.oauth type and defaults grant health to ok (#327)', async () => {
+    const doc = new Connector({
+      scope: 'user',
+      userId: new mongoose.Types.ObjectId(),
+      name: 'oauthed',
+      url: 'https://mcp.notion.com/mcp',
+      type: 'mcp.oauth',
+      oauth: { iv: 'a', tag: 'b', ciphertext: 'c' },
+      authState: 'ok',
+    });
+    await expect(doc.validate()).resolves.toBeUndefined();
+    // Both vault envelopes are stripped on the wire; authState is visible.
+    const json = doc.toJSON();
+    expect(json.oauth).toBeUndefined();
+    expect(json.headers).toBeUndefined();
+    expect(json.authState).toBe('ok');
+  });
+
+  it('rejects an out-of-enum authState (#327)', async () => {
+    const doc = new Connector({
+      scope: 'user',
+      userId: new mongoose.Types.ObjectId(),
+      name: 'bad-state',
+      url: 'https://mcp.example.com',
+      authState: 'revoked' as never,
+    });
+    await expect(doc.validate()).rejects.toThrow();
+  });
+
   it('rejects connector types outside the storable enum (#329)', async () => {
     // mcp.oauth / api / sdk are contract-level names; only mcp.pat is
     // storable until #327 extends the enum.

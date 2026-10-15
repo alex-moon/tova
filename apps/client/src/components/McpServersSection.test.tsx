@@ -7,6 +7,9 @@ import { MCP_SUGGESTIONS } from './mcpSuggestions';
 const list = vi.fn();
 const add = vi.fn();
 const remove = vi.fn();
+const startOAuth = vi.fn();
+const completeOAuth = vi.fn();
+const reauth = vi.fn();
 
 vi.mock('../services/connectors', async () => {
   const actual =
@@ -15,6 +18,9 @@ vi.mock('../services/connectors', async () => {
     list: (...args: unknown[]) => list(...args),
     add: (...args: unknown[]) => add(...args),
     remove: (...args: unknown[]) => remove(...args),
+    startOAuth: (...args: unknown[]) => startOAuth(...args),
+    completeOAuth: (...args: unknown[]) => completeOAuth(...args),
+    reauth: (...args: unknown[]) => reauth(...args),
   };
   return { ...actual, default: MockedConnectorService };
 });
@@ -27,6 +33,7 @@ const server: ConnectorInfo = {
   url: 'https://mcp.example.com/mcp',
   status: 'connected',
   authConfigured: true,
+  authState: 'ok',
   tools: [
     { name: 'weather', description: 'Get weather' },
     { name: 'forecast', description: 'Get forecast' },
@@ -94,5 +101,75 @@ describe('McpServersSection (issues #36, #80)', () => {
     fireEvent.click(screen.getByTestId('mcp-suggestion-0'));
     expect(screen.getByTestId('mcp-add-name')).toHaveValue(MCP_SUGGESTIONS[0].name);
     expect(screen.getByTestId('mcp-add-url')).toHaveValue(MCP_SUGGESTIONS[0].url);
+  });
+});
+
+describe('McpServersSection OAuth affordances (#327)', () => {
+  beforeEach(() => {
+    list.mockReset().mockResolvedValue([server]);
+    startOAuth.mockReset().mockResolvedValue('https://as.example.com/authorize?client_id=dcr');
+    reauth.mockReset().mockResolvedValue('https://as.example.com/authorize?client_id=dcr');
+  });
+
+  afterEach(cleanup);
+
+  it('connects via browser sign-in: startOAuth with the form fields, then redirect', async () => {
+    const open = vi.spyOn(window, 'open').mockImplementation(() => null);
+    render(<McpServersSection />);
+    await screen.findByTestId(`mcp-server-${server.name}`);
+
+    fireEvent.change(screen.getByTestId('mcp-add-name'), { target: { value: 'notion' } });
+    fireEvent.change(screen.getByTestId('mcp-add-url'), {
+      target: { value: 'https://mcp.notion.com/mcp' },
+    });
+    fireEvent.click(screen.getByTestId('mcp-add-oauth'));
+
+    await waitFor(() =>
+      expect(startOAuth).toHaveBeenCalledWith({
+        name: 'notion',
+        url: 'https://mcp.notion.com/mcp',
+      }),
+    );
+    await waitFor(() =>
+      expect(open).toHaveBeenCalledWith('https://as.example.com/authorize?client_id=dcr', '_self'),
+    );
+    // The token form was not used.
+    expect(add).not.toHaveBeenCalled();
+  });
+
+  it('surfaces the discovery failure (no OAuth advertised) without navigating', async () => {
+    const open = vi.spyOn(window, 'open').mockImplementation(() => null);
+    render(<McpServersSection />);
+    await screen.findByTestId(`mcp-server-${server.name}`);
+
+    const { ConnectorError } = await import('../services/connectors');
+    startOAuth.mockRejectedValue(
+      new ConnectorError('This endpoint does not advertise OAuth sign-in.'),
+    );
+
+    fireEvent.change(screen.getByTestId('mcp-add-name'), { target: { value: 'x' } });
+    fireEvent.change(screen.getByTestId('mcp-add-url'), {
+      target: { value: 'https://noauth.example.com/mcp' },
+    });
+    fireEvent.click(screen.getByTestId('mcp-add-oauth'));
+
+    await waitFor(() =>
+      expect(screen.getByTestId('mcp-servers-error')).toHaveTextContent('does not advertise OAuth'),
+    );
+    expect(open).not.toHaveBeenCalled();
+  });
+
+  it('offers re-connect on a needs-reauth row without deleting it', async () => {
+    const open = vi.spyOn(window, 'open').mockImplementation(() => null);
+    const deadGrant = { ...server, type: 'mcp.oauth' as const, authState: 'needs-reauth' as const };
+    list.mockResolvedValue([deadGrant]);
+    render(<McpServersSection />);
+    await screen.findByTestId(`mcp-reconnect-${deadGrant.name}`);
+
+    fireEvent.click(screen.getByTestId(`mcp-reconnect-${deadGrant.name}`));
+    await waitFor(() => expect(reauth).toHaveBeenCalledWith(deadGrant.id));
+    await waitFor(() =>
+      expect(open).toHaveBeenCalledWith('https://as.example.com/authorize?client_id=dcr', '_self'),
+    );
   });
 });

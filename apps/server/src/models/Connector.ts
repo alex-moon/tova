@@ -14,7 +14,7 @@ const connectorSchema = new mongoose.Schema(
     // instead of failing validation.
     type: {
       type: String,
-      enum: ['mcp.pat'],
+      enum: ['mcp.pat', 'mcp.oauth'],
       required: true,
       default: 'mcp.pat',
     },
@@ -56,8 +56,7 @@ const connectorSchema = new mongoose.Schema(
     // mcp.pat auth material: AES-256-GCM envelope
     // (apps/server/src/services/crypto.ts) of the auth header set. Secret
     // material at rest is only these three fields; the toJSON transform below
-    // strips the whole envelope so no API response ever echoes it. #327 adds
-    // the mcp.oauth token vault alongside, not inside, this field.
+    // strips the whole envelope so no API response ever echoes it.
     headers: {
       type: {
         iv: { type: String, required: true },
@@ -65,6 +64,27 @@ const connectorSchema = new mongoose.Schema(
         ciphertext: { type: String, required: true },
       },
       default: null,
+    },
+    // mcp.oauth token vault (#327): the same envelope shape, over a JSON
+    // blob of {accessToken, refreshToken?, expiresAt?, tokenType?, scope?,
+    // clientInformation?} — the DCR client registration rides in the vault so
+    // re-auth reuses it without a fresh registration. Swept with the document
+    // on factory reset; the toJSON transform strips it like `headers`.
+    oauth: {
+      type: {
+        iv: { type: String, required: true },
+        tag: { type: String, required: true },
+        ciphertext: { type: String, required: true },
+      },
+      default: null,
+    },
+    // Grant health (#327): 'needs-reauth' when a proactive token refresh
+    // fails (revoked/expired grant); cleared by a successful re-auth. A pat
+    // connector is always 'ok'.
+    authState: {
+      type: String,
+      enum: ['ok', 'needs-reauth'],
+      default: 'ok',
     },
     // Denormalized so the API can show "auth configured" (wire field
     // `authConfigured`) without exposing anything about the header itself.
@@ -121,6 +141,7 @@ connectorSchema.set('toJSON', {
   versionKey: false,
   transform: (_doc, ret) => {
     delete ret.headers;
+    delete ret.oauth;
     return ret;
   },
 });
