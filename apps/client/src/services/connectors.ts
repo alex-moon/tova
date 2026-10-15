@@ -1,5 +1,10 @@
 import axios from 'axios';
-import type { ConnectorAddInput, ConnectorInfo } from '@shared/connectors';
+import type {
+  ConnectorAddInput,
+  ConnectorInfo,
+  ConnectorOAuthCallbackInput,
+  ConnectorOAuthStartInput,
+} from '@shared/connectors';
 
 // Normalised connector-registry failure: message comes from the server
 // response when one arrived, otherwise the call's fallback. (Formerly
@@ -11,6 +16,11 @@ export class ConnectorError extends Error {
     this.name = 'ConnectorError';
   }
 }
+
+// StrictMode (dev) double-fires the callback effect: two completeOAuth calls
+// for the same state must share one request, not race two token exchanges
+// (the provider's code is single-use).
+const inflightComplete = new Map<string, Promise<ConnectorInfo>>();
 
 const toConnectorError = (err: unknown, fallback: string): ConnectorError => {
   if (axios.isAxiosError(err)) {
@@ -46,6 +56,47 @@ const ConnectorService = {
       await axios.delete(`/api/connectors/${id}`);
     } catch (err) {
       throw toConnectorError(err, 'Could not remove connector.');
+    }
+  },
+
+  // OAuth connect flow (#327): start returns the provider consent URL the
+  // browser must be redirected to; complete exchanges the relayed code for
+  // the stored connector; reauth restarts consent for a dead grant.
+  async startOAuth(input: ConnectorOAuthStartInput): Promise<string> {
+    try {
+      const res = await axios.post<{ authorizationUrl: string }>(
+        '/api/connectors/oauth/start',
+        input,
+      );
+      return res.data.authorizationUrl;
+    } catch (err) {
+      throw toConnectorError(err, 'Could not start sign-in.');
+    }
+  },
+
+  async completeOAuth(input: ConnectorOAuthCallbackInput): Promise<ConnectorInfo> {
+    const inflight = inflightComplete.get(input.state);
+    if (inflight) return inflight;
+    const request = axios
+      .post<{ connector: ConnectorInfo }>('/api/connectors/oauth/callback', input)
+      .then((res) => res.data.connector)
+      .finally(() => inflightComplete.delete(input.state))
+      .catch((err) => {
+        throw toConnectorError(err, 'Could not complete sign-in.');
+      });
+    inflightComplete.set(input.state, request as Promise<ConnectorInfo>);
+    return request;
+  },
+
+  async reauth(id: string): Promise<string> {
+    try {
+      const res = await axios.post<{ authorizationUrl: string }>(
+        `/api/connectors/${id}/reauth`,
+        {},
+      );
+      return res.data.authorizationUrl;
+    } catch (err) {
+      throw toConnectorError(err, 'Could not start re-connect.');
     }
   },
 };

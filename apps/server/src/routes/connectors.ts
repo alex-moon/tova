@@ -3,10 +3,22 @@ import { Types } from 'mongoose';
 import type { ConnectorInfo } from '@tova/shared';
 import { Connector } from '../models/Connector';
 import type { ConnectorDocument } from '../models/Connector';
-import { connectorCreateSchema } from '../validation';
+import {
+  connectorCreateSchema,
+  connectorOAuthCallbackSchema,
+  connectorOAuthStartSchema,
+} from '../validation';
 import { authenticate, AuthRequest } from '../middleware/auth';
 import { encryptEnvelope } from '../services/crypto';
 import { listMcpTools } from '../services/connectorService';
+import {
+  ConnectorOAuthError,
+  completeConnectorOAuth,
+  hasVaultedAuth,
+  readConnectorVault,
+  redirectOriginFrom,
+  startConnectorOAuth,
+} from '../services/oauthConnectors';
 
 const router = express.Router();
 
@@ -29,7 +41,8 @@ const serialize = (doc: ConnectorDocument): ConnectorInfo => ({
   name: doc.name,
   url: doc.url,
   status: doc.status,
-  authConfigured: doc.headersConfigured,
+  authConfigured: hasVaultedAuth(doc),
+  authState: doc.authState === 'needs-reauth' ? 'needs-reauth' : 'ok',
   tools: doc.tools.map((t) => ({ name: t.name, description: t.description })),
 });
 
@@ -111,6 +124,100 @@ router.delete('/:id', authenticate, async (req: AuthRequest, res) => {
     return res.status(204).end();
   } catch {
     return res.status(500).json({ message: 'Error removing connector' });
+  }
+});
+
+// POST /api/connectors/oauth/start (#327) — begin a browser consent for an
+// mcp.oauth connector. Probes discovery first: an endpoint that does not
+// advertise OAuth is a 422 (the token form is the graceful fallback), and a
+// duplicate URL fails fast with the same 409 the registry POST would give.
+router.post('/oauth/start', authenticate, async (req: AuthRequest, res) => {
+  const parsed = connectorOAuthStartSchema.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    return res.status(400).json({ message: parsed.error.issues[0]?.message ?? 'Invalid payload' });
+  }
+  const { name, url } = parsed.data;
+  try {
+    const userId = req.user?.id as string;
+    const existing = await Connector.findOne({ scope: 'user', userId, url });
+    if (existing) {
+      return res.status(409).json({ message: 'This URL is already connected for your account' });
+    }
+    const { authorizationUrl } = await startConnectorOAuth({
+      url,
+      name,
+      redirectOrigin: redirectOriginFrom(req.headers),
+      userId,
+    });
+    return res.json({ authorizationUrl });
+  } catch (err) {
+    if (err instanceof ConnectorOAuthError) {
+      return res.status(err.status).json({ message: err.message });
+    }
+    return res.status(500).json({ message: 'Error starting OAuth sign-in' });
+  }
+});
+
+// POST /api/connectors/:id/reauth (#327) — restart consent for an owned
+// mcp.oauth connector whose grant died (authState 'needs-reauth') or that
+// the user wants to re-consent. The callback then updates this row instead
+// of creating a new one: re-connect without deleting.
+router.post('/:id/reauth', authenticate, async (req: AuthRequest, res) => {
+  const idParam = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+  if (!Types.ObjectId.isValid(idParam)) {
+    return res.status(404).json({ message: 'Connector not found' });
+  }
+  try {
+    const doc = await Connector.findOne({
+      _id: new Types.ObjectId(idParam),
+      scope: 'user',
+      userId: new Types.ObjectId(req.user?.id),
+      type: 'mcp.oauth',
+    });
+    if (!doc) return res.status(404).json({ message: 'Connector not found' });
+    const { authorizationUrl } = await startConnectorOAuth({
+      url: doc.url,
+      name: doc.name,
+      redirectOrigin: redirectOriginFrom(req.headers),
+      userId: req.user?.id as string,
+      connectorId: String(doc._id),
+      existingVault: readConnectorVault(doc),
+    });
+    return res.json({ authorizationUrl });
+  } catch (err) {
+    if (err instanceof ConnectorOAuthError) {
+      return res.status(err.status).json({ message: err.message });
+    }
+    return res.status(500).json({ message: 'Error starting re-connect' });
+  }
+});
+
+// POST /api/connectors/oauth/callback (#327) — complete a consent: exchange
+// the code against the pending record, store the tokens encrypted, and
+// create (or update, for re-auth) the connector. The redirect's query
+// params are relayed here by the client callback page.
+router.post('/oauth/callback', authenticate, async (req: AuthRequest, res) => {
+  const parsed = connectorOAuthCallbackSchema.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    return res.status(400).json({ message: parsed.error.issues[0]?.message ?? 'Invalid payload' });
+  }
+  try {
+    const doc = await completeConnectorOAuth({
+      ...parsed.data,
+      userId: req.user?.id as string,
+    });
+    return res.status(201).json({ connector: serialize(doc) });
+  } catch (err) {
+    if (err instanceof ConnectorOAuthError) {
+      return res.status(err.status).json({ message: err.message });
+    }
+    if (err instanceof Error && err.name === 'ValidationError') {
+      return res.status(400).json({ message: err.message });
+    }
+    if (err instanceof Error && 'code' in err && (err as { code?: unknown }).code === 11000) {
+      return res.status(409).json({ message: 'This URL is already connected for your account' });
+    }
+    return res.status(500).json({ message: 'Error completing OAuth sign-in' });
   }
 });
 
