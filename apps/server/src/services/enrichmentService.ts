@@ -3,6 +3,18 @@ import { config } from '../config';
 import { inferenceService } from './inferenceService';
 import { redactForLog } from './logRedaction';
 import { fileLibraryIndex } from './promptAssembly';
+import { isWorkspaceMemoryEnabled } from './workspaceRetrievalService';
+
+/*
+ * #253: the enrichment vote — a `files` boolean, a `workspace` boolean, and
+ * (#308) a `timedOut` marker so a slow aux call is distinguishable from a real
+ * double-no in the traces view. Absent means the call settled normally.
+ */
+export interface EnrichmentVotes {
+  files: boolean;
+  workspace: boolean;
+  timedOut?: boolean;
+}
 
 /*
  * #238: the enrichment pass.
@@ -134,7 +146,8 @@ const enrichmentModel = (): string => config.aux.model;
 const runEnrichmentCall = async (
   query: string,
   history: { role: 'user' | 'assistant'; content: string }[] = [],
-): Promise<{ files: boolean; workspace: boolean }> => {
+  sessionId?: string,
+): Promise<EnrichmentVotes> => {
   const transcript = history.length
     ? `\nConversation so far, oldest first:\n${history
         .map((m) => `${m.role}: ${m.content}`)
@@ -151,7 +164,9 @@ const runEnrichmentCall = async (
     ],
     temperature: 0,
     max_tokens: 512,
-    trace: { tags: ['enrichment:votes'] },
+    // #308: sessionId when known threads this aux run under the chat session's
+    // LangSmith thread (tags alone leave it orphaned).
+    trace: { tags: ['enrichment:votes'], ...(sessionId ? { sessionId } : {}) },
   });
   const raw = completion.choices[0]?.message?.content ?? '';
   return { files: filesVoteFromReply(raw), workspace: workspaceVoteFromReply(raw) };
@@ -160,9 +175,10 @@ const runEnrichmentCall = async (
 export const classifyFileIntent = async (
   query: string,
   history: { role: 'user' | 'assistant'; content: string }[] = [],
-): Promise<{ files: boolean; workspace: boolean }> => {
+  sessionId?: string,
+): Promise<EnrichmentVotes> => {
   try {
-    return await runEnrichmentCall(query, history);
+    return await runEnrichmentCall(query, history, sessionId);
   } catch (err) {
     console.error('Enrichment classify error:', redactForLog(err));
     return { files: false, workspace: false };
@@ -178,7 +194,7 @@ export const classifyFileIntent = async (
 export const classifyFileIntentStrict = (
   query: string,
   history: { role: 'user' | 'assistant'; content: string }[] = [],
-): Promise<{ files: boolean; workspace: boolean }> => runEnrichmentCall(query, history);
+): Promise<EnrichmentVotes> => runEnrichmentCall(query, history);
 
 /*
  * #289 T15b: the eval-facing probe. Runs the strict classifier under the same
@@ -248,16 +264,19 @@ export const libraryIndexFor = async (userId: string): Promise<string> => {
 const classifyWithinTimeout = async (
   query: string,
   history: { role: 'user' | 'assistant'; content: string }[],
-): Promise<{ files: boolean; workspace: boolean }> => {
+  sessionId?: string,
+): Promise<EnrichmentVotes> => {
   let timer: ReturnType<typeof setTimeout> | undefined;
-  const timeout = new Promise<{ files: boolean; workspace: boolean }>((resolve) => {
+  // #308: the timeout path marks itself, so the traces view can tell a slow
+  // aux call (a silent memory killer) apart from a real double-no.
+  const timeout = new Promise<EnrichmentVotes>((resolve) => {
     timer = setTimeout(
-      () => resolve({ files: false, workspace: false }),
+      () => resolve({ files: false, workspace: false, timedOut: true }),
       config.aux.enrichmentTimeoutMs,
     );
   });
   try {
-    return await Promise.race([classifyFileIntent(query, history), timeout]);
+    return await Promise.race([classifyFileIntent(query, history, sessionId), timeout]);
   } finally {
     if (timer) clearTimeout(timer);
   }
@@ -273,9 +292,10 @@ const classifyWithinTimeout = async (
 export const enrichmentVotes = async (
   query: string,
   history: { role: 'user' | 'assistant'; content: string }[] = [],
-): Promise<{ files: boolean; workspace: boolean }> => {
+  sessionId?: string,
+): Promise<EnrichmentVotes> => {
   if (!isEnrichmentEnabled()) return { files: false, workspace: false };
-  return classifyWithinTimeout(query, history);
+  return classifyWithinTimeout(query, history, sessionId);
 };
 
 /*
@@ -293,3 +313,31 @@ export const enrichmentLibraryBlock = async (
   if (!votes.files) return '';
   return libraryIndexFor(userId);
 };
+
+/*
+ * #308: workspace-memory facts for the traces view.
+ *
+ * `workspaceGateFrom` reduces the vote (+ the skip reasons the caller knows)
+ * to one label: `off` (image turn, kill switch, or memory disabled),
+ * `timeout` (the silent Groq-slowness case), or the vote itself.
+ * `workspaceTraceMetadata` renders the facts as flat, namespaced,
+ * identifier-only metadata keys — no user content — under the contract
+ * `TraceContext.metadata` already documents. The retrieval side counts the
+ * rendered block's bullets, so `yes · 0` (gate fired, nothing overlapped) is
+ * distinguishable from a gate no.
+ */
+export type WorkspaceGate = 'yes' | 'no' | 'timeout' | 'off';
+
+export const workspaceGateFrom = (votes: EnrichmentVotes, skip: boolean): WorkspaceGate => {
+  if (skip || !isEnrichmentEnabled() || !isWorkspaceMemoryEnabled()) return 'off';
+  if (votes.timedOut) return 'timeout';
+  return votes.workspace ? 'yes' : 'no';
+};
+
+export const workspaceTraceMetadata = (
+  gate: WorkspaceGate,
+  workspaceBlock: string,
+): Record<string, string | number> => ({
+  tova_workspace_gate: gate,
+  tova_workspace_hits: workspaceBlock ? workspaceBlock.split('\n').length : 0,
+});

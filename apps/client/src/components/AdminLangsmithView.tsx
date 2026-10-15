@@ -6,6 +6,7 @@ import type {
   AdminSessionCostRow,
   AdminSessionsCostPayload,
   AdminTraceDetail,
+  AdminTraceRow,
   AdminTraceRun,
   AdminTracesPayload,
 } from '../types/admin';
@@ -41,6 +42,18 @@ const formatCost = (usd: number | null): string => {
 const formatTime = (iso: string): string => {
   const date = new Date(iso);
   return Number.isNaN(date.getTime()) ? iso : date.toLocaleString();
+};
+
+// #308: the workspace-memory facts, terse for the table cell — the guard
+// outcome plus (when the guard fired) how many slices the block carried.
+// Undefined on traces from before the metadata existed.
+const memoryLabel = (trace: AdminTraceRow): string => {
+  if (!trace.workspaceGate) return '—';
+  const hits =
+    trace.workspaceGate === 'yes' && trace.workspaceHits !== undefined
+      ? ` · ${trace.workspaceHits}`
+      : '';
+  return `${trace.workspaceGate}${hits}`;
 };
 
 const prettyJson = (value: unknown): string => {
@@ -435,6 +448,7 @@ const AdminLangsmithView = () => {
                   <th className="px-4 py-3 font-medium">Started</th>
                   <th className="px-4 py-3 font-medium">Status</th>
                   <th className="px-4 py-3 font-medium">Model</th>
+                  <th className="px-4 py-3 font-medium">Memory</th>
                   <th className="px-4 py-3 font-medium">Duration</th>
                   <th className="px-4 py-3 font-medium">Tokens</th>
                   <th className="px-4 py-3 font-medium" />
@@ -459,6 +473,14 @@ const AdminLangsmithView = () => {
                     <td className="px-4 py-3" data-label="Model">
                       {trace.model ?? '—'}
                       {trace.provider ? ` · ${trace.provider}` : ''}
+                    </td>
+                    <td
+                      className={`px-4 py-3 ${
+                        trace.workspaceGate === 'timeout' ? 'text-destructive' : ''
+                      }`}
+                      data-label="Memory"
+                    >
+                      {memoryLabel(trace)}
                     </td>
                     <td className="px-4 py-3" data-label="Duration">
                       {formatDuration(trace.durationMs)}

@@ -88,9 +88,14 @@ jest.mock('../services/titleService', () => ({
 // #238: stub the enrichment aux call so it does not occupy
 // `mockPlainGenerate.mock.calls[0]` in the trace assertions.
 jest.mock('../services/enrichmentService', () => ({
+  // #308: the gate/metadata helpers are pure — keep them real so the routes'
+  // trace metadata is derived from the mocked votes.
+  ...jest.requireActual('../services/enrichmentService'),
   enrichmentVotes: jest.fn().mockResolvedValue({ files: false, workspace: false }),
   libraryIndexFor: jest.fn().mockResolvedValue(''),
-  isEnrichmentEnabled: () => false,
+  // #308: the real workspaceGateFrom consults this — true keeps the mocked
+  // votes (not the stub) driving the trace metadata.
+  isEnrichmentEnabled: () => true,
 }));
 
 const fullStreamFrom = (chunks: string[]) =>
@@ -284,9 +289,15 @@ describe('Zero-data retention chats (issue #116)', () => {
     const meta = eventsFrom(response.text).find((e) => e.event === 'meta')?.data as
       { sessionId?: string } | undefined;
     const [callOptions] = mockAgentStream.mock.calls[0] as unknown as [
-      { trace?: { sessionId?: string } },
+      { trace?: { sessionId?: string; metadata?: Record<string, unknown> } },
     ];
-    expect(callOptions.trace).toEqual({ sessionId: meta?.sessionId });
+    // #308: the workspace facts ride alongside the session id (off here — the
+    // test env has workspace memory disabled).
+    expect(callOptions.trace?.sessionId).toBe(meta?.sessionId);
+    expect(callOptions.trace?.metadata).toEqual({
+      tova_workspace_gate: 'off',
+      tova_workspace_hits: 0,
+    });
     expect(String(callOptions.trace?.sessionId)).toMatch(/^[a-f0-9]{24}$/);
   });
 

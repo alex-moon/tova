@@ -263,19 +263,27 @@ const callOptionsFrom = (
 };
 
 /*
- * Trace attach: plain metadata/tags ride directly on the call, the
- * LangSmith session key goes through the plugin helper. `withLangsmithMetadata`
- * is only consulted when an exporter exists (key present).
+ * Trace attach (#308): everything rides through `tracingOptions` — Mastra
+ * drops top-level `metadata`/`tags` call options entirely (verified live:
+ * `raceTrace`'s keys never landed in LangSmith), while `TracingOptions`
+ * metadata/tags reach the root span and the exporter posts span metadata as
+ * run metadata. The LangSmith session key goes through the plugin helper,
+ * consulted only when an exporter exists (key present).
  */
-const traceOptionsFrom = (trace?: TraceContext) => ({
-  ...(trace?.metadata ? { metadata: trace.metadata } : {}),
-  ...(trace?.tags?.length ? { tags: trace.tags } : {}),
-  ...(langsmithKey && trace?.sessionId
-    ? {
-        tracingOptions: buildTracingOptions(withLangsmithMetadata({ sessionId: trace.sessionId })),
-      }
-    : {}),
-});
+const traceOptionsFrom = (trace?: TraceContext) => {
+  if (!trace) return {};
+  const vendor =
+    langsmithKey && trace.sessionId ? withLangsmithMetadata({ sessionId: trace.sessionId }) : null;
+  const hasFacts = Boolean(vendor || trace.metadata || trace.tags?.length);
+  if (!hasFacts) return {};
+  return {
+    tracingOptions: buildTracingOptions(...(vendor ? [vendor] : []), (opts) => ({
+      ...opts,
+      ...(trace.metadata ? { metadata: { ...opts.metadata, ...trace.metadata } } : {}),
+      ...(trace.tags?.length ? { tags: [...(opts.tags ?? []), ...trace.tags] } : {}),
+    })),
+  };
+};
 
 /*
  * Web search tool (issue #16). The tool is defined here, not in a separate

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, waitFor, fireEvent, cleanup } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent, cleanup, within } from '@testing-library/react';
 import AdminLangsmithView from './AdminLangsmithView';
 import { AdminError } from '../services/admin';
 import type {
@@ -194,6 +194,26 @@ describe('AdminLangsmithView (#186)', () => {
     expect(stats).toHaveTextContent('openai/gpt-oss-20b');
     expect(stats).toHaveTextContent('10');
     expect(stats).toHaveTextContent('2');
+  });
+
+  // #308: the Memory column shows the guard outcome (+ hit count when the
+  // guard fired), an em dash for pre-#308 traces, and timeout in the error tone.
+  it('renders the workspace memory column per trace (#308)', async () => {
+    listTraces.mockResolvedValue(
+      tracesPayload([
+        traceRow({ traceId: 'trace-1', workspaceGate: 'yes', workspaceHits: 3 }),
+        traceRow({ id: 'run-2', traceId: 'trace-2', workspaceGate: 'timeout' }),
+        traceRow({ id: 'run-3', traceId: 'trace-3', workspaceGate: 'off' }),
+        traceRow({ id: 'run-4', traceId: 'trace-4' }),
+      ]),
+    );
+    render(<AdminLangsmithView />);
+
+    expect(await screen.findByTestId('langsmith-trace-trace-1')).toHaveTextContent('yes · 3');
+    const timeoutCell = within(screen.getByTestId('langsmith-trace-trace-2')).getByText('timeout');
+    expect(timeoutCell).toHaveClass('text-destructive');
+    expect(screen.getByTestId('langsmith-trace-trace-3')).toHaveTextContent('off');
+    expect(screen.getByTestId('langsmith-trace-trace-4')).toHaveTextContent('—');
   });
 
   it('renders the cost-breakdown row per model, with — for unknown price (#224)', async () => {

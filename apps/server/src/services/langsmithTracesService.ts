@@ -274,6 +274,29 @@ const joinLlmChildren = async (
 const rootFilter = (errorsOnly: boolean) =>
   errorsOnly ? 'and(eq(is_root, true), eq(status, "error"))' : 'eq(is_root, true)';
 
+// Workspace-memory metadata keys (#308): attached by the chat routes to the
+// main call's trace metadata, so they land on the root run. Absent on traces
+// from before #308.
+const WORKSPACE_GATES = new Set(['yes', 'no', 'timeout', 'off']);
+
+const workspaceFactsOf = (
+  run: RawRun,
+): { workspaceGate?: 'yes' | 'no' | 'timeout' | 'off'; workspaceHits?: number } => {
+  const meta = run.extra?.metadata;
+  if (!meta) return {};
+  const facts: { workspaceGate?: 'yes' | 'no' | 'timeout' | 'off'; workspaceHits?: number } = {};
+  if (
+    typeof meta.tova_workspace_gate === 'string' &&
+    WORKSPACE_GATES.has(meta.tova_workspace_gate)
+  ) {
+    facts.workspaceGate = meta.tova_workspace_gate as 'yes' | 'no' | 'timeout' | 'off';
+  }
+  if (typeof meta.tova_workspace_hits === 'number' && Number.isFinite(meta.tova_workspace_hits)) {
+    facts.workspaceHits = meta.tova_workspace_hits;
+  }
+  return facts;
+};
+
 const toTraceRow = (run: RawRun, join: ModelJoin): AdminTraceRow | null => {
   if (!run.id || !run.trace_id) return null;
   return {
@@ -288,6 +311,7 @@ const toTraceRow = (run: RawRun, join: ModelJoin): AdminTraceRow | null => {
     totalTokens: join.tokensOf.get(run.trace_id) ?? null,
     error: errorSnippet(run.error),
     ...(run.app_path ? { appPath: run.app_path } : {}),
+    ...workspaceFactsOf(run),
   };
 };
 
@@ -319,7 +343,18 @@ export const listTraces = async (
   const res = await queryRuns(headers, resolved.id, {
     filter: rootFilter(Boolean(params.errorsOnly)),
     limit,
-    select: ['id', 'trace_id', 'name', 'status', 'error', 'start_time', 'end_time', 'app_path'],
+    // `extra` carries the #308 workspace metadata the row surfaces.
+    select: [
+      'id',
+      'trace_id',
+      'name',
+      'status',
+      'error',
+      'start_time',
+      'end_time',
+      'app_path',
+      'extra',
+    ],
   });
   const roots = res.runs ?? [];
   const join = await joinLlmChildren(

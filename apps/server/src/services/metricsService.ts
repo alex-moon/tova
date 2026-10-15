@@ -97,16 +97,19 @@ const isAllNullLlm = (llm: LlmMetrics): boolean =>
 // means the inference call itself failed. Null when flags were parsed.
 export const classifyPromptDimensions = async (
   content: string,
+  sessionId?: string,
 ): Promise<{ llm: LlmMetrics; skipReason: 'parse' | 'error' | null }> => {
   try {
     // #77: tool-free agent — same rationale as the guard classifier
-    // (tool-rejecting small models, issue #41).
+    // (tool-rejecting small models, issue #41). #308: sessionId threads the
+    // aux run under the chat session's LangSmith thread when known.
     const completion = await inferenceService.createToolFreeCompletion({
       provider: config.aux.provider,
       model: llmModel(),
       messages: [{ role: 'user', content: `${LLM_PROMPT}\n\nPrompt: ${content.trim()}` }],
       temperature: 0,
       max_tokens: 100,
+      ...(sessionId ? { trace: { sessionId } } : {}),
     });
     const llm = parseLlmFlags(completion?.choices?.[0]?.message?.content);
     return { llm, skipReason: isAllNullLlm(llm) ? 'parse' : null };
@@ -125,8 +128,9 @@ export const classifyPromptDimensions = async (
 export const classifyAndPersistPromptDimensions = async (
   messageId: string,
   content: string,
+  sessionId?: string,
 ): Promise<void> => {
-  const { llm, skipReason } = await classifyPromptDimensions(content);
+  const { llm, skipReason } = await classifyPromptDimensions(content, sessionId);
   await Message.findByIdAndUpdate(messageId, {
     $set: { 'metrics.llm': llm, 'metrics.llmSkipReason': skipReason },
   });

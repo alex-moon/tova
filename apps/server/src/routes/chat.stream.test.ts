@@ -71,9 +71,14 @@ jest.mock('../services/titleService', () => ({
 // #238: the enrichment pass is a separate aux call; the route tests pin the
 // main completion's arguments, so stub enrichment to a no-op block.
 jest.mock('../services/enrichmentService', () => ({
+  // #308: the gate/metadata helpers are pure — keep them real so the routes'
+  // trace metadata is derived from the mocked votes.
+  ...jest.requireActual('../services/enrichmentService'),
   enrichmentVotes: jest.fn().mockResolvedValue({ files: false, workspace: false }),
   libraryIndexFor: jest.fn().mockResolvedValue(''),
-  isEnrichmentEnabled: () => false,
+  // #308: the real workspaceGateFrom consults this — true keeps the mocked
+  // votes (not the stub) driving the trace metadata.
+  isEnrichmentEnabled: () => true,
 }));
 
 const isClassifierCall = (args?: { messages?: { role: string; content: string }[] }) =>
@@ -271,10 +276,15 @@ describe('Chat streaming route', () => {
       expect(response.status).toBe(200);
       const [, options] = mockAgentStream.mock.calls[0] as unknown as [
         unknown,
-        { instructions: string },
+        { instructions: string; tracingOptions?: { metadata?: Record<string, unknown> } },
       ];
       expect(options.instructions).toContain('<user:workspace>');
       expect(options.instructions).toContain('budget is twelve thousand');
+      // #308: the guard outcome + hit count ride the main call's trace metadata.
+      expect(options.tracingOptions?.metadata).toMatchObject({
+        tova_workspace_gate: 'yes',
+        tova_workspace_hits: 1,
+      });
     } finally {
       delete process.env.WORKSPACE_MEMORY_ENABLED;
       retrieve.mockRestore();

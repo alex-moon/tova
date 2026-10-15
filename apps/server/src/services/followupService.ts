@@ -15,6 +15,7 @@ const MAX_SUGGESTIONS = 3;
 export const generateFollowups = async (
   userContent: string,
   assistantContent: string,
+  sessionId?: string,
 ): Promise<string[]> => {
   const trimmed = `${userContent}\n\nAssistant replied:\n${assistantContent}`
     .replace(/\s+/g, ' ')
@@ -25,6 +26,7 @@ export const generateFollowups = async (
     // completion route attaches web_search to every agent, and the
     // suggestion model rejects tool-carrying requests. Suggestions need no
     // search, so this call goes to a plain agent even when the key is set.
+    // #308: sessionId threads the aux run under the chat session's thread.
     const completion = await inferenceService.createToolFreeCompletion({
       provider: config.aux.provider,
       model: suggestionModel(),
@@ -34,6 +36,7 @@ export const generateFollowups = async (
       ],
       temperature: 0.5,
       max_tokens: 512,
+      ...(sessionId ? { trace: { sessionId } } : {}),
     });
     const raw = completion.choices[0]?.message?.content ?? '';
     return parseSuggestions(raw);
