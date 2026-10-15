@@ -3,4 +3,5 @@
 // the runtime helper shared across the server, migrations, and scripts.
 export * from './contracts';
 export * from './connectors';
+export * from './connectorCatalog';
 export * from './mongoUri';

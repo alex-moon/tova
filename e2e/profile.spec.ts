@@ -32,13 +32,6 @@ const mockUserAndApp = async (
       body: JSON.stringify({ user }),
     }),
   );
-  await page.route('**/api/connectors', (route) =>
-    route.fulfill({
-      status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify({ connectors: [] }),
-    }),
-  );
   await page.route('**/api/chat/sessions', (route) =>
     route.fulfill({
       status: 200,

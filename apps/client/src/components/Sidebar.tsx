@@ -1,5 +1,5 @@
 import React from 'react';
-import { Files, ListTree, LogOut, Plus, Trash2, X } from 'lucide-react';
+import { Files, ListTree, LogOut, Plus, Trash2, X, Plug } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { useAuth } from '../hooks/useAuth';
@@ -86,6 +86,15 @@ const Sidebar: React.FC<SidebarProps> = ({
           >
             <ListTree className="size-4 shrink-0" />
             Tasks
+          </a>
+          {/* Issue #331 (epic #328): the connectors view lives at /connectors. */}
+          <a
+            href="/connectors"
+            data-testid="sidebar-connectors-link"
+            className="mt-1 flex h-9 w-full items-center justify-center gap-2 rounded-lg px-4 text-sm font-medium transition-colors hover:bg-accent"
+          >
+            <Plug className="size-4 shrink-0" />
+            Connectors
           </a>
         </div>
         <div className="flex-1 overflow-y-auto px-4">
