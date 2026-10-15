@@ -4,6 +4,8 @@ import { Dialog } from 'radix-ui';
 import type { ConnectorInfo } from '@shared/connectors';
 import { CONNECTOR_CATALOG } from '@shared/connectorCatalog';
 import type { CatalogEntry } from '@shared/connectorCatalog';
+import { instructionsFor } from '@shared/connectorInstructions';
+import type { ConnectorInstructions } from '@shared/connectorInstructions';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import ConnectorService, { ConnectorError } from '../services/connectors';
@@ -33,10 +35,37 @@ const findRowByUrl = (rows: ConnectorInfo[], url: string): ConnectorInfo | undef
 type ModalTarget =
   { kind: 'catalog'; entry: CatalogEntry } | { kind: 'custom'; connector: ConnectorInfo } | null;
 
-// Placeholder instruction copy until #332 ships per-provider content
-// (instructionsRef); honest, never provider-branded.
-const tokenInstructionsFallback = (name: string): string =>
-  `Create an API token in your ${name} account settings and paste it here. The token is stored encrypted and never shown again.`;
+// Renders one render path for provider instruction content (#332): real
+// steps when the ref resolves, generic honest copy when the entry has none.
+const InstructionSteps = ({ instructions }: { instructions: ConnectorInstructions }) => (
+  <div
+    data-testid="connector-modal-instructions"
+    className="mt-3 rounded-lg border border-border bg-muted/40 p-3 text-xs"
+  >
+    <p className="mb-2">{instructions.intro}</p>
+    <ol className="space-y-2">
+      {instructions.steps.map((step, i) => (
+        <li key={i} className="flex gap-2">
+          <span
+            aria-hidden="true"
+            className="mt-0.5 flex size-4 shrink-0 items-center justify-center rounded-full bg-muted text-[10px] font-semibold"
+          >
+            {i + 1}
+          </span>
+          <span className="min-w-0">
+            {step.title && <span className="block font-medium">{step.title}</span>}
+            <span className="block text-muted-foreground">{step.body}</span>
+          </span>
+        </li>
+      ))}
+    </ol>
+    {instructions.scopeNote && (
+      <p className="mt-2 rounded border-border bg-background/60 p-2 text-muted-foreground">
+        {instructions.scopeNote}
+      </p>
+    )}
+  </div>
+);
 
 const statusBadge = (connector: ConnectorInfo): { label: string; className: string } => {
   if (connector.authState === 'needs-reauth')
@@ -463,6 +492,7 @@ const ConnectorModal = ({
 
   const needsReauth = row?.authState === 'needs-reauth';
   const watchlisted = entry?.state === 'watchlisted';
+  const entryInstructions = entry ? instructionsFor(entry) : undefined;
   // Catalog PAT entries connect by token, and a tokenless row is a dead end
   // (no update path) — the token is required up front. OAuth connects with
   // browser consent only.
@@ -522,22 +552,41 @@ const ConnectorModal = ({
               <p className="mt-3 text-sm">{grants}</p>
 
               {entry?.authType === 'mcp.pat' && !row && (
-                <label className="mt-3 block text-xs">
-                  <span className="mb-1 block">API token from {entry.name}</span>
-                  <Input
-                    type="password"
-                    value={authToken}
-                    onChange={(e) => setAuthToken(e.target.value)}
-                    maxLength={4000}
-                    data-testid="connector-modal-token"
-                    placeholder="token"
-                    autoComplete="off"
-                    onFocus={(e) => e.target.scrollIntoView({ block: 'center' })}
-                  />
-                  <span className="mt-1 block text-muted-foreground">
-                    {tokenInstructionsFallback(entry.name)}
-                  </span>
-                </label>
+                <>
+                  <label className="mt-3 block text-xs">
+                    <span className="mb-1 block">API token from {entry.name}</span>
+                    <Input
+                      type="password"
+                      value={authToken}
+                      onChange={(e) => setAuthToken(e.target.value)}
+                      maxLength={4000}
+                      data-testid="connector-modal-token"
+                      placeholder="token"
+                      autoComplete="off"
+                      onFocus={(e) => e.target.scrollIntoView({ block: 'center' })}
+                    />
+                    <span className="mt-1 block text-muted-foreground">
+                      {entryInstructions
+                        ? 'The token is submitted once, stored encrypted, and never shown again.'
+                        : `Create an API token in your ${entry.name} account settings and paste it here. The token is stored encrypted and never shown again.`}
+                    </span>
+                  </label>
+                  {entryInstructions && <InstructionSteps instructions={entryInstructions} />}
+                </>
+              )}
+
+              {entry?.authType === 'mcp.oauth' && entryInstructions && !row && (
+                <details className="mt-3 text-xs" data-testid="connector-modal-token-fallback">
+                  <summary className="cursor-pointer text-muted-foreground">
+                    Prefer an API token instead?
+                  </summary>
+                  <p className="mt-2 text-muted-foreground">
+                    OAuth sign-in is the recommended path here. If you specifically want
+                    token-scoped access, create a token with the steps below and connect it through
+                    “Add anything else by URL”.
+                  </p>
+                  <InstructionSteps instructions={entryInstructions} />
+                </details>
               )}
 
               {row && (

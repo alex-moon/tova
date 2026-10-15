@@ -139,6 +139,26 @@ describe('ConnectorsView (#331)', () => {
     );
   });
 
+  it('renders the per-provider token instructions (#332) for PAT entries', async () => {
+    render(<ConnectorsView />);
+    fireEvent.click(await screen.findByTestId('connector-card-atlassian'));
+    const steps = await screen.findByTestId('connector-modal-instructions');
+    // Real provider path, not the generic fallback.
+    expect(steps).toHaveTextContent('id.atlassian.com');
+    expect(steps).toHaveTextContent('Security → API tokens');
+    // Scope guidance present (Atlassian: account-scoped, no ticks).
+    expect(steps).toHaveTextContent('no per-scope ticks');
+  });
+
+  it('offers the PAT fallback steps as a disclosure for OAuth entries (#332)', async () => {
+    render(<ConnectorsView />);
+    fireEvent.click(await screen.findByTestId('connector-card-github'));
+    const fallback = await screen.findByTestId('connector-modal-token-fallback');
+    expect(fallback).toHaveTextContent('Fine-grained token');
+    // The fallback says what breaks when scopes are narrow.
+    expect(fallback).toHaveTextContent('invisible to the assistant');
+  });
+
   it('offers re-connect and disconnect for a needs-reauth row', async () => {
     list.mockResolvedValue([
       { ...patRow, type: 'mcp.oauth' as const, authState: 'needs-reauth' as const },

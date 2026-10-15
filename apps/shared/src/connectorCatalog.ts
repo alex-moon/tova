@@ -135,6 +135,7 @@ export const CONNECTOR_CATALOG: CatalogEntry[] = [
     state: 'live',
     brandColor: '#0052CC',
     iconRef: 'atlassian',
+    instructionsRef: 'atlassian',
   },
   {
     id: 'github',
@@ -145,5 +146,6 @@ export const CONNECTOR_CATALOG: CatalogEntry[] = [
     state: 'live',
     brandColor: '#181717',
     iconRef: 'github',
+    instructionsRef: 'github',
   },
 ];
