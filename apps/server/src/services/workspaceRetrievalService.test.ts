@@ -14,6 +14,8 @@ import {
   promptWords,
   rankWorkspaceSlices,
   retrieveWorkspaceBlock,
+  RERANK_CUT,
+  rerankAndCut,
   rrfFuse,
   taskTitle,
   tokenize,
@@ -781,6 +783,8 @@ describe('workspaceRetrievalService', () => {
       const vectorCandidates = jest.fn(async () => [{ sourceId: 'c', score: 0.9 }]);
       const ranked = await rankWorkspaceSlices('a paraphrase with no overlap', 'u', slices, 6, {
         vectorCandidates,
+        // #305: the reranker grades this pair confidently relevant — keep it.
+        rerank: async () => [RERANK_CUT * 100],
       });
       expect(ranked.map((s) => s.id)).toContain('c');
     });
@@ -790,6 +794,8 @@ describe('workspaceRetrievalService', () => {
       const vectorCandidates = jest.fn(async () => [{ sourceId: 'ghost', score: 0.99 }]);
       const ranked = await rankWorkspaceSlices('what is the budget', 'u', slices, 6, {
         vectorCandidates,
+        // #305: a null rerank degrades to the un-cut fused ranking.
+        rerank: async () => null,
       });
       expect(ranked.map((s) => s.id)).toEqual(['a']);
     });
@@ -799,6 +805,45 @@ describe('workspaceRetrievalService', () => {
       const vectorCandidates = jest.fn(async () => [{ sourceId: 'x', score: 0.9 }]);
       expect(await rankWorkspaceSlices('q', 'u', [], 6, { vectorCandidates })).toEqual([]);
       expect(vectorCandidates).not.toHaveBeenCalled();
+    });
+  });
+
+  // #305: the post-retrieval relevance bar. Pure via the injectable rerank.
+  describe('rerankAndCut (#305)', () => {
+    it('cuts candidates below the threshold and orders the rest by relevance', async () => {
+      const a = slice({ id: 'a', text: 'budget' });
+      const b = slice({ id: 'b', text: 'move budget' });
+      const c = slice({ id: 'c', text: 'lease' });
+      const rerank = jest.fn(async () => [0.9, 0.0001, 0.4]);
+      const cut = await rerankAndCut('what is the budget', [a, b, c], { rerank });
+      expect(cut.map((s) => s.id)).toEqual(['a', 'c']);
+      expect(rerank).toHaveBeenCalledWith('what is the budget', [
+        'Budget chat\nbudget',
+        'Budget chat\nmove budget',
+        'Budget chat\nlease',
+      ]);
+    });
+
+    it('cuts everything when every candidate is below the bar (graceful refusal)', async () => {
+      const rerank = jest.fn(async () => [0.0002, 0.001]);
+      expect(
+        await rerankAndCut('and that one as well?', [slice({ id: 'a' }), slice({ id: 'b' })], {
+          rerank,
+        }),
+      ).toEqual([]);
+    });
+
+    it('returns no cut for an empty fused set without calling the reranker', async () => {
+      const rerank = jest.fn();
+      expect(await rerankAndCut('q', [], { rerank })).toEqual([]);
+      expect(rerank).not.toHaveBeenCalled();
+    });
+
+    it('degrades to the un-cut fused ranking when the reranker is unavailable', async () => {
+      const fused = [slice({ id: 'a', text: 'budget' }), slice({ id: 'b', text: 'lease' })];
+      expect(await rerankAndCut('what is the budget', fused, { rerank: async () => null })).toEqual(
+        fused,
+      );
     });
   });
 });
