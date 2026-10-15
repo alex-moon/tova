@@ -10,7 +10,9 @@ import { createHash } from 'crypto';
  *
  * The derivations mirror `collectWorkspaceSlices`:
  *   chat -> the message content
- *   file -> markdownExtracted, falling back to textExtracted
+ *   file -> "<filename>\n" + the extracted text (#309: the filename makes
+ *           file-title references like "that AGI file" retrievable — it is
+ *           folded in before hashing, so a rename re-embeds)
  *   task -> the user/assistant TaskEvent contents joined in `seq` order
  *           (system notices are visible-only and never embedded)
  */
@@ -24,17 +26,32 @@ export type EmbeddingTextSource =
   | { kind: 'chat'; content: string | null | undefined }
   | {
       kind: 'file';
+      filename?: string | null;
       markdownExtracted?: string | null;
       textExtracted?: string | null;
     }
   | { kind: 'task'; events: { role: string; content: string | null | undefined }[] };
+
+/*
+ * #309: the metadata fold, shared by the ingest and backfill paths so the
+ * hashed text stays byte-identical. Only the file slice's title (the
+ * filename) carries terms the content cannot supply; chat/task titles add
+ * nothing (unavailable at ingest / duplicate of the content) and pass through.
+ */
+export const withEmbedTitle = (title: string | null | undefined, text: string): string => {
+  const trimmed = (title ?? '').trim();
+  return trimmed ? `${trimmed}\n${text}` : text;
+};
 
 export const workspaceSliceText = (source: EmbeddingTextSource): string => {
   switch (source.kind) {
     case 'chat':
       return (source.content ?? '').trim();
     case 'file':
-      return ((source.markdownExtracted ?? '') || (source.textExtracted ?? '')).trim();
+      return withEmbedTitle(
+        source.filename,
+        ((source.markdownExtracted ?? '') || (source.textExtracted ?? '')).trim(),
+      );
     case 'task':
       return source.events
         .filter(

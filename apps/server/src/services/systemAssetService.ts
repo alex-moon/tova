@@ -84,7 +84,7 @@ export const createSystemAsset = async (
     userId,
     kind: 'file',
     sourceId: String(asset._id),
-    source: { kind: 'file', textExtracted: asset.textExtracted },
+    source: { kind: 'file', filename: asset.filename, textExtracted: asset.textExtracted },
   });
 
   return {

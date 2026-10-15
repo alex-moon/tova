@@ -2,6 +2,7 @@ import {
   EMBEDDING_MAX_CHARS,
   embeddingTextHash,
   truncateForEmbedding,
+  withEmbedTitle,
   workspaceSliceText,
 } from './workspaceEmbeddingText';
 
@@ -44,6 +45,33 @@ describe('workspaceSliceText (#294)', () => {
 
   it('returns an empty string for a task with no embeddable events', () => {
     expect(workspaceSliceText({ kind: 'task', events: [] })).toBe('');
+  });
+
+  // #309: the filename rides the embed text so title-only references
+  // ("that AGI file") are semantically retrievable.
+  it('folds the filename above the file content (#309)', () => {
+    expect(
+      workspaceSliceText({
+        kind: 'file',
+        filename: 'agi-final.md',
+        textExtracted: 'The rollout completes in three phases.',
+      }),
+    ).toBe('agi-final.md\nThe rollout completes in three phases.');
+  });
+
+  it('passes content through unchanged when the filename is absent or blank (#309)', () => {
+    expect(workspaceSliceText({ kind: 'file', filename: null, textExtracted: 'raw text' })).toBe(
+      'raw text',
+    );
+    expect(workspaceSliceText({ kind: 'file', filename: '   ', textExtracted: 'raw text' })).toBe(
+      'raw text',
+    );
+  });
+
+  it('changes the hash when the filename changes, so a rename re-embeds (#309)', () => {
+    const a = truncateForEmbedding(withEmbedTitle('agi-final.md', 'content')).text;
+    const b = truncateForEmbedding(withEmbedTitle('agi-final-v2.md', 'content')).text;
+    expect(embeddingTextHash(a, 'm')).not.toBe(embeddingTextHash(b, 'm'));
   });
 });
 

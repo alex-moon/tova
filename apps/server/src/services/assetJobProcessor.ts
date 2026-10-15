@@ -119,6 +119,7 @@ const processConversion = async (
       sourceId: String(asset._id),
       source: {
         kind: 'file',
+        filename: asset.filename,
         markdownExtracted: asset.markdownExtracted,
         textExtracted: asset.textExtracted,
       },
