@@ -12,6 +12,7 @@ import AssetsView from './components/AssetsView';
 import TasksView from './components/TasksView';
 import BackToChatLink from './components/BackToChatLink';
 import TaskService from './services/tasks';
+import ConnectorOAuthCallback from './components/ConnectorOAuthCallback';
 
 export interface ToolEvent {
   phase: 'call' | 'result';
@@ -95,12 +96,21 @@ export function isTasksRoute() {
   return typeof window !== 'undefined' && window.location.pathname.startsWith('/tasks');
 }
 
+// OAuth consent landing (#327): the provider redirect target for mcp.oauth
+// connectors, before the dedicated connectors view (#331) exists.
+export function isConnectorCallbackRoute() {
+  return (
+    typeof window !== 'undefined' && window.location.pathname.startsWith('/connectors/callback')
+  );
+}
+
 function App() {
   const { user, loading } = useAuth();
   const showAdminView = isAdminRoute();
   const showProfileView = isProfileRoute();
   const showFilesView = isFilesRoute();
   const showTasksView = isTasksRoute();
+  const showConnectorCallback = isConnectorCallbackRoute();
   const [sessions, setSessions] = useState<Session[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -431,6 +441,15 @@ function App() {
 
   if (!user) {
     return <Login />;
+  }
+
+  if (showConnectorCallback) {
+    return (
+      <main className="h-dvh w-full">
+        <Toaster position="bottom-center" richColors />
+        <ConnectorOAuthCallback />
+      </main>
+    );
   }
 
   return (

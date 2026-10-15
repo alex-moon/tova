@@ -50,6 +50,11 @@ jest.mock('@modelcontextprotocol/sdk/client/sse.js', () => ({
 
 jest.mock('./crypto', () => ({
   decryptEnvelope: jest.fn(() => JSON.stringify({ Authorization: 'Bearer from-mock-decrypt' })),
+  encryptEnvelope: jest.fn((plaintext: string) => ({
+    iv: 'a',
+    tag: 'b',
+    ciphertext: plaintext.slice(0, 10),
+  })),
 }));
 
 const USER_ID = '507f1f77bcf86cd799439011';
@@ -109,6 +114,36 @@ describe('connectorService', () => {
     });
     const toolsets = await connectorToolsetsForUser(USER_ID);
     expect(Object.keys(toolsets)).toEqual(['mcp_platform_tools']);
+  });
+
+  it('sends the vaulted bearer token for mcp.oauth connectors (#327)', async () => {
+    await Connector.create({
+      type: 'mcp.oauth',
+      scope: 'user',
+      userId: USER_ID,
+      name: 'oauthed',
+      url: 'https://oauthed.example.com/mcp',
+      // The shared crypto mock decrypts any envelope to a header JSON; for
+      // the oauth branch the vault shape is read instead (accessToken).
+      oauth: { iv: 'a', tag: 'b', ciphertext: 'vault' },
+    });
+    // The oauth vault JSON differs from the pat header JSON; point the mock
+    // at the vault shape for this doc by re-writing decryptEnvelope's return.
+    const { decryptEnvelope } = jest.requireMock('./crypto') as {
+      decryptEnvelope: jest.Mock;
+    };
+    decryptEnvelope.mockReturnValueOnce(
+      JSON.stringify({
+        accessToken: 'vault-token',
+        authorizationServerUrl: 'https://as.example.com',
+        expiresAt: Date.now() + 3600_000,
+      }),
+    );
+    await connectorToolsetsForUser(USER_ID);
+    expect(streamableTransport).toHaveBeenCalledWith(
+      expect.objectContaining({ origin: 'https://oauthed.example.com' }),
+      { requestInit: { headers: { Authorization: 'Bearer vault-token' } } },
+    );
   });
 
   it('decrypts stored mcp.pat auth headers before connecting', async () => {
