@@ -177,9 +177,12 @@ describe('Chat streaming route', () => {
   });
 
   // #261: persisted turns carry a `[timestamp]` header in the prompt so the
-  // model can see when each turn happened and how long passed between them;
-  // the redundant system-prompt date line is dropped on this path.
-  it('stamps every persisted turn and drops the date line in the prompt (#261)', async () => {
+  // #261: user turns are stamped so the model can see when each turn happened
+  // and how long passed between them; the redundant system-prompt date line is
+  // dropped on this path. #315: assistant turns are NOT stamped — stamped
+  // assistant examples in the transcript made the model reproduce the stamps
+  // in its visible replies.
+  it('stamps user turns only and drops the date line in the prompt (#261, #315)', async () => {
     const cookies = await registerUser('stream-timestamps@example.com');
     await mockStream(['ok']);
 
@@ -216,18 +219,21 @@ describe('Chat streaming route', () => {
     ];
     // The date line is gone on the persisted path.
     expect(options.instructions).not.toContain("Today's date is");
-    // Seeded turns carry absolute stamps; the assistant reply 1 minute later
-    // gets no relative line (sub-hour). The new turn rides the live clock, so
-    // its absolute stamp is the current UTC minute and its gap to the seeded
-    // turn is whatever unit that (ever-growing) gap rounds to. Assert the
-    // shape, not a fixed value: the previous assertion hard-coded "2 days"
-    // from the seeded date and rotted as wall time moved past it.
+    // Seeded user turns carry absolute stamps; assistant turns ride bare
+    // (#315). The new turn rides the live clock, so its absolute stamp is the
+    // current UTC minute and its gap to the seeded turn is whatever unit that
+    // (ever-growing) gap rounds to. Assert the shape, not a fixed value: the
+    // previous assertion hard-coded "2 days" from the seeded date and rotted
+    // as wall time moved past it.
     const stamp = (d: Date) =>
       `[${d.toISOString().slice(0, 10)} ${d.toISOString().slice(11, 16)} UTC]`;
     const userTurns = turns.filter((m) => m.role === 'user');
     expect(userTurns[0].content).toBe(`${stamp(firstTurnAt)}\nfirst turn`);
+    // #315: the assistant turn is unstamped — no stamp, no echo pressure.
     const assistantTurn = turns.find((m) => m.role === 'assistant');
-    expect(assistantTurn?.content).toBe(`${stamp(firstReplyAt)}\nfirst reply`);
+    expect(assistantTurn?.content).toBe('first reply');
+    // The gap still measures from the previous turn regardless of role (the
+    // seeded assistant reply is the immediately preceding turn).
     const now = new Date();
     const pad = (n: number) => String(n).padStart(2, '0');
     const currentStamp = `${now.toISOString().slice(0, 10)} ${pad(now.getUTCHours())}:${pad(now.getUTCMinutes())}`;

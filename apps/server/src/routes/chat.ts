@@ -451,22 +451,26 @@ const buildZdrMessages = (
 ];
 
 /*
- * #261: every persisted turn is prefixed with a `[timestamp]` header so the
- * model can see when each turn happened and how long passed between them. The
- * header is emitted at prompt-assembly time from the stored `Message.timestamp`
- * (always UTC in the DB) and never persisted into `content` itself; `timezone`
- * only shapes the rendered stamp. The docs arrive newest-first (the caller's
- * `sort({ timestamp: -1 })`); after reversing them the previous turn's
- * timestamp is the one immediately before.
+ * #261: user turns are prefixed with a `[timestamp]` header so the model can
+ * see when each turn happened and how long passed between them. The header is
+ * emitted at prompt-assembly time from the stored `Message.timestamp` (always
+ * UTC in the DB) and never persisted into `content` itself; `timezone` only
+ * shapes the rendered stamp. #315: assistant turns are NOT stamped — the model
+ * imitates its own role's examples, so stamped assistant turns leaked the
+ * stamps into visible replies. The gap line rides the following user stamp,
+ * which still measures from the previous turn regardless of role. The docs
+ * arrive newest-first (the caller's `sort({ timestamp: -1 })`); after
+ * reversing them the previous turn's timestamp is the one immediately before.
  */
 const messagesFromPersistedHistory = (
   history: { role: string; content: string; timestamp?: Date }[],
   timezone?: string | null,
 ): { role: 'system' | 'user' | 'assistant'; content: string | MessageContentPart[] }[] =>
   history.reverse().map((m, i) => {
-    const header = m.timestamp
-      ? `${timestampHeader(m.timestamp, history[i - 1]?.timestamp, timezone)}\n`
-      : '';
+    const header =
+      m.role === 'user' && m.timestamp
+        ? `${timestampHeader(m.timestamp, history[i - 1]?.timestamp, timezone)}\n`
+        : '';
     return {
       role: m.role as 'user' | 'assistant',
       content: header + (m.content as string),
