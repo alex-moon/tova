@@ -29,11 +29,17 @@ Order: 0 → {1, 3, 4}; 2 after 1; 5 anytime.
   Wire field `authConfigured` replaces `headersConfigured` as the type-agnostic seam.
   `mcpService` → `connectorService` with a per-type `authFor` dispatch; MCP wire internals
   unchanged; model-visible `mcp_` toolset key prefix kept (trace/eval churn avoidance).
+- Slice 1 (#327, PR #337): OAuth engine on MCP SDK 1.32.1 auth primitives; in-memory
+  pending consents (TTL, user-bound); encrypted token vault in the connector doc carrying
+  AS metadata + full DCR client info (SDK refresh does not re-discover); proactive
+  single-flight refresh; `authState: 'ok' | 'needs-reauth'` wire field; re-auth via
+  `/:id/reauth`; SSRF-parity (public https) on all discovered endpoints; provider error
+  detail never echoed. Client: `/connectors/callback` route + minimal section affordances.
 
 ## Done
 
 - [x] #329 groundwork (connector model, types, shared contracts, migration) — PR #336
-- [ ] #327 OAuth engine for `mcp.oauth` connectors
+- [x] #327 OAuth engine for `mcp.oauth` connectors — PR #337
 - [ ] #330 curated OAuth connector catalog (hand-verified)
 - [ ] #331 `/connectors` UI (grid, modal, mobile-first)
 - [ ] #332 PAT per-provider instructions
