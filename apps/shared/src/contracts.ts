@@ -392,6 +392,8 @@ export interface AdminEvalRetrievalMetrics {
   expectedMet: number;
   expectedMetRate: number;
   surfacedRate: number;
+  /** #305: retrieval cases that ended empty-after-cut (graceful refusal). */
+  cutEmpty?: number;
   byCategory: Record<string, { total: number; surfaced: number; expectedMet: number }>;
 }
 
@@ -414,8 +416,10 @@ export interface AdminEvalMemoryMetrics {
   stages: string[];
   /** SHA-256 over the canonical corpus (D15), so a corpus change is visible. */
   corpusHash: string;
-  gateModel: string;
-  gateProvider: string;
+  /** #310: the gate is retired — these are absent on runs after it, and read
+   * only from historical rollups. */
+  gateModel?: string;
+  gateProvider?: string;
   /** Responder/judge identities (D15/OQ29); absent on a retrieval-only run. */
   responderModel?: string;
   responderProvider?: string;

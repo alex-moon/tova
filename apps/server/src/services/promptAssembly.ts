@@ -107,12 +107,6 @@ const profileContextBlock = (
     .trim();
 };
 
-const LIBRARY_INTRO =
-  'The user is likely referring to one of the files in their library, listed below ' +
-  '(newest first) with the id needed to open it. Match the request to the most ' +
-  'relevant file and call `read_file` with its id before quoting any contents; if ' +
-  'more exist than are shown, say so rather than assuming the list is complete.';
-
 // #253: pre-retrieved workspace memory. The caller does the gate and the Mongo
 // read; this function only decides layout and the empty-no-op guard, so an
 // empty block never shifts an otherwise identical prompt (same posture as the
@@ -130,16 +124,6 @@ const workspaceBlock = (block: string | null | undefined): string => {
   return ['<user:workspace>', WORKSPACE_INTRO, '', trimmed, '</user:workspace>'].join('\n');
 };
 
-// #214 preliminary: bounded library index injected only when the guard's AUX
-// `files` vote fired. The caller does the Mongo read; this function decides
-// layout and the empty-no-op guard (an empty block must not shift an otherwise
-// identical prompt).
-const libraryBlock = (block: string | null | undefined): string => {
-  const trimmed = block?.trim();
-  if (!trimmed) return '';
-  return ['<user:file_library>', LIBRARY_INTRO, '', trimmed, '</user:file_library>'].join('\n');
-};
-
 // #255 (F4): completed background tasks surfaced into the turn that follows
 // their completion — a queued write the chat route drains, never a mid-turn
 // interruption. The caller does the Mongo read and the mark-notified; this
@@ -154,33 +138,6 @@ const taskCompletionBlock = (block: string | null | undefined): string => {
   const trimmed = block?.trim();
   if (!trimmed) return '';
   return ['<task:completed>', TASK_COMPLETION_INTRO, '', trimmed, '</task:completed>'].join('\n');
-};
-
-/*
- * #214 preliminary: render the library index exactly as `list_files` reports it
- * — newest first, capped at 20, with an honest truncation notice when more
- * exist. Kept pure and separate from the Mongo read (`chat.ts:libraryIndexFor`)
- * so the cap/notice contract is unit-testable without a DB, mirroring the
- * retrieval/layout split used for the workspace block.
- */
-export const fileLibraryIndex = (
-  rows: {
-    filename: string;
-    contentType: string;
-    createdAt?: Date;
-    _id: { toString(): string };
-  }[],
-): string => {
-  if (rows.length === 0) return '';
-  const hasMore = rows.length > 20;
-  const lines = rows.slice(0, 20).map((r) => {
-    const created = (r.createdAt ?? new Date()).toISOString().slice(0, 10);
-    return `- ${r.filename} (${r.contentType}, added ${created}) [id: ${r._id.toString()}]`;
-  });
-  if (hasMore) {
-    lines.push('(More files exist than are shown — the 20 most recent are listed.)');
-  }
-  return lines.join('\n');
 };
 
 /*
@@ -302,7 +259,6 @@ const timezoneContextLine = (timezone?: string | null): string => {
 
 export const buildSystemContent = (
   user: Pick<UserDocument, 'name' | 'preferredName' | 'location' | 'settings'> | null,
-  fileLibraryBlock: string | null | undefined = undefined,
   // #261: persisted turns carry a per-message timestamp header, which now
   // supplies both the day and the time-of-day, so the bare date line is
   // redundant there (and was the thing flattening the model's sense of time).
@@ -332,7 +288,6 @@ export const buildSystemContent = (
     timezoneContextLine(timezone),
     profileContextBlock(user),
     workspaceBlock(workspaceMemoryBlock),
-    libraryBlock(fileLibraryBlock),
     taskCompletionBlock(taskCompletion),
     customInstructionsBlock(user?.settings ?? null),
   ].filter(Boolean);

@@ -1,9 +1,4 @@
-import {
-  buildSystemContent,
-  fileLibraryIndex,
-  resolveSystemPrompt,
-  timestampHeader,
-} from './promptAssembly';
+import { buildSystemContent, resolveSystemPrompt, timestampHeader } from './promptAssembly';
 import { UserDocument } from '../models/User';
 
 const userWith = (
@@ -200,12 +195,7 @@ describe('timestampHeader (#261)', () => {
 
 describe('buildSystemContent / user timezone (#261 D6)', () => {
   it('adds the zone context line and renders the date line locally when a zone is known', () => {
-    const content = buildSystemContent(
-      userWith({ preferredName: 'Alex' }),
-      undefined,
-      true,
-      'Europe/London',
-    );
+    const content = buildSystemContent(userWith({ preferredName: 'Alex' }), true, 'Europe/London');
     // The zone is named with its current offset so short labels are clear.
     expect(content).toMatch(
       /The user's timezone is Europe\/London \(currently GMT(?:[+-]\d+(?::\d+)?)?\)\./,
@@ -225,13 +215,13 @@ describe('buildSystemContent / user timezone (#261 D6)', () => {
   });
 
   it('keeps the zone context line even when the date line is dropped (persisted turns)', () => {
-    const content = buildSystemContent(null, undefined, false, 'Europe/London');
+    const content = buildSystemContent(null, false, 'Europe/London');
     expect(content).not.toContain("Today's date is");
     expect(content).toMatch(/The user's timezone is Europe\/London/);
   });
 
   it('silently drops the context line for an invalid zone (UTC fallback)', () => {
-    const content = buildSystemContent(null, undefined, true, 'Mars/Olympus');
+    const content = buildSystemContent(null, true, 'Mars/Olympus');
     expect(content).not.toContain("The user's timezone is");
     expect(content).toMatch(/Today's date is \d{4}-\d{2}-\d{2} \(UTC\)\./);
   });
@@ -241,7 +231,6 @@ describe('buildSystemContent / workspace memory (#253)', () => {
   it('injects the workspace block when supplied', () => {
     const content = buildSystemContent(
       null,
-      undefined,
       true,
       null,
       '- chat "Move" (2026-10-01) — budget is twelve thousand',
@@ -253,7 +242,7 @@ describe('buildSystemContent / workspace memory (#253)', () => {
 
   it('is a no-op when the block is empty (no prompt drift)', () => {
     const bare = buildSystemContent(null);
-    expect(buildSystemContent(null, undefined, true, null, '')).toBe(bare);
+    expect(buildSystemContent(null, true, null, '')).toBe(bare);
     expect(bare).not.toContain('<user:workspace>');
   });
 });
@@ -301,7 +290,7 @@ describe('buildSystemContent / envelope-based profile data (issue #35, PR #46 re
   // (the persisted call sites pass it off; ZDR and the admin Compare path keep
   // it on).
   it('drops the date line when the caller opts out (persisted turns, #261)', () => {
-    const content = buildSystemContent(null, undefined, false);
+    const content = buildSystemContent(null, false);
     expect(content).not.toContain("Today's date is");
     expect(content.startsWith(resolveSystemPrompt())).toBe(true);
   });
@@ -351,53 +340,12 @@ describe('buildSystemContent / coarse location (issue #50)', () => {
     ).toHaveLength(1);
   });
 
-  describe('buildSystemContent / file library block (#214 preliminary)', () => {
-    it('rides in its own envelope when the caller supplies a library index', () => {
-      const content = buildSystemContent(
-        userWith({ preferredName: 'Alex' }),
-        '- CV.pdf (application/pdf, added 2026-09-01) [id: abc123]',
-      );
-      expect(content).toContain('<user:file_library>');
-      expect(content).toContain('- CV.pdf (application/pdf, added 2026-09-01) [id: abc123]');
-      expect(content).toContain('</user:file_library>');
-      expect(content).toContain('read_file');
-    });
-
-    it('emits no library envelope when the block is empty, whitespace, or not requested', () => {
-      expect(buildSystemContent(userWith({})).split('<user:file_library>')).toHaveLength(1);
-      expect(buildSystemContent(userWith({}), '').split('<user:file_library>')).toHaveLength(1);
-      expect(buildSystemContent(userWith({}), '   \n').split('<user:file_library>')).toHaveLength(
-        1,
-      );
-      expect(buildSystemContent(null, undefined).split('<user:file_library>')).toHaveLength(1);
-    });
-  });
-
-  describe('fileLibraryIndex (#214 preliminary)', () => {
-    const row = (n: number) => ({
-      filename: `file-${n}.pdf`,
-      contentType: 'application/pdf',
-      createdAt: new Date('2026-09-01T00:00:00Z'),
-      _id: { toString: () => `id-${n}` },
-    });
-
-    it('is empty for an empty library (no-op injection)', () => {
-      expect(fileLibraryIndex([])).toBe('');
-    });
-
-    it('lists files with their id and date', () => {
-      const block = fileLibraryIndex([row(1)]);
-      expect(block).toContain('- file-1.pdf (application/pdf, added 2026-09-01) [id: id-1]');
-    });
-
-    it('caps at 20 and adds the truncation notice at 21', () => {
-      const twenty = Array.from({ length: 20 }, (_, i) => row(i));
-      expect(fileLibraryIndex(twenty)).not.toContain('More files exist');
-      const twentyOne = Array.from({ length: 21 }, (_, i) => row(i));
-      const block = fileLibraryIndex(twentyOne);
-      expect(block).toContain('More files exist than are shown');
-      // 20 file lines + 1 notice line.
-      expect(block.split('\n')).toHaveLength(21);
-    });
+  // #310: the file-library injection is retired — the envelope never renders,
+  // whatever callers pass positionally.
+  it('never emits the file-library envelope (#310)', () => {
+    expect(
+      buildSystemContent(userWith({ preferredName: 'Alex' })).split('<user:file_library>'),
+    ).toHaveLength(1);
+    expect(buildSystemContent(null).split('<user:file_library>')).toHaveLength(1);
   });
 });

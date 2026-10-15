@@ -274,7 +274,7 @@ const defaultRespond = async (query: string, block: string): Promise<RespondResu
     provider: config.memoryEval.responderProvider ?? scheduledProvider,
     model: config.memoryEval.responderModel ?? scheduledModel,
     messages: [
-      { role: 'system', content: buildSystemContent(null, null, true, null, block) },
+      { role: 'system', content: buildSystemContent(null, true, null, block) },
       { role: 'user', content: query },
     ],
     temperature: config.memoryEval.responderTemperature,

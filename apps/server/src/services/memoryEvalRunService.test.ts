@@ -11,29 +11,10 @@ import {
  * #289 T6: the persisted memory rollup, exercised with injected fakes so no
  * Mongo or provider is needed — the record shape, the sentinel per-case rows,
  * the continuous metrics payload, the global lease, and the error settle.
+ * #310: the gate stage is retired — retrieval is the only deterministic stage.
  */
 
 const report: MemoryEvalReport = {
-  gate: {
-    results: [
-      { caseId: 'g1', expected: true, observed: true, pass: true, subtype: 'explicit' },
-      { caseId: 'g2', expected: false, observed: false, pass: true },
-    ],
-    metrics: {
-      total: 2,
-      evaluated: 2,
-      truePos: 1,
-      falsePos: 0,
-      trueNeg: 1,
-      falseNeg: 0,
-      precision: 1,
-      recall: 1,
-      fireRate: 0.5,
-      errors: 0,
-      timeouts: 0,
-      recallBySubtype: { explicit: { total: 1, truePos: 1, falseNeg: 0, recall: 1 } },
-    },
-  },
   retrieval: {
     results: [
       {
@@ -52,6 +33,7 @@ const report: MemoryEvalReport = {
       expectedMet: 1,
       expectedMetRate: 1,
       surfacedRate: 1,
+      cutEmpty: 0,
       byCategory: { direct: { total: 1, surfaced: 1, expectedMet: 1 } },
     },
   },
@@ -98,7 +80,7 @@ describe('executeMemoryEvalRun (#289 T6)', () => {
     const updateRecord = jest.fn(async () => undefined);
     const result = await executeMemoryEvalRun(
       'id-1',
-      { stages: ['gate', 'retrieval'], trigger: 'manual' },
+      { stages: ['retrieval'], trigger: 'manual' },
       fakeDeps({ updateRecord: updateRecord as never }),
     );
     expect(result).toBe(report);
@@ -106,35 +88,15 @@ describe('executeMemoryEvalRun (#289 T6)', () => {
       $set: { status: string; results: { caseId: string; score: string }[]; metrics: unknown };
     };
     expect(update.$set.status).toBe('done');
-    expect(update.$set.results.map((r) => r.caseId)).toEqual([
-      'gate:g1',
-      'gate:g2',
-      'retrieval:s1',
-    ]);
+    expect(update.$set.results.map((r) => r.caseId)).toEqual(['retrieval:s1']);
     expect(update.$set.results.every((r) => r.score === 'pass')).toBe(true);
     expect(update.$set.metrics).toMatchObject({
-      stages: ['gate', 'retrieval'],
-      gate: { precision: 1, recall: 1 },
-      retrieval: { surfacedRate: 1 },
+      stages: ['retrieval'],
+      retrieval: { surfacedRate: 1, cutEmpty: 0 },
     });
     expect((update.$set.metrics as { corpusHash: string }).corpusHash).toMatch(/^[0-9a-f]{64}$/);
-  });
-
-  it('writes no gate metrics for a retrieval-only run', async () => {
-    const updateRecord = jest.fn(async () => undefined);
-    await executeMemoryEvalRun(
-      'id-1',
-      { stages: ['retrieval'], trigger: 'scheduled' },
-      fakeDeps({
-        run: async () => ({ retrieval: report.retrieval }),
-        updateRecord: updateRecord as never,
-      }),
-    );
-    const metrics = (
-      updateRecord.mock.calls[0][1] as { $set: { metrics: Record<string, unknown> } }
-    ).$set.metrics;
-    expect(metrics.gate).toBeUndefined();
-    expect(metrics.retrieval).toBeDefined();
+    // #310: the gate is retired — no gate model identity on fresh rollups.
+    expect((update.$set.metrics as { gateModel?: string }).gateModel).toBeUndefined();
   });
 
   it('settles error and does not throw when the runner crashes', async () => {
