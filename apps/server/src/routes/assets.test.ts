@@ -5,6 +5,7 @@ import AdmZip from 'adm-zip';
 import { createApp } from '../index';
 import { User } from '../models/User';
 import { Asset } from '../models/Asset';
+import { AssetVersion } from '../models/AssetVersion';
 import { isStorageConfigured } from '../services/storageService';
 import { AssetJob } from '../models/AssetJob';
 
@@ -15,6 +16,7 @@ const mockGetObjectBuffer = jest.fn();
 const mockGetObjectStream = jest.fn();
 const mockDeleteObject = jest.fn();
 const mockEnqueueAssetJob = jest.fn();
+const mockPutObject = jest.fn();
 
 jest.mock('../services/storageService', () => ({
   isStorageConfigured: jest.fn().mockReturnValue(true),
@@ -24,6 +26,7 @@ jest.mock('../services/storageService', () => ({
   getObjectBuffer: (...args: unknown[]) => mockGetObjectBuffer(...args),
   getObjectStream: (...args: unknown[]) => mockGetObjectStream(...args),
   deleteObject: (...args: unknown[]) => mockDeleteObject(...args),
+  putObject: (...args: unknown[]) => mockPutObject(...args),
 }));
 
 // Route the enqueue through a mock so the confirm tests can simulate an
@@ -1222,5 +1225,174 @@ describe('Assets bulk download', () => {
     mockGetObjectStream.mockRejectedValue({ name: 'InternalError' });
     const response = await bulkRequest(cookieA, [assetId]);
     expect(response.status).toBe(502);
+  });
+});
+
+describe('Asset version history and restore (#325)', () => {
+  const seedGenerated = async (
+    email: string,
+    content = '# draft',
+    extra: Record<string, unknown> = {},
+  ): Promise<{ cookie: string; id: string; userId: string }> => {
+    const cookie = await registerUser(email);
+    const user = await User.findOne({ email });
+    const id = new Types.ObjectId();
+    await Asset.create({
+      _id: id,
+      userId: user?._id,
+      filename: 'notes.md',
+      key: `${String(user?._id)}/${String(id)}/notes.md`,
+      contentType: 'text/markdown',
+      size: Buffer.byteLength(content, 'utf8'),
+      status: 'ready',
+      origin: 'system-generated',
+      textExtracted: content,
+      ...extra,
+    });
+    return { cookie, id: String(id), userId: String(user?._id) };
+  };
+
+  const seedVersion = (
+    assetId: string,
+    userId: string,
+    version: number,
+    content: string,
+  ): Promise<unknown> =>
+    AssetVersion.create({
+      assetId,
+      userId,
+      version,
+      filename: 'notes.md',
+      size: Buffer.byteLength(content, 'utf8'),
+      textExtracted: content,
+    });
+
+  beforeEach(() => {
+    jest.resetAllMocks();
+    (isStorageConfigured as jest.Mock).mockReturnValue(true);
+    mockPutObject.mockResolvedValue(undefined);
+  });
+
+  it('lists versions newest first, scoped to the caller', async () => {
+    const { cookie, id, userId } = await seedGenerated('assets-versions@example.com');
+    await seedVersion(id, userId, 1, 'v1');
+    await seedVersion(id, userId, 2, 'v2');
+    await Asset.updateOne({ _id: id }, { version: 2, textExtracted: 'v2' });
+
+    const response = await request(app).get(`/api/assets/${id}/versions`).set('Cookie', [cookie]);
+    expect(response.status).toBe(200);
+    expect(response.body.versions.map((v: { version: number }) => v.version)).toEqual([2, 1]);
+    expect(response.body.versions[0]).toMatchObject({ version: 2, size: 2 });
+  });
+
+  it('returns one version body and 404s an unknown version', async () => {
+    const { cookie, id, userId } = await seedGenerated('assets-version-content@example.com');
+    await seedVersion(id, userId, 1, 'old body');
+
+    const ok = await request(app)
+      .get(`/api/assets/${id}/versions/1/content`)
+      .set('Cookie', [cookie]);
+    expect(ok.status).toBe(200);
+    expect(ok.body.version).toMatchObject({ version: 1, content: 'old body', format: 'markdown' });
+
+    const missing = await request(app)
+      .get(`/api/assets/${id}/versions/9/content`)
+      .set('Cookie', [cookie]);
+    expect(missing.status).toBe(404);
+
+    const invalid = await request(app)
+      .get(`/api/assets/${id}/versions/abc/content`)
+      .set('Cookie', [cookie]);
+    expect(invalid.status).toBe(400);
+  });
+
+  it('restores a prior version as a new version', async () => {
+    const { cookie, id, userId } = await seedGenerated(
+      'assets-restore@example.com',
+      'current body',
+    );
+    await seedVersion(id, userId, 1, 'old body');
+    await seedVersion(id, userId, 2, 'current body');
+    await Asset.updateOne({ _id: id }, { version: 2 });
+
+    const response = await request(app)
+      .post(`/api/assets/${id}/restore`)
+      .set('Cookie', [cookie])
+      .send({ version: 1 });
+    expect(response.status).toBe(200);
+    expect(response.body.asset.version).toBe(3);
+
+    const stored = await Asset.findById(id);
+    expect(stored?.textExtracted).toBe('old body');
+    expect(stored?.version).toBe(3);
+    const versions = await AssetVersion.find({ assetId: id }).sort({ version: 1 }).lean();
+    expect(versions.map((v) => v.version)).toEqual([1, 2, 3]);
+  });
+
+  it('404s restoring an unknown version', async () => {
+    const { cookie, id } = await seedGenerated('assets-restore-missing@example.com');
+    const response = await request(app)
+      .post(`/api/assets/${id}/restore`)
+      .set('Cookie', [cookie])
+      .send({ version: 7 });
+    expect(response.status).toBe(404);
+    expect(mockPutObject).not.toHaveBeenCalled();
+  });
+
+  it('refuses to restore an edit on a user upload', async () => {
+    const cookie = await registerUser('assets-restore-upload@example.com');
+    const user = await User.findOne({ email: 'assets-restore-upload@example.com' });
+    const id = new Types.ObjectId();
+    await Asset.create({
+      _id: id,
+      userId: user?._id,
+      filename: 'upload.txt',
+      key: 'k/upload.txt',
+      contentType: 'text/plain',
+      size: 3,
+      status: 'ready',
+      origin: 'user-upload',
+      textExtracted: 'abc',
+    });
+    const response = await request(app)
+      .post(`/api/assets/${String(id)}/restore`)
+      .set('Cookie', [cookie])
+      .send({ version: 1 });
+    expect(response.status).toBe(400);
+    expect(mockPutObject).not.toHaveBeenCalled();
+  });
+
+  it('rejects a malformed restore body', async () => {
+    const { cookie, id } = await seedGenerated('assets-restore-body@example.com');
+    for (const body of [{}, { version: 0 }, { version: 1.5 }, { version: 'x' }]) {
+      const response = await request(app)
+        .post(`/api/assets/${id}/restore`)
+        .set('Cookie', [cookie])
+        .send(body);
+      expect(response.status).toBe(400);
+    }
+  });
+
+  it('isolates history and restore by ownership and rejects guests', async () => {
+    const { id, userId } = await seedGenerated('assets-versions-owner@example.com');
+    await seedVersion(id, userId, 1, 'secret');
+    const otherCookie = await registerUser('assets-versions-other@example.com');
+
+    const list = await request(app).get(`/api/assets/${id}/versions`).set('Cookie', [otherCookie]);
+    expect(list.status).toBe(404);
+    const content = await request(app)
+      .get(`/api/assets/${id}/versions/1/content`)
+      .set('Cookie', [otherCookie]);
+    expect(content.status).toBe(404);
+    const restore = await request(app)
+      .post(`/api/assets/${id}/restore`)
+      .set('Cookie', [otherCookie])
+      .send({ version: 1 });
+    expect(restore.status).toBe(404);
+
+    expect((await request(app).get(`/api/assets/${id}/versions`)).status).toBe(401);
+    expect((await request(app).post(`/api/assets/${id}/restore`).send({ version: 1 })).status).toBe(
+      401,
+    );
   });
 });

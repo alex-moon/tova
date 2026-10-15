@@ -6,6 +6,9 @@ const safeAsset = (asset: AssetDocument): unknown => ({
   contentType: asset.contentType,
   size: asset.size,
   status: asset.status,
+  // #325: current content version. > 1 means the file has edit history the
+  // viewer can show; 1 for uploads and never-edited generated files.
+  version: asset.version ?? 1,
   // #252: where the file came from. Absent provenance serialises as explicit
   // null so the client sees a stable key and can tell "unknown" from "field
   // missing in an old payload"; never faked from the scalar `origin`.
@@ -53,6 +56,8 @@ const previewAsset = (asset: AssetDocument): unknown => {
     contentType: asset.contentType,
     size: asset.size,
     status: asset.status,
+    // #325: current content version (see safeAsset).
+    version: asset.version ?? 1,
     // #252: same contract as `safeAsset` — explicit null when unknown.
     provenance: (asset.provenance as AssetProvenance | undefined) ?? null,
     // null when nothing was extracted — the viewer shows "(no extracted text)".

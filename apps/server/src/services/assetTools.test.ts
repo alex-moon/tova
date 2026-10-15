@@ -1,8 +1,9 @@
 import { RequestContext } from '@mastra/core/request-context';
 import { Asset } from '../models/Asset';
+import { AssetVersion } from '../models/AssetVersion';
 import { User } from '../models/User';
 import { Types } from 'mongoose';
-import { generateFileTool, listFilesTool, readFileTool } from './mastraService';
+import { editFileTool, generateFileTool, listFilesTool, readFileTool } from './mastraService';
 import { toolIsFailed } from './toolDegrade';
 import { truncateForPrompt } from './textExtraction';
 
@@ -66,6 +67,15 @@ const generateExecute = (
       args: Record<string, unknown>,
       ctx: unknown,
     ) => Promise<{ file?: unknown; error?: string }>;
+  }
+).execute;
+
+const editExecute = (
+  editFileTool as unknown as {
+    execute: (
+      args: Record<string, unknown>,
+      ctx: unknown,
+    ) => Promise<{ file?: { id: string; version: number }; error?: string; note?: string }>;
   }
 ).execute;
 
@@ -197,6 +207,105 @@ describe('generate_file tool (#66)', () => {
     // The failed doc must be visible/failed, ready for the failed list.
     const stored = await Asset.findOne({ userId: user.id });
     expect(stored).toMatchObject({ status: 'failed', failureReason: 'storage-error' });
+  });
+});
+
+describe('edit_file tool (#325)', () => {
+  const generated = async (userId: string, content = '# draft\n\nbody') => {
+    const id = new Types.ObjectId();
+    await Asset.create({
+      _id: id,
+      userId,
+      filename: 'notes.md',
+      key: `${userId}/${String(id)}/notes.md`,
+      contentType: 'text/markdown',
+      size: Buffer.byteLength(content, 'utf8'),
+      status: 'ready',
+      origin: 'system-generated',
+      textExtracted: content,
+    });
+    return String(id);
+  };
+
+  beforeEach(() => {
+    storageMocks.isStorageConfigured.mockReset().mockReturnValue(true);
+    storageMocks.putObject.mockReset().mockResolvedValue(undefined);
+  });
+
+  it('requires a userId in the request context', async () => {
+    expect(await editExecute({ id: 'x', edits: [] }, asCtx())).toEqual({ error: 'unavailable' });
+  });
+
+  it('degrades to unavailable when storage is unconfigured', async () => {
+    storageMocks.isStorageConfigured.mockReturnValue(false);
+    const user = await createUser('edit-unconfigured@example.com');
+    expect(
+      await editExecute({ id: new Types.ObjectId().toString(), edits: [] }, asCtx(user.id)),
+    ).toEqual({ error: 'unavailable' });
+  });
+
+  it('gracefully rejects a missing or malformed id', async () => {
+    const user = await createUser('edit-bad-id@example.com');
+    expect(await editExecute({ id: 'not-an-objectid', edits: [] }, asCtx(user.id))).toEqual({
+      error: 'not_found',
+    });
+  });
+
+  it('does not edit another user’s file', async () => {
+    const owner = await createUser('edit-owner@example.com');
+    const other = await createUser('edit-other@example.com');
+    const id = await generated(owner.id);
+    expect(
+      await editExecute({ id, edits: [{ oldText: 'body', newText: 'x' }] }, asCtx(other.id)),
+    ).toEqual({ error: 'not_found' });
+  });
+
+  it('applies edits to a generated file and bumps the version', async () => {
+    const user = await createUser('edit-happy@example.com');
+    const id = await generated(user.id);
+    const out = await editExecute(
+      { id, edits: [{ oldText: 'body', newText: 'body v2' }] },
+      asCtx(user.id),
+    );
+    expect(out.error).toBeUndefined();
+    expect(out.file).toMatchObject({ id, version: 2 });
+    const stored = await Asset.findById(id);
+    expect(stored?.textExtracted).toBe('# draft\n\nbody v2');
+    expect(await AssetVersion.countDocuments({ assetId: id })).toBe(2);
+  });
+
+  it('refuses to edit a user upload', async () => {
+    const user = await createUser('edit-upload@example.com');
+    const asset = await createAsset(user.id, 'uploaded.txt', { textExtracted: 'hello' });
+    const out = await editExecute(
+      { id: asset.id, edits: [{ oldText: 'hello', newText: 'hi' }] },
+      asCtx(user.id),
+    );
+    expect(out.error).toBe('not_editable');
+    expect(storageMocks.putObject).not.toHaveBeenCalled();
+  });
+
+  it('returns a retryable no_match error with guidance', async () => {
+    const user = await createUser('edit-nomatch@example.com');
+    const id = await generated(user.id);
+    const out = await editExecute(
+      { id, edits: [{ oldText: 'absent', newText: 'x' }] },
+      asCtx(user.id),
+    );
+    expect(out.error).toBe('no_match');
+    expect(out.note).toContain('not found');
+    expect(storageMocks.putObject).not.toHaveBeenCalled();
+  });
+
+  it('returns an ambiguous error when the block matches more than once', async () => {
+    const user = await createUser('edit-ambiguous@example.com');
+    const id = await generated(user.id, 'same\nsame');
+    const out = await editExecute(
+      { id, edits: [{ oldText: 'same', newText: 'x' }] },
+      asCtx(user.id),
+    );
+    expect(out.error).toBe('ambiguous');
+    expect(out.note).toContain('more than once');
   });
 });
 

@@ -40,3 +40,18 @@ describe('assetViews provenance (#252)', () => {
     ).toEqual({ kind: 'upload' });
   });
 });
+
+describe('assetViews version (#325)', () => {
+  it('defaults to 1 for a legacy asset with no version field', async () => {
+    const doc = await createAsset();
+    expect((safeAsset(doc) as { version: number }).version).toBe(1);
+    expect((previewAsset(doc) as { version: number }).version).toBe(1);
+  });
+
+  it('surfaces the stored version', async () => {
+    const doc = await createAsset();
+    doc.version = 3;
+    expect((safeAsset(doc) as { version: number }).version).toBe(3);
+    expect((previewAsset(doc) as { version: number }).version).toBe(3);
+  });
+});

@@ -309,3 +309,46 @@ describe('AssetService.uploadMany', () => {
     expect(confirmBodies).toHaveLength(0);
   });
 });
+
+describe('AssetService version history (#325)', () => {
+  const axiosGet = vi.mocked(axios.get);
+
+  beforeEach(() => {
+    axiosGet.mockReset();
+  });
+
+  it('lists versions from the versions endpoint', async () => {
+    axiosGet.mockResolvedValue({
+      data: { versions: [{ version: 2, size: 12, createdAt: '2026-01-01T00:00:00.000Z' }] },
+    } as never);
+    const versions = await AssetService.versions('a1');
+    expect(axiosGet).toHaveBeenCalledWith('/api/assets/a1/versions');
+    expect(versions).toEqual([{ version: 2, size: 12, createdAt: '2026-01-01T00:00:00.000Z' }]);
+  });
+
+  it('fetches one version body', async () => {
+    axiosGet.mockResolvedValue({
+      data: {
+        version: {
+          version: 1,
+          size: 8,
+          content: 'old',
+          format: 'markdown',
+          createdAt: '2026-01-01T00:00:00.000Z',
+        },
+      },
+    } as never);
+    const v = await AssetService.versionContent('a1', 1);
+    expect(axiosGet).toHaveBeenCalledWith('/api/assets/a1/versions/1/content');
+    expect(v.content).toBe('old');
+  });
+
+  it('posts a restore and returns the updated asset', async () => {
+    axiosPost.mockResolvedValueOnce({
+      data: { asset: { ...assetRow('a1'), status: 'ready', version: 3 } },
+    } as never);
+    const restored = await AssetService.restore('a1', 1);
+    expect(axiosPost).toHaveBeenCalledWith('/api/assets/a1/restore', { version: 1 });
+    expect(restored.version).toBe(3);
+  });
+});

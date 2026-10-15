@@ -1016,6 +1016,55 @@ describe('Chat streaming route', () => {
     expect(resultEvent.filename).toBeUndefined();
   });
 
+  it('labels edit_file and reports its filename on the result event (#325)', async () => {
+    const cookies = await registerUser('stream-edit-file-label@example.com');
+    mockAgentStream.mockImplementation(async () => ({
+      fullStream: (async function* () {
+        yield { type: 'tool-call', payload: { toolName: 'edit_file', args: {} } };
+        yield {
+          type: 'tool-result',
+          payload: {
+            toolName: 'edit_file',
+            result: { file: { filename: 'agi-final.md', version: 2 } },
+          },
+        };
+        yield { type: 'text-delta', payload: { text: 'Done.' } };
+      })(),
+    }));
+
+    const app = createApp();
+    const response = await request(app)
+      .post('/api/chat/stream')
+      .set('Cookie', cookies)
+      .send({ content: 'update it' });
+
+    expect(response.status).toBe(200);
+    const toolEvents = response.text
+      .split('\n\n')
+      .filter((part) => part.includes('event: tool'))
+      .map((part) =>
+        JSON.parse(
+          part
+            .split('\n')
+            .find((l) => l.startsWith('data: '))!
+            .slice(6),
+        ),
+      );
+    expect(toolEvents[0]).toMatchObject({
+      phase: 'call',
+      name: 'edit_file',
+      label: 'Updated a file',
+    });
+    expect(toolEvents[1]).toEqual(
+      expect.objectContaining({
+        phase: 'result',
+        name: 'edit_file',
+        status: 'ok',
+        filename: 'agi-final.md',
+      }),
+    );
+  });
+
   it('delivers follow-up suggestions on done and persists them on the message', async () => {
     const cookies = await registerUser('stream-suggestions@example.com');
     mockAgentStream.mockImplementation(async () => ({

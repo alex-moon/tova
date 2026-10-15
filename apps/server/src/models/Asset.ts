@@ -97,6 +97,15 @@ const assetSchema = new mongoose.Schema(
       enum: ['user-upload', 'system-generated'],
       default: 'user-upload',
     },
+    // #325: current version number of the file's content. 1 until the first
+    // edit; every `edit_file` write / restore bumps it and snapshots both the
+    // pre-write and new content into `AssetVersion`. Legacy docs read as 1 via
+    // the default. Only `system-generated` files are ever edited, so this stays
+    // 1 for uploads.
+    version: {
+      type: Number,
+      default: 1,
+    },
     // Issue #252 (epic #251): where the file came from — the vocabulary
     // later slices (task artifacts, cross-chat memory) write into. Deliberately
     // ODDBALL-FREE and ADDITIVE: it does not touch the scalar `origin` above.

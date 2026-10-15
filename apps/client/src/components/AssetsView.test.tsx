@@ -16,6 +16,9 @@ vi.mock('../services/assets', async (importOriginal) => {
       content: vi.fn(),
       downloadUrl: vi.fn(),
       thumbnailUrl: vi.fn(),
+      versions: vi.fn(),
+      versionContent: vi.fn(),
+      restore: vi.fn(),
       delete: vi.fn(),
       bulkDownloadUrl: vi.fn(() => '/api/assets/bulk-download'),
       bulkDelete: vi.fn(),
@@ -212,5 +215,118 @@ describe('AssetsView (issue #197)', () => {
     renderView();
     fireEvent.click(await screen.findByTestId('asset-preview-img3'));
     expect(await screen.findByText('(no preview available)')).toBeInTheDocument();
+  });
+});
+
+describe('AssetsView version history (#325)', () => {
+  afterEach(cleanup);
+  beforeEach(() => {
+    vi.mocked(AssetService.list).mockReset();
+    vi.mocked(AssetService.content).mockReset();
+    vi.mocked(AssetService.thumbnailUrl).mockReset();
+    vi.mocked(AssetService.versions).mockReset();
+    vi.mocked(AssetService.versionContent).mockReset();
+    vi.mocked(AssetService.restore).mockReset();
+  });
+
+  const generated = (over: Partial<AssetSummary> = {}) =>
+    asset({ id: 'gen1', filename: 'notes.md', contentType: 'text/markdown', version: 2, ...over });
+
+  it('hides the History control when there is no history', async () => {
+    vi.mocked(AssetService.list).mockResolvedValue({ assets: [asset()], nextCursor: null });
+    vi.mocked(AssetService.content).mockResolvedValue(content());
+    renderView();
+    fireEvent.click(await screen.findByTestId('asset-preview-a1'));
+    await screen.findByTestId('assets-preview-body');
+    expect(screen.queryByTestId('assets-history-toggle')).not.toBeInTheDocument();
+  });
+
+  it('lists versions and previews a past version read-only', async () => {
+    vi.mocked(AssetService.list).mockResolvedValue({ assets: [generated()], nextCursor: null });
+    vi.mocked(AssetService.content).mockResolvedValue(
+      content({ id: 'gen1', filename: 'notes.md', content: 'current body' }),
+    );
+    vi.mocked(AssetService.versions).mockResolvedValue([
+      { version: 2, size: 12, createdAt: new Date().toISOString() },
+      { version: 1, size: 8, createdAt: new Date().toISOString() },
+    ]);
+    vi.mocked(AssetService.versionContent).mockResolvedValue({
+      version: 1,
+      size: 8,
+      content: 'old body',
+      format: 'markdown',
+      createdAt: new Date().toISOString(),
+    });
+
+    renderView();
+    fireEvent.click(await screen.findByTestId('asset-preview-gen1'));
+    await screen.findByTestId('assets-preview-body');
+
+    fireEvent.click(screen.getByTestId('assets-history-toggle'));
+    expect(await screen.findByTestId('assets-history-list')).toBeInTheDocument();
+    expect(screen.getByTestId('assets-history-item-2')).toHaveTextContent('Current');
+
+    fireEvent.click(screen.getByTestId('assets-history-item-1'));
+    expect(await screen.findByTestId('assets-version-preview')).toBeInTheDocument();
+    expect(screen.getByTestId('assets-version-banner')).toHaveTextContent('Version 1');
+    expect(await screen.findByText('old body')).toBeInTheDocument();
+    expect(AssetService.versionContent).toHaveBeenCalledWith('gen1', 1);
+  });
+
+  it('restores a past version and reloads the current content', async () => {
+    vi.mocked(AssetService.list).mockResolvedValue({ assets: [generated()], nextCursor: null });
+    vi.mocked(AssetService.content).mockResolvedValue(
+      content({ id: 'gen1', filename: 'notes.md', content: 'current body' }),
+    );
+    vi.mocked(AssetService.versions).mockResolvedValue([
+      { version: 2, size: 12, createdAt: new Date().toISOString() },
+      { version: 1, size: 8, createdAt: new Date().toISOString() },
+    ]);
+    vi.mocked(AssetService.versionContent).mockResolvedValue({
+      version: 1,
+      size: 8,
+      content: 'old body',
+      format: 'markdown',
+      createdAt: new Date().toISOString(),
+    });
+    vi.mocked(AssetService.restore).mockResolvedValue(generated({ version: 3 }) as AssetSummary);
+
+    renderView();
+    fireEvent.click(await screen.findByTestId('asset-preview-gen1'));
+    await screen.findByTestId('assets-preview-body');
+    fireEvent.click(screen.getByTestId('assets-history-toggle'));
+    fireEvent.click(await screen.findByTestId('assets-history-item-1'));
+
+    fireEvent.click(await screen.findByTestId('assets-version-restore'));
+    await waitFor(() => expect(AssetService.restore).toHaveBeenCalledWith('gen1', 1));
+    // A restore closes the version view and reloads the (now current) body.
+    await waitFor(() =>
+      expect(screen.queryByTestId('assets-version-preview')).not.toBeInTheDocument(),
+    );
+  });
+
+  it('returns from a version preview back to the version list', async () => {
+    vi.mocked(AssetService.list).mockResolvedValue({ assets: [generated()], nextCursor: null });
+    vi.mocked(AssetService.content).mockResolvedValue(content({ id: 'gen1' }));
+    vi.mocked(AssetService.versions).mockResolvedValue([
+      { version: 2, size: 12, createdAt: new Date().toISOString() },
+      { version: 1, size: 8, createdAt: new Date().toISOString() },
+    ]);
+    vi.mocked(AssetService.versionContent).mockResolvedValue({
+      version: 1,
+      size: 8,
+      content: 'old body',
+      format: 'markdown',
+      createdAt: new Date().toISOString(),
+    });
+
+    renderView();
+    fireEvent.click(await screen.findByTestId('asset-preview-gen1'));
+    await screen.findByTestId('assets-preview-body');
+    fireEvent.click(screen.getByTestId('assets-history-toggle'));
+    fireEvent.click(await screen.findByTestId('assets-history-item-1'));
+    await screen.findByTestId('assets-version-preview');
+    fireEvent.click(screen.getByTestId('assets-version-back'));
+    expect(await screen.findByTestId('assets-history-list')).toBeInTheDocument();
   });
 });
