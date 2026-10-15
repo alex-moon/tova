@@ -3,9 +3,11 @@ import {
   routingPrice,
   rosterScore,
   rosterModelsForTurn,
+  recordTtft,
   ROSTER_SEED,
   RosterModel,
 } from './rosterConfig';
+import { ModelRoster } from '../models/ModelRoster';
 
 /*
  * #232 weighted primary pick and roster gating (pure functions; no Mongo).
@@ -182,5 +184,83 @@ describe('ROSTER_SEED (#232 owner-locked roster)', () => {
     expect(rosterModelsForTurn(ROSTER_SEED, true).map((m) => m.modelId)).not.toContain(
       'MiniMaxAI/MiniMax-M3',
     );
+  });
+});
+
+describe('recordTtft (#320 windowed mean)', () => {
+  const modelId = 'test-ttft-window-model';
+
+  const seedDoc = async (ttftMs: number | undefined, samples: number | undefined) => {
+    await ModelRoster.deleteOne({ modelId });
+    await ModelRoster.create({
+      modelId,
+      label: 'Window test',
+      providers: [
+        { provider: 'deepinfra', modelId: 'di-test', ttftMs, ttftSamples: samples },
+        { provider: 'fireworks', modelId: 'fw-test' },
+      ],
+    });
+  };
+
+  const deepinfraEntry = async () => {
+    const doc = await ModelRoster.findOne({ modelId }).lean();
+    const providers = doc?.providers as unknown as
+      | { provider: string; ttftMs?: number; ttftSamples?: number; disabledUntil?: Date | null }[]
+      | undefined;
+    return providers?.find((p) => p.provider === 'deepinfra');
+  };
+
+  afterEach(async () => {
+    await ModelRoster.deleteOne({ modelId });
+    delete process.env.ROSTER_TTFT_WINDOW;
+  });
+
+  it('takes the first observation exactly (no prior samples)', async () => {
+    await seedDoc(undefined, undefined);
+    await recordTtft(modelId, 'deepinfra', 250);
+    const entry = await deepinfraEntry();
+    expect(entry?.ttftMs).toBe(250);
+    expect(entry?.ttftSamples).toBe(1);
+  });
+
+  it('caps the sample count at the window and forgets old observations', async () => {
+    process.env.ROSTER_TTFT_WINDOW = '3';
+    // Seeded history: mean 100 over 2 samples. First fold-in fills the window.
+    await seedDoc(100, 2);
+    await recordTtft(modelId, 'deepinfra', 1000);
+    let entry = await deepinfraEntry();
+    expect(entry?.ttftSamples).toBe(3);
+    expect(entry?.ttftMs).toBeCloseTo((100 * 2 + 1000) / 3);
+
+    // Second fold-in: the old mean's weight is capped at W-1 = 2, so the
+    // seeded history decays out instead of weighing in forever.
+    await recordTtft(modelId, 'deepinfra', 1000);
+    entry = await deepinfraEntry();
+    expect(entry?.ttftSamples).toBe(3);
+    expect(entry?.ttftMs).toBeCloseTo((400 * 2 + 1000) / 3);
+  });
+
+  it('records providers independently', async () => {
+    await seedDoc(undefined, undefined);
+    await recordTtft(modelId, 'deepinfra', 250);
+    await recordTtft(modelId, 'fireworks', 750);
+    const doc = await ModelRoster.findOne({ modelId }).lean();
+    const providers = doc?.providers as unknown as {
+      provider: string;
+      ttftMs?: number;
+    }[];
+    expect(providers.find((p) => p.provider === 'deepinfra')?.ttftMs).toBe(250);
+    expect(providers.find((p) => p.provider === 'fireworks')?.ttftMs).toBe(750);
+  });
+
+  it('clears a cool-off on observation (#232 semantics preserved)', async () => {
+    await seedDoc(undefined, undefined);
+    await ModelRoster.updateOne(
+      { modelId, 'providers.provider': 'deepinfra' },
+      { $set: { 'providers.$.disabledUntil': new Date(Date.now() + 60_000) } },
+    );
+    await recordTtft(modelId, 'deepinfra', 250);
+    const entry = await deepinfraEntry();
+    expect(entry?.disabledUntil).toBeNull();
   });
 });

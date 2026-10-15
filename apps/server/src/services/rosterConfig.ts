@@ -360,12 +360,24 @@ export const rosterModelsForTurn = (
     .filter((model) => model.providers.length > 0);
 
 /*
- * Record a winning TTFT observation as a rolling mean. The Mongo pipeline
- * update keeps the mean in the database (no read-modify-write race between
- * concurrent turns): newMean = (oldMean*oldSamples + ttft) / (oldSamples + 1).
+ * Record a winning TTFT observation as a windowed mean (#320). The Mongo
+ * pipeline update keeps the mean in the database (no read-modify-write race
+ * between concurrent turns): newMean = (oldMean*effective + ttft) / (effective + 1)
+ * with `effective` capped at windowSize()-1, so once the window is full each
+ * new observation gets weight 1/W and older ones decay progressively — an
+ * EWMA equivalent on the same `(ttftMs, ttftSamples)` storage. TTFT is
+ * dominated by current endpoint load, so the mean must track RECENT latency,
+ * not the lifetime average (an unwindowed mean read 18.45s for a healthy
+ * provider on 2026-10-15, mostly historical queue overload).
  * A provider entry with no prior samples treats the old mean as 0 and old
  * samples as 0, so the first observation is exact.
  */
+const windowSize = (): number => {
+  const raw = process.env.ROSTER_TTFT_WINDOW;
+  const parsed = raw === undefined || raw === '' ? NaN : Number(raw);
+  return Number.isInteger(parsed) && (parsed as number) >= 1 ? (parsed as number) : 20;
+};
+
 export const recordTtft = async (
   modelId: string,
   provider: RosterProvider,
@@ -373,6 +385,7 @@ export const recordTtft = async (
 ): Promise<void> => {
   if (!Number.isFinite(ttftMs) || ttftMs < 0) return;
   try {
+    const window = windowSize();
     await ModelRoster.updateOne({ modelId, 'providers.provider': provider }, [
       {
         $set: {
@@ -394,16 +407,26 @@ export const recordTtft = async (
                                 {
                                   $multiply: [
                                     { $ifNull: ['$$p.ttftMs', 0] },
-                                    { $ifNull: ['$$p.ttftSamples', 0] },
+                                    // Cap the old mean's weight: once the
+                                    // window is full, the oldest observation
+                                    // decays out one new sample at a time.
+                                    { $min: [{ $ifNull: ['$$p.ttftSamples', 0] }, window - 1] },
                                   ],
                                 },
                                 ttftMs,
                               ],
                             },
-                            { $add: [{ $ifNull: ['$$p.ttftSamples', 0] }, 1] },
+                            {
+                              $add: [
+                                { $min: [{ $ifNull: ['$$p.ttftSamples', 0] }, window - 1] },
+                                1,
+                              ],
+                            },
                           ],
                         },
-                        ttftSamples: { $add: [{ $ifNull: ['$$p.ttftSamples', 0] }, 1] },
+                        ttftSamples: {
+                          $add: [{ $min: [{ $ifNull: ['$$p.ttftSamples', 0] }, window - 1] }, 1],
+                        },
                         ttftUpdatedAt: '$$NOW',
                         disabledUntil: null,
                       },
