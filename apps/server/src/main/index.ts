@@ -47,13 +47,32 @@ attachConsoleCapture();
  * 502 until a redeploy. Rejections are logged and swallowed so the server
  * keeps serving; an uncaught exception is logged and exits, letting Docker's
  * restart policy bring the process back cleanly rather than limp on in an
- * undefined state.
+ * undefined state — with one scoped carve-out (#358): tesseract.js dispatches
+ * worker failures from inside its own message handler and can escape with a
+ * synchronous throw even when recognizeImage passes `errorHandler` (a
+ * double-settled job rejects into a deleted promise slot). The blast radius
+ * there is one per-call worker that recognizeImage creates and terminates;
+ * the process stays in a defined state and the asset job runner settles the
+ * failure, so those are logged and contained instead of exiting.
  */
+export const isTesseractWorkerError = (err: unknown): boolean => {
+  const stack =
+    typeof err === 'object' && err !== null && 'stack' in err
+      ? String((err as { stack?: unknown }).stack ?? '')
+      : '';
+  // Matches both tesseract.js and tesseract.js-core (prefix).
+  return /node_modules[/\\]tesseract\.js/.test(stack);
+};
+
 export const installProcessSafetyNet = (): void => {
   process.on('unhandledRejection', (reason) => {
     console.error('Unhandled promise rejection:', redactForLog(reason));
   });
   process.on('uncaughtException', (err) => {
+    if (isTesseractWorkerError(err)) {
+      console.error('Contained tesseract worker error:', redactForLog(err));
+      return;
+    }
     console.error('Uncaught exception:', redactForLog(err));
     process.exit(1);
   });

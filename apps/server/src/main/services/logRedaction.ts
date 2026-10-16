@@ -7,9 +7,15 @@
 
 // Policy note: this is the conservative heuristic (option b, plan-145).
 // It targets long/high-entropy segments, quoted request bodies, and JSON
-// blocks; short message tokens (status codes, errno classes, file paths)
-// survive. Whether it is sufficient for short personal content is an open
-// audit question — see docs/done/plan-145-log-redaction.md.
+// blocks; short message tokens (status codes, errno classes) and quoted
+// filesystem paths survive. Paths are code-controlled (fs error messages
+// quote the exact file), and the #358 diagnosis was slowed by redacting
+// them, so the quoted-string rules carve them out — narrowly: POSIX-safe
+// charset, no scheme, short extension-terminated final segment. URLs and
+// token-ish runs still redact, and any 64+-char run is re-caught by the
+// long-run rules regardless. Whether the result is sufficient for short
+// personal content is an open audit question — see
+// docs/done/plan-145-log-redaction.md.
 
 export const REDACTED = '[redacted]';
 
@@ -24,6 +30,40 @@ interface NonError {
 
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null;
 
+// A filesystem path as quoted in fs error messages (`open '/app/x/y.gz'`,
+// `readFile 'dist/main.js'`) and code-controlled logs. Deliberately narrow —
+// this is an allowlist inside an over-redaction-first heuristic:
+// - POSIX-safe charset only (no spaces, quotes, shell metacharacters);
+// - no scheme separator, so URLs (which can embed tokens or user text) never
+//   match;
+// - the final segment must carry a short (1-16 char) file extension, so
+//   opaque runs like `/reset/<token>` or `/p/<id>` still redact. Real paths
+//   virtually always end in a file; extension-less directory paths stay
+//   redacted (conservative miss, accepted);
+// - bounded at 64 chars, aligned with the long-run backstop rules below:
+//   pathological "paths" longer than that stay redacted (plan-145
+//   conservative direction). Real fs error paths are well under this.
+const PATH_SAFE_CHARS = /^[\w./@+~-]+$/;
+const FILE_EXTENSION_END = /\.[A-Za-z0-9]{1,16}$/;
+const PATH_MAX_CHARS = 64;
+
+const isPathShaped = (text: string): boolean =>
+  text.length > 0 &&
+  text.length <= PATH_MAX_CHARS &&
+  !text.includes('://') &&
+  PATH_SAFE_CHARS.test(text) &&
+  FILE_EXTENSION_END.test(text);
+
+// Extraction for the carve-out: a quoted segment (either quote style; the
+// apostrophe-pair risk is neutralised by isPathShaped's strictness — prose
+// between two apostrophes never looks like a path) whose content is
+// path-shaped is swapped for a placeholder that survives every rule below,
+// then restored verbatim at the end. #358: without this, the final catch-all
+// redacts the ENTIRE fs error message once the path is kept (the message is
+// one long line), which is worse than redacting just the path.
+const QUOTED_SEGMENT = /'((?:\\.|[^']){1,300})'|"((?:\\.|[^"]){1,300})"/g;
+const PATH_PLACEHOLDER = (i: number): string => `\u0000${i}\u0000`;
+
 /**
  * Redact user-shaped content from a single string: quoted strings that are
  * long enough to be payload text, JSON-esque blocks, and long token
@@ -31,7 +71,15 @@ const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'obj
  */
 export const redactString = (text: string): string => {
   if (!text) return text;
-  let out = text;
+  const paths: string[] = [];
+  let out = text.replace(
+    QUOTED_SEGMENT,
+    (quoted, sq: string | undefined, dq: string | undefined) => {
+      if (!isPathShaped(sq ?? dq ?? '')) return quoted;
+      paths.push(quoted);
+      return PATH_PLACEHOLDER(paths.length - 1);
+    },
+  );
   // JSON-ish objects/arrays spanning >= 40 chars (includes quoted request
   // bodies embedded by provider errors via stringify)
   out = out.replace(/[{[][\s\S]{40,}[}\]]/g, REDACTED);
@@ -54,7 +102,11 @@ export const redactString = (text: string): string => {
   // embedded prose (provider echo of prompt text). Deliberately aggressive:
   // the conservative direction is over-redaction (plan-145 open question).
   out = out.replace(/[^\n\r]{64,}/g, REDACTED);
-  return out;
+  // eslint-disable-next-line no-control-regex -- the \x00 sentinel is the point
+  return out.replace(/\u0000(\d+)\u0000/g, (_, i: string) => {
+    const path = paths[Number(i)];
+    return path === undefined ? '' : path;
+  });
 };
 
 /** Serialize an unknown value to inspectable text without throwing. */

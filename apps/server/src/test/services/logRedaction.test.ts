@@ -52,6 +52,48 @@ describe('redactString', () => {
     const out = redactString("Provider said: 'the user chat message being echoed onward' 400");
     expect(out).not.toContain('user chat message');
   });
+
+  // #358: fs error messages quote the exact file; redacting the path cost the
+  // outage diagnosis. Paths are code-controlled, so quoted segments that are
+  // narrowly path-shaped survive every rule — including the 64+-char catch-all
+  // that would otherwise swallow the whole (long) error line.
+  it('keeps quoted filesystem paths from fs error messages', () => {
+    const enoent =
+      "Error: ENOENT: no such file or directory, open '/app/assets/tessdata/eng.traineddata.gz'";
+    expect(redactString(enoent)).toBe(enoent);
+    const eacces = "EACCES: permission denied, open '/tmp/tova-ocr-cache/eng.traineddata'";
+    expect(redactString(eacces)).toBe(eacces);
+    const relative = "Error: ENOENT: no such file or directory, open 'dist/main.js'";
+    expect(redactString(relative)).toBe(relative);
+  });
+
+  it('keeps double-quoted filesystem paths', () => {
+    const msg = 'fs read failed for "/app/apps/server/dist/services/ocr.js" during boot';
+    expect(redactString(msg)).toBe(msg);
+  });
+
+  it('still redacts quoted URLs even when path-charset-clean', () => {
+    const url = 'fetch failed for "https://cdn.jsdelivr.net/npm/@tesseract.js-data/eng.gz"';
+    expect(redactString(url)).not.toContain('cdn.jsdelivr.net');
+  });
+
+  it('still redacts quoted token-ish runs without a file extension', () => {
+    const out = redactString("reset link path '/reset/abc123def456ghi789' leaked");
+    expect(out).not.toContain('abc123def456ghi789');
+  });
+
+  it('still redacts quoted prose even when it ends in a dot-something', () => {
+    const out = redactString(
+      'provider echoed: "please summarize my tax return.pdf and more words"',
+    );
+    expect(out).not.toContain('tax return');
+  });
+
+  it('still redacts a pathological 64+-char path-shaped run (backstop)', () => {
+    const deep = `/app/${'a/'.repeat(40)}x.gz`;
+    const out = redactString(`open '${deep}' failed`);
+    expect(out).not.toContain(deep);
+  });
 });
 
 describe('redactForLog', () => {
@@ -111,5 +153,17 @@ describe('redactForLog', () => {
     const out = redactForLog(new TypeError());
     expect(out).toContain('TypeError');
     expect(out).toContain('\n    at');
+  });
+
+  it('keeps the full fs error message with its path, as prod logs it (#358)', () => {
+    // The exact shape Loki showed for the #358 outage, minus the redaction:
+    // doubled "Error:" from tesseract's throw Error(data), quoted absolute
+    // path. The whole line must stay readable.
+    const err = new Error(
+      "Error: ENOENT: no such file or directory, open '/app/assets/tessdata/eng.traineddata.gz'",
+    );
+    const out = redactForLog(err);
+    expect(out).toContain('ENOENT: no such file or directory');
+    expect(out).toContain('/app/assets/tessdata/eng.traineddata.gz');
   });
 });

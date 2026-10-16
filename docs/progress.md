@@ -14,7 +14,14 @@ now located by walking up from `__dirname` to the vendored copy (pinned by
 tests for both layouts), OCR worker failures are contained (`errorHandler` +
 `withTimeout` around `createWorker`, which tesseract v7 otherwise leaves
 un-settled on load failure), and the live backend gets
-`restart: unless-stopped`.
+`restart: unless-stopped`. Hardening follow-ups the same day: quoted
+filesystem paths survive log redaction (narrowly — POSIX charset, no scheme,
+extension-terminated, ≤64 chars; they are code-controlled and redacting them
+slowed the diagnosis), and the process safety net contains tesseract-scoped
+uncaught exceptions instead of exiting (tesseract can still throw from its
+own message dispatch, e.g. a double-settled job rejecting into a deleted
+promise slot; the blast radius is one per-call worker, so the process keeps
+serving — everything else keeps the #248 exit policy).
 
 #260 db:sync discoverability (in flight, branch `fix/tv/260-db-sync-friction`):
 agents kept reaching for `mongosh`/`mongodump`/`mongorestore` instead of
