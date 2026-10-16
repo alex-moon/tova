@@ -79,7 +79,7 @@ describe('ConnectorsView (#331)', () => {
       expect(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     }
     // Watchlisted entries say coming soon, not connect.
-    expect(screen.getByTestId('connector-card-spotify-status')).toHaveTextContent('Coming soon');
+    expect(screen.getByTestId('connector-card-slack-status')).toHaveTextContent('Coming soon');
     expect(screen.getByTestId('connector-card-trello-status')).toHaveTextContent('Connect');
   });
 
@@ -111,7 +111,7 @@ describe('ConnectorsView (#331)', () => {
 
   it('shows watchlisted copy and no connect button in the modal', async () => {
     render(<ConnectorsView />);
-    fireEvent.click(await screen.findByTestId('connector-card-spotify'));
+    fireEvent.click(await screen.findByTestId('connector-card-slack'));
     await screen.findByTestId('connector-modal');
     expect(screen.getByTestId('connector-modal-watchlist')).toBeInTheDocument();
     expect(screen.queryByTestId('connector-modal-connect')).not.toBeInTheDocument();

@@ -70,7 +70,9 @@ export const CONNECTOR_CATALOG: CatalogEntry[] = [
     authType: 'mcp.oauth',
     endpoint: 'https://mcp-gateway-external-pilot.spotify.net/mcp',
     summary: 'Control playback and browse your library.',
-    state: 'live',
+    state: 'watchlisted',
+    watchlistNote:
+      "Spotify rejects http://localhost redirect URIs (https-only policy) — connectable from the deployed origin once its static client is configured there (#342).",
     brandColor: '#1ED760',
     iconRef: 'spotify',
   },
