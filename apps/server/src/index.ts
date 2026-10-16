@@ -123,9 +123,6 @@ export const createApp = (): Express => {
   app.use('/api/assets', assetRoutes);
   app.use('/api/tasks', taskRoutes);
   app.use('/api/connectors', connectorRoutes);
-  // Deprecated path alias (#329): keeps the old path alive, but the wire
-  // contract is the new one (no type -> 400, `connectors` response keys).
-  app.use('/api/mcp-servers', connectorRoutes);
 
   app.get('/api/health', (_req, res) => {
     res.json({ status: 'ok' });

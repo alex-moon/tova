@@ -40,10 +40,11 @@ Order: 0 → {1, 3, 4}; 2 after 1; 5 anytime.
 
 - [x] #329 groundwork (connector model, types, shared contracts, migration) — PR #336
 - [x] #327 OAuth engine for `mcp.oauth` connectors — PR #337
-- [ ] #330 curated OAuth connector catalog (hand-verified)
-- [ ] #331 `/connectors` UI (grid, modal, mobile-first)
-- [ ] #332 PAT per-provider instructions
-- [ ] #333 quick wins (suggestion refresh, add-time error copy)
+- [x] #330 curated OAuth connector catalog (hand-verified: Trello, Atlassian, Notion, Linear, Dropbox, GitHub-PAT) — PRs #343, #345
+- [x] #331 `/connectors` UI (grid, modal, mobile-first) — PR #338
+- [x] #332 PAT per-provider instructions — PR #339
+- [x] #342 static/BYO OAuth clients for DCR-less providers — PR #345
+- [x] #333 wash-up (re-scoped at close-out: OAuth-required copy, in-chat health, 413 copy, alias retirement, RFC 7009 revocation, golden-six view) — this PR
 - [ ] Final epic PR to `main` with `npm run ci` green
 
 ## Follow-ups

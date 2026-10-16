@@ -72,7 +72,7 @@ export const CONNECTOR_CATALOG: CatalogEntry[] = [
     summary: 'Control playback and browse your library.',
     state: 'watchlisted',
     watchlistNote:
-      "Spotify rejects http://localhost redirect URIs (https-only policy) — connectable from the deployed origin once its static client is configured there (#342).",
+      'Spotify rejects http://localhost redirect URIs (https-only policy) — connectable from the deployed origin once its static client is configured there (#342).',
     brandColor: '#1ED760',
     iconRef: 'spotify',
   },

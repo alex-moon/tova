@@ -62,8 +62,17 @@ export const reasonFrom = (error: unknown): string => {
 
 // The model-facing degraded result text (#82): the only channel we own for
 // "the model surfaces that it tried to use the tool but it failed" is the
-// tool result itself, so the instruction rides in the text.
+// tool result itself, so the instruction rides in the text. Auth-flavored
+// failures add the re-connect pointer (#333): the fix is a user action in
+// the Connectors view, and this is the only place the user is looking.
+const AUTH_FLAVORED =
+  /401|403|invalid_token|unauthorized|needs-reauth|not connected|unreachable|fetch failed|ECONNREFUSED/i;
+
 export const degradedToolError = (toolId: string, reason?: string): string =>
   `Tool ${toolId} failed to run${
     reason ? `: ${reason}` : ' (reason unknown)'
-  }. It is unavailable for the rest of this completion — tell the user you tried to use it but it could not be used.`;
+  }. It is unavailable for the rest of this completion — tell the user you tried to use it but it could not be used.${
+    reason && AUTH_FLAVORED.test(reason)
+      ? ' The connector providing this tool may need re-connecting in the Connectors view.'
+      : ''
+  }`;

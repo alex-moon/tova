@@ -20,12 +20,15 @@ jest.mock('../services/oauthConnectors', () => ({
   ...jest.requireActual('../services/oauthConnectors'),
   startConnectorOAuth: jest.fn(),
   completeConnectorOAuth: jest.fn(),
+  probeConnectorOAuth: jest.fn(),
 }));
 
 const mockStartConnectorOAuth = jest.requireMock('../services/oauthConnectors')
   .startConnectorOAuth as jest.Mock;
 const mockCompleteConnectorOAuth = jest.requireMock('../services/oauthConnectors')
   .completeConnectorOAuth as jest.Mock;
+const mockProbeConnectorOAuth = jest.requireMock('../services/oauthConnectors')
+  .probeConnectorOAuth as jest.Mock;
 
 // The mocked module registry, resolved lazily (after jest.mock hoisting), so
 // the shared jest.fn instances are read from the mock, not typed imports.
@@ -53,6 +56,9 @@ beforeEach(() => {
     authorizationUrl: 'https://as.example.com/authorize?client_id=dcr',
   });
   mockCompleteConnectorOAuth.mockReset();
+  // Add-time OAuth probe (#333): default to "no OAuth advertised" — the
+  // generic unreachable copy. Individual tests override per case.
+  mockProbeConnectorOAuth.mockReset().mockResolvedValue(null);
 });
 
 describe('POST /api/connectors (issues #36, #329)', () => {
@@ -144,6 +150,25 @@ describe('POST /api/connectors (issues #36, #329)', () => {
 
     expect(res.status).toBe(422);
     expect(res.body.message).toMatch(/not reachable.*ECONNREFUSED/u);
+  });
+
+  it('says an OAuth-only endpoint needs Connect, not a token (#333 wash-up)', async () => {
+    const { app, cookie } = await registerUser('conn-oauthonly@example.com');
+    mockListMcpTools.mockRejectedValue(new Error('MCP error 401: invalid_token'));
+    mockProbeConnectorOAuth.mockResolvedValue({
+      authorizationServerUrl: 'https://as.example.com',
+      metadata: { authorization_endpoint: 'https://as.example.com/authorize' },
+    });
+
+    const res = await request(app)
+      .post('/api/connectors')
+      .set('Cookie', cookie)
+      .send({ type: 'mcp.pat', name: 'oauth-only', url: 'https://oauthonly.example.com/mcp' });
+
+    expect(res.status).toBe(422);
+    expect(res.body.message).toMatch(/requires OAuth sign-in/u);
+    expect(res.body.message).toMatch(/Connect on the connector card/u);
+    expect(res.body.message).not.toContain('invalid_token');
   });
 
   it('rejects non-https URLs and old-style header payloads', async () => {
@@ -245,16 +270,10 @@ describe('GET /api/connectors (issues #36, #329)', () => {
     expect(res.status).toBe(401);
   });
 
-  it('keeps the deprecated /api/mcp-servers alias working (#329)', async () => {
+  it('retires the /api/mcp-servers alias with 404 (#333 wash-up)', async () => {
     const { app, cookie } = await registerUser('conn-alias@example.com');
-    await request(app)
-      .post('/api/connectors')
-      .set('Cookie', cookie)
-      .send({ type: 'mcp.pat', name: 'alias', url: 'https://alias.example.com/mcp' });
-
     const res = await request(app).get('/api/mcp-servers').set('Cookie', cookie);
-    expect(res.status).toBe(200);
-    expect(res.body.connectors.map((s: { name: string }) => s.name)).toContain('alias');
+    expect(res.status).toBe(404);
   });
 });
 

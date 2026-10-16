@@ -6,6 +6,8 @@ import { AssetJob } from '../models/AssetJob';
 import { spacesWorkspaceStorage } from './workspaceStorage';
 import { purgeUserTraces } from './tracePurge';
 import { Connector } from '../models/Connector';
+import type { ConnectorDocument } from '../models/Connector';
+import { readConnectorVault } from './oauthConnectors';
 
 /*
  * Factory reset (issue #143): a full wipe of everything a user's account
@@ -36,6 +38,41 @@ export interface UserDataPurgeResult {
   failedObjects: string[];
 }
 
+/*
+ * RFC 7009 best-effort grant revocation (#333): deleting the row kills the
+ * tokens at rest, but the grant stays live at the provider. When the vault's
+ * stored AS metadata advertises a revocation endpoint, POST the refresh
+ * token (revoking it revokes the grant's access tokens too); no advertised
+ * endpoint, or any failure, never blocks the sweep — it is a nicety, and the
+ * row (and tokens) are deleted regardless.
+ */
+const revokeOAuthGrants = async (connectors: ConnectorDocument[]): Promise<void> => {
+  await Promise.allSettled(
+    connectors.map(async (connector) => {
+      if (connector.type !== 'mcp.oauth' || !connector.oauth) return;
+      let token: string | undefined;
+      let revocationEndpoint: string | undefined;
+      try {
+        const vault = readConnectorVault(connector);
+        token = vault?.refreshToken ?? vault?.accessToken;
+        // The SDK's zod schema carries revocation_endpoint but its TS type
+        // omits it — read it through the wire shape.
+        revocationEndpoint = (vault?.metadata as { revocation_endpoint?: string } | undefined)
+          ?.revocation_endpoint;
+      } catch {
+        return; // undecryptable or key missing: the row delete below still wipes the material
+      }
+      if (!token || !revocationEndpoint) return;
+      await fetch(revocationEndpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({ token }),
+        signal: AbortSignal.timeout(5000),
+      }).catch(() => undefined);
+    }),
+  );
+};
+
 export const purgeAllUserData = async (
   userId: string | Types.ObjectId,
 ): Promise<UserDataPurgeResult> => {
@@ -56,6 +93,10 @@ export const purgeAllUserData = async (
   // messages, asset docs, the job rows keyed by assetId (AssetJob has no
   // userId, so it is swept via the pre-fetched asset ids), and the
   // user-scoped connector configs — platform connectors are left alone.
+  // OAuth grants are revoked at their providers first (best-effort, #333):
+  // the vault must be read before the docs are gone.
+  const oauthConnectors = await Connector.find({ scope: 'user', userId, type: 'mcp.oauth' });
+  await revokeOAuthGrants(oauthConnectors);
   await Promise.all([
     Message.deleteMany({ sessionId: { $in: sessionIds } }),
     Asset.deleteMany({ userId }),

@@ -698,11 +698,11 @@ describe('confirmationForToolResults (#195)', () => {
 });
 
 describe('streamingErrorMessage (#77, #117)', () => {
-  it('maps 413 / request-too-large errors to an actionable MCP-rate-limit message', () => {
-    expect(streamingErrorMessage({ statusCode: 413 })).toMatch(/MCP servers/);
+  it('maps 413 / request-too-large errors to an actionable connector-rate-limit message (#333)', () => {
+    expect(streamingErrorMessage({ statusCode: 413 })).toMatch(/connectors/);
     expect(
       streamingErrorMessage(new Error('Request too large for model `openai/gpt-oss-120b`')),
-    ).toMatch(/MCP servers/);
+    ).toMatch(/connectors/);
   });
 
   it('maps 429 / rate-limit errors to an actionable retry message (#117)', () => {
@@ -721,7 +721,7 @@ describe('streamingErrorMessage (#77, #117)', () => {
     // 413 takes precedence — it is the more specific diagnosis of the same
     // "tokens" family, and #117 must not unlink #77's message.
     expect(streamingErrorMessage({ statusCode: 413, message: 'TPM exceeded' })).toMatch(
-      /MCP servers/,
+      /connectors/,
     );
   });
 

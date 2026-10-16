@@ -48,7 +48,9 @@ test('grid renders the catalog with statuses and opens the modal', async ({ page
 
   await expect(page.getByTestId('connector-card-notion-status')).toHaveText('Connected');
   await expect(page.getByTestId('connector-card-trello-status')).toHaveText('Connect');
-  await expect(page.getByTestId('connector-card-slack-status')).toHaveText('Coming soon');
+  // #333: watchlisted entries never render — the grid shows the golden six.
+  await expect(page.getByTestId('connector-card-spotify')).toHaveCount(0);
+  await expect(page.getByTestId('connector-card-slack')).toHaveCount(0);
   await expect(page.getByTestId('connectors-count')).toHaveText('1 connected');
 
   await page.getByTestId('connector-card-trello').click();

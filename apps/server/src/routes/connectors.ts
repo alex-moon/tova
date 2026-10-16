@@ -15,12 +15,24 @@ import {
   ConnectorOAuthError,
   completeConnectorOAuth,
   hasVaultedAuth,
+  probeConnectorOAuth,
   readConnectorVault,
   redirectOriginFrom,
   startConnectorOAuth,
 } from '../services/oauthConnectors';
 
 const router = express.Router();
+
+// Discovery probe for the add-time copy (#333): true when the endpoint
+// advertises OAuth. A failed probe (network, SSRF guard) answers false —
+// the generic unreachable copy is the honest fallback there.
+const connectorAdvertisesOAuth = async (url: string): Promise<boolean> => {
+  try {
+    return (await probeConnectorOAuth(url)) !== null;
+  } catch {
+    return false;
+  }
+};
 
 /*
  * Personal connector registry (issues #36, #329). Only user-scope documents
@@ -77,6 +89,16 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
       // instead of triggering a second connection round-trip.
       tools = await listMcpTools(url, headers);
     } catch (err) {
+      // An OAuth-only endpoint probed with a bearer (or nothing) fails the
+      // handshake with an auth error that reads as "bad token" — but no
+      // token will ever work here (#333). Probe discovery: when OAuth is
+      // advertised, point at the Connect flow instead of the raw error.
+      if (await connectorAdvertisesOAuth(url)) {
+        return res.status(422).json({
+          message:
+            'This endpoint requires OAuth sign-in — use Connect on the connector card instead of a token.',
+        });
+      }
       const message = err instanceof Error ? err.message : 'MCP handshake failed';
       return res.status(422).json({ message: `Connector is not reachable: ${message}` });
     }
