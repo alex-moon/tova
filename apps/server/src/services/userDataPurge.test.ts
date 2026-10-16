@@ -3,7 +3,8 @@ import { Session } from '../models/Session';
 import { Message } from '../models/Message';
 import { Asset } from '../models/Asset';
 import { AssetJob } from '../models/AssetJob';
-import { McpServer } from '../models/McpServer';
+import { Connector } from '../models/Connector';
+import { encryptEnvelope, MCP_ENCRYPTION_KEY_ENV_VAR } from './crypto';
 import { purgeAllUserData } from './userDataPurge';
 
 // Data-level coverage for purgeAllUserData (issue #143 T1): every
@@ -62,7 +63,7 @@ const seedAssetsAndMcp = async (uid: mongoose.Types.ObjectId) => {
     status: 'ready',
   });
   await AssetJob.create({ assetId: asset._id });
-  const mcpServer = await McpServer.create({
+  const connector = await Connector.create({
     scope: 'user',
     userId: uid,
     name: 'remote-tools',
@@ -70,7 +71,7 @@ const seedAssetsAndMcp = async (uid: mongoose.Types.ObjectId) => {
     headers: { iv: 'iv', tag: 'tag', ciphertext: 'cipher' },
     headersConfigured: true,
   });
-  return { asset, mcpServer };
+  return { asset, connector };
 };
 
 describe('purgeAllUserData (issue #143: factory reset)', () => {
@@ -93,7 +94,7 @@ describe('purgeAllUserData (issue #143: factory reset)', () => {
     const owner = userId();
     const other = userId();
     // A platform server is ownerless and must never be swept by any user's reset.
-    await McpServer.create({
+    await Connector.create({
       scope: 'platform',
       name: 'platform-tools',
       url: 'https://p.example.com',
@@ -114,10 +115,10 @@ describe('purgeAllUserData (issue #143: factory reset)', () => {
     expect(await Asset.countDocuments({ userId: owner })).toBe(0);
     // AssetJob has no userId: swept by the owner's asset ids only.
     expect(await AssetJob.countDocuments({ assetId: otherAsset.asset._id })).toBe(1);
-    // User-scoped MCP server configs (urls + encrypted auth headers) die too.
-    expect(await McpServer.countDocuments({ scope: 'user', userId: owner })).toBe(0);
+    // User-scoped connector configs (urls + encrypted auth headers) die too.
+    expect(await Connector.countDocuments({ scope: 'user', userId: owner })).toBe(0);
     // The ownerless platform server is untouched.
-    expect(await McpServer.countDocuments({ scope: 'platform' })).toBe(1);
+    expect(await Connector.countDocuments({ scope: 'platform' })).toBe(1);
 
     // Other user: nothing changed.
     const otherSessions = await Session.find({ userId: other }).lean();
@@ -197,5 +198,62 @@ describe('purgeAllUserData (issue #143: factory reset)', () => {
 
     expect(result.failedObjects).toEqual([`${uid}/chats/*`]);
     expect(await Session.countDocuments({ userId: uid })).toBe(0);
+  });
+});
+
+describe('RFC 7009 grant revocation on factory reset (#333 wash-up)', () => {
+  beforeAll(() => {
+    process.env[MCP_ENCRYPTION_KEY_ENV_VAR] = 'purge-oauth-test-key';
+  });
+
+  const createVaulted = (owner: mongoose.Types.ObjectId, vault: Record<string, unknown>) =>
+    Connector.create({
+      type: 'mcp.oauth',
+      scope: 'user',
+      userId: owner,
+      name: 'vaulted',
+      url: 'https://mcp.example.com/mcp',
+      oauth: encryptEnvelope(JSON.stringify(vault)),
+    });
+
+  it('posts the refresh token to the advertised revocation endpoint, then sweeps the row', async () => {
+    const owner = userId();
+    await createVaulted(owner, {
+      accessToken: 'at-1',
+      refreshToken: 'rt-1',
+      metadata: { revocation_endpoint: 'https://as.example.com/revoke' },
+    });
+    const fetchSpy = jest
+      .spyOn(global, 'fetch')
+      .mockResolvedValue(new Response(null, { status: 200 }));
+
+    try {
+      await purgeAllUserData(owner);
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+      const [url, init] = fetchSpy.mock.calls[0];
+      expect(url).toBe('https://as.example.com/revoke');
+      expect(init?.method).toBe('POST');
+      expect((init?.body as URLSearchParams).get('token')).toBe('rt-1');
+      // The grant dies at the provider AND the row (with its vault) dies here.
+      expect(await Connector.countDocuments({ scope: 'user', userId: owner })).toBe(0);
+    } finally {
+      fetchSpy.mockRestore();
+    }
+  });
+
+  it('skips revocation when the AS advertises no revocation endpoint', async () => {
+    const owner = userId();
+    await createVaulted(owner, { accessToken: 'at-2', refreshToken: 'rt-2' });
+    const fetchSpy = jest
+      .spyOn(global, 'fetch')
+      .mockResolvedValue(new Response(null, { status: 200 }));
+
+    try {
+      await purgeAllUserData(owner);
+      expect(fetchSpy).not.toHaveBeenCalled();
+      expect(await Connector.countDocuments({ scope: 'user', userId: owner })).toBe(0);
+    } finally {
+      fetchSpy.mockRestore();
+    }
   });
 });

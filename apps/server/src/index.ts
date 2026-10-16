@@ -15,7 +15,7 @@ import adminEvalsRoutes from './routes/adminEvals';
 import profileRoutes from './routes/profile';
 import assetRoutes from './routes/assets';
 import taskRoutes from './routes/tasks';
-import mcpServerRoutes from './routes/mcpServers';
+import connectorRoutes from './routes/connectors';
 import { buildMongoUri } from '@tova/shared';
 import { getJwtSecret } from './config/jwt';
 import helmet from 'helmet';
@@ -122,7 +122,7 @@ export const createApp = (): Express => {
   app.use('/api/profile', profileRoutes);
   app.use('/api/assets', assetRoutes);
   app.use('/api/tasks', taskRoutes);
-  app.use('/api/mcp-servers', mcpServerRoutes);
+  app.use('/api/connectors', connectorRoutes);
 
   app.get('/api/health', (_req, res) => {
     res.json({ status: 'ok' });

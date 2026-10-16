@@ -1,12 +1,12 @@
 import React, { useState } from 'react';
 import { toast } from 'sonner';
+import { ChevronRight } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import type { Theme } from '@/theme';
 import AuthService, { AuthError } from '../services/auth';
 import { persistTheme, resolveTheme } from '../theme';
 import { useAuth } from '../hooks/useAuth';
-import McpServersSection from './McpServersSection';
 
 const PREFERRED_NAME_LIMIT = 20;
 const CUSTOM_INSTRUCTIONS_LIMIT = 4000;
@@ -215,7 +215,19 @@ const ProfileView = () => {
               className="w-full rounded-lg border border-border bg-transparent px-3 py-1 text-base outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/30"
             />
           </label>
-          <McpServersSection />
+          <a
+            href="/connectors"
+            data-testid="profile-connectors-link"
+            className="flex items-center justify-between rounded-lg border border-border p-3 text-sm transition-colors hover:bg-accent"
+          >
+            <span>
+              <span className="block font-medium">Connectors</span>
+              <span className="block text-xs text-muted-foreground">
+                Link your services — Notion, Slack, Dropbox and more.
+              </span>
+            </span>
+            <ChevronRight className="size-4 shrink-0 text-muted-foreground" />
+          </a>
           <fieldset className="text-sm">
             <legend className="mb-1 block">Delete confirmations</legend>
             {(['chat', 'file'] as const).map((target) => (

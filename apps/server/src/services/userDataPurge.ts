@@ -5,7 +5,9 @@ import { Asset } from '../models/Asset';
 import { AssetJob } from '../models/AssetJob';
 import { spacesWorkspaceStorage } from './workspaceStorage';
 import { purgeUserTraces } from './tracePurge';
-import { McpServer } from '../models/McpServer';
+import { Connector } from '../models/Connector';
+import type { ConnectorDocument } from '../models/Connector';
+import { readConnectorVault } from './oauthConnectors';
 
 /*
  * Factory reset (issue #143): a full wipe of everything a user's account
@@ -18,9 +20,11 @@ import { McpServer } from '../models/McpServer';
  *
  * Under factory reset NOTHING survives: sessions are HARD-deleted (including
  * already-soft-deleted ones), asset docs and their Spaces bytes, chat-scoped
- * workspace files, asset-derived job rows, and user-scoped MCP server configs
- * (their urls plus AES-256-GCM-encrypted auth header envelopes are secret
- * material at rest, critic pass 2026-09-23) all go.
+ * workspace files, asset-derived job rows, and user-scoped connector configs
+ * (their urls plus AES-256-GCM-encrypted auth material — headers today,
+ * OAuth token vaults with #327 — is secret material at rest, critic pass
+ * 2026-09-23) all go. The auth vault lives inside the swept connector
+ * document, so no separate token collection can escape this list (#327).
  * Exceptions: user *settings* (customInstructions, theme, startupChat,
  * confirmDeletes, zdr) are preferences, not data — intentionally NOT wiped
  * here; and the account itself stays (the user is still logged in and can
@@ -33,6 +37,41 @@ export interface UserDataPurgeResult {
   // surface the count so the UI can warn the user.
   failedObjects: string[];
 }
+
+/*
+ * RFC 7009 best-effort grant revocation (#333): deleting the row kills the
+ * tokens at rest, but the grant stays live at the provider. When the vault's
+ * stored AS metadata advertises a revocation endpoint, POST the refresh
+ * token (revoking it revokes the grant's access tokens too); no advertised
+ * endpoint, or any failure, never blocks the sweep — it is a nicety, and the
+ * row (and tokens) are deleted regardless.
+ */
+const revokeOAuthGrants = async (connectors: ConnectorDocument[]): Promise<void> => {
+  await Promise.allSettled(
+    connectors.map(async (connector) => {
+      if (connector.type !== 'mcp.oauth' || !connector.oauth) return;
+      let token: string | undefined;
+      let revocationEndpoint: string | undefined;
+      try {
+        const vault = readConnectorVault(connector);
+        token = vault?.refreshToken ?? vault?.accessToken;
+        // The SDK's zod schema carries revocation_endpoint but its TS type
+        // omits it — read it through the wire shape.
+        revocationEndpoint = (vault?.metadata as { revocation_endpoint?: string } | undefined)
+          ?.revocation_endpoint;
+      } catch {
+        return; // undecryptable or key missing: the row delete below still wipes the material
+      }
+      if (!token || !revocationEndpoint) return;
+      await fetch(revocationEndpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({ token }),
+        signal: AbortSignal.timeout(5000),
+      }).catch(() => undefined);
+    }),
+  );
+};
 
 export const purgeAllUserData = async (
   userId: string | Types.ObjectId,
@@ -53,12 +92,16 @@ export const purgeAllUserData = async (
   // Mongo sweep — every collection enumerated explicitly (issue #143):
   // messages, asset docs, the job rows keyed by assetId (AssetJob has no
   // userId, so it is swept via the pre-fetched asset ids), and the
-  // user-scoped MCP server configs — platform servers are left alone.
+  // user-scoped connector configs — platform connectors are left alone.
+  // OAuth grants are revoked at their providers first (best-effort, #333):
+  // the vault must be read before the docs are gone.
+  const oauthConnectors = await Connector.find({ scope: 'user', userId, type: 'mcp.oauth' });
+  await revokeOAuthGrants(oauthConnectors);
   await Promise.all([
     Message.deleteMany({ sessionId: { $in: sessionIds } }),
     Asset.deleteMany({ userId }),
     AssetJob.deleteMany({ assetId: { $in: assetIds } }),
-    McpServer.deleteMany({ scope: 'user', userId }),
+    Connector.deleteMany({ scope: 'user', userId }),
     // Hard delete of ALL owned sessions — soft-deleted ones included; nothing
     // survives a factory reset.
     Session.deleteMany({ userId }),

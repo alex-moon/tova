@@ -1,12 +1,12 @@
 import { RequestContext } from '@mastra/core/request-context';
-import { McpServer } from '../models/McpServer';
+import { Connector } from '../models/Connector';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import {
   callMcpTool,
-  clearMcpCachesForTests,
-  mcpToolsetsForUser,
+  clearConnectorCachesForTests,
+  connectorToolsetsForUser,
   zodFromJsonSchema,
-} from './mcpService';
+} from './connectorService';
 import { toolIsFailed } from './toolDegrade';
 
 const LIST_TOOLS_RESULT = {
@@ -50,12 +50,17 @@ jest.mock('@modelcontextprotocol/sdk/client/sse.js', () => ({
 
 jest.mock('./crypto', () => ({
   decryptEnvelope: jest.fn(() => JSON.stringify({ Authorization: 'Bearer from-mock-decrypt' })),
+  encryptEnvelope: jest.fn((plaintext: string) => ({
+    iv: 'a',
+    tag: 'b',
+    ciphertext: plaintext.slice(0, 10),
+  })),
 }));
 
 const USER_ID = '507f1f77bcf86cd799439011';
 
 beforeEach(() => {
-  clearMcpCachesForTests();
+  clearConnectorCachesForTests();
   mockListTools.mockClear().mockResolvedValue(LIST_TOOLS_RESULT);
   mockCallTool.mockReset();
   mockConnect.mockClear().mockResolvedValue(undefined);
@@ -65,19 +70,19 @@ beforeEach(() => {
   sseTransport.mockReset().mockImplementation(() => ({}) as never);
 });
 
-describe('mcpService', () => {
-  it('returns no toolsets for a user with no MCP servers', async () => {
-    const toolsets = await mcpToolsetsForUser(USER_ID);
+describe('connectorService', () => {
+  it('returns no toolsets for a user with no connectors', async () => {
+    const toolsets = await connectorToolsetsForUser(USER_ID);
     expect(toolsets).toEqual({});
   });
 
-  it('exposes one toolset per platform server with wrapped tools', async () => {
-    await McpServer.create({
+  it('exposes one toolset per platform connector with wrapped tools', async () => {
+    await Connector.create({
       scope: 'platform',
       name: 'platform-tools',
       url: 'https://mcp.example.com/mcp',
     });
-    const toolsets = await mcpToolsetsForUser(USER_ID);
+    const toolsets = await connectorToolsetsForUser(USER_ID);
     // Server name sanitization keeps the toolset key stable and prefixed.
     expect(Object.keys(toolsets)).toEqual(['mcp_platform_tools']);
     expect(Object.keys(toolsets.mcp_platform_tools)).toEqual([
@@ -86,7 +91,7 @@ describe('mcpService', () => {
     ]);
   });
 
-  it('skips servers whose handshake fails', async () => {
+  it('skips connectors whose handshake fails', async () => {
     // A dead host fails both transport attempts (streamable then the SSE
     // fallback), so it is skipped from the toolset entirely.
     streamableTransport.mockImplementation((url: URL) => {
@@ -97,22 +102,52 @@ describe('mcpService', () => {
       if (url.hostname === 'dead.example.com') throw new Error('ECONNREFUSED');
       return {} as never;
     });
-    await McpServer.create({
+    await Connector.create({
       scope: 'platform',
-      name: 'dead-server',
+      name: 'dead-connector',
       url: 'https://dead.example.com/mcp',
     });
-    await McpServer.create({
+    await Connector.create({
       scope: 'platform',
       name: 'platform-tools',
       url: 'https://mcp.example.com/mcp',
     });
-    const toolsets = await mcpToolsetsForUser(USER_ID);
+    const toolsets = await connectorToolsetsForUser(USER_ID);
     expect(Object.keys(toolsets)).toEqual(['mcp_platform_tools']);
   });
 
-  it('decrypts stored auth headers before connecting', async () => {
-    await McpServer.create({
+  it('sends the vaulted bearer token for mcp.oauth connectors (#327)', async () => {
+    await Connector.create({
+      type: 'mcp.oauth',
+      scope: 'user',
+      userId: USER_ID,
+      name: 'oauthed',
+      url: 'https://oauthed.example.com/mcp',
+      // The shared crypto mock decrypts any envelope to a header JSON; for
+      // the oauth branch the vault shape is read instead (accessToken).
+      oauth: { iv: 'a', tag: 'b', ciphertext: 'vault' },
+    });
+    // The oauth vault JSON differs from the pat header JSON; point the mock
+    // at the vault shape for this doc by re-writing decryptEnvelope's return.
+    const { decryptEnvelope } = jest.requireMock('./crypto') as {
+      decryptEnvelope: jest.Mock;
+    };
+    decryptEnvelope.mockReturnValueOnce(
+      JSON.stringify({
+        accessToken: 'vault-token',
+        authorizationServerUrl: 'https://as.example.com',
+        expiresAt: Date.now() + 3600_000,
+      }),
+    );
+    await connectorToolsetsForUser(USER_ID);
+    expect(streamableTransport).toHaveBeenCalledWith(
+      expect.objectContaining({ origin: 'https://oauthed.example.com' }),
+      { requestInit: { headers: { Authorization: 'Bearer vault-token' } } },
+    );
+  });
+
+  it('decrypts stored mcp.pat auth headers before connecting', async () => {
+    await Connector.create({
       scope: 'user',
       userId: USER_ID,
       name: 'personal',
@@ -120,7 +155,7 @@ describe('mcpService', () => {
       headers: { iv: 'a', tag: 'b', ciphertext: 'c' },
       headersConfigured: true,
     });
-    await mcpToolsetsForUser(USER_ID);
+    await connectorToolsetsForUser(USER_ID);
     expect(streamableTransport).toHaveBeenCalledWith(
       expect.objectContaining({ origin: 'https://personal.example.com' }),
       { requestInit: { headers: { Authorization: 'Bearer from-mock-decrypt' } } },
@@ -128,59 +163,60 @@ describe('mcpService', () => {
   });
 
   it('caches resolutions for one TTL window', async () => {
-    await McpServer.create({
+    await Connector.create({
       scope: 'platform',
       name: 'platform-tools',
       url: 'https://mcp.example.com/mcp',
     });
-    await mcpToolsetsForUser(USER_ID);
+    await connectorToolsetsForUser(USER_ID);
     const afterFirst = (Client as unknown as jest.Mock).mock.calls.length;
-    await mcpToolsetsForUser(USER_ID);
+    await connectorToolsetsForUser(USER_ID);
     expect((Client as unknown as jest.Mock).mock.calls.length).toBe(afterFirst);
   });
 
   it('does not serve a rejected cached resolution on the next turn', async () => {
-    await McpServer.create({
+    await Connector.create({
       scope: 'platform',
       name: 'platform-tools',
       url: 'https://mcp.example.com/mcp',
     });
-    const findSpy = jest.spyOn(McpServer, 'find').mockRejectedValueOnce(new Error('mongo down'));
-    await expect(mcpToolsetsForUser(USER_ID)).rejects.toThrow('mongo down');
+    const findSpy = jest.spyOn(Connector, 'find').mockRejectedValueOnce(new Error('mongo down'));
+    await expect(connectorToolsetsForUser(USER_ID)).rejects.toThrow('mongo down');
     // Within the same TTL window a fresh resolution must be rebuilt, not
     // served from the poisoned cache entry.
-    const toolsets = await mcpToolsetsForUser(USER_ID);
+    const toolsets = await connectorToolsetsForUser(USER_ID);
     expect(Object.keys(toolsets)).toEqual(['mcp_platform_tools']);
     findSpy.mockRestore();
   });
 
   it('rebuilds after concurrent callers share one rejected resolution', async () => {
-    await McpServer.create({
+    await Connector.create({
       scope: 'platform',
       name: 'platform-tools',
       url: 'https://mcp.example.com/mcp',
     });
-    const findSpy = jest.spyOn(McpServer, 'find').mockRejectedValueOnce(new Error('mongo down'));
+    const findSpy = jest.spyOn(Connector, 'find').mockRejectedValueOnce(new Error('mongo down'));
     // Two turns racing inside one TTL window share the stored promise, so
     // both observe the rejection; the poisoned entry must nevertheless be
     // gone once either caller's cleanup runs.
-    await Promise.allSettled([mcpToolsetsForUser(USER_ID), mcpToolsetsForUser(USER_ID)]).then(
-      (results) => {
-        expect(results.every((r) => r.status === 'rejected')).toBe(true);
-      },
-    );
-    const toolsets = await mcpToolsetsForUser(USER_ID);
+    await Promise.allSettled([
+      connectorToolsetsForUser(USER_ID),
+      connectorToolsetsForUser(USER_ID),
+    ]).then((results) => {
+      expect(results.every((r) => r.status === 'rejected')).toBe(true);
+    });
+    const toolsets = await connectorToolsetsForUser(USER_ID);
     expect(Object.keys(toolsets)).toEqual(['mcp_platform_tools']);
     findSpy.mockRestore();
   });
 
   it('degrades persistent call failures to an unavailable result', async () => {
-    await McpServer.create({
+    await Connector.create({
       scope: 'platform',
       name: 'platform-tools',
       url: 'https://mcp.example.com/mcp',
     });
-    await mcpToolsetsForUser(USER_ID);
+    await connectorToolsetsForUser(USER_ID);
     mockConnect.mockRejectedValue(new Error('boom'));
     mockCallTool.mockRejectedValue(new Error('boom'));
     const result = (await callMcpTool('https://mcp.example.com/mcp', undefined, 'weather', {
@@ -219,12 +255,12 @@ describe('mcpService', () => {
   });
 
   it('short-circuits a retried tool within one completion (#82): no second handshake', async () => {
-    await McpServer.create({
+    await Connector.create({
       scope: 'platform',
       name: 'platform-tools',
       url: 'https://mcp.example.com/mcp',
     });
-    const toolsets = await mcpToolsetsForUser(USER_ID);
+    const toolsets = await connectorToolsetsForUser(USER_ID);
     mockConnect.mockRejectedValue(new Error('boom'));
     mockCallTool.mockRejectedValue(new Error('boom'));
     const weather = toolsets.mcp_platform_tools.weather as unknown as {
@@ -253,12 +289,12 @@ describe('mcpService', () => {
   });
 
   it('does not mark a tool failed when it succeeds', async () => {
-    await McpServer.create({
+    await Connector.create({
       scope: 'platform',
       name: 'platform-tools',
       url: 'https://mcp.example.com/mcp',
     });
-    const toolsets = await mcpToolsetsForUser(USER_ID);
+    const toolsets = await connectorToolsetsForUser(USER_ID);
     mockCallTool.mockResolvedValue({ content: [{ text: 'sunny' }] });
     const weather = toolsets.mcp_platform_tools.weather as unknown as {
       execute: (input: unknown, ctx: unknown) => Promise<Record<string, unknown>>;

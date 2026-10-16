@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { CONNECTOR_TYPES } from '@tova/shared';
 import { MAX_BULK_TOTAL_SIZE } from './services/assetLimits';
 
 // Node's canonical IANA zone list (418 entries) plus the UTC/GMT aliases a
@@ -260,12 +261,31 @@ export const assetRestoreSchema = z.object({
     .int({ message: 'version must be an integer' })
     .positive({ message: 'version must be positive' }),
 });
-// POST /api/mcp-servers body (issue #36). Personal MCP servers only: the
-// route is authenticated and always writes scope:'user' owned by the caller.
-// https-only URLs keep the outbound connect surface (SSRF) off plain HTTP;
-// auth is submitted as a raw token (issue #80) — the server wraps it in
-// `Authorization: Bearer <token>` and stores that single header encrypted.
-export const mcpServerCreateSchema = z.strictObject({
+// POST /api/connectors body (issues #36, #329, #327). Personal connectors
+// only: the route is authenticated and always writes scope:'user' owned by
+// the caller. https-only URLs keep the outbound connect surface (SSRF) off
+// plain HTTP; auth is submitted as a raw token (issue #80) — the server
+// wraps it in `Authorization: Bearer <token>` and stores that single header
+// encrypted. `type` is required (#329): the full CONNECTOR_TYPES namespace
+// parses so known-but-non-pat types get a flow-specific message (mcp.oauth
+// points at the browser sign-in flow, #327) and anything unknown is
+// rejected by the enum.
+export const connectorCreateSchema = z.strictObject({
+  type: z
+    .enum(CONNECTOR_TYPES, {
+      error: (iss) =>
+        iss.input === undefined ? 'Connector type is required' : 'Unknown connector type',
+    })
+    .superRefine((value, ctx) => {
+      if (value === 'mcp.pat') return;
+      ctx.addIssue({
+        code: 'custom',
+        message:
+          value === 'mcp.oauth'
+            ? 'This connector connects via OAuth sign-in — use the browser connect flow, not a pasted token'
+            : 'This connector type is not supported yet',
+      });
+    }),
   name: z
     .string({ message: 'Name is required' })
     .min(1, { message: 'Name is required' })
@@ -281,4 +301,32 @@ export const mcpServerCreateSchema = z.strictObject({
     .string({ message: 'authToken must be a string' })
     .max(4000, { message: 'authToken is too long' })
     .optional(),
+});
+
+// POST /api/connectors/oauth/start body (#327): begin a browser consent for
+// an mcp.oauth connector. The connector row is only created when the flow
+// completes (no orphan rows on abandoned consents).
+export const connectorOAuthStartSchema = z.strictObject({
+  name: z
+    .string({ message: 'Name is required' })
+    .min(1, { message: 'Name is required' })
+    .max(60, { message: 'Name must be 60 characters or fewer' }),
+  url: z
+    .string({ message: 'URL is required' })
+    .trim()
+    .url({ message: 'URL must be a valid URL' })
+    .refine((value) => value.startsWith('https://'), {
+      message: 'URL must be an https URL',
+    }),
+});
+
+// POST /api/connectors/oauth/callback body (#327): the consent redirect's
+// query params, relayed by the client callback page. `state` keys the
+// server-side pending record (PKCE verifier ride along there).
+export const connectorOAuthCallbackSchema = z.strictObject({
+  code: z.string({ message: 'code is required' }).min(1, { message: 'code is required' }).max(4000),
+  state: z
+    .string({ message: 'state is required' })
+    .min(1, { message: 'state is required' })
+    .max(256),
 });

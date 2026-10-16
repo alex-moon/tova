@@ -255,8 +255,8 @@ export const streamingErrorMessage = (err: unknown): string => {
   if (err instanceof AllModelsDisabledError) return message;
   if (statusCode === 413 || /Request too large/.test(message)) {
     return (
-      'Request too large for this deployment’s current rate limit — connected MCP servers ' +
-      'may have added many tools to the request. Try again shortly or remove MCP servers in settings.'
+      'Request too large for this deployment’s current rate limit — connected connectors ' +
+      'may have added many tools to the request. Try again shortly or disconnect some in /connectors.'
     );
   }
   /*

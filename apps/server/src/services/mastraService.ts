@@ -14,7 +14,7 @@ import { Asset } from '../models/Asset';
 import { User } from '../models/User';
 import { truncateForPrompt } from './textExtraction';
 import { evaluateExpression } from './calculator';
-import { mcpToolsetsForUser } from './mcpService';
+import { connectorToolsetsForUser } from './connectorService';
 import {
   degradedToolError,
   markToolFailed,
@@ -223,14 +223,15 @@ const modelSettingsFrom = (options: CompletionOptions) => ({
  * session.
  */
 /*
- * MCP toolsets (#36): when the caller is a user, resolve platform + personal
- * MCP servers into per-call toolsets (resolutions are cached with a short
- * TTL inside mcpService). Empty result -> no `toolsets` key forwarded at
- * all, so a user with zero MCP servers gets the exact pre-#36 call shape.
+ * Connector toolsets (#36, #329): when the caller is a user, resolve
+ * platform + personal connectors into per-call toolsets (resolutions are
+ * cached with a short TTL inside connectorService). Empty result -> no
+ * `toolsets` key forwarded at all, so a user with zero connectors gets the
+ * exact pre-#36 call shape.
  */
-const mcpToolsetsFrom = async (options: CompletionOptions) => {
+const connectorToolsetsFrom = async (options: CompletionOptions) => {
   if (!options.userId) return {};
-  const toolsets = await mcpToolsetsForUser(options.userId);
+  const toolsets = await connectorToolsetsForUser(options.userId);
   return Object.keys(toolsets).length ? { toolsets } : {};
 };
 
@@ -1114,7 +1115,7 @@ const buildConnector = (provider: LlmProvider): LlmConnector => {
         mastraMessagesFor(provider, rest),
         {
           ...callOptionsFrom(options, defaultMode, mergedInstructions(TOOL_INSTRUCTIONS, system)),
-          ...(await mcpToolsetsFrom(options)),
+          ...(await connectorToolsetsFrom(options)),
         },
       );
       // Tool executions (issue #16): FullOutput.toolResults carries every
@@ -1168,7 +1169,7 @@ const buildConnector = (provider: LlmProvider): LlmConnector => {
         mastraMessagesFor(provider, rest),
         {
           ...callOptionsFrom(options, defaultMode, mergedInstructions(TOOL_INSTRUCTIONS, system)),
-          ...(await mcpToolsetsFrom(options)),
+          ...(await connectorToolsetsFrom(options)),
         },
       );
       // #224: resolve usage after the real chunks, as a final `usage` chunk
