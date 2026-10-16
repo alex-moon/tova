@@ -488,8 +488,9 @@ export const fetchUrlTool = createTool({
         note:
           `The page was longer than this preview, so a full copy is saved as a ` +
           `file ("${saved.filename}", id ${saved.fileId}) — tell the user you saved ` +
-          'it so you could read it in full. Use read_file to read the rest: ' +
-          'offset/limit for a line range, or unitsOnly for the section list.',
+          'it so you could read it in full (they can see it in Files under the ' +
+          'Agent files filter). Use read_file to read the rest: offset/limit for ' +
+          'a line range, or unitsOnly for the section list.',
         results,
       };
     }
@@ -518,6 +519,7 @@ const assetFileFrom = (asset: {
   contentType: string;
   size: number;
   createdAt?: Date;
+  sourceUrl?: string | null;
 }) => ({
   id: asset._id.toString(),
   filename: asset.filename,
@@ -526,15 +528,21 @@ const assetFileFrom = (asset: {
   contentType: asset.contentType,
   size: asset.size,
   createdAt: (asset.createdAt ?? new Date()).toISOString(),
+  // #356: present on system-side rows only — the URL the page was fetched
+  // from, so the agent can match a cached copy to a URL the user mentions.
+  ...(asset.sourceUrl ? { sourceUrl: asset.sourceUrl } : {}),
 });
 
 export const listFilesTool = createTool({
   id: 'list_files',
   description:
-    'List the files in the calling user’s file library (uploaded documents/text ' +
-    'files), newest first, with metadata (filename, type, size, upload date). ' +
-    'Call it when the user refers to their files or library; call it ' +
-    'first whenever the user wants anything from the library.',
+    'List the files in the calling user’s file library, newest first, with metadata ' +
+    '(filename, type, size, upload date). Covers uploaded documents/text files, ' +
+    'files Tova generated, and cached copies of web pages fetch_url saved for the ' +
+    'agent (those carry a `sourceUrl` — the page they were scraped from) and can be ' +
+    'read in full with `read_file`. Call it when the user refers to their files or ' +
+    'library, or to find a previously fetched page; call it first whenever the user ' +
+    'wants anything from the library.',
   inputSchema: z.object({}),
   outputSchema: z.object({
     files: z.array(
@@ -544,6 +552,10 @@ export const listFilesTool = createTool({
         contentType: z.string(),
         size: z.number(),
         createdAt: z.string().describe('Upload time as an ISO 8601 UTC timestamp'),
+        sourceUrl: z
+          .string()
+          .optional()
+          .describe('For cached web pages: the URL the page was fetched from'),
       }),
     ),
     more: z.boolean().optional().describe('True when the list was truncated at 20'),
@@ -560,16 +572,15 @@ export const listFilesTool = createTool({
     if (!userId) return { files: [], error: 'unavailable' };
     try {
       // 21 rows: 20 returned, the 21st only feeds the `more` flag.
-      // Agent-side material (#340: scraped pages) is not library content —
-      // the agent discovers it from the fetch_url result's fileId.
-      const rows = await Asset.find({
-        userId,
-        status: 'ready',
-        origin: { $ne: 'system-side' },
-      })
+      // #356: agent-side rows (origin 'system-side' — pages fetch_url saved)
+      // ARE listed, with their `sourceUrl`, so the agent can rediscover a
+      // cached page in a later session and read it with read_file. Listing
+      // them here does not leak to the user UI: the assets list route keeps
+      // its own default exclusion and its explicit ?origin=system-side filter.
+      const rows = await Asset.find({ userId, status: 'ready' })
         .sort({ _id: -1 })
         .limit(21)
-        .select('filename contentType size createdAt');
+        .select('filename contentType size createdAt sourceUrl');
       const hasMore = rows.length > 20;
       return {
         files: rows.slice(0, 20).map((r) => assetFileFrom(r)),
