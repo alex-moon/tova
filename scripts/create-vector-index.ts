@@ -17,14 +17,14 @@
  */
 import 'dotenv/config';
 import { MongoClient } from 'mongodb';
-import { buildMongoUri } from '../apps/shared/src/mongoUri';
-import { config } from '../apps/server/src/config';
+import { buildMongoUri } from '../apps/shared/src/main/mongoUri';
+import { config } from '../apps/server/src/main/config';
 import {
   VECTOR_INDEX_NAME,
   assertAtlasUrl,
   ensureVectorIndex,
   type SearchIndexManager,
-} from '../apps/server/src/services/atlasVectorIndex';
+} from '../apps/server/src/main/services/atlasVectorIndex';
 
 const main = async (): Promise<void> => {
   const url = assertAtlasUrl(buildMongoUri());

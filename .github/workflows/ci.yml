@@ -285,7 +285,7 @@ jobs:
       - name: Semgrep scan (default OSS rules)
         run: |
           docker run --rm -v "$PWD:/src" -w /src semgrep/semgrep \
-            semgrep --config p/default --error --metrics=off apps/server/src
+            semgrep --config p/default --error --metrics=off apps/server/src/main
 
   npm-audit:
     if: github.event_name == 'push'

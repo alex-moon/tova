@@ -1,6 +1,6 @@
 {
   "compilerOptions": {
-    "paths": { "@/*": ["./src/*"], "@shared/*": ["../shared/src/*"] },
+    "paths": { "@/*": ["./src/main/*"], "@shared/*": ["../shared/src/main/*"] },
     "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.app.tsbuildinfo",
     "target": "es2023",
     "lib": ["ES2023", "DOM"],
