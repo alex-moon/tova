@@ -473,74 +473,84 @@ describe('read_file tool (#58)', () => {
   });
 });
 
-describe('read_file unit walking (#159)', () => {
+describe('read_file line paging (#350)', () => {
+  const PAGES = ['intro text, phone 0400', 'second page '.repeat(12), 'PREFACE'.padStart(10, 'x')];
+  const markdown = PAGES.join('\n');
+
   const setUnits = (assetId: string, units: { index: number; label: string; text: string }[]) =>
     Asset.updateOne({ _id: assetId }, { $set: { units } });
 
-  const createPdf = async (userId: string, markdown: string) => {
+  const createPdf = async (userId: string) => {
     const asset = await createAsset(userId, 'report.pdf', {
       textExtracted: null,
       markdownExtracted: markdown,
     });
-    await setUnits(asset.id, [
-      { index: 1, label: 'Page 1', text: 'intro text, phone 0400' },
-      { index: 2, label: 'Page 2', text: ' '.repeat(200) },
-      { index: 3, label: 'Page 3', text: 'PREFACE'.padStart(10, 'x') },
-    ]);
+    await setUnits(
+      asset.id,
+      PAGES.map((text, i) => ({ index: i + 1, label: `Page ${i + 1}`, text })),
+    );
     return asset;
   };
 
-  it('lists units with short previews via unitsOnly', async () => {
+  it('lists units as a table of contents with start lines via unitsOnly', async () => {
     const user = await createUser('units-list@example.com');
-    const asset = await createPdf(user.id, 'x');
+    const asset = await createPdf(user.id);
     const out = (await readExecute({ id: asset.id, unitsOnly: true }, asCtx(user.id))) as {
-      units: { index: number; label: string; preview: string }[];
+      units: { index: number; label: string; startLine: number; preview: string }[];
     };
     expect(out.units).toHaveLength(3);
-    expect(out.units[0]).toMatchObject({
-      index: 1,
-      label: 'Page 1',
-      preview: 'intro text, phone 0400',
-    });
+    expect(out.units[0]).toMatchObject({ index: 1, label: 'Page 1', startLine: 1 });
+    expect(out.units[1].startLine).toBe(2);
+    expect(out.units[2].startLine).toBe(3);
     expect(out.units[1].preview).toHaveLength(120);
   });
 
   it('accepts unitsOnly as a boolean-string ("true") from the wire (#159 live run)', async () => {
     const user = await createUser('units-string-boolean@example.com');
-    const asset = await createPdf(user.id, 'x');
+    const asset = await createPdf(user.id);
     const out = (await readExecute({ id: asset.id, unitsOnly: 'true' }, asCtx(user.id))) as {
       units?: { index: number }[];
     };
     expect(out.units).toHaveLength(3);
   });
 
-  it('reads a single unit and a range, truncated per read', async () => {
+  it('reads a line range with paging metadata', async () => {
     const user = await createUser('units-read@example.com');
-    const asset = await createPdf(user.id, 'x');
-    const one = (await readExecute({ id: asset.id, unit: 3 }, asCtx(user.id))) as {
+    const asset = await createPdf(user.id);
+    const out = (await readExecute({ id: asset.id, offset: 2, limit: 1 }, asCtx(user.id))) as {
       content: string;
+      offset: number;
+      endLine: number;
+      totalLines: number;
+      totalChars: number;
+      truncated: boolean;
     };
-    expect(one.content).toBe('xxxPREFACE');
-    const range = (await readExecute({ id: asset.id, unit: '1-2' }, asCtx(user.id))) as {
-      content: string;
-    };
-    expect(range.content).toContain('intro text');
+    expect(out.content).toBe(PAGES[1]);
+    expect(out.offset).toBe(2);
+    expect(out.endLine).toBe(2);
+    expect(out.totalLines).toBe(3);
+    expect(out.totalChars).toBe(markdown.length);
+    expect(out.truncated).toBe(true); // line 3 remains
   });
 
-  it('coerces numeric strings ("58") to a unit number (#159 live run)', async () => {
+  it('coerces numeric string offset/limit (#159 live run)', async () => {
     const user = await createUser('units-numeric-string@example.com');
-    const asset = await createPdf(user.id, 'x');
-    const out = (await readExecute({ id: asset.id, unit: '3' }, asCtx(user.id))) as {
+    const asset = await createPdf(user.id);
+    const out = (await readExecute({ id: asset.id, offset: '3', limit: '1' }, asCtx(user.id))) as {
       content: string;
+      endLine: number;
+      truncated: boolean;
     };
     expect(out.content).toBe('xxxPREFACE');
+    expect(out.endLine).toBe(3);
+    expect(out.truncated).toBe(false);
   });
 
-  it('rejects unit arguments outside the real unit range', async () => {
+  it('rejects offset/limit outside the real range', async () => {
     const user = await createUser('units-oor@example.com');
-    const asset = await createPdf(user.id, 'x');
-    for (const unit of [0, 4, '2-1', '02x', '0-2']) {
-      const out = (await readExecute({ id: asset.id, unit }, asCtx(user.id))) as {
+    const asset = await createPdf(user.id);
+    for (const args of [{ offset: 0 }, { offset: 4 }, { limit: 0 }, { offset: 'x' }]) {
+      const out = (await readExecute({ id: asset.id, ...args }, asCtx(user.id))) as {
         error?: string;
       };
       expect(out.error).toBe('invalid');
@@ -548,26 +558,40 @@ describe('read_file unit walking (#159)', () => {
     }
   });
 
-  it('keeps legacy behavior for documents without units (item 3)', async () => {
+  it('default read returns the head with metadata (no silent truncation)', async () => {
+    const user = await createUser('units-default@example.com');
+    const asset = await createPdf(user.id);
+    const out = (await readExecute({ id: asset.id }, asCtx(user.id))) as {
+      content: string;
+      offset: number;
+      endLine: number;
+      totalLines: number;
+      truncated: boolean;
+    };
+    expect(out.content).toBe(markdown);
+    expect(out.offset).toBe(1);
+    expect(out.endLine).toBe(3);
+    expect(out.totalLines).toBe(3);
+    expect(out.truncated).toBe(false); // whole doc fits under the cap
+  });
+
+  it('keeps line reads working for documents without units (item 3)', async () => {
     const user = await createUser('units-legacy@example.com');
     // No units set — an asset ingested before #159.
     const asset = await createAsset(user.id, 'report.pdf', {
       textExtracted: null,
-      markdownExtracted: 'whole markdown',
+      markdownExtracted: 'line one\nline two\nline three',
     });
-    const out = (await readExecute({ id: asset.id }, asCtx(user.id))) as { content: string };
-    expect(out.content).toBe('whole markdown');
+    const out = (await readExecute({ id: asset.id, offset: 2, limit: 1 }, asCtx(user.id))) as {
+      content: string;
+    };
+    expect(out.content).toBe('line two');
     const unitsOnly = (await readExecute({ id: asset.id, unitsOnly: true }, asCtx(user.id))) as {
       units?: unknown[];
       note?: string;
     };
     expect(unitsOnly.units).toBeUndefined();
     expect(unitsOnly.note).toContain('no per-unit text');
-    const withUnit = (await readExecute({ id: asset.id, unit: 1 }, asCtx(user.id))) as {
-      units?: unknown[];
-      note?: string;
-    };
-    expect(withUnit.note).toContain('no per-unit text');
   });
 });
 

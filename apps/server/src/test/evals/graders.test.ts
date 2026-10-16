@@ -349,11 +349,11 @@ describe('assertRun', () => {
 
   it('argsSubset matches numeric args regardless of wire encoding (#159)', () => {
     const run_ = run([
-      { name: 'read_file', args: { id: 'a', unit: '58' } },
+      { name: 'read_file', args: { id: 'a', offset: '58' } },
       { name: 'generate_file', args: { filename: '42-test.md', content: 'yes' } },
     ]);
     const results = assertRun(run_, [
-      { type: 'tool_called', tool: 'read_file', argsSubset: { unit: 58 } },
+      { type: 'tool_called', tool: 'read_file', argsSubset: { offset: 58 } },
       // Non-numeric strings stay strings; a number never merges with text.
       { type: 'tool_called', tool: 'generate_file', argsSubset: { filename: '42-test.md' } },
       {

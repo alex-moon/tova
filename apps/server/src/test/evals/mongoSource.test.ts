@@ -59,9 +59,9 @@ describe('#112 temp mongo source', () => {
     expect(units[SUPPORT_PHONE_PAGE - 1].text.slice(0, 120)).toContain('support contact');
   });
 
-  // An agent can pass the case without unit walking only if the phone is
-  // visible in the lazy whole-file read; the filler is sized so the joined
-  // text exceeds MAX_PROMPT_TEXT_CHARS and truncation cuts off before page 58.
+  // An agent can pass the case without paging only if the phone is visible in
+  // the default head read; the filler is sized so the joined text exceeds
+  // MAX_PROMPT_TEXT_CHARS and truncation cuts off before page 58.
   it('whole-file read of the manual truncates before the phone page', async () => {
     await seedEvalSource();
     const manual = await Asset.findOne({ userId, filename: 'long-manual.md' });

@@ -12,7 +12,7 @@ import { z } from 'zod';
 import mongoose from 'mongoose';
 import { Asset } from '../models/Asset';
 import { User } from '../models/User';
-import { truncateForPrompt } from './textExtraction';
+import { MAX_PROMPT_TEXT_CHARS, truncateForPrompt } from './textExtraction';
 import { evaluateExpression } from './calculator';
 import { connectorToolsetsForUser } from './connectorService';
 import {
@@ -204,9 +204,9 @@ const modelSettingsFrom = (options: CompletionOptions) => ({
  * call options (AI-SDK style) instead of sending undefined keys.
  * `maxSteps` caps the agent's own tool loop: with built-in tools attached
  * the agent decides how many rounds to run (search → answer, with follow-up
- * rounds allowed — e.g. #159's long-document workflows walk units and emit
- * one file per section, so a low cap silently starves the task of its final
- * answer step); without tools a completion is single-step,
+ * rounds allowed — e.g. #159's long-document workflows page through a document
+ * and emit one file per section, so a low cap silently starves the task of its
+ * final answer step); without tools a completion is single-step,
  * as before #16. Since #52 the tools-mode, not the Brave key, drives this:
  * the key-free `current_datetime` keeps tools attached for key-less
  * deployments too.
@@ -462,21 +462,28 @@ export const readFileTool = createTool({
   description:
     'Read a file from the calling user’s file library by its id (from `list_files`), ' +
     'returning its metadata (filename, type, size, upload date) and extracted text ' +
-    'content when any exists. For long documents call with `unitsOnly: true` first ' +
-    'to list the document’s units (pages/sections) with a short preview each, then ' +
-    'read specific units selectively with `unit: n` or `unit: "start-end"` instead ' +
-    'of re-reading the whole file.',
+    'content when any exists. Read long documents in slices with `offset` (1-based ' +
+    'start line) and `limit` (number of lines); every result reports `totalLines`, ' +
+    '`totalChars` and whether more remains (`truncated`). To navigate a long ' +
+    'document, call with `unitsOnly: true` first to list its units (pages/sections) ' +
+    'as a table of contents with each unit’s `startLine`, then read from that line.',
   inputSchema: z.object({
     id: z.string().min(1),
     // #159 live run: models emit boolean tool args as the string "true" (same
-    // wire-encoding drift as numeric `unit`), and a strict boolean schema
+    // wire-encoding drift as numeric args), and a strict boolean schema
     // makes Mastra reject the whole call. The string branch exists to accept
     // those encodings; execute coerces to an actual boolean.
     unitsOnly: z.union([z.boolean(), z.enum(['true', 'false', 'True', 'False'])]).optional(),
-    unit: z
+    // #350: models also emit numeric tool args as strings; the union accepts
+    // both and execute coerces digit-only strings to numbers.
+    offset: z
       .union([z.number(), z.string()])
       .optional()
-      .describe('Unit number (1-based) or inclusive range "start-end" to read selectively'),
+      .describe('1-based line number to start reading from (default 1)'),
+    limit: z
+      .union([z.number(), z.string()])
+      .optional()
+      .describe('Maximum number of lines to return from offset'),
   }),
   outputSchema: z.object({
     file: z
@@ -495,14 +502,20 @@ export const readFileTool = createTool({
         z.object({
           index: z.number(),
           label: z.string(),
+          startLine: z.number().optional().describe('1-based line where this unit begins'),
           preview: z.string(),
         }),
       )
       .optional(),
+    totalLines: z.number().optional(),
+    totalChars: z.number().optional(),
+    offset: z.number().optional().describe('1-based line the returned content starts at'),
+    endLine: z.number().optional().describe('1-based line the returned content ends at'),
+    truncated: z.boolean().optional().describe('True when more text remains beyond this read'),
     note: z.string().optional(),
     error: z.string().optional(),
   }),
-  execute: async ({ id, unitsOnly: rawUnitsOnly, unit }, ctx) => {
+  execute: async ({ id, unitsOnly: rawUnitsOnly, offset: rawOffset, limit: rawLimit }, ctx) => {
     // #159: boolean wire-encoding coercion (see inputSchema note).
     const unitsOnly =
       rawUnitsOnly === undefined ? undefined : /^\s*(true|1)$/i.test(String(rawUnitsOnly));
@@ -523,11 +536,18 @@ export const readFileTool = createTool({
       // #159: per-unit text (one unit per PDF page / top-level section),
       // selected explicitly because the field is `select: false`.
       const units = (asset.get('units') ?? []) as { index: number; label: string; text: string }[];
-      const readUnitRange = (
-        from: number,
-        to: number,
-      ): { index: number; label: string; text: string }[] =>
-        units.filter((u) => u.index >= from && u.index <= to);
+      // Issue #67: markdown conversion is the fallback content source when
+      // the fast extraction did not produce text (pdf/docx/html).
+      const text = asset.textExtracted ?? asset.markdownExtracted;
+      // #350: units are a table of contents — each points at the line where it
+      // begins in the text the reader serves. Computed at read time (not
+      // stored) so rows written before #350 still get start lines; units are
+      // trimmed slices, so the first occurrence is their position.
+      const startLineOf = (needle: string): number | undefined => {
+        if (!text || !needle) return undefined;
+        const at = text.indexOf(needle);
+        return at < 0 ? undefined : text.slice(0, at).split('\n').length;
+      };
       if (unitsOnly) {
         if (units.length === 0) {
           return {
@@ -542,55 +562,11 @@ export const readFileTool = createTool({
           units: units.map((u) => ({
             index: u.index,
             label: u.label,
+            startLine: startLineOf(u.text),
             preview: u.text.slice(0, 120),
           })),
         };
       }
-      if (unit !== undefined) {
-        if (units.length === 0) {
-          return {
-            file,
-            note:
-              'This document has no per-unit text available; read it without the ' +
-              '`unit` parameter to get its full extracted text.',
-          };
-        }
-        let from: number;
-        let to: number;
-        // Models routinely emit numeric tool args as strings ("58") (#159
-        // eval run: the agent burned a step on each retry until it sent the
-        // number as JSON). Coerce digit-only strings to numbers first.
-        const numeric = typeof unit === 'string' ? /^\s*\d+\s*$/.test(unit) : true;
-        if (typeof unit === 'number' || (typeof unit === 'string' && numeric)) {
-          from = to = Math.trunc(Number(unit));
-        } else {
-          const range = /^\s*(\d+)\s*-\s*(\d+)\s*$/.exec(unit);
-          if (!range)
-            return { file, error: 'invalid', note: 'unit must be a number or "start-end"' };
-          from = Number(range[1]);
-          to = Number(range[2]);
-        }
-        if (!Number.isFinite(from) || from < 1 || to < from) {
-          return { file, error: 'invalid', note: `unit must be within 1-${units.length}` };
-        }
-        const selected = readUnitRange(from, to);
-        if (selected.length === 0) {
-          return { file, error: 'invalid', note: `unit must be within 1-${units.length}` };
-        }
-        return {
-          file,
-          content: truncateForPrompt(selected.map((u) => u.text).join('\n\n')),
-          hasText: true,
-          units: selected.map((u) => ({
-            index: u.index,
-            label: u.label,
-            preview: u.text.slice(0, 120),
-          })),
-        };
-      }
-      // Issue #67: markdown conversion is the fallback content source when
-      // the fast extraction did not produce text (pdf/docx/html).
-      const text = asset.textExtracted ?? asset.markdownExtracted;
       if (text == null) {
         return {
           file,
@@ -601,7 +577,51 @@ export const readFileTool = createTool({
             'binary type such as an image); use the attach flow to include it in the chat.',
         };
       }
-      return { file, content: truncateForPrompt(text), hasText: true };
+      // #350: line-range read over the extracted text. Numeric args may arrive
+      // as digit-only strings (#159); coerce before validating.
+      const coerceLine = (value: unknown): number | null => {
+        if (typeof value === 'number' && Number.isFinite(value)) return Math.trunc(value);
+        if (typeof value === 'string' && /^\s*\d+\s*$/.test(value)) return Number(value.trim());
+        return null;
+      };
+      const lines = text.split('\n');
+      const totalLines = lines.length;
+      const totalChars = text.length;
+      const offset = rawOffset === undefined ? 1 : coerceLine(rawOffset);
+      if (offset === null || offset < 1 || offset > totalLines) {
+        return {
+          file,
+          error: 'invalid',
+          note: `offset must be within 1-${totalLines}`,
+          totalLines,
+          totalChars,
+        };
+      }
+      const limit = rawLimit === undefined ? undefined : coerceLine(rawLimit);
+      if (limit !== undefined && (limit === null || limit < 1)) {
+        return { file, error: 'invalid', note: 'limit must be a positive line count' };
+      }
+      const endLine = limit === undefined ? totalLines : Math.min(offset + limit - 1, totalLines);
+      const joined = lines.slice(offset - 1, endLine).join('\n');
+      const content = truncateForPrompt(joined);
+      const truncated = endLine < totalLines || joined.length > MAX_PROMPT_TEXT_CHARS;
+      return {
+        file,
+        content,
+        hasText: true,
+        offset,
+        endLine,
+        totalLines,
+        totalChars,
+        truncated,
+        ...(truncated
+          ? {
+              note:
+                `Showing lines ${offset}-${endLine} of ${totalLines}. ` +
+                `Call read_file again with offset=${endLine + 1} to continue.`,
+            }
+          : {}),
+      };
     } catch (error) {
       markToolFailed(ctx, 'read_file', reasonFrom(error));
       return { error: degradedToolError('read_file', reasonFrom(error)) };
@@ -927,10 +947,10 @@ const TOOL_INSTRUCTIONS =
   'own knowledge when no search is needed. When the user refers to their files ' +
   'or library, call the `list_files` tool to see what they have; call ' +
   '`read_file` with a file id from that list before quoting any file contents, ' +
-  'and never invent file contents you have not read. For a long multi-unit ' +
-  'document, call `read_file` with `unitsOnly: true` first to see the unit ' +
-  '(page/section) list, then read only the relevant units with `unit` — never ' +
-  're-read a long document end to end. When the user asks you to ' +
+  'and never invent file contents you have not read. For a long document, call ' +
+  '`read_file` with `unitsOnly: true` first to see the unit (page/section) list ' +
+  'with each unit’s start line, then read only the lines you need with `offset` ' +
+  'and `limit` — never re-read a long document end to end. When the user asks you to ' +
   'save, generate or create a new file, note or document, call `generate_file` ' +
   'with a filename (ending in .md) and the full markdown content; the file then ' +
   'appears in their library and in `list_files` output. When the user asks to ' +

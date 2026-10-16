@@ -55,9 +55,10 @@ const matchesFinalText = (run: EvalRun, pattern: RegExp): boolean =>
   typeof run.finalText === 'string' && pattern.test(run.finalText);
 
 /**
- * #159: `read_file` accepts `unit` as a number or a numeric string (models
- * routinely emit numeric tool args as strings depending on the provider's
- * JSON encoding), and the tool itself coerces digit-only strings. Args are
+ * #159/#350: `read_file` accepts numeric args (`offset`/`limit`) as numbers or
+ * numeric strings (models routinely emit numeric tool args as strings depending
+ * on the provider's JSON encoding), and the tool itself coerces digit-only
+ * strings. Args are
  * normalised on both sides of an `argsSubset` comparison so the assertion is
  * about what the call meant, not the wire encoding.
  */

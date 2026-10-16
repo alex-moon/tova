@@ -159,16 +159,14 @@ export const CASES: EvalCase[] = [
     id: 'manual-page-of-phone',
     prompt: 'Which page of long-manual.md is the support phone number on?',
     description:
-      '#159 long-document navigation: the agent must walk units (unitsOnly first), ' +
-      'locate the support phone number (only on page 58 of 60), and answer the page.',
+      '#159/#350 long-document navigation: the agent must list the unit table of ' +
+      'contents (unitsOnly first), read the support-contact page by line, and answer ' +
+      'the page number (only page 58 of 60 holds the phone).',
     assertions: [
       { type: 'tool_called', tool: 'list_files' },
-      // Navigation signal: either a unitsOnly listing or a targeted unit read
-      // counts (live runs show both legitimate walks; the literal unitsOnly
-      // assert rejected a correct direct unit-58 read as "unwalked").
-      { type: 'tool_called', tool: 'read_file', argsSubset: { unit: 58 } },
-      // Strict variant: the unitsOnly-first navigation. A range-walk agent
-      // fails only this line (partial aggregate), not the whole case.
+      // Navigation signal (#350): the agent lists the unit table of contents
+      // (each unit carries a startLine), then reads the support-contact page
+      // by line range.
       { type: 'tool_called', tool: 'read_file', argsSubset: { unitsOnly: true } },
       { type: 'answer_contains', text: 'page 58' },
     ],
@@ -193,9 +191,10 @@ export const CASES: EvalCase[] = [
       '01-overview.md), each file starting with the section heading kept exactly ' +
       'as a heading-2 line (## Title) followed by its body.',
     description:
-      '#159 long-document structuring: the agent reads the handbook by units and ' +
-      'generates one markdown file per heading-2 section under the stated filename ' +
-      'convention; content assertions are substring-level since bodies may be rewritten.',
+      '#159 long-document structuring: the agent reads the handbook by line ranges ' +
+      'and generates one markdown file per heading-2 section under the stated ' +
+      'filename convention; content assertions are substring-level since bodies may ' +
+      'be rewritten.',
     assertions: [
       { type: 'tool_sequence', tools: ['read_file', 'generate_file'] },
       { type: 'tool_called', tool: 'generate_file', argsSubset: { filename: '01-overview.md' } },
