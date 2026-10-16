@@ -216,6 +216,34 @@ describe('startConnectorOAuth', () => {
     expect(err.message).not.toContain('dynamic client registration');
   });
 
+  it('uses the operator static client instead of DCR when configured (#342)', async () => {
+    process.env.CONNECTORS_OAUTH_CLIENTS = JSON.stringify({
+      'https://as.example.com': { clientId: 'static-id', clientSecret: 'static-secret' },
+    });
+    try {
+      await startConnectorOAuth(base);
+      expect(registerClient).not.toHaveBeenCalled();
+      expect(startAuthorization).toHaveBeenCalledWith(
+        'https://as.example.com',
+        expect.objectContaining({
+          clientInformation: { client_id: 'static-id', client_secret: 'static-secret' },
+        }),
+      );
+    } finally {
+      delete process.env.CONNECTORS_OAUTH_CLIENTS;
+    }
+  });
+
+  it('ignores a malformed CONNECTORS_OAUTH_CLIENTS and falls back to DCR (#342)', async () => {
+    process.env.CONNECTORS_OAUTH_CLIENTS = 'not-json';
+    try {
+      await startConnectorOAuth(base);
+      expect(registerClient).toHaveBeenCalled();
+    } finally {
+      delete process.env.CONNECTORS_OAUTH_CLIENTS;
+    }
+  });
+
   it('reuses the vaulted DCR registration on re-auth instead of re-registering', async () => {
     await startConnectorOAuth({
       ...base,

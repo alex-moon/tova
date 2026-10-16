@@ -204,6 +204,37 @@ const clientMetadata = (redirectUri: string): OAuthClientMetadata => ({
   token_endpoint_auth_method: 'none',
 });
 
+/*
+ * Operator-configured static OAuth clients (#342): providers without RFC
+ * 7591 dynamic client registration (GitHub, Slack, Google, Spotify) cannot
+ * mint Tova a client at consent time. CONNECTORS_OAUTH_CLIENTS is a JSON
+ * map from authorization-server ORIGIN to { clientId, clientSecret }; when
+ * the probed AS matches, the static client replaces DCR entirely. The vault
+ * persists the static client information like any DCR result, so exchange
+ * and refresh are unchanged (the SDK drives client_secret_post from it).
+ */
+interface StaticOAuthClient {
+  clientId: string;
+  clientSecret: string;
+}
+
+export const staticClientFor = (authorizationServerUrl: string): StaticOAuthClient | undefined => {
+  const raw = process.env.CONNECTORS_OAUTH_CLIENTS;
+  if (!raw) return undefined;
+  let parsed: Record<string, StaticOAuthClient>;
+  try {
+    parsed = JSON.parse(raw) as Record<string, StaticOAuthClient>;
+  } catch {
+    console.error('CONNECTORS_OAUTH_CLIENTS is not valid JSON — ignoring static OAuth clients');
+    return undefined;
+  }
+  try {
+    return parsed[new URL(authorizationServerUrl).origin];
+  } catch {
+    return undefined;
+  }
+};
+
 export interface StartConnectorOAuthOptions {
   url: string;
   name: string;
@@ -236,29 +267,39 @@ export const startConnectorOAuth = async (
     );
   }
 
-  // A vault registration is only reusable against the AS that issued it; a
-  // provider that moved its authorization_servers gets a fresh DCR.
+  // Client selection, most-stable first (#342): an operator static client
+  // wins (stable identity across restarts), then a vaulted DCR registration
+  // (only reusable against the AS that issued it — a provider that moved its
+  // authorization_servers gets a fresh DCR), then a fresh DCR.
+  const staticClient = staticClientFor(probe.authorizationServerUrl);
   const reusableClient =
     options.existingVault?.authorizationServerUrl === probe.authorizationServerUrl
       ? options.existingVault?.clientInformation
       : undefined;
   let clientInformation: OAuthClientInformationMixed;
-  try {
-    clientInformation =
-      reusableClient ??
-      (await registerClient(probe.authorizationServerUrl, {
+  if (staticClient) {
+    clientInformation = {
+      client_id: staticClient.clientId,
+      client_secret: staticClient.clientSecret,
+    };
+  } else if (reusableClient) {
+    clientInformation = reusableClient;
+  } else {
+    try {
+      clientInformation = await registerClient(probe.authorizationServerUrl, {
         metadata: probe.metadata,
         clientMetadata: clientMetadata(redirectUri),
-      }));
-  } catch (err) {
-    if (err instanceof ConnectorOAuthError) throw err;
-    console.error('connector oauth client registration failed:', String(err));
-    throw new ConnectorOAuthError(
-      /dynamic client registration/i.test(String(err))
-        ? 'This provider does not support automatic app registration — one-click sign-in is not available yet.'
-        : 'Could not start sign-in with this provider. Try again shortly.',
-      422,
-    );
+      });
+    } catch (err) {
+      if (err instanceof ConnectorOAuthError) throw err;
+      console.error('connector oauth client registration failed:', String(err));
+      throw new ConnectorOAuthError(
+        /dynamic client registration/i.test(String(err))
+          ? 'This provider does not support automatic app registration — one-click sign-in is not available yet.'
+          : 'Could not start sign-in with this provider. Try again shortly.',
+        422,
+      );
+    }
   }
 
   // RFC 8707 resource indicator + the per-server scope set, verbatim from
