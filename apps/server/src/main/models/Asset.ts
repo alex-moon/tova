@@ -92,9 +92,12 @@ const assetSchema = new mongoose.Schema(
     // Issue #66: origin flag ("did Tova make it?"). Legacy docs predate this
     // field; Mongoose applies the default at read time, so no backfill is
     // needed. This is a separate, boolean-ish axis from `provenance` below.
+    // #340 adds 'system-side': Tova-made material for the AGENT's own reading
+    // (a scraped web page saved so read_file can page through it) — never
+    // shown in the library, not editable, no Spaces object, swept on a TTL.
     origin: {
       type: String,
-      enum: ['user-upload', 'system-generated'],
+      enum: ['user-upload', 'system-generated', 'system-side'],
       default: 'user-upload',
     },
     // #325: current version number of the file's content. 1 until the first
@@ -137,6 +140,13 @@ const assetSchema = new mongoose.Schema(
       type: String,
       default: null,
     },
+    // #340: agent-side rows (origin 'system-side') only. The TTL index below
+    // expires a document at exactly this moment; a document without the field
+    // (every user upload and generated file) is never TTL-eligible.
+    expiresAt: { type: Date },
+    // #340: the URL a system-side row was scraped from — the cache key that
+    // lets a follow-up reuse a fresh copy instead of paying for a re-scrape.
+    sourceUrl: { type: String, default: null },
     // Zero-data retention (issue #116): chat-composer uploads from a ZDR user
     // are throwaway — the bytes and row are removed as soon as the turn that
     // used them completes. Assets-page uploads are never ephemeral, so a
@@ -158,6 +168,14 @@ assetSchema.index({ userId: 1, _id: 1 });
 // Issue #67: future search queries over converted markdown; not exercised by
 // this ticket's read paths.
 assetSchema.index({ markdownExtracted: 1 });
+
+// #340: native TTL for agent-side assets. expireAfterSeconds: 0 expires a
+// document at exactly its own `expiresAt` value; only system-side rows carry
+// that field, so nothing else is ever eligible. The TTL monitor runs about
+// every 60s, so deletion lands within a minute of the cutoff, and the remove
+// is a bare collection delete (no Mongoose middleware) — complete by design,
+// because system-side rows have no Spaces object to outlive them.
+assetSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
 
 export type AssetDocument = mongoose.HydratedDocument<mongoose.InferSchemaType<typeof assetSchema>>;
 

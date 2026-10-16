@@ -6,6 +6,10 @@ const safeAsset = (asset: AssetDocument): unknown => ({
   contentType: asset.contentType,
   size: asset.size,
   status: asset.status,
+  // #340: which audience the file is for — 'user-upload' | 'system-generated'
+  // | 'system-side' (agent-only working material, e.g. a scraped page). Lets
+  // the viewer hide attach/download affordances that need a Spaces object.
+  origin: asset.origin,
   // #325: current content version. > 1 means the file has edit history the
   // viewer can show; 1 for uploads and never-edited generated files.
   version: asset.version ?? 1,
@@ -56,6 +60,9 @@ const previewAsset = (asset: AssetDocument): unknown => {
     contentType: asset.contentType,
     size: asset.size,
     status: asset.status,
+    // #340: see safeAsset — the viewer hides object-backed actions for
+    // agent-side rows (they have no Spaces object at all).
+    origin: asset.origin,
     // #325: current content version (see safeAsset).
     version: asset.version ?? 1,
     // #252: same contract as `safeAsset` — explicit null when unknown.

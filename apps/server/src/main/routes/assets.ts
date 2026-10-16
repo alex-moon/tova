@@ -229,8 +229,18 @@ router.get('/', authenticate, async (req: AuthRequest, res) => {
   try {
     const userId = req.user?.id;
     // Ephemeral ZDR chat attachments (#116) live for one turn at most; the
-    // library view is for durable files, so they never appear here.
-    const query: Record<string, unknown> = { userId, ephemeral: { $ne: true } };
+    // library view is for durable files, so they never appear here. Agent-side
+    // material (#340: scraped pages) is also excluded by default — it exists
+    // so the agent's read_file can page through it, and the attach picker
+    // (which calls this same endpoint with no params) must never offer it.
+    // The owner can still inspect and delete it: `?origin=system-side` flips
+    // the filter to ONLY agent-side rows (the assets view's opt-in tab).
+    const agentSideOnly = req.query.origin === 'system-side';
+    const query: Record<string, unknown> = {
+      userId,
+      ephemeral: { $ne: true },
+      origin: agentSideOnly ? 'system-side' : { $ne: 'system-side' },
+    };
     const cursor = req.query.cursor;
     if (typeof cursor === 'string' && isValidObjectId(cursor)) {
       query._id = { $lt: cursor };

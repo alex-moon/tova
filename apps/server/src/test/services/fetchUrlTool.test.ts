@@ -2,24 +2,29 @@ import { RequestContext } from '@mastra/core/request-context';
 import { fetchUrlTool } from '../../main/services/mastraService';
 import { muteConsoleError } from '../muteConsole';
 
-// #340: fetch_url falls back to Firecrawl when the native fetch fails, and a
-// long scraped page is saved to the library so read_file can read it in full.
+// #340: fetch_url falls back to Firecrawl when the native fetch fails, a long
+// scraped page is saved agent-side so read_file can read it in full, and a
+// fresh cached copy of a URL is reused instead of paying for a re-scrape.
 jest.mock('../../main/services/webFetchService', () => ({
   fetchPage: jest.fn(),
   safeSlice: (text: string, max: number) => text.slice(0, max),
   MAX_FETCH_CHARS: 8000,
 }));
 jest.mock('../../main/services/firecrawlService', () => ({ firecrawlScrape: jest.fn() }));
-jest.mock('../../main/services/systemAssetService', () => ({ createSystemAsset: jest.fn() }));
+jest.mock('../../main/services/systemAssetService', () => ({
+  createSystemAsset: jest.fn(),
+  createSystemSideAsset: jest.fn(),
+  findFreshScrape: jest.fn(),
+}));
 
 import { fetchPage } from '../../main/services/webFetchService';
 import { firecrawlScrape } from '../../main/services/firecrawlService';
-import { createSystemAsset } from '../../main/services/systemAssetService';
-import { spacesWorkspaceStorage } from '../../main/services/workspaceStorage';
+import { createSystemSideAsset, findFreshScrape } from '../../main/services/systemAssetService';
 
 const mockedFetch = fetchPage as unknown as jest.Mock;
 const mockedScrape = firecrawlScrape as unknown as jest.Mock;
-const mockedCreate = createSystemAsset as unknown as jest.Mock;
+const mockedCreate = createSystemSideAsset as unknown as jest.Mock;
+const mockedFind = findFreshScrape as unknown as jest.Mock;
 const consoleErrorSpy = muteConsoleError();
 
 const fetchExecute = (
@@ -36,10 +41,11 @@ const fetchExecute = (
   }
 ).execute;
 
-const asCtx = (userId?: string, sessionId?: string) => {
+const asCtx = (userId?: string, ids?: { sessionId?: string; taskId?: string }) => {
   const requestContext = new RequestContext();
   if (userId) requestContext.set('userId', userId);
-  if (sessionId) requestContext.set('sessionId', sessionId);
+  if (ids?.sessionId) requestContext.set('sessionId', ids.sessionId);
+  if (ids?.taskId) requestContext.set('taskId', ids.taskId);
   return { requestContext };
 };
 
@@ -50,6 +56,7 @@ beforeEach(() => {
   mockedFetch.mockReset();
   mockedScrape.mockReset();
   mockedCreate.mockReset();
+  mockedFind.mockReset();
   delete process.env.FIRECRAWL_API_KEY;
 });
 
@@ -68,48 +75,86 @@ describe('fetch_url Firecrawl fallback (#340)', () => {
   it('falls back to Firecrawl and returns a short page inline (no file)', async () => {
     process.env.FIRECRAWL_API_KEY = 'fc-test';
     mockedFetch.mockRejectedValue(new Error('HTTP 419 fetching example.com'));
+    mockedFind.mockResolvedValue(null);
     mockedScrape.mockResolvedValue(page('short body'));
-    const out = await fetchExecute({ url: 'https://example.com' }, asCtx('u1'));
+    const out = await fetchExecute(
+      { url: 'https://example.com' },
+      asCtx('u1', { sessionId: 's1' }),
+    );
     expect(out.content).toBe('short body');
     expect(out.fileId).toBeUndefined();
     expect(mockedCreate).not.toHaveBeenCalled();
   });
 
-  it('saves a long scraped page and returns its fileId + a read_file note', async () => {
+  it('saves a long scraped page agent-side and returns its fileId + honest note', async () => {
     process.env.FIRECRAWL_API_KEY = 'fc-test';
-    jest.spyOn(spacesWorkspaceStorage, 'isConfigured').mockReturnValue(true);
+    const long = 'x'.repeat(9000);
     mockedFetch.mockRejectedValue(new Error('HTTP 419 fetching example.com'));
-    mockedScrape.mockResolvedValue(page('x'.repeat(9000)));
-    mockedCreate.mockResolvedValue({
-      ok: true,
-      fileId: 'file-1',
-      filename: 'web-example.com-ex.md',
-      size: 9000,
-      createdAt: new Date(),
-    });
+    mockedFind.mockResolvedValue(null);
+    mockedScrape.mockResolvedValue(page(long));
+    mockedCreate.mockResolvedValue({ fileId: 'file-1', filename: 'web-example.com-ex.md' });
 
-    const out = await fetchExecute({ url: 'https://example.com' }, asCtx('u1', 's1'));
+    const out = await fetchExecute(
+      { url: 'https://example.com' },
+      asCtx('u1', { sessionId: 's1' }),
+    );
 
     expect(out.fileId).toBe('file-1');
     expect(out.content).toHaveLength(8000);
+    expect(out.note).toContain('tell the user');
     expect(out.note).toContain('read_file');
     expect(mockedCreate).toHaveBeenCalledWith(
       'u1',
       expect.stringContaining('web-'),
-      expect.any(Buffer),
-      'text/markdown',
+      long,
       { kind: 'chat', sessionId: 's1' },
+      'https://example.com/',
     );
   });
 
-  it('returns the head without a file when storage is unconfigured', async () => {
+  it('a ZDR turn (no session, no task) never persists a scrape', async () => {
     process.env.FIRECRAWL_API_KEY = 'fc-test';
-    jest.spyOn(spacesWorkspaceStorage, 'isConfigured').mockReturnValue(false);
     mockedFetch.mockRejectedValue(new Error('HTTP 419'));
+    mockedFind.mockResolvedValue(null);
     mockedScrape.mockResolvedValue(page('x'.repeat(9000)));
     const out = await fetchExecute({ url: 'https://example.com' }, asCtx('u1'));
     expect(out.fileId).toBeUndefined();
     expect(out.content).toHaveLength(8000);
+    expect(mockedCreate).not.toHaveBeenCalled();
+  });
+
+  it('attributes a task-origin scrape to the task (#298 provenance)', async () => {
+    process.env.FIRECRAWL_API_KEY = 'fc-test';
+    mockedFetch.mockRejectedValue(new Error('HTTP 419'));
+    mockedFind.mockResolvedValue(null);
+    mockedScrape.mockResolvedValue(page('x'.repeat(9000)));
+    mockedCreate.mockResolvedValue({ fileId: 'file-2', filename: 'web-x.md' });
+    await fetchExecute({ url: 'https://example.com' }, asCtx('u1', { taskId: 't1' }));
+    expect(mockedCreate).toHaveBeenCalledWith(
+      'u1',
+      expect.any(String),
+      expect.any(String),
+      { kind: 'task', taskId: 't1' },
+      'https://example.com/',
+    );
+  });
+
+  it('reuses a fresh cached copy instead of re-scraping', async () => {
+    process.env.FIRECRAWL_API_KEY = 'fc-test';
+    mockedFetch.mockRejectedValue(new Error('HTTP 419 fetching example.com'));
+    mockedFind.mockResolvedValue({
+      fileId: 'cached-1',
+      filename: 'web-example.com-ex.md',
+      content: 'x'.repeat(9000),
+    });
+    const out = await fetchExecute(
+      { url: 'https://example.com' },
+      asCtx('u1', { sessionId: 's1' }),
+    );
+    expect(mockedScrape).not.toHaveBeenCalled();
+    expect(mockedCreate).not.toHaveBeenCalled();
+    expect(out.fileId).toBe('cached-1');
+    expect(out.note).toContain('read_file');
   });
 
   it('does not fall back when the native fetch succeeds', async () => {
@@ -118,5 +163,6 @@ describe('fetch_url Firecrawl fallback (#340)', () => {
     const out = await fetchExecute({ url: 'https://example.com' }, asCtx('u1'));
     expect(out.content).toBe('native body');
     expect(mockedScrape).not.toHaveBeenCalled();
+    expect(mockedFind).not.toHaveBeenCalled();
   });
 });

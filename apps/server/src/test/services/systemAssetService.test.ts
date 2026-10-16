@@ -1,6 +1,10 @@
 import { Asset } from '../../main/models/Asset';
 import mongoose from 'mongoose';
-import { createSystemAsset } from '../../main/services/systemAssetService';
+import {
+  createSystemAsset,
+  createSystemSideAsset,
+  findFreshScrape,
+} from '../../main/services/systemAssetService';
 import { sanitizeFilename } from '../../main/services/assetLimits';
 
 jest.mock('../../main/services/storageService', () => ({
@@ -118,5 +122,113 @@ describe('createSystemAsset (#66)', () => {
       expect(asset?.status).toBe('failed');
       expect(asset?.failureReason).toBe('storage-error');
     });
+  });
+});
+
+describe('createSystemSideAsset (#340)', () => {
+  const MARKDOWN = '# scraped page\n\nbody text';
+  const DAY_MS = 24 * 60 * 60 * 1000;
+  const ttlBackup = process.env.AGENT_ASSET_TTL_DAYS;
+
+  beforeEach(() => {
+    mockPutObject.mockReset();
+  });
+
+  afterEach(() => {
+    if (ttlBackup === undefined) delete process.env.AGENT_ASSET_TTL_DAYS;
+    else process.env.AGENT_ASSET_TTL_DAYS = ttlBackup;
+  });
+
+  it('creates a ready text-only row: origin system-side, no Spaces object', async () => {
+    const userId = oid();
+    const saved = await createSystemSideAsset(userId, 'web-example.com-page.md', MARKDOWN);
+    expect(saved).toMatchObject({ filename: 'web-example.com-page.md' });
+
+    const asset = await Asset.findOne({ userId });
+    expect(asset?.status).toBe('ready');
+    expect(asset?.origin).toBe('system-side');
+    expect(asset?.textExtracted).toBe(MARKDOWN);
+    expect(asset?.markdownStatus).toBe('none');
+    expect(asset?.key).toBe(`agent-side/${String(asset?._id)}/web-example.com-page.md`);
+    expect(mockPutObject).not.toHaveBeenCalled();
+  });
+
+  it('stamps expiresAt from the TTL config (default 30 days) for the native TTL index', async () => {
+    const before = Date.now();
+    await createSystemSideAsset(oid(), 'page.md', MARKDOWN);
+    const asset = await Asset.findOne({ origin: 'system-side' });
+    const actual = (asset?.expiresAt as Date).getTime();
+    expect(actual).toBeGreaterThanOrEqual(before + 30 * DAY_MS);
+    expect(actual).toBeLessThanOrEqual(Date.now() + 30 * DAY_MS);
+  });
+
+  it('omits expiresAt when the TTL is disabled (0 days) — TTL never fires', async () => {
+    process.env.AGENT_ASSET_TTL_DAYS = '0';
+    await createSystemSideAsset(oid(), 'page.md', MARKDOWN);
+    const asset = await Asset.findOne({ origin: 'system-side' });
+    expect(asset?.expiresAt).toBeUndefined();
+  });
+
+  it('records the source URL — the cache key for reuse over a re-scrape', async () => {
+    await createSystemSideAsset(oid(), 'page.md', MARKDOWN, undefined, 'https://example.com/');
+    const asset = await Asset.findOne({ origin: 'system-side' });
+    expect(asset?.sourceUrl).toBe('https://example.com/');
+  });
+
+  it('returns null for blank markdown or a filename that sanitizes away', async () => {
+    expect(await createSystemSideAsset(oid(), 'page.md', '   ')).toBeNull();
+    expect(await createSystemSideAsset(oid(), '   ', MARKDOWN)).toBeNull();
+    expect(await Asset.countDocuments({ origin: 'system-side' })).toBe(0);
+  });
+});
+
+describe('findFreshScrape (#340)', () => {
+  const DAY_MS = 24 * 60 * 60 * 1000;
+  const MARKDOWN = '# scraped page\n\nbody text';
+  const URL = 'https://example.com/';
+  const ttlBackup = process.env.AGENT_ASSET_TTL_DAYS;
+
+  beforeEach(() => {
+    mockPutObject.mockReset();
+  });
+
+  afterEach(() => {
+    if (ttlBackup === undefined) delete process.env.AGENT_ASSET_TTL_DAYS;
+    else process.env.AGENT_ASSET_TTL_DAYS = ttlBackup;
+  });
+
+  it('returns the fresh copy for an exact URL match', async () => {
+    const userId = oid();
+    await createSystemSideAsset(userId, 'page.md', MARKDOWN, undefined, URL);
+    expect(await findFreshScrape(userId, URL)).toMatchObject({
+      fileId: expect.any(String),
+      filename: 'page.md',
+      content: MARKDOWN,
+    });
+  });
+
+  it('misses a different URL or another user', async () => {
+    const userId = oid();
+    await createSystemSideAsset(userId, 'page.md', MARKDOWN, undefined, URL);
+    expect(await findFreshScrape(userId, 'https://other.com/')).toBeNull();
+    expect(await findFreshScrape(oid(), URL)).toBeNull();
+  });
+
+  it('misses a row past the staleness horizon — re-download territory', async () => {
+    const userId = oid();
+    await createSystemSideAsset(userId, 'page.md', MARKDOWN, undefined, URL);
+    // Mongoose protects createdAt from updates; write raw to backdate it.
+    await Asset.collection.updateOne(
+      { userId: new mongoose.Types.ObjectId(userId) },
+      { $set: { createdAt: new Date(Date.now() - 31 * DAY_MS) } },
+    );
+    expect(await findFreshScrape(userId, URL)).toBeNull();
+  });
+
+  it('returns null when the TTL is disabled (no cache horizon)', async () => {
+    process.env.AGENT_ASSET_TTL_DAYS = '0';
+    const userId = oid();
+    await createSystemSideAsset(userId, 'page.md', MARKDOWN, undefined, URL);
+    expect(await findFreshScrape(userId, URL)).toBeNull();
   });
 });
