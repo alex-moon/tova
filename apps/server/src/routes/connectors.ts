@@ -154,6 +154,7 @@ router.post('/oauth/start', authenticate, async (req: AuthRequest, res) => {
     if (err instanceof ConnectorOAuthError) {
       return res.status(err.status).json({ message: err.message });
     }
+    console.error('connector oauth start failed:', String(err));
     return res.status(500).json({ message: 'Error starting OAuth sign-in' });
   }
 });
@@ -188,6 +189,7 @@ router.post('/:id/reauth', authenticate, async (req: AuthRequest, res) => {
     if (err instanceof ConnectorOAuthError) {
       return res.status(err.status).json({ message: err.message });
     }
+    console.error('connector oauth re-connect failed:', String(err));
     return res.status(500).json({ message: 'Error starting re-connect' });
   }
 });
@@ -206,6 +208,29 @@ router.post('/oauth/callback', authenticate, async (req: AuthRequest, res) => {
       ...parsed.data,
       userId: req.user?.id as string,
     });
+    // Post-consent handshake, parity with the PAT path's live-handshake-then-
+    // persist (POST /): list tools with the fresh grant and mark the row
+    // connected. Failure keeps the row — the grant is the expensive part —
+    // but honestly marked unreachable; 'never-tested' after a real consent
+    // would hide a broken endpoint (#330 verification pass). Re-auth rides
+    // the same block, so a re-connect also heals an unreachable row.
+    const vault = readConnectorVault(doc);
+    if (vault) {
+      try {
+        const tools = await listMcpTools(doc.url, {
+          Authorization: `Bearer ${vault.accessToken}`,
+        });
+        doc.set(
+          'tools',
+          tools.map((t) => ({ name: t.name, description: t.description })),
+        );
+        doc.status = 'connected';
+      } catch (err) {
+        console.error('connector post-consent handshake failed:', String(err));
+        doc.status = 'unreachable';
+      }
+      await doc.save();
+    }
     return res.status(201).json({ connector: serialize(doc) });
   } catch (err) {
     if (err instanceof ConnectorOAuthError) {

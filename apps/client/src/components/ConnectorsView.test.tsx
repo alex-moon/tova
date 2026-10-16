@@ -28,8 +28,8 @@ const patRow: ConnectorInfo = {
   id: 'row-1',
   scope: 'user',
   type: 'mcp.pat',
-  name: 'Atlassian',
-  url: 'https://mcp.atlassian.com/v1',
+  name: 'GitHub',
+  url: 'https://api.githubcopilot.com/mcp',
   status: 'connected',
   authConfigured: true,
   authState: 'ok',
@@ -80,28 +80,28 @@ describe('ConnectorsView (#331)', () => {
     }
     // Watchlisted entries say coming soon, not connect.
     expect(screen.getByTestId('connector-card-spotify-status')).toHaveTextContent('Coming soon');
-    expect(screen.getByTestId('connector-card-notion-status')).toHaveTextContent('Connect');
+    expect(screen.getByTestId('connector-card-trello-status')).toHaveTextContent('Connect');
   });
 
   it('joins connected rows by url and shows the connected badge', async () => {
     list.mockResolvedValue([patRow]);
     render(<ConnectorsView />);
-    await screen.findByTestId('connector-card-atlassian');
-    expect(screen.getByTestId('connector-card-atlassian-status')).toHaveTextContent('Connected');
+    await screen.findByTestId('connector-card-github');
+    expect(screen.getByTestId('connector-card-github-status')).toHaveTextContent('Connected');
     expect(screen.getByTestId('connectors-count')).toHaveTextContent('1 connected');
   });
 
   it('opens the OAuth modal with a single Connect button and redirects on click', async () => {
     startOAuth.mockResolvedValue('https://as.example.com/authorize?client_id=dcr');
     render(<ConnectorsView />);
-    fireEvent.click(await screen.findByTestId('connector-card-notion'));
+    fireEvent.click(await screen.findByTestId('connector-card-trello'));
     await screen.findByTestId('connector-modal');
     expect(screen.getByTestId('connector-modal-connect')).toHaveTextContent('Connect');
     fireEvent.click(screen.getByTestId('connector-modal-connect'));
     await waitFor(() =>
       expect(startOAuth).toHaveBeenCalledWith({
-        name: 'Notion',
-        url: 'https://mcp.notion.com/mcp',
+        name: 'Trello',
+        url: 'https://mcp.trello.com/v1',
       }),
     );
     await waitFor(() =>
@@ -120,7 +120,7 @@ describe('ConnectorsView (#331)', () => {
   it('collects a token for PAT connectors and adds through the registry', async () => {
     add.mockResolvedValue(patRow);
     render(<ConnectorsView />);
-    fireEvent.click(await screen.findByTestId('connector-card-atlassian'));
+    fireEvent.click(await screen.findByTestId('connector-card-github'));
     // A PAT connect requires a token up front (a tokenless row is a dead
     // end: there is no update-token path).
     expect(screen.getByTestId('connector-modal-connect')).toBeDisabled();
@@ -132,8 +132,8 @@ describe('ConnectorsView (#331)', () => {
     await waitFor(() =>
       expect(add).toHaveBeenCalledWith({
         type: 'mcp.pat',
-        name: 'Atlassian',
-        url: 'https://mcp.atlassian.com/v1',
+        name: 'GitHub',
+        url: 'https://api.githubcopilot.com/mcp',
         authToken: 'api-token-1',
       }),
     );
@@ -141,22 +141,13 @@ describe('ConnectorsView (#331)', () => {
 
   it('renders the per-provider token instructions (#332) for PAT entries', async () => {
     render(<ConnectorsView />);
-    fireEvent.click(await screen.findByTestId('connector-card-atlassian'));
+    fireEvent.click(await screen.findByTestId('connector-card-github'));
     const steps = await screen.findByTestId('connector-modal-instructions');
     // Real provider path, not the generic fallback.
-    expect(steps).toHaveTextContent('id.atlassian.com');
-    expect(steps).toHaveTextContent('Security → API tokens');
-    // Scope guidance present (Atlassian: account-scoped, no ticks).
-    expect(steps).toHaveTextContent('no per-scope ticks');
-  });
-
-  it('offers the PAT fallback steps as a disclosure for OAuth entries (#332)', async () => {
-    render(<ConnectorsView />);
-    fireEvent.click(await screen.findByTestId('connector-card-github'));
-    const fallback = await screen.findByTestId('connector-modal-token-fallback');
-    expect(fallback).toHaveTextContent('Fine-grained token');
-    // The fallback says what breaks when scopes are narrow.
-    expect(fallback).toHaveTextContent('invisible to the assistant');
+    expect(steps).toHaveTextContent('personal-access-tokens');
+    expect(steps).toHaveTextContent('Fine-grained token');
+    // Scope guidance present (GitHub: narrow repository set).
+    expect(steps).toHaveTextContent('invisible to the assistant');
   });
 
   it('offers re-connect and disconnect for a needs-reauth row', async () => {
@@ -165,7 +156,7 @@ describe('ConnectorsView (#331)', () => {
     ]);
     reauth.mockResolvedValue('https://as.example.com/authorize');
     render(<ConnectorsView />);
-    fireEvent.click(await screen.findByTestId('connector-card-atlassian'));
+    fireEvent.click(await screen.findByTestId('connector-card-github'));
     await screen.findByTestId('connector-modal-reconnect');
     fireEvent.click(screen.getByTestId('connector-modal-reconnect'));
     await waitFor(() => expect(reauth).toHaveBeenCalledWith('row-1'));

@@ -42,7 +42,7 @@ export const CONNECTOR_INSTRUCTIONS: Record<string, ConnectorInstructions> = {
   },
   github: {
     intro:
-      'GitHub’s remote MCP server prefers OAuth sign-in — connect that way unless you specifically want token-scoped access.',
+      'GitHub’s remote MCP server also supports OAuth sign-in, but requires a pre-registered app Tova cannot create automatically yet (#342) — connect with a fine-grained token for now.',
     steps: [
       {
         title: 'Open GitHub’s token settings',

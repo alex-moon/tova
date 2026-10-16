@@ -431,6 +431,59 @@ describe('POST /api/connectors/oauth/callback (#327)', () => {
     expect(res.status).toBe(400);
     expect(mockCompleteConnectorOAuth).not.toHaveBeenCalled();
   });
+
+  it('handshakes with the fresh grant: lists tools and marks the row connected', async () => {
+    const { encryptEnvelope } = await import('../services/crypto');
+    const { app, cookie } = await registerUser('oauth-cb-tools@example.com');
+    const doc = await Connector.create({
+      type: 'mcp.oauth',
+      scope: 'user',
+      userId: new Types.ObjectId('507f1f77bcf86cd799439011'),
+      name: 'trello',
+      url: 'https://mcp.trello.com/v1',
+      authState: 'ok',
+    });
+    doc.oauth = encryptEnvelope(JSON.stringify({ accessToken: 'fresh-at' }));
+    await doc.save();
+    mockCompleteConnectorOAuth.mockResolvedValue(doc);
+    mockListMcpTools.mockResolvedValue([{ name: 'get_board', description: 'Read a board' }]);
+
+    const res = await request(app)
+      .post('/api/connectors/oauth/callback')
+      .set('Cookie', cookie)
+      .send({ code: 'auth-code', state: 'st@te' });
+
+    expect(res.status).toBe(201);
+    expect(res.body.connector.status).toBe('connected');
+    expect(res.body.connector.tools).toEqual([{ name: 'get_board', description: 'Read a board' }]);
+  });
+
+  it('keeps the grant on a failed handshake but marks the row unreachable', async () => {
+    const { encryptEnvelope } = await import('../services/crypto');
+    const { app, cookie } = await registerUser('oauth-cb-dead@example.com');
+    const doc = await Connector.create({
+      type: 'mcp.oauth',
+      scope: 'user',
+      userId: new Types.ObjectId('507f1f77bcf86cd799439011'),
+      name: 'trello',
+      url: 'https://mcp.trello.com/v1',
+      authState: 'ok',
+    });
+    doc.oauth = encryptEnvelope(JSON.stringify({ accessToken: 'fresh-at' }));
+    await doc.save();
+    mockCompleteConnectorOAuth.mockResolvedValue(doc);
+    mockListMcpTools.mockRejectedValue(new Error('handshake boom'));
+
+    const res = await request(app)
+      .post('/api/connectors/oauth/callback')
+      .set('Cookie', cookie)
+      .send({ code: 'auth-code', state: 'st@te' });
+
+    expect(res.status).toBe(201);
+    expect(res.body.connector.status).toBe('unreachable');
+    // The grant survived: still no token material in the response.
+    expect(JSON.stringify(res.body)).not.toContain('fresh-at');
+  });
 });
 
 describe('POST /api/connectors/:id/reauth (#327)', () => {

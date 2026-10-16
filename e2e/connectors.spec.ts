@@ -47,11 +47,11 @@ test('grid renders the catalog with statuses and opens the modal', async ({ page
   await expect(page.getByTestId('connectors-view')).toBeVisible();
 
   await expect(page.getByTestId('connector-card-notion-status')).toHaveText('Connected');
-  await expect(page.getByTestId('connector-card-dropbox-status')).toHaveText('Connect');
+  await expect(page.getByTestId('connector-card-trello-status')).toHaveText('Connect');
   await expect(page.getByTestId('connector-card-spotify-status')).toHaveText('Coming soon');
   await expect(page.getByTestId('connectors-count')).toHaveText('1 connected');
 
-  await page.getByTestId('connector-card-dropbox').click();
+  await page.getByTestId('connector-card-trello').click();
   await expect(page.getByTestId('connector-modal')).toBeVisible();
   await expect(page.getByTestId('connector-modal-connect')).toBeVisible();
   await page.keyboard.press('Escape');

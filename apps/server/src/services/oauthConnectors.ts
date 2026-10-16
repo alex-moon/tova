@@ -11,6 +11,7 @@ import type {
   AuthorizationServerMetadata,
   OAuthClientInformationMixed,
   OAuthClientMetadata,
+  OAuthProtectedResourceMetadata,
   OAuthTokens,
 } from '@modelcontextprotocol/sdk/shared/auth.js';
 import type { ConnectorDocument } from '../models/Connector';
@@ -46,6 +47,9 @@ export interface ConnectorOAuthVault {
   expiresAt?: number;
   tokenType?: string;
   scope?: string;
+  // The RFC 8707 resource indicator the grant was issued for; re-sent on
+  // refresh so the AS refreshes against the same resource.
+  resource?: string;
   // The authorization server that issued these tokens plus the metadata it
   // served at discovery: refreshAuthorization does NOT re-discover — without
   // the stored metadata it would fall back to `{asUrl}/token`, wrong for any
@@ -67,6 +71,9 @@ interface PendingOAuth {
   authorizationServerUrl: string;
   metadata: AuthorizationServerMetadata;
   clientInformation: OAuthClientInformationMixed;
+  // RFC 8707 resource indicator from the endpoint's protected-resource doc;
+  // echoed on the token exchange so the AS binds the tokens to the resource.
+  resource?: string;
   codeVerifier: string;
   // Set by the re-auth path: the callback updates this row instead of
   // creating a new one.
@@ -97,6 +104,13 @@ export class ConnectorOAuthError extends Error {
 export interface ConnectorOAuthProbe {
   authorizationServerUrl: string;
   metadata: AuthorizationServerMetadata;
+  // The RFC 9728 doc when the endpoint served one. Its `resource` is the
+  // canonical RFC 8707 indicator and its `scopes_supported` the per-server
+  // scope set — both must ride the authorization request or multi-product
+  // authorization servers (Atlassian) cannot route consent to the right
+  // product (Trello consent came back as the Rovo site picker without it,
+  // #330 verification pass).
+  resourceMetadata?: OAuthProtectedResourceMetadata;
 }
 
 // SSRF posture parity with the connector url itself (https-only, #36): the
@@ -129,9 +143,11 @@ const assertPublicHttpsUrl = (raw: string | URL, what: string): URL => {
  */
 export const probeConnectorOAuth = async (url: string): Promise<ConnectorOAuthProbe | null> => {
   let authorizationServerUrl: string | undefined;
+  let resourceMetadata: OAuthProtectedResourceMetadata | undefined;
   try {
     const resource = await discoverOAuthProtectedResourceMetadata(url);
     authorizationServerUrl = resource?.authorization_servers?.[0];
+    resourceMetadata = resource;
   } catch {
     // No RFC 9728 document: fall through to the origin-as-issuer attempt.
   }
@@ -152,7 +168,7 @@ export const probeConnectorOAuth = async (url: string): Promise<ConnectorOAuthPr
       assertPublicHttpsUrl(metadata.token_endpoint, 'OAuth token endpoint');
     if (metadata.registration_endpoint)
       assertPublicHttpsUrl(metadata.registration_endpoint, 'OAuth registration endpoint');
-    return { authorizationServerUrl, metadata };
+    return { authorizationServerUrl, metadata, resourceMetadata };
   } catch (err) {
     // A discovery doc pointing Tova at private/http endpoints is not "no
     // OAuth" — surface why, so the failure is diagnosable.
@@ -226,12 +242,31 @@ export const startConnectorOAuth = async (
     options.existingVault?.authorizationServerUrl === probe.authorizationServerUrl
       ? options.existingVault?.clientInformation
       : undefined;
-  const clientInformation: OAuthClientInformationMixed =
-    reusableClient ??
-    (await registerClient(probe.authorizationServerUrl, {
-      metadata: probe.metadata,
-      clientMetadata: clientMetadata(redirectUri),
-    }));
+  let clientInformation: OAuthClientInformationMixed;
+  try {
+    clientInformation =
+      reusableClient ??
+      (await registerClient(probe.authorizationServerUrl, {
+        metadata: probe.metadata,
+        clientMetadata: clientMetadata(redirectUri),
+      }));
+  } catch (err) {
+    if (err instanceof ConnectorOAuthError) throw err;
+    console.error('connector oauth client registration failed:', String(err));
+    throw new ConnectorOAuthError(
+      /dynamic client registration/i.test(String(err))
+        ? 'This provider does not support automatic app registration — one-click sign-in is not available yet.'
+        : 'Could not start sign-in with this provider. Try again shortly.',
+      422,
+    );
+  }
+
+  // RFC 8707 resource indicator + the per-server scope set, verbatim from
+  // the endpoint's protected-resource doc. Without them a multi-product
+  // authorization server cannot tell which product is being authorized —
+  // Atlassian served its Rovo/Jira site picker for a Trello-only account.
+  const resource = probe.resourceMetadata?.resource;
+  const scope = probe.resourceMetadata?.scopes_supported?.join(' ');
 
   // State is generated here (not by the SDK): it keys the pending record the
   // callback matches against, binding the consent to this start call.
@@ -241,6 +276,8 @@ export const startConnectorOAuth = async (
     clientInformation,
     redirectUrl: redirectUri,
     state,
+    resource,
+    scope,
   });
 
   prunePending();
@@ -252,6 +289,7 @@ export const startConnectorOAuth = async (
     authorizationServerUrl: probe.authorizationServerUrl,
     metadata: probe.metadata,
     clientInformation,
+    resource,
     codeVerifier: started.codeVerifier,
     connectorId: options.connectorId,
     expiresAt: Date.now() + PENDING_TTL_MS,
@@ -286,6 +324,7 @@ const vaultFromTokens = (
   authorizationServerUrl: string,
   metadata: AuthorizationServerMetadata | undefined,
   clientInformation: OAuthClientInformationMixed | undefined,
+  resource?: string,
   previous?: ConnectorOAuthVault | null,
 ): ConnectorOAuthVault => ({
   accessToken: tokens.access_token,
@@ -298,6 +337,7 @@ const vaultFromTokens = (
       : previous?.expiresAt,
   tokenType: tokens.token_type,
   scope: tokens.scope,
+  resource: resource ?? previous?.resource,
   authorizationServerUrl,
   metadata,
   clientInformation,
@@ -339,6 +379,7 @@ export const completeConnectorOAuth = async ({
       authorizationCode: code,
       codeVerifier: record.codeVerifier,
       redirectUri: record.redirectUri,
+      resource: record.resource,
     });
   } catch (err) {
     pending.delete(state);
@@ -357,6 +398,7 @@ export const completeConnectorOAuth = async ({
     record.authorizationServerUrl,
     record.metadata,
     record.clientInformation,
+    record.resource,
   );
 
   if (record.connectorId) {
@@ -415,12 +457,14 @@ const refreshVault = async (
         metadata: vault.metadata,
         clientInformation: vault.clientInformation,
         refreshToken: vault.refreshToken,
+        resource: vault.resource,
       });
       const next = vaultFromTokens(
         tokens,
         vault.authorizationServerUrl,
         vault.metadata,
         vault.clientInformation,
+        vault.resource,
         vault,
       );
       connector.oauth = encryptEnvelope(vaultPayload(next));
