@@ -140,8 +140,12 @@ type ProbeCase = {
   seesImage: boolean;
   /** What a model that truly saw the image answers. */
   expect: RegExp;
+  /** Question asked about the image. */
+  prompt: string;
   /** Tool-message variant: the image rides the tool result instead of the user turn. */
   viaTool?: boolean;
+  /** Attempt allowance — hard perception cases flake more (default 2). */
+  attempts?: number;
 };
 
 const PROBE_CASES: ProbeCase[] = [
@@ -150,18 +154,41 @@ const PROBE_CASES: ProbeCase[] = [
     fixture: ['red.png', 'image/png'],
     seesImage: true,
     expect: /\bred\b/i,
+    prompt: 'What color is this image? Answer with one word.',
   },
   {
     name: 'user message, blue.png',
     fixture: ['blue.png', 'image/png'],
     seesImage: true,
     expect: /\bblue\b/i,
+    prompt: 'What color is this image? Answer with one word.',
   },
   {
     name: 'user message, kitten.jpg',
     fixture: ['kitten.jpg', 'image/jpeg'],
     seesImage: true,
     expect: /\bcat|kitten\b/i,
+    prompt: 'What is in this image? Answer briefly.',
+  },
+  {
+    name: 'user message, whiteboard.jpg (handwriting)',
+    fixture: ['whiteboard.jpg', 'image/jpeg'],
+    seesImage: true,
+    // Distinctive menu items — unreadable without actually parsing the
+    // handwriting.
+    expect: /\bcroissant|lemonade|barbeque|barbecue\b/i,
+    prompt: 'Read the whiteboard. Name one food or drink item written on it.',
+    attempts: 3,
+  },
+  {
+    name: 'user message, street.jpg (busy scene)',
+    fixture: ['street.jpg', 'image/jpeg'],
+    seesImage: true,
+    // Small sign text / salient vehicle — requires more than a vague scene
+    // guess.
+    expect: /\bone way\b|\bbus\b/i,
+    prompt: 'Look at the street scene. What text is visible on a sign, and is there a bus?',
+    attempts: 3,
   },
   {
     name: 'tool message, red.png',
@@ -169,6 +196,7 @@ const PROBE_CASES: ProbeCase[] = [
     seesImage: true,
     expect: /\bred\b/i,
     viaTool: true,
+    prompt: 'view_image was already called. What color is the image? One word.',
   },
 ];
 
@@ -209,7 +237,7 @@ export const probeImageToolsCommand: ManageCommand = {
           ? [
               {
                 role: 'user',
-                content: 'view_image was already called. What color is the image? One word.',
+                content: probeCase.prompt,
               },
               { role: 'assistant', content: null, tool_calls: [toolCall] },
               {
@@ -221,10 +249,7 @@ export const probeImageToolsCommand: ManageCommand = {
           : [
               {
                 role: 'user',
-                content: [
-                  { type: 'text', text: 'What is in this image? Answer briefly.' },
-                  imagePart,
-                ],
+                content: [{ type: 'text', text: probeCase.prompt }, imagePart],
               },
             ];
         /*
@@ -232,7 +257,7 @@ export const probeImageToolsCommand: ManageCommand = {
          * "solid dark red"; the next named it correctly), so each case gets a
          * retry before it counts as a failure.
          */
-        const attemptsAllowed = 2;
+        const attemptsAllowed = probeCase.attempts ?? 2;
         let status = 0;
         let answer = '';
         let ok = false;
@@ -245,7 +270,10 @@ export const probeImageToolsCommand: ManageCommand = {
               body: JSON.stringify({
                 model: target.model,
                 messages,
-                max_tokens: 60,
+                // Reasoning models emit long reasoning_content before the
+                // answer; a small cap truncates before the item is named and
+                // reads as a perception failure when it is only token hunger.
+                max_tokens: 400,
               }),
             });
             status = res.status;
