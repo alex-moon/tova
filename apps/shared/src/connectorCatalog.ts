@@ -70,9 +70,7 @@ export const CONNECTOR_CATALOG: CatalogEntry[] = [
     authType: 'mcp.oauth',
     endpoint: 'https://mcp-gateway-external-pilot.spotify.net/mcp',
     summary: 'Control playback and browse your library.',
-    state: 'watchlisted',
-    watchlistNote:
-      'Official but a "pilot" endpoint that may move — held back until it proves stable (#330 watchlist).',
+    state: 'live',
     brandColor: '#1ED760',
     iconRef: 'spotify',
   },
@@ -82,9 +80,7 @@ export const CONNECTOR_CATALOG: CatalogEntry[] = [
     authType: 'mcp.oauth',
     endpoint: 'https://mcp.dropbox.com/mcp',
     summary: 'Browse, read, and search your Dropbox files.',
-    state: 'watchlisted',
-    watchlistNote:
-      'OAuth flow is built but not yet verified with a real account (#330 gate) — connectable today via "Add anything else by URL".',
+    state: 'live',
     brandColor: '#0061FF',
     iconRef: 'dropbox',
   },
