@@ -378,15 +378,26 @@ describe('list_files tool (#58)', () => {
     expect(out.more).toBe(true);
   });
 
-  it('never lists agent-side rows (#340) — the agent finds those via fetch_url', async () => {
+  it('lists agent-side rows with their sourceUrl (#356) — cross-session rediscovery', async () => {
     const user = await createUser('list-agentside@example.com');
     await createAsset(user.id, 'mine.txt', { textExtracted: 'mine' });
     const scraped = await createAsset(user.id, 'web-example.com-page.md', {
       textExtracted: '# scraped page',
     });
-    await Asset.updateOne({ _id: scraped.id }, { $set: { origin: 'system-side' } });
-    const out = (await listExecute([], asCtx(user.id))) as { files: { filename: string }[] };
-    expect(out.files.map((f) => f.filename)).toEqual(['mine.txt']);
+    await Asset.updateOne(
+      { _id: scraped.id },
+      { $set: { origin: 'system-side', sourceUrl: 'https://example.com/page' } },
+    );
+    const out = (await listExecute([], asCtx(user.id))) as {
+      files: { filename: string; sourceUrl?: string }[];
+    };
+    expect(out.files.map((f) => f.filename)).toEqual(
+      expect.arrayContaining(['mine.txt', 'web-example.com-page.md']),
+    );
+    const cached = out.files.find((f) => f.filename === 'web-example.com-page.md');
+    expect(cached?.sourceUrl).toBe('https://example.com/page');
+    // Uploads carry no sourceUrl — the flag marks agent-saved pages only.
+    expect(out.files.find((f) => f.filename === 'mine.txt')?.sourceUrl).toBeUndefined();
   });
 });
 

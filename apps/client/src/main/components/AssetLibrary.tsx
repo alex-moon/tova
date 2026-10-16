@@ -55,10 +55,18 @@ interface AssetLibraryProps {
   selectedId?: string | null;
 }
 
+// Issue #356: which audience the list shows. 'mine' is the classic library
+// (uploads + system-generated, the server's default); 'agent' flips the
+// server's `?origin=system-side` filter to ONLY agent-facing files (pages
+// fetch_url saved for read_file).
+type AssetFilter = 'mine' | 'agent';
+
 const AssetLibrary: React.FC<AssetLibraryProps> = ({ onSelect, selectedId = null }) => {
   const [assets, setAssets] = useState<AssetSummary[]>([]);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [filter, setFilter] = useState<AssetFilter>('mine');
+  const originParam = filter === 'agent' ? ('system-side' as const) : undefined;
   const [uploadRows, setUploadRows] = useState<
     Array<{
       name: string;
@@ -73,26 +81,38 @@ const AssetLibrary: React.FC<AssetLibraryProps> = ({ onSelect, selectedId = null
   const [bulkDeleting, setBulkDeleting] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const load = useCallback(async (opts: { silent?: boolean } = {}) => {
-    try {
-      if (!opts.silent) setLoading(true);
-      const page = await AssetService.list();
-      setAssets(page.assets);
-      setNextCursor(page.nextCursor);
-    } catch (err) {
-      if (!opts.silent) {
-        console.error('Error listing assets:', err);
-        toast.error('Could not load your files');
+  const load = useCallback(
+    async (opts: { silent?: boolean } = {}) => {
+      try {
+        if (!opts.silent) setLoading(true);
+        const page = await AssetService.list(undefined, originParam);
+        setAssets(page.assets);
+        setNextCursor(page.nextCursor);
+      } catch (err) {
+        if (!opts.silent) {
+          console.error('Error listing assets:', err);
+          toast.error('Could not load your files');
+        }
+      } finally {
+        if (!opts.silent) setLoading(false);
       }
-    } finally {
-      if (!opts.silent) setLoading(false);
-    }
-  }, []);
+    },
+    [originParam],
+  );
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     void load();
   }, [load]);
+
+  const switchFilter = (next: AssetFilter) => {
+    if (next === filter) return;
+    // Clear the previous audience's rows and selection up front: a stale row
+    // must never sit under a delete click aimed at the new list.
+    setFilter(next);
+    setAssets([]);
+    setSelectedIds(new Set());
+  };
 
   // Issue #83: while any listed asset is still converting, poll the list
   // silently (no loading flash) so pending cards turn ready/failed in place.
@@ -182,6 +202,13 @@ const AssetLibrary: React.FC<AssetLibraryProps> = ({ onSelect, selectedId = null
     else void handleDelete(id);
   });
 
+  // Agent-side rows have no Spaces object behind them (synthetic key), so a
+  // presigned download can never resolve — hide object-backed affordances
+  // whenever the selection contains one (#356).
+  const anyAgentSideSelected = assets.some(
+    (a) => selectedIds.has(a.id) && a.origin === 'system-side',
+  );
+
   const handleDownload = async (asset: AssetSummary) => {
     try {
       const url = await AssetService.downloadUrl(asset.id);
@@ -224,8 +251,43 @@ const AssetLibrary: React.FC<AssetLibraryProps> = ({ onSelect, selectedId = null
 
   const body = (
     <>
-      <div className="flex h-14 shrink-0 items-center justify-between border-b border-border px-4">
+      <div className="flex h-14 shrink-0 items-center justify-between gap-2 border-b border-border px-4">
         <h2 className="font-heading text-lg font-semibold">Files</h2>
+        {/* Issue #356: audience switch — user-facing files vs agent-facing
+            ones (pages fetch_url saved). Compact segmented control so it fits
+            beside the title at phone width. */}
+        <div
+          className="flex shrink-0 items-center rounded-lg border border-border p-0.5"
+          role="group"
+          aria-label="File filter"
+        >
+          <button
+            type="button"
+            data-testid="asset-filter-mine"
+            aria-pressed={filter === 'mine'}
+            onClick={() => switchFilter('mine')}
+            className={`rounded-md px-2 py-1 text-xs font-medium transition-colors ${
+              filter === 'mine'
+                ? 'bg-accent text-foreground'
+                : 'text-muted-foreground hover:text-foreground'
+            }`}
+          >
+            My files
+          </button>
+          <button
+            type="button"
+            data-testid="asset-filter-agent"
+            aria-pressed={filter === 'agent'}
+            onClick={() => switchFilter('agent')}
+            className={`rounded-md px-2 py-1 text-xs font-medium transition-colors ${
+              filter === 'agent'
+                ? 'bg-accent text-foreground'
+                : 'text-muted-foreground hover:text-foreground'
+            }`}
+          >
+            Agent files
+          </button>
+        </div>
       </div>
       <div className="flex-1 overflow-y-auto p-4">
         {loading ? (
@@ -237,7 +299,9 @@ const AssetLibrary: React.FC<AssetLibraryProps> = ({ onSelect, selectedId = null
           </div>
         ) : assets.length === 0 ? (
           <p className="py-6 text-center text-sm text-muted-foreground">
-            No files yet. Upload one below or attach it to a message in the chat.
+            {filter === 'agent'
+              ? 'No agent files yet. When a web page the agent reads is too long for one preview, Tova saves a copy here for it to re-read.'
+              : 'No files yet. Upload one below or attach it to a message in the chat.'}
           </p>
         ) : (
           <>
@@ -286,19 +350,21 @@ const AssetLibrary: React.FC<AssetLibraryProps> = ({ onSelect, selectedId = null
                 <div className="mb-2 flex items-center justify-between gap-2">
                   <span className="text-xs text-muted-foreground">{selectedIds.size} selected</span>
                   <div className="flex items-center gap-2">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      disabled={bulkDownloading}
-                      data-testid="asset-bulk-download"
-                      onClick={() => void handleBulkDownload()}
-                    >
-                      {bulkDownloading ? (
-                        <Loader2 className="size-4 animate-spin" />
-                      ) : (
-                        'Download selected'
-                      )}
-                    </Button>
+                    {!anyAgentSideSelected && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        disabled={bulkDownloading}
+                        data-testid="asset-bulk-download"
+                        onClick={() => void handleBulkDownload()}
+                      >
+                        {bulkDownloading ? (
+                          <Loader2 className="size-4 animate-spin" />
+                        ) : (
+                          'Download selected'
+                        )}
+                      </Button>
+                    )}
                     <Button
                       variant="outline"
                       size="sm"
@@ -414,15 +480,17 @@ const AssetLibrary: React.FC<AssetLibraryProps> = ({ onSelect, selectedId = null
                         )}
                       </span>
                     </button>
-                    <button
-                      type="button"
-                      title="Download"
-                      aria-label={`Download ${asset.filename}`}
-                      onClick={() => void handleDownload(asset)}
-                      className="shrink-0 rounded p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-                    >
-                      <span className="text-xs underline">Get</span>
-                    </button>
+                    {asset.origin !== 'system-side' && (
+                      <button
+                        type="button"
+                        title="Download"
+                        aria-label={`Download ${asset.filename}`}
+                        onClick={() => void handleDownload(asset)}
+                        className="shrink-0 rounded p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                      >
+                        <span className="text-xs underline">Get</span>
+                      </button>
+                    )}
                     <button
                       type="button"
                       title="Delete"
@@ -441,7 +509,7 @@ const AssetLibrary: React.FC<AssetLibraryProps> = ({ onSelect, selectedId = null
               <button
                 type="button"
                 onClick={() =>
-                  void AssetService.list(nextCursor)
+                  void AssetService.list(nextCursor, originParam)
                     .then((page) => {
                       setAssets((prev) => [...prev, ...page.assets]);
                       setNextCursor(page.nextCursor);
@@ -456,62 +524,66 @@ const AssetLibrary: React.FC<AssetLibraryProps> = ({ onSelect, selectedId = null
           </>
         )}
       </div>
-      <div className="shrink-0 border-t border-border p-4">
-        <button
-          type="button"
-          data-testid="asset-dropzone"
-          aria-label="Upload files: drop them here or tap to choose"
-          onDrop={onDrop}
-          onDragOver={(e) => e.preventDefault()}
-          onClick={() => inputRef.current?.click()}
-          className="flex w-full cursor-pointer flex-col items-center gap-1.5 rounded-lg border border-dashed border-border px-4 py-4 text-center text-sm text-muted-foreground transition-colors hover:border-primary hover:text-accent-foreground"
-        >
-          <Upload className="size-4" />
-          <span>
-            Drag files here, or{' '}
-            <span className="text-primary underline underline-offset-2">choose files</span>
-          </span>
-          <span className="text-xs">Up to 15 MB each · txt, md, csv, json, pdf, images</span>
-        </button>
-        {uploadRows.length > 0 && (
-          <ul className="mt-2 space-y-1" data-testid="upload-rows">
-            {uploadRows.map((row, i) => (
-              <li key={`${row.name}-${i}`} className="flex flex-col gap-0.5 text-left">
-                <span
-                  className="flex items-center justify-between gap-2 truncate text-xs"
-                  data-testid={`upload-row-${i}`}
-                >
-                  <span className="truncate">{row.name}</span>
+      {/* Uploads are user-origin files: in the Agent files view they could
+          never appear in this filtered list, so the dropzone hides (#356). */}
+      {filter === 'mine' && (
+        <div className="shrink-0 border-t border-border p-4">
+          <button
+            type="button"
+            data-testid="asset-dropzone"
+            aria-label="Upload files: drop them here or tap to choose"
+            onDrop={onDrop}
+            onDragOver={(e) => e.preventDefault()}
+            onClick={() => inputRef.current?.click()}
+            className="flex w-full cursor-pointer flex-col items-center gap-1.5 rounded-lg border border-dashed border-border px-4 py-4 text-center text-sm text-muted-foreground transition-colors hover:border-primary hover:text-accent-foreground"
+          >
+            <Upload className="size-4" />
+            <span>
+              Drag files here, or{' '}
+              <span className="text-primary underline underline-offset-2">choose files</span>
+            </span>
+            <span className="text-xs">Up to 15 MB each · txt, md, csv, json, pdf, images</span>
+          </button>
+          {uploadRows.length > 0 && (
+            <ul className="mt-2 space-y-1" data-testid="upload-rows">
+              {uploadRows.map((row, i) => (
+                <li key={`${row.name}-${i}`} className="flex flex-col gap-0.5 text-left">
                   <span
-                    className={
-                      row.status === 'error' ? 'text-destructive' : 'text-muted-foreground'
-                    }
+                    className="flex items-center justify-between gap-2 truncate text-xs"
+                    data-testid={`upload-row-${i}`}
                   >
-                    {row.status === 'uploading' && `Uploading ${row.progress}%`}
-                    {row.status === 'done' && 'Uploaded'}
-                    {row.status === 'error' && (row.message ?? 'Upload failed')}
+                    <span className="truncate">{row.name}</span>
+                    <span
+                      className={
+                        row.status === 'error' ? 'text-destructive' : 'text-muted-foreground'
+                      }
+                    >
+                      {row.status === 'uploading' && `Uploading ${row.progress}%`}
+                      {row.status === 'done' && 'Uploaded'}
+                      {row.status === 'error' && (row.message ?? 'Upload failed')}
+                    </span>
                   </span>
-                </span>
-                {row.status === 'uploading' && (
-                  <progress max={100} value={row.progress} className="h-1 w-full" />
-                )}
-              </li>
-            ))}
-          </ul>
-        )}
-        <input
-          ref={inputRef}
-          type="file"
-          className="hidden"
-          aria-hidden
-          multiple
-          data-testid="asset-input"
-          onChange={(e) => {
-            void handleFiles(e.target.files);
-            e.target.value = '';
-          }}
-        />
-      </div>
+                  {row.status === 'uploading' && (
+                    <progress max={100} value={row.progress} className="h-1 w-full" />
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+          <input
+            ref={inputRef}
+            type="file"
+            className="hidden"
+            aria-hidden
+            multiple
+            data-testid="asset-input"
+            onChange={(e) => {
+              void handleFiles(e.target.files);
+              e.target.value = '';
+            }}
+          />
+        </div>
+      )}
     </>
   );
 

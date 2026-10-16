@@ -20,6 +20,10 @@ export interface AssetSummary {
   contentType: string;
   size: number;
   status: string;
+  // Issue #340/#356: which audience the file is for — 'user-upload' |
+  // 'system-generated' | 'system-side' (agent-only working material, e.g. a
+  // scraped page: no Spaces object, so download affordances must hide).
+  origin?: 'user-upload' | 'system-generated' | 'system-side';
   // No extracted text server-side — Tova can read the filename only.
   hasText: boolean;
   // Issue #67: markdown conversion lifecycle ('none'|'pending'|'ready'|'failed');
@@ -248,9 +252,13 @@ const uploadBatch = async (
 };
 
 const AssetService = {
-  async list(cursor?: string | null): Promise<AssetListPage> {
+  // Issue #356: `origin` narrows the list to one audience — 'system-side'
+  // fetches ONLY agent-facing files (pages fetch_url saved); omitted keeps
+  // the server default (uploads + generated, agent-side excluded), which the
+  // chat attach picker also relies on.
+  async list(cursor?: string | null, origin?: 'system-side'): Promise<AssetListPage> {
     const res = await axios.get<AssetListPage>('/api/assets', {
-      params: cursor ? { cursor } : {},
+      params: { ...(cursor ? { cursor } : {}), ...(origin ? { origin } : {}) },
     });
     return res.data;
   },

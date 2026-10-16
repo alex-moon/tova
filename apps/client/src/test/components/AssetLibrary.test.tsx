@@ -383,7 +383,7 @@ describe('AssetLibrary — conversion feedback (issue #83)', () => {
     vi.useRealTimers();
     expect(screen.getByTestId('asset-extracting')).toBeInTheDocument();
     expect(vi.mocked(AssetService.list)).toHaveBeenCalledTimes(4);
-    expect(vi.mocked(AssetService.list)).toHaveBeenLastCalledWith();
+    expect(vi.mocked(AssetService.list)).toHaveBeenLastCalledWith(undefined, undefined);
     expect(toast.error).not.toHaveBeenCalled();
   });
 });
@@ -476,5 +476,82 @@ describe('AssetLibrary — inline delete confirm (issue #59)', () => {
     await screen.findByText('notes.txt');
     fireEvent.click(screen.getByRole('button', { name: 'Delete notes.txt' }));
     await waitFor(() => expect(AssetService.delete).toHaveBeenCalledWith('a1'));
+  });
+});
+
+describe('AssetLibrary — audience filter (issue #356)', () => {
+  afterEach(cleanup);
+  vi.mocked(AssetService.list).mockReset();
+
+  it('defaults to My files and refetches with the system-side origin on Agent files', async () => {
+    vi.mocked(AssetService.list).mockResolvedValue({ assets: [], nextCursor: null });
+    renderLibrary();
+    await waitFor(() =>
+      expect(vi.mocked(AssetService.list)).toHaveBeenCalledWith(undefined, undefined),
+    );
+    fireEvent.click(screen.getByTestId('asset-filter-agent'));
+    await waitFor(() =>
+      expect(vi.mocked(AssetService.list)).toHaveBeenCalledWith(undefined, 'system-side'),
+    );
+    fireEvent.click(screen.getByTestId('asset-filter-mine'));
+    await waitFor(() =>
+      expect(vi.mocked(AssetService.list)).toHaveBeenLastCalledWith(undefined, undefined),
+    );
+  });
+
+  it('hides the upload dropzone and download affordances for agent files', async () => {
+    const agentFile = asset({
+      id: 'a9',
+      filename: 'web-example.com-page.md',
+      contentType: 'text/markdown',
+      origin: 'system-side',
+    });
+    vi.mocked(AssetService.list)
+      .mockReset()
+      .mockResolvedValue({
+        assets: [agentFile],
+        nextCursor: null,
+      });
+    renderLibrary();
+    fireEvent.click(screen.getByTestId('asset-filter-agent'));
+    await screen.findByText('web-example.com-page.md');
+
+    // Agent view: dropzone gone (uploads could never appear here), per-row
+    // Get gone (no Spaces object behind the row), bulk download hidden even
+    // when selected; delete stays available.
+    expect(screen.queryByTestId('asset-dropzone')).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: 'Download web-example.com-page.md' }),
+    ).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Select web-example.com-page.md' }));
+    expect(screen.queryByTestId('asset-bulk-download')).not.toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'Delete web-example.com-page.md' }),
+    ).toBeInTheDocument();
+  });
+
+  it('shows the agent empty-state copy in the Agent files view', async () => {
+    vi.mocked(AssetService.list).mockReset().mockResolvedValue({ assets: [], nextCursor: null });
+    renderLibrary();
+    await screen.findByText(
+      'No files yet. Upload one below or attach it to a message in the chat.',
+    );
+    fireEvent.click(screen.getByTestId('asset-filter-agent'));
+    await screen.findByText(
+      'No agent files yet. When a web page the agent reads is too long for one preview, Tova saves a copy here for it to re-read.',
+    );
+  });
+
+  it('shows per-row Get for user files and keeps bulk download working', async () => {
+    vi.mocked(AssetService.list)
+      .mockReset()
+      .mockResolvedValue({
+        assets: [asset()],
+        nextCursor: null,
+      });
+    renderLibrary();
+    await screen.findByText('notes.txt');
+    expect(screen.getByTestId('asset-dropzone')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Download notes.txt' })).toBeInTheDocument();
   });
 });
