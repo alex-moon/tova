@@ -126,9 +126,7 @@ export const CONNECTOR_CATALOG: CatalogEntry[] = [
     authType: 'mcp.oauth',
     endpoint: 'https://mcp.linear.app/mcp',
     summary: 'Work with issues, projects, and cycles.',
-    state: 'watchlisted',
-    watchlistNote:
-      'OAuth flow is built but not yet verified with a real account (#330 gate) — connectable today via "Add anything else by URL".',
+    state: 'live',
     brandColor: '#5E6AD2',
     iconRef: 'linear',
   },
