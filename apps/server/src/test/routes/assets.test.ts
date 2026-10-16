@@ -198,6 +198,19 @@ describe('Assets confirm', () => {
     expect(stored?.size).toBe(11);
   });
 
+  it('stores the full extracted text, not a 12k prompt-truncated copy (#341)', async () => {
+    const cookie = await registerUser('assets-fulltext-user@example.com');
+    const body = 'x'.repeat(13_000);
+    const assetId = await presignOk(cookie, 'long.txt', 'text/plain', body.length);
+
+    mockHead.mockResolvedValue(headerForObject(body.length, 'text/plain'));
+    mockGetObjectBuffer.mockResolvedValue(Buffer.from(body));
+
+    const confirm = await confirmFor(cookie, assetId);
+    expect(confirm.status).toBe(200);
+    expect((await Asset.findById(assetId))?.textExtracted).toBe(body);
+  });
+
   it('embeds extracted text on confirm but never for an ephemeral upload (#294)', async () => {
     const enqueueEmbed = jest.spyOn(
       jest.requireActual<typeof import('../../main/services/workspaceEmbeddingIngest')>(
