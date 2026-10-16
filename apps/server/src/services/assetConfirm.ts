@@ -3,7 +3,7 @@ import { spacesWorkspaceStorage } from './workspaceStorage';
 import { MAX_ASSET_SIZE, isImageContentType } from './assetLimits';
 import { enqueueAssetJob } from './assetJobService';
 import { isConvertible } from './markdownConversion';
-import { extractText, isExtractable, truncateForPrompt } from './textExtraction';
+import { extractText, isExtractable } from './textExtraction';
 import { safeAsset } from './assetViews';
 import { enqueueWorkspaceEmbedding } from './workspaceEmbeddingIngest';
 
@@ -59,7 +59,10 @@ const confirmAsset = async (asset: AssetDocument): Promise<ConfirmResult> => {
   let text: string | null = null;
   if (isExtractable(asset.filename) && head.size <= MAX_EXTRACT_BYTES) {
     const buf = await spacesWorkspaceStorage.getByKey(asset.key);
-    if (buf) text = truncateForPrompt(extractText(asset.filename, buf) ?? '');
+    // Store the full extracted text (OQ4): the 12k cap applies at prompt-assembly
+    // time (truncateForPrompt in the attach envelope / read_file), never here — so
+    // a long document is recoverable via read_file instead of being lost at ingest.
+    if (buf) text = extractText(asset.filename, buf);
     if (text !== null) asset.textExtracted = text === '' ? null : text;
   }
 
