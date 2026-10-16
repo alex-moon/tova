@@ -94,9 +94,7 @@ export const CONNECTOR_CATALOG: CatalogEntry[] = [
     authType: 'mcp.oauth',
     endpoint: 'https://mcp.notion.com/mcp',
     summary: 'Search, read, and edit your Notion pages.',
-    state: 'watchlisted',
-    watchlistNote:
-      'OAuth flow is built but not yet verified with a real account (#330 gate) — connectable today via "Add anything else by URL".',
+    state: 'live',
     brandColor: '#000000',
     iconRef: 'notion',
   },
