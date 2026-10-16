@@ -68,10 +68,10 @@ const ConnectorOAuthCallback = () => {
         </p>
         {!working && (
           <a
-            href="/profile"
+            href="/connectors"
             className="block text-sm text-muted-foreground underline underline-offset-4 hover:text-foreground"
           >
-            Back to settings
+            Back to connectors
           </a>
         )}
       </div>

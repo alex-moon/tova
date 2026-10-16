@@ -52,6 +52,8 @@ beforeEach(() => {
   jest.clearAllMocks();
   discoverOAuthProtectedResourceMetadata.mockResolvedValue({
     authorization_servers: ['https://as.example.com'],
+    resource: 'https://mcp.example.com/mcp',
+    scopes_supported: ['read:things', 'write:things'],
   });
   discoverAuthorizationServerMetadata.mockResolvedValue(AS_METADATA);
   registerClient.mockResolvedValue({ client_id: 'dcr-client', client_secret: 'dcr-secret' });
@@ -77,11 +79,18 @@ describe('probeConnectorOAuth', () => {
   it('follows RFC 9728 discovery to the authorization server', async () => {
     discoverOAuthProtectedResourceMetadata.mockResolvedValue({
       authorization_servers: ['https://as.example.com'],
+      resource: 'https://mcp.example.com/mcp',
+      scopes_supported: ['read:things', 'write:things'],
     });
     const probe = await probeConnectorOAuth('https://mcp.example.com/mcp');
     expect(probe).toEqual({
       authorizationServerUrl: 'https://as.example.com',
       metadata: AS_METADATA,
+      resourceMetadata: {
+        authorization_servers: ['https://as.example.com'],
+        resource: 'https://mcp.example.com/mcp',
+        scopes_supported: ['read:things', 'write:things'],
+      },
     });
   });
 
@@ -187,9 +196,24 @@ describe('startConnectorOAuth', () => {
       'https://as.example.com',
       expect.objectContaining({
         clientInformation: { client_id: 'dcr-client', client_secret: 'dcr-secret' },
+        // RFC 8707 resource indicator + per-server scopes, verbatim from the
+        // endpoint's protected-resource doc (#330 verification pass).
+        resource: 'https://mcp.example.com/mcp',
+        scope: 'read:things write:things',
       }),
     );
     expect(authorizationUrl).toContain('as.example.com/authorize');
+  });
+
+  it('wraps a DCR-incapable authorization server as a 422 with honest copy (#342)', async () => {
+    registerClient.mockRejectedValue(
+      new Error('Incompatible auth server: does not support dynamic client registration'),
+    );
+    const err = await startConnectorOAuth(base).catch((e: ConnectorOAuthError) => e);
+    expect(err).toBeInstanceOf(ConnectorOAuthError);
+    expect(err.status).toBe(422);
+    expect(err.message).toMatch(/automatic app registration/u);
+    expect(err.message).not.toContain('dynamic client registration');
   });
 
   it('reuses the vaulted DCR registration on re-auth instead of re-registering', async () => {
@@ -247,6 +271,7 @@ describe('completeConnectorOAuth', () => {
         authorizationCode: 'auth-code',
         codeVerifier: 'verifier-abc',
         redirectUri: 'https://app.example.com/connectors/callback',
+        resource: 'https://mcp.example.com/mcp',
       }),
     );
     expect(doc.type).toBe('mcp.oauth');
