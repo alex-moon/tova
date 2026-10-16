@@ -9,10 +9,10 @@
     "strict": true,
     "skipLibCheck": true,
     "declaration": true,
-    "rootDir": "src",
+    "rootDir": "src/main",
     "outDir": "dist",
     "tsBuildInfoFile": "dist/tsconfig.tsbuildinfo"
   },
-  "include": ["src/**/*.ts"],
-  "exclude": ["src/**/*.test.ts"]
+  "include": ["src/main/**/*.ts"],
+  "exclude": ["src/test/**"]
 }

@@ -1,5 +1,5 @@
 import 'dotenv/config';
-import { config } from '../apps/server/src/config';
+import { config } from '../apps/server/src/main/config';
 
 /*
  * Read logs from Grafana Cloud (hosted Loki) — the same credentials the admin

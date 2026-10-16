@@ -1,6 +1,6 @@
 import 'dotenv/config';
 import zlib from 'node:zlib';
-import { deepinfraConnector, groqConnector } from '../apps/server/src/services/mastraService';
+import { deepinfraConnector, groqConnector } from '../apps/server/src/main/services/mastraService';
 
 /*
  * Manual smoke for #115: drives the real in-process DeepInfra connector

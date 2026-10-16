@@ -17,24 +17,24 @@
  */
 import 'dotenv/config';
 import mongoose from 'mongoose';
-import { buildMongoUri } from '../apps/shared/src/mongoUri';
-import { langsmithClientFromEnv } from '../apps/server/src/services/evalRunService';
+import { buildMongoUri } from '../apps/shared/src/main/mongoUri';
+import { langsmithClientFromEnv } from '../apps/server/src/main/services/evalRunService';
 import {
   pushMemoryCorpusToLangSmith,
   runMemoryEvals,
-} from '../apps/server/src/evals/memory/memoryEvalService';
+} from '../apps/server/src/main/evals/memory/memoryEvalService';
 import {
   defaultJudge,
   runHelpfulnessEval,
   runJudgePreflight,
-} from '../apps/server/src/evals/memory/helpfulnessEval';
+} from '../apps/server/src/main/evals/memory/helpfulnessEval';
 import {
   constructedJudgeLabels,
   handJudgeLabels,
   judgeAgreement,
   type JudgeLabel,
-} from '../apps/server/src/evals/memory/judgeValidation';
-import { config } from '../apps/server/src/config';
+} from '../apps/server/src/main/evals/memory/judgeValidation';
+import { config } from '../apps/server/src/main/config';
 
 const pct = (value: number | null): string =>
   value === null ? 'n/a' : `${(value * 100).toFixed(1)}%`;

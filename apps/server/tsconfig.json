@@ -9,7 +9,7 @@
     "skipLibCheck": true,
     "types": ["node", "jest"],
     "baseUrl": ".",
-    "paths": { "@tova/shared": ["../shared/src"] }
+    "paths": { "@tova/shared": ["../shared/src/main"] }
   },
   "include": ["src/**/*.ts"],
   "exclude": ["src/**/*.test.ts", "src/test/**"]

@@ -11,7 +11,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Tova</title>
     <script>
-      // Standalone twin: apps/client/src/theme.ts (keep in sync). Runs before
+      // Standalone twin: apps/client/src/main/theme.ts (keep in sync). Runs before
       // the bundle to set the theme class on <html> and avoid a flash of the
       // wrong theme. Precedence: cookie -> localStorage -> prefers-color-scheme
       // -> light (no-op, :root is light).
@@ -48,6 +48,6 @@
   </head>
   <body>
     <div id="root"></div>
-    <script type="module" src="/src/main.tsx"></script>
+    <script type="module" src="/src/main/main.tsx"></script>
   </body>
 </html>
