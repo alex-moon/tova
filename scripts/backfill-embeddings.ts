@@ -16,10 +16,10 @@
  */
 import 'dotenv/config';
 import mongoose from 'mongoose';
-import { buildMongoUri } from '../apps/shared/src/mongoUri';
-import { config } from '../apps/server/src/config';
-import { User } from '../apps/server/src/models/User';
-import { embedWorkspaceUser } from '../apps/server/src/services/workspaceEmbeddingIngest';
+import { buildMongoUri } from '../apps/shared/src/main/mongoUri';
+import { config } from '../apps/server/src/main/config';
+import { User } from '../apps/server/src/main/models/User';
+import { embedWorkspaceUser } from '../apps/server/src/main/services/workspaceEmbeddingIngest';
 
 // Rough public pricing for a bge-base-class embedding (~$0.067 per 1M input
 // tokens); reported as an order-of-magnitude cost bound, not a bill.

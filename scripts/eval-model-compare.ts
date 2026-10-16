@@ -1,7 +1,7 @@
 import 'dotenv/config';
-import type { LlmProvider } from '../apps/server/src/services/llmTypes';
-import { runModelComparison } from '../apps/server/src/services/modelCompare';
-import { ROSTER_SEED } from '../apps/server/src/services/rosterConfig';
+import type { LlmProvider } from '../apps/server/src/main/services/llmTypes';
+import { runModelComparison } from '../apps/server/src/main/services/modelCompare';
+import { ROSTER_SEED } from '../apps/server/src/main/services/rosterConfig';
 
 /*
  * #129 one-off eval: run a single prompt against the existing agent on

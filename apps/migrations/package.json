@@ -4,8 +4,8 @@
   "private": true,
   "description": "Tova Mongo schema migrations (mongo-migrate-ts, run via tsx)",
   "scripts": {
-    "migrate": "tsx src/index.ts up",
-    "migrate:down": "tsx src/index.ts down --last"
+    "migrate": "tsx src/main/index.ts up",
+    "migrate:down": "tsx src/main/index.ts down --last"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",
