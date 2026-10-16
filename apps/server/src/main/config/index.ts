@@ -64,6 +64,15 @@ export const config = {
     },
   },
 
+  // #340: Firecrawl web-data API, used as the fetch_url fallback when a plain
+  // fetch is blocked (JS-heavy pages, anti-bot/WAF challenges). Optional;
+  // unset means fetch_url keeps its native-only behaviour.
+  firecrawl: {
+    get apiKey(): string | undefined {
+      return process.env.FIRECRAWL_API_KEY;
+    },
+  },
+
   // Provider API keys. Mastra reads these implicitly for inference; the
   // model-lookup service (#217) reads DeepInfra's catalog directly, so the
   // key is surfaced here rather than reached for ad hoc.

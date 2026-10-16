@@ -14,6 +14,8 @@ jest.mock('../../main/services/webSearchService', () => ({
 }));
 jest.mock('../../main/services/webFetchService', () => ({
   fetchPage: jest.fn(),
+  safeSlice: (text: string, max: number) => text.slice(0, max),
+  MAX_FETCH_CHARS: 8000,
 }));
 
 import { fetchPage } from '../../main/services/webFetchService';

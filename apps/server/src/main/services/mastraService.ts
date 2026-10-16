@@ -32,7 +32,8 @@ import {
   TraceContext,
 } from './llmTypes';
 import { webSearch } from './webSearchService';
-import { fetchPage } from './webFetchService';
+import { fetchPage, safeSlice, MAX_FETCH_CHARS, type FetchedPage } from './webFetchService';
+import { firecrawlScrape } from './firecrawlService';
 import { createSystemAsset } from './systemAssetService';
 import { applyAssetEdits, type AssetEdit } from './assetEditService';
 import { spacesWorkspaceStorage } from './workspaceStorage';
@@ -338,18 +339,73 @@ export const webSearchTool = createTool({
  * is `webFetchService.fetchPage`; like web_search, any failure degrades to
  * a typed error instead of throwing (a tool call must never fail the turn).
  * Unconditionally attached — it needs no API key.
+ *
+ * #340: when the native fetch fails (JS-rendered pages, WAF/anti-bot
+ * challenges, HTTP 419) and a Firecrawl key is configured, the page is
+ * retried through Firecrawl. A scraped page larger than the visible cap is
+ * saved to the library (full text) so the agent can read it with read_file.
  */
+const scrapedFilename = (page: FetchedPage): string => {
+  let host = '';
+  try {
+    host = new URL(page.url).hostname.replace(/^www\./, '');
+  } catch {
+    /* keep '' */
+  }
+  const slug = (page.title || host || 'page')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 60);
+  const base = slug || 'page';
+  return `web-${host ? `${host}-` : ''}${base}.md`.slice(0, 120);
+};
+
+const saveScrapedPage = async (
+  userId: string,
+  page: FetchedPage,
+  ctx: { requestContext: { get: (key: string) => unknown } },
+): Promise<{ fileId: string; filename: string } | null> => {
+  if (!spacesWorkspaceStorage.isConfigured()) return null;
+  // Same provenance rule as generate_file (#252/#298): attribute to the task,
+  // else the chat, else leave absent rather than inventing one.
+  const sessionId = ctx.requestContext.get('sessionId') as string | undefined;
+  const taskId = ctx.requestContext.get('taskId') as string | undefined;
+  const provenance = taskId
+    ? ({ kind: 'task', taskId } as const)
+    : sessionId
+      ? ({ kind: 'chat', sessionId } as const)
+      : undefined;
+  try {
+    const result = await createSystemAsset(
+      userId,
+      scrapedFilename(page),
+      Buffer.from(page.content, 'utf8'),
+      'text/markdown',
+      provenance,
+    );
+    return result.ok ? { fileId: result.fileId, filename: result.filename } : null;
+  } catch {
+    return null;
+  }
+};
+
 export const fetchUrlTool = createTool({
   id: 'fetch_url',
   description:
     'Fetch the content of a web page at a specific URL (e.g. one the user pasted), ' +
     'returning its title and readable text. Use it whenever the user provides a ' +
-    'complete http(s) URL; prefer it over web_search for any such link.',
+    'complete http(s) URL; prefer it over web_search for any such link. A page a ' +
+    'plain fetch cannot reach is retried through a hosted scraper; when the page is ' +
+    'long it is saved to the file library and the result carries its `fileId` — read ' +
+    'the rest with `read_file` (offset/limit, or unitsOnly for the section list).',
   inputSchema: z.object({ url: z.string().min(1).describe('Full http(s) URL to fetch') }),
   outputSchema: z.object({
     url: z.string().optional(),
     title: z.string().optional(),
     content: z.string().optional(),
+    fileId: z.string().optional().describe('Library file id when the full page was saved'),
+    note: z.string().optional(),
     results: z.array(z.object({ title: z.string(), snippet: z.string(), url: z.string() })),
     error: z.string().optional(),
   }),
@@ -360,26 +416,60 @@ export const fetchUrlTool = createTool({
         results: [],
         error: degradedToolError('fetch_url', toolDegradeReason(ctx, 'fetch_url')),
       };
+    const userId = ctx.requestContext.get('userId') as string | undefined;
+    let page: FetchedPage | null = null;
+    let viaFirecrawl = false;
     try {
-      const page = await fetchPage(url);
-      if (!page)
-        return {
-          results: [],
-          error:
-            'The page could not be retrieved (unsupported content type); ' +
-            'fall back to web_search or answer from your own knowledge.',
-        };
-      // `results` mirrors web_search's provenance shape so the sources
-      // block picks up the fetched page for free.
-      return {
-        title: page.title,
-        content: page.content,
-        results: [{ title: page.title, snippet: '', url: page.url }],
-      };
-    } catch (error) {
-      markToolFailed(ctx, 'fetch_url', reasonFrom(error));
-      return { results: [], error: degradedToolError('fetch_url', reasonFrom(error)) };
+      page = await fetchPage(url);
+    } catch (nativeError) {
+      // #340: native fetch failed — retry through Firecrawl when configured.
+      if (!config.firecrawl.apiKey) {
+        markToolFailed(ctx, 'fetch_url', reasonFrom(nativeError));
+        return { results: [], error: degradedToolError('fetch_url', reasonFrom(nativeError)) };
+      }
+      try {
+        page = await firecrawlScrape(url);
+        viaFirecrawl = true;
+      } catch (scrapeError) {
+        markToolFailed(ctx, 'fetch_url', reasonFrom(scrapeError));
+        return { results: [], error: degradedToolError('fetch_url', reasonFrom(scrapeError)) };
+      }
     }
+    if (!page)
+      return {
+        results: [],
+        error:
+          'The page could not be retrieved (unsupported content type); ' +
+          'fall back to web_search or answer from your own knowledge.',
+      };
+    // `results` mirrors web_search's provenance shape so the sources
+    // block picks up the fetched page for free.
+    const results = [{ title: page.title, snippet: '', url: page.url }];
+    // #340: a scraped page larger than the visible cap is saved to the library
+    // (full text, via the system-asset path) so the agent can read it in full
+    // with read_file (#350). Short pages need no file.
+    if (viaFirecrawl && userId && page.content.length > MAX_FETCH_CHARS) {
+      const saved = await saveScrapedPage(userId, page, ctx);
+      if (saved) {
+        return {
+          url: page.url,
+          title: page.title,
+          content: safeSlice(page.content, MAX_FETCH_CHARS),
+          fileId: saved.fileId,
+          note:
+            `Full page saved to the file library as "${saved.filename}" ` +
+            `(id ${saved.fileId}). Use read_file to read the rest — offset/limit for ` +
+            'a line range, or unitsOnly for the section list.',
+          results,
+        };
+      }
+    }
+    return {
+      url: page.url,
+      title: page.title,
+      content: safeSlice(page.content, MAX_FETCH_CHARS),
+      results,
+    };
   },
 });
 

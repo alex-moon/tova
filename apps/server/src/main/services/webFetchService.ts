@@ -65,7 +65,7 @@ const privateIpv6 = (addr: string): boolean => {
 };
 // literals and any resolved private address are refused. DNS rebinding and
 // redirects to private hosts are consciously deferred and flagged in the PR.
-const assertPublicHost = async (rawHostname: string): Promise<void> => {
+export const assertPublicHost = async (rawHostname: string): Promise<void> => {
   // WHATWG URL hostnames keep brackets around IPv6 literals; net.isIP and
   // isPrivateIp both expect the bare address.
   const hostname = rawHostname.replace(/^\[|\]$/g, '');
@@ -102,7 +102,7 @@ const assertPublicHost = async (rawHostname: string): Promise<void> => {
 
 // Truncate without splitting a surrogate pair (emoji, CJK), which would
 // corrupt the tail of the prompt text.
-const safeSlice = (text: string, max: number): string =>
+export const safeSlice = (text: string, max: number): string =>
   /[\uD800-\uDBFF]/.test(text.slice(max - 1, max)) ? text.slice(0, max - 1) : text.slice(0, max);
 
 // Stream the body to a real cap: response.text() would buffer an
