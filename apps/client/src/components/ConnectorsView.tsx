@@ -27,6 +27,12 @@ import ConnectorLogo from './ConnectorLogo';
 // place this normalization lives, so cards, modal, and custom list agree.
 const normUrl = (url: string): string => url.replace(/\/+$/, '');
 
+// The grid renders live entries only (#333): the watchlist rides in the
+// catalog as data and re-appears by flipping state, but the view shows the
+// verified set — no "coming soon" cards. Watchlisted providers' rows (connected
+// via the custom affordance before a flip) still surface under "Added by you",
+// so CATALOG_ENDPOINTS covers the whole catalog while the GRID uses live only.
+const LIVE_CATALOG = CONNECTOR_CATALOG.filter((d) => d.state === 'live');
 const CATALOG_ENDPOINTS = new Set(CONNECTOR_CATALOG.map((d) => normUrl(d.endpoint)));
 
 const findRowByUrl = (rows: ConnectorInfo[], url: string): ConnectorInfo | undefined =>
@@ -142,7 +148,7 @@ const ConnectorsView = () => {
         <p className="text-sm text-muted-foreground">Loading...</p>
       ) : (
         <ul className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {CONNECTOR_CATALOG.map((entry) => {
+          {LIVE_CATALOG.map((entry) => {
             const connected = findRowByUrl(connectors ?? [], entry.endpoint);
             const badge = connected
               ? statusBadge(connected)

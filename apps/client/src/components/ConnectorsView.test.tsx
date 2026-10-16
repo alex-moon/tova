@@ -57,29 +57,24 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe('ConnectorsView (#331)', () => {
-  it('renders the curated grid in market-share order with status badges', async () => {
+  it('renders the live grid in market-share order with status badges', async () => {
     render(<ConnectorsView />);
     await screen.findByTestId('connector-card-dropbox');
-    const ids = [
-      'google-drive',
-      'gmail',
-      'google-calendar',
-      'google-maps',
-      'spotify',
-      'dropbox',
-      'notion',
-      'slack',
-      'trello',
-      'atlassian',
-      'github',
-    ];
-    for (let i = 1; i < ids.length; i += 1) {
-      const a = screen.getByTestId(`connector-card-${ids[i - 1]}`);
-      const b = screen.getByTestId(`connector-card-${ids[i]}`);
-      expect(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // #333 wash-up: the grid shows the verified ("golden six") set only —
+    // watchlisted entries stay in the catalog as data but never render.
+    const ids = ['dropbox', 'notion', 'trello', 'linear', 'atlassian', 'github'];
+    for (let i = 0; i < ids.length; i += 1) {
+      expect(screen.getByTestId(`connector-card-${ids[i]}`)).toBeInTheDocument();
+      if (i > 0) {
+        const a = screen.getByTestId(`connector-card-${ids[i - 1]}`);
+        const b = screen.getByTestId(`connector-card-${ids[i]}`);
+        expect(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      }
     }
-    // Watchlisted entries say coming soon, not connect.
-    expect(screen.getByTestId('connector-card-spotify-status')).toHaveTextContent('Coming soon');
+    // Watchlisted providers do not render cards at all — connectable via the
+    // custom URL affordance instead.
+    expect(screen.queryByTestId('connector-card-slack')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('connector-card-spotify')).not.toBeInTheDocument();
     expect(screen.getByTestId('connector-card-trello-status')).toHaveTextContent('Connect');
   });
 
@@ -107,14 +102,6 @@ describe('ConnectorsView (#331)', () => {
     await waitFor(() =>
       expect(open).toHaveBeenCalledWith('https://as.example.com/authorize?client_id=dcr', '_self'),
     );
-  });
-
-  it('shows watchlisted copy and no connect button in the modal', async () => {
-    render(<ConnectorsView />);
-    fireEvent.click(await screen.findByTestId('connector-card-spotify'));
-    await screen.findByTestId('connector-modal');
-    expect(screen.getByTestId('connector-modal-watchlist')).toBeInTheDocument();
-    expect(screen.queryByTestId('connector-modal-connect')).not.toBeInTheDocument();
   });
 
   it('collects a token for PAT connectors and adds through the registry', async () => {
