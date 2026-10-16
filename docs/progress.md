@@ -2,6 +2,20 @@
 
 ## Status (current)
 
+#358 prod outage fix (on `main`, 2026-10-16): the first image upload since
+#209 shipped OCR killed the backend — `ocr.ts` resolved `TESSDATA_DIR` with a
+fixed five-level upward hop that only matches the tsx layout
+(`src/main/services`); the compiled layout is `dist/services`
+(`rootDir: src/main`), so the prod image read `/assets/tessdata` → ENOENT →
+tesseract.js v7 re-threw worker failures from its message handler when no
+`errorHandler` option is set → uncaughtException → exit, and the live compose
+service had no restart policy, so the backend stayed down. Fixes: tessdata is
+now located by walking up from `__dirname` to the vendored copy (pinned by
+tests for both layouts), OCR worker failures are contained (`errorHandler` +
+`withTimeout` around `createWorker`, which tesseract v7 otherwise leaves
+un-settled on load failure), and the live backend gets
+`restart: unless-stopped`.
+
 #260 db:sync discoverability (in flight, branch `fix/tv/260-db-sync-friction`):
 agents kept reaching for `mongosh`/`mongodump`/`mongorestore` instead of
 `npm run db:sync` for three reinforcing reasons, all doc/artifact-level — the

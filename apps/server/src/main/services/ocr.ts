@@ -1,7 +1,9 @@
+import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { createWorker } from 'tesseract.js';
 import { finalizeMarkdown, withTimeout } from './markdownConversion';
+import { redactForLog } from './logRedaction';
 
 // OCR (issue #209): images and image-only PDFs currently yield no text, so the
 // viewer shows "(no extracted text)" and the agent's read_file returns
@@ -17,11 +19,26 @@ import { finalizeMarkdown, withTimeout } from './markdownConversion';
 
 // Traineddata is vendored at build time; `langPath` has no trailing slash and
 // tesseract.js loads `${langPath}/eng.traineddata.gz` when `gzip: true`.
-// Resolution mirrors the client-build lookup in src/index.ts: relative
-// to this file, which reaches the repo root in both `tsx`
-// (apps/server/src/services) and the compiled (apps/server/dist/services)
-// layouts.
-export const TESSDATA_DIR = path.join(__dirname, '../../../../../assets/tessdata');
+// The repo root sits a different number of levels above this file in each
+// layout (tsx: src/main/services; compiled: dist/services, rootDir src/main),
+// so a fixed upward hop count silently resolved to /assets/tessdata in the
+// prod image — the ENOENT behind the #358 outage. Walk up from __dirname to
+// the first vendored copy instead of counting hops.
+const TESSDATA_GZ = 'eng.traineddata.gz';
+
+export const findTessdataDir = (from: string = __dirname): string => {
+  let dir = from;
+  for (let hop = 0; hop < 8; hop += 1) {
+    const candidate = path.join(dir, 'assets', 'tessdata');
+    if (fs.existsSync(path.join(candidate, TESSDATA_GZ))) return candidate;
+    const parent = path.dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  return path.join(from, 'assets', 'tessdata');
+};
+
+export const TESSDATA_DIR = findTessdataDir();
 
 // tesseract.js caches the *decompressed* traineddata to `cachePath`, which
 // otherwise defaults to the process cwd — littering the working directory with
@@ -69,11 +86,26 @@ export const recognizeImage = async (
   buffer: Buffer,
   timeoutMs = OCR_TIMEOUT_MS,
 ): Promise<string> => {
-  const worker = await createWorker(OCR_LANG, 1, {
-    langPath: TESSDATA_DIR,
-    cachePath: OCR_CACHE_DIR,
-    gzip: true,
-  });
+  // The same budget bounds worker creation. tesseract.js v7 settles the
+  // createWorker promise only on full success (its internal chain ends in
+  // `.catch(() => {})`), so a load failure — the #358 ENOENT — would hang
+  // the await forever with no errorHandler, or crash the process with one.
+  // The timeout keeps the single-flight poller alive either way; the
+  // (idle) worker thread behind a timed-out creation is abandoned.
+  const worker = await withTimeout(
+    createWorker(OCR_LANG, 1, {
+      langPath: TESSDATA_DIR,
+      cachePath: OCR_CACHE_DIR,
+      gzip: true,
+      // tesseract.js re-throws worker failures from its own message handler
+      // when no errorHandler option is set — a throw inside a Worker 'message'
+      // event bypasses every try/catch and terminates the process (#358). The
+      // failure is contained here; the creation timeout above turns it into a
+      // rejected promise the job runner can settle.
+      errorHandler: (err) => console.error('[OCR] tesseract worker error:', redactForLog(err)),
+    }),
+    timeoutMs,
+  );
   try {
     // tesseract.js accepts a Node Buffer/Uint8Array at runtime, but its
     // `ImageLike` union only lists DOM image types, so go through `unknown`.

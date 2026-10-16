@@ -1,3 +1,4 @@
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'fs';
 import { readFileSync } from 'fs';
 import os from 'os';
 import path from 'path';
@@ -7,6 +8,7 @@ import {
   OCR_PDF_EMPTY_CHARS,
   TESSDATA_DIR,
   finalizeOcrText,
+  findTessdataDir,
   isNearEmpty,
   recognizeImage,
 } from '../../main/services/ocr';
@@ -51,6 +53,46 @@ describe('ocr constants (#209)', () => {
 
   it('keeps the traineddata decompression cache out of the working directory', () => {
     expect(OCR_CACHE_DIR.startsWith(os.tmpdir())).toBe(true);
+  });
+});
+
+// #358: the prod image resolves a different depth above this module than tsx
+// (rootDir src/main flattens dist/main/services to dist/services), which made
+// the old fixed hop count point at /assets/tessdata. Pin every known layout.
+describe('findTessdataDir (#358)', () => {
+  const vendored = (root: string): void => {
+    mkdirSync(path.join(root, 'assets', 'tessdata'), { recursive: true });
+    writeFileSync(path.join(root, 'assets', 'tessdata', 'eng.traineddata.gz'), 'x');
+  };
+
+  let base: string;
+
+  beforeEach(() => {
+    base = mkdtempSync(path.join(os.tmpdir(), 'tova-tessdata-'));
+  });
+
+  afterEach(() => {
+    rmSync(base, { recursive: true, force: true });
+  });
+
+  it('resolves the tsx layout (src/main/services, five levels deep)', () => {
+    vendored(base);
+    const from = path.join(base, 'apps', 'server', 'src', 'main', 'services');
+    mkdirSync(from, { recursive: true });
+    expect(findTessdataDir(from)).toBe(path.join(base, 'assets', 'tessdata'));
+  });
+
+  it('resolves the compiled layout (dist/services, four levels deep)', () => {
+    vendored(base);
+    const from = path.join(base, 'apps', 'server', 'dist', 'services');
+    mkdirSync(from, { recursive: true });
+    expect(findTessdataDir(from)).toBe(path.join(base, 'assets', 'tessdata'));
+  });
+
+  it('falls back to the sibling assets path when nothing is vendored', () => {
+    const from = path.join(base, 'apps', 'server', 'dist', 'services');
+    mkdirSync(from, { recursive: true });
+    expect(findTessdataDir(from)).toBe(path.join(from, 'assets', 'tessdata'));
   });
 });
 

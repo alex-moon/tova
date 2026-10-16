@@ -17,6 +17,10 @@ services:
       context: .
       dockerfile: Dockerfile
     command: npm start
+    # #358: an uncaught-exception crash (tesseract/tessdata, Oct 16) left the
+    # backend dead until the next deploy — compose's default restart policy is
+    # "no". Keep the container up across crashes and host reboots.
+    restart: unless-stopped
     ports:
       - '15000:5000'
     environment:
