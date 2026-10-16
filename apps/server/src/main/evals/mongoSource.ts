@@ -46,7 +46,7 @@ const FIXTURE_FILES: { filename: string; contentType: string; text: string }[] =
  * number — exists only here, and every filler page is unique and free of it.
  * Filler is sized so the JOINED full text clearly exceeds MAX_PROMPT_TEXT_CHARS
  * (12k): a lazy whole-file read truncates well before page 58 and cannot see
- * the phone, so the case genuinely forces unit walking instead of being
+ * the phone, so the case genuinely forces line paging instead of being
  * passable with one big read. */
 export const SUPPORT_PHONE = '+44 20 7946 0812';
 export const SUPPORT_PHONE_PAGE = 58;
