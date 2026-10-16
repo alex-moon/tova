@@ -377,6 +377,17 @@ describe('list_files tool (#58)', () => {
     expect(out.files).toHaveLength(20);
     expect(out.more).toBe(true);
   });
+
+  it('never lists agent-side rows (#340) — the agent finds those via fetch_url', async () => {
+    const user = await createUser('list-agentside@example.com');
+    await createAsset(user.id, 'mine.txt', { textExtracted: 'mine' });
+    const scraped = await createAsset(user.id, 'web-example.com-page.md', {
+      textExtracted: '# scraped page',
+    });
+    await Asset.updateOne({ _id: scraped.id }, { $set: { origin: 'system-side' } });
+    const out = (await listExecute([], asCtx(user.id))) as { files: { filename: string }[] };
+    expect(out.files.map((f) => f.filename)).toEqual(['mine.txt']);
+  });
 });
 
 describe('read_file tool (#58)', () => {

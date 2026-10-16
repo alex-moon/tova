@@ -73,6 +73,21 @@ export const config = {
     },
   },
 
+  // #340: TTL (in days) for agent-side assets (origin 'system-side' — scraped
+  // pages the agent reads via read_file). The horizon is a staleness policy:
+  // within it, follow-up questions reuse the saved copy instead of paying for
+  // a re-scrape; past it, the page is expired AND stale ("something might
+  // well have changed"), so the next scrape re-downloads. 0 disables expiry
+  // (rows kept indefinitely).
+  agentAssets: {
+    get ttlDays(): number {
+      const raw = process.env.AGENT_ASSET_TTL_DAYS;
+      if (raw === undefined || raw === '') return 30;
+      const parsed = Number(raw);
+      return Number.isFinite(parsed) && parsed >= 0 ? Math.trunc(parsed) : 30;
+    },
+  },
+
   // Provider API keys. Mastra reads these implicitly for inference; the
   // model-lookup service (#217) reads DeepInfra's catalog directly, so the
   // key is surfaced here rather than reached for ad hoc.

@@ -739,6 +739,58 @@ describe('Assets confirm markdown conversion queue (#67)', () => {
   });
 });
 
+describe('Agent-side asset visibility (#340)', () => {
+  const seedRowsFor = async (email: string): Promise<string> => {
+    const cookie = await registerUser(email);
+    const user = await User.findOne({ email });
+    await Asset.create({
+      userId: user?._id,
+      filename: 'library-file.md',
+      key: `k/${String(user?._id)}/library-file.md`,
+      contentType: 'text/markdown',
+      size: 12,
+      status: 'ready',
+    });
+    await Asset.create({
+      userId: user?._id,
+      filename: 'web-example.com-page.md',
+      key: `agent-side/${String(user?._id)}/web-example.com-page.md`,
+      contentType: 'text/markdown',
+      size: 12,
+      status: 'ready',
+      origin: 'system-side',
+      textExtracted: '# scraped page',
+      sourceUrl: 'https://example.com/',
+    });
+    return cookie;
+  };
+
+  it('the default listing (library view and attach picker) never offers agent-side rows', async () => {
+    const cookie = await seedRowsFor('assets-agentside-default@example.com');
+    const response = await request(app).get('/api/assets').set('Cookie', [cookie]);
+    const names = response.body.assets.map((row: { filename: string }) => row.filename);
+    expect(names).toContain('library-file.md');
+    expect(names).not.toContain('web-example.com-page.md');
+  });
+
+  it('?origin=system-side lists only the agent-side rows (the opt-in tab)', async () => {
+    const cookie = await seedRowsFor('assets-agentside-tab@example.com');
+    const response = await request(app)
+      .get('/api/assets?origin=system-side')
+      .set('Cookie', [cookie]);
+    const names = response.body.assets.map((row: { filename: string }) => row.filename);
+    expect(names).toEqual(['web-example.com-page.md']);
+  });
+
+  it('the agent-side payload carries origin so the viewer can hide object actions', async () => {
+    const cookie = await seedRowsFor('assets-agentside-origin@example.com');
+    const response = await request(app)
+      .get('/api/assets?origin=system-side')
+      .set('Cookie', [cookie]);
+    expect(response.body.assets[0].origin).toBe('system-side');
+  });
+});
+
 describe('Asset hasText & failureReason serialization (issue #83)', () => {
   const seedAssetFor = async (email: string, extra: Record<string, unknown>): Promise<string> => {
     const cookie = await registerUser(email);

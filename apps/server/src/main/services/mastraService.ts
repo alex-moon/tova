@@ -34,7 +34,7 @@ import {
 import { webSearch } from './webSearchService';
 import { fetchPage, safeSlice, MAX_FETCH_CHARS, type FetchedPage } from './webFetchService';
 import { firecrawlScrape } from './firecrawlService';
-import { createSystemAsset } from './systemAssetService';
+import { createSystemAsset, createSystemSideAsset, findFreshScrape } from './systemAssetService';
 import { applyAssetEdits, type AssetEdit } from './assetEditService';
 import { spacesWorkspaceStorage } from './workspaceStorage';
 import { config } from '../config';
@@ -343,7 +343,8 @@ export const webSearchTool = createTool({
  * #340: when the native fetch fails (JS-rendered pages, WAF/anti-bot
  * challenges, HTTP 419) and a Firecrawl key is configured, the page is
  * retried through Firecrawl. A scraped page larger than the visible cap is
- * saved to the library (full text) so the agent can read it with read_file.
+ * saved agent-side (system-side origin: invisible to the user, no Spaces
+ * object) so the agent can read it in full with read_file.
  */
 const scrapedFilename = (page: FetchedPage): string => {
   let host = '';
@@ -365,26 +366,27 @@ const saveScrapedPage = async (
   userId: string,
   page: FetchedPage,
   ctx: { requestContext: { get: (key: string) => unknown } },
+  sourceUrl?: string,
 ): Promise<{ fileId: string; filename: string } | null> => {
-  if (!spacesWorkspaceStorage.isConfigured()) return null;
-  // Same provenance rule as generate_file (#252/#298): attribute to the task,
-  // else the chat, else leave absent rather than inventing one.
   const sessionId = ctx.requestContext.get('sessionId') as string | undefined;
   const taskId = ctx.requestContext.get('taskId') as string | undefined;
+  // A ZDR turn (#116) persists nothing — it is exactly the turn with no
+  // session and no task — so its scrapes stay head-only like every other
+  // ZDR artifact.
+  if (!sessionId && !taskId) return null;
+  // Same provenance rule as generate_file (#252/#298): attribute to the task,
+  // else the chat — the two (and only two) durable contexts.
   const provenance = taskId
     ? ({ kind: 'task', taskId } as const)
-    : sessionId
-      ? ({ kind: 'chat', sessionId } as const)
-      : undefined;
+    : ({ kind: 'chat', sessionId } as const);
   try {
-    const result = await createSystemAsset(
+    return await createSystemSideAsset(
       userId,
       scrapedFilename(page),
-      Buffer.from(page.content, 'utf8'),
-      'text/markdown',
+      page.content,
       provenance,
+      sourceUrl,
     );
-    return result.ok ? { fileId: result.fileId, filename: result.filename } : null;
   } catch {
     return null;
   }
@@ -397,14 +399,19 @@ export const fetchUrlTool = createTool({
     'returning its title and readable text. Use it whenever the user provides a ' +
     'complete http(s) URL; prefer it over web_search for any such link. A page a ' +
     'plain fetch cannot reach is retried through a hosted scraper; when the page is ' +
-    'long it is saved to the file library and the result carries its `fileId` — read ' +
-    'the rest with `read_file` (offset/limit, or unitsOnly for the section list).',
+    'longer than the preview it is saved agent-side (invisible to the user) and the ' +
+    'result carries its `fileId` — tell the user you saved the page so you could ' +
+    'read it in full, then read the rest with `read_file` (offset/limit, or ' +
+    'unitsOnly for the section list).',
   inputSchema: z.object({ url: z.string().min(1).describe('Full http(s) URL to fetch') }),
   outputSchema: z.object({
     url: z.string().optional(),
     title: z.string().optional(),
     content: z.string().optional(),
-    fileId: z.string().optional().describe('Library file id when the full page was saved'),
+    fileId: z
+      .string()
+      .optional()
+      .describe('Agent-side file id when the full page was saved (read it with read_file)'),
     note: z.string().optional(),
     results: z.array(z.object({ title: z.string(), snippet: z.string(), url: z.string() })),
     error: z.string().optional(),
@@ -418,7 +425,13 @@ export const fetchUrlTool = createTool({
       };
     const userId = ctx.requestContext.get('userId') as string | undefined;
     let page: FetchedPage | null = null;
-    let viaFirecrawl = false;
+    let viaAgentSide = false;
+    // Normalized requested URL — the scrape-cache key. Declared here because
+    // the save below (outside the catch) reuses it.
+    let cacheKey: string | null = null;
+    // Set when the page is (or already was) persisted agent-side, so the
+    // result can carry the fileId the agent reads it back with.
+    let saved: { fileId: string; filename: string } | null = null;
     try {
       page = await fetchPage(url);
     } catch (nativeError) {
@@ -427,12 +440,26 @@ export const fetchUrlTool = createTool({
         markToolFailed(ctx, 'fetch_url', reasonFrom(nativeError));
         return { results: [], error: degradedToolError('fetch_url', reasonFrom(nativeError)) };
       }
+      // A fresh cached copy of this URL (within the TTL) is reused instead of
+      // paying for a re-scrape; past the horizon, re-download.
       try {
-        page = await firecrawlScrape(url);
-        viaFirecrawl = true;
-      } catch (scrapeError) {
-        markToolFailed(ctx, 'fetch_url', reasonFrom(scrapeError));
-        return { results: [], error: degradedToolError('fetch_url', reasonFrom(scrapeError)) };
+        cacheKey = new URL(url).toString();
+      } catch {
+        cacheKey = null; // invalid URL — firecrawlScrape throws the same below
+      }
+      const cached = userId && cacheKey ? await findFreshScrape(userId, cacheKey) : null;
+      if (cached && cacheKey) {
+        page = { url: cacheKey, title: cached.filename, content: cached.content };
+        saved = { fileId: cached.fileId, filename: cached.filename };
+        viaAgentSide = true;
+      } else {
+        try {
+          page = await firecrawlScrape(url);
+          viaAgentSide = true;
+        } catch (scrapeError) {
+          markToolFailed(ctx, 'fetch_url', reasonFrom(scrapeError));
+          return { results: [], error: degradedToolError('fetch_url', reasonFrom(scrapeError)) };
+        }
       }
     }
     if (!page)
@@ -445,24 +472,26 @@ export const fetchUrlTool = createTool({
     // `results` mirrors web_search's provenance shape so the sources
     // block picks up the fetched page for free.
     const results = [{ title: page.title, snippet: '', url: page.url }];
-    // #340: a scraped page larger than the visible cap is saved to the library
-    // (full text, via the system-asset path) so the agent can read it in full
-    // with read_file (#350). Short pages need no file.
-    if (viaFirecrawl && userId && page.content.length > MAX_FETCH_CHARS) {
-      const saved = await saveScrapedPage(userId, page, ctx);
-      if (saved) {
-        return {
-          url: page.url,
-          title: page.title,
-          content: safeSlice(page.content, MAX_FETCH_CHARS),
-          fileId: saved.fileId,
-          note:
-            `Full page saved to the file library as "${saved.filename}" ` +
-            `(id ${saved.fileId}). Use read_file to read the rest — offset/limit for ` +
-            'a line range, or unitsOnly for the section list.',
-          results,
-        };
-      }
+    // #340: a scraped page larger than the visible cap is saved agent-side
+    // (full text, via createSystemSideAsset — invisible to the user) so the
+    // agent can read it in full with read_file (#350). Short pages need no
+    // file, and a cache hit is already saved.
+    if (!saved && viaAgentSide && userId && page.content.length > MAX_FETCH_CHARS) {
+      saved = await saveScrapedPage(userId, page, ctx, cacheKey ?? undefined);
+    }
+    if (saved) {
+      return {
+        url: page.url,
+        title: page.title,
+        content: safeSlice(page.content, MAX_FETCH_CHARS),
+        fileId: saved.fileId,
+        note:
+          `The page was longer than this preview, so a full copy is saved as a ` +
+          `file ("${saved.filename}", id ${saved.fileId}) — tell the user you saved ` +
+          'it so you could read it in full. Use read_file to read the rest: ' +
+          'offset/limit for a line range, or unitsOnly for the section list.',
+        results,
+      };
     }
     return {
       url: page.url,
@@ -531,7 +560,13 @@ export const listFilesTool = createTool({
     if (!userId) return { files: [], error: 'unavailable' };
     try {
       // 21 rows: 20 returned, the 21st only feeds the `more` flag.
-      const rows = await Asset.find({ userId, status: 'ready' })
+      // Agent-side material (#340: scraped pages) is not library content —
+      // the agent discovers it from the fetch_url result's fileId.
+      const rows = await Asset.find({
+        userId,
+        status: 'ready',
+        origin: { $ne: 'system-side' },
+      })
         .sort({ _id: -1 })
         .limit(21)
         .select('filename contentType size createdAt');
