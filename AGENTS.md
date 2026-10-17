@@ -104,6 +104,15 @@ Retained production logs live in Grafana Cloud (hosted Loki) and are readable di
 - Examples: `npm run logs -- --since 6h`, `npm run logs -- '{job="tova"} |= "GET /api"' --since 24h --raw`, `npm run logs -- '{service="backend"} |~ "error|fail"' --since 2h`.
 - Pass the LogQL as a single quoted argument. Streams are `{job="tova"}` with a `service` label — `backend` (the app server) and `frontend`; query distinct values with the Loki `/loki/api/v1/label/service/values` API if unsure. Do NOT use `npx tsx` here — use the npm script (or `node node_modules/tsx/dist/cli.mjs scripts/loki.ts ...`), consistent with the other `scripts/`.
 
+### Comment policy
+
+Comments are aggressively culled (#364): they bloat the agent context window without making the code better. House style for all code you write or edit, tests included:
+
+- Every comment is a single line capturing only high-level intent — no multi-line prose, no narration of what the next line already says.
+- Ticket references go on a separate following line, in the form `// @see #123 #456` (multiple numbers allowed, no ticket explanation). A bare `// @see #N` with no intent line is fine when the code speaks for itself.
+- JSDoc follows the same rule: a one-liner `/** ... */` at most, plus an `@see` line.
+- If one line is not enough to explain it, the explanation belongs in the ticket or plan doc — or the code needs renaming, not annotating.
+
 ### Code quality gate
 
 `npm run ci` is the single gate for any code change. It runs everything in sequence (server lint, format check, typecheck, server tests, client lint, client format check, client tests, client build), fails at the first error, and is mirrored by the CI workflow that gates merges to `main`. Run it as the final step before finishing any change; it must pass with exit code 0. Per-step commands below are only for iterating on a single failure without re-running the whole gate:
