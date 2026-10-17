@@ -61,6 +61,13 @@ jest.mock('../../main/services/titleService', () => ({
   generateChatTitle: jest.fn().mockResolvedValue('Hello'),
 }));
 
+// #359: subtitle revision is fire-and-forget on a turn cadence; the mock lets
+// the cadence describe assert when it fires without any aux call.
+const mockRevise = jest.fn();
+jest.mock('../../main/services/subtitleService', () => ({
+  reviseSessionSubtitle: (...args: unknown[]) => mockRevise(...args),
+}));
+
 // #238: the enrichment pass is a separate aux call; the route tests pin the
 // main completion's arguments, so stub enrichment to a no-op block and keep
 // it off `inferenceService.mock.calls`.
@@ -954,5 +961,51 @@ describe('#226 sessions ordered by most recent message', () => {
     expect(new Date(session!.lastMessageAt as Date).getTime()).toBe(
       new Date(userMessage!.timestamp as Date).getTime(),
     );
+  });
+});
+
+describe('Subtitle revision cadence (#359)', () => {
+  beforeEach(() => {
+    mockRevise.mockReset().mockResolvedValue('Fresh subtitle');
+  });
+
+  const turn = (
+    app: ReturnType<typeof createApp>,
+    cookies: unknown,
+    body: Record<string, unknown>,
+  ) => request(app).post('/api/chat').set('Cookie', cookies).send(body);
+
+  it('fires after turn 2 (not 1), then not again until the every-6th cadence', async () => {
+    const app = createApp();
+    const cookies = await registerUser(app, 'subtitle-cadence@example.com');
+
+    const settle = () => new Promise((r) => setTimeout(r, 100));
+
+    const first = await turn(app, cookies, { content: 'turn one' });
+    expect(first.status).toBe(200);
+    await settle();
+    expect(mockRevise).not.toHaveBeenCalled();
+
+    const sessionId: string = first.body.sessionId;
+    const second = await turn(app, cookies, { content: 'turn two', sessionId });
+    expect(second.status).toBe(200);
+    await settle();
+    expect(mockRevise).toHaveBeenCalledTimes(1);
+    // First revision starts from no subtitle and the latest turns as context.
+    expect(mockRevise.mock.calls[0][0]).toBeNull();
+    expect(mockRevise.mock.calls[0][1].length).toBeGreaterThan(0);
+
+    await turn(app, cookies, { content: 'turn three', sessionId });
+    await settle();
+    expect(mockRevise).toHaveBeenCalledTimes(1);
+
+    // Persist the first subtitle so the turn-6 revision reads it back.
+    await Session.updateOne({ _id: sessionId }, { $set: { subtitle: 'Fresh subtitle' } });
+    for (let i = 4; i <= 6; i += 1) {
+      await turn(app, cookies, { content: `turn ${i}`, sessionId });
+    }
+    await settle();
+    expect(mockRevise).toHaveBeenCalledTimes(2);
+    expect(mockRevise.mock.calls[1][0]).toBe('Fresh subtitle');
   });
 });

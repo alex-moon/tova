@@ -18,6 +18,8 @@ const avatarInitial = (user: {
 interface Session {
   _id: string;
   title: string;
+  // #359: system-maintained scope line; absent until the first revision.
+  subtitle?: string | null;
 }
 
 interface SidebarProps {
@@ -146,7 +148,15 @@ const Sidebar: React.FC<SidebarProps> = ({
                   )}
                   onClick={() => onSelectSession(session._id)}
                 >
-                  {session.title}
+                  <span className="block truncate">{session.title}</span>
+                  {/* #359: the subtitle is the better library label — it
+                      tracks what the chat drifted to, where a first-message
+                      title goes stale. Secondary weight only. */}
+                  {session.subtitle && (
+                    <span className="block truncate text-xs font-normal text-muted-foreground">
+                      {session.subtitle}
+                    </span>
+                  )}
                 </button>
                 <Button
                   variant="ghost"

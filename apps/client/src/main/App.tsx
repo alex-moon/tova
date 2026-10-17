@@ -72,6 +72,9 @@ export interface Message {
 interface Session {
   _id: string;
   title: string;
+  // #359: the system-maintained one-line scope summary; absent until the
+  // first revision lands on the server.
+  subtitle?: string | null;
 }
 
 export function isAdminRoute() {
@@ -408,6 +411,23 @@ function App() {
     setSidebarOpen(false);
   };
 
+  // #359: user-owned title. The server marks the session 'user'-titled; the
+  // sidebar (and header) re-render from the updated row.
+  const handleRenameSession = async (title: string) => {
+    if (!activeSessionId) return;
+    try {
+      const res = await axios.patch(`/api/chat/sessions/${activeSessionId}`, { title });
+      setSessions((prev) => prev.map((s) => (s._id === activeSessionId ? res.data : s)));
+    } catch (err) {
+      console.error('Error renaming session:', err);
+      toast.error('Could not rename the chat');
+    }
+  };
+
+  const activeSession = activeSessionId
+    ? (sessions.find((s) => s._id === activeSessionId) ?? null)
+    : null;
+
   const handleDeleteSession = async (sessionId: string) => {
     try {
       await axios.delete(`/api/chat/sessions/${sessionId}`);
@@ -516,6 +536,9 @@ function App() {
             onOpenSidebar={() => setSidebarOpen(true)}
             onFeedback={handleFeedback}
             sessionId={activeSessionId}
+            sessionTitle={activeSession?.title ?? null}
+            sessionSubtitle={activeSession?.subtitle ?? null}
+            onRenameSession={handleRenameSession}
             incognito={incognitoChoice ?? Boolean(user?.incognitoByDefault ?? user?.zdr)}
             onToggleIncognito={setIncognitoChoice}
           />

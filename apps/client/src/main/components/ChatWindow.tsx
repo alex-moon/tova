@@ -49,6 +49,11 @@ interface ChatWindowProps {
   incognito?: boolean;
   onToggleIncognito?: (value: boolean) => void;
   onFeedback?: (messageId: string, value: 'up' | 'down' | null) => void;
+  // #359: user-owned title + system-maintained subtitle of the active chat.
+  // Null on a new chat → the header shows the brand as before.
+  sessionTitle?: string | null;
+  sessionSubtitle?: string | null;
+  onRenameSession?: (title: string) => void | Promise<void>;
 }
 
 const PLACEHOLDERS = [
@@ -286,6 +291,67 @@ const FollowupChips: React.FC<{ suggestions: string[]; onPick: (value: string) =
     </div>
   ) : null;
 
+/*
+ * #359: the two-line header identity — a title the user owns (tap to rename)
+ * over a system-maintained subtitle that must read as secondary weight
+ * (smaller, muted, never competing with the title). Keyed by session id so
+ * the edit state resets on chat switch.
+ */
+const SessionHeaderTitle: React.FC<{
+  title: string;
+  subtitle?: string | null;
+  onRename?: (title: string) => void | Promise<void>;
+}> = ({ title, subtitle, onRename }) => {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(title);
+  const commit = () => {
+    setEditing(false);
+    const trimmed = draft.trim();
+    if (trimmed && trimmed !== title) void onRename?.(trimmed);
+  };
+  if (editing) {
+    return (
+      <input
+        data-testid="chat-title-input"
+        autoFocus
+        value={draft}
+        aria-label="Chat title"
+        className="w-full min-w-0 rounded-md border border-border bg-background px-2 py-1 text-sm"
+        onChange={(e) => setDraft(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') commit();
+          if (e.key === 'Escape') setEditing(false);
+        }}
+        onBlur={commit}
+      />
+    );
+  }
+  return (
+    <button
+      type="button"
+      data-testid="chat-title"
+      title="Rename chat"
+      onClick={() => {
+        setDraft(title);
+        setEditing(true);
+      }}
+      className="block w-full min-w-0 cursor-text rounded-md text-left focus-visible:outline-2 focus-visible:outline-primary"
+    >
+      <span className="block truncate font-heading text-sm font-semibold leading-tight">
+        {title}
+      </span>
+      {subtitle && (
+        <span
+          data-testid="chat-subtitle"
+          className="block truncate text-xs font-normal leading-tight text-muted-foreground"
+        >
+          {subtitle}
+        </span>
+      )}
+    </button>
+  );
+};
+
 const ChatWindow: React.FC<ChatWindowProps> = ({
   messages,
   onSendMessage,
@@ -297,6 +363,9 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
   incognito: incognitoProp,
   onToggleIncognito,
   onFeedback,
+  sessionTitle,
+  sessionSubtitle,
+  onRenameSession,
 }) => {
   const auth = useContext(AuthContext);
   // Per-chat incognito (#144): a controlled value from App when present,
@@ -538,10 +607,23 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
         <Button variant="ghost" size="icon" aria-label="Open menu" onClick={onOpenSidebar}>
           <Menu />
         </Button>
-        <div className="flex items-center gap-1.5">
-          <img src="/tova-logo.png" alt="" className="size-7" />
-          <h1 className="font-heading text-lg font-semibold">Tova</h1>
-        </div>
+        {sessionTitle ? (
+          /* #359: chat identity in the header — min-w-0 + truncate keeps the
+              two lines inside a 375px row without mid-word overflow hiding
+              the title/subtitle distinction. No right-side brand: the
+              floating admin chip owns that corner on phone. */
+          <SessionHeaderTitle
+            key={sessionId ?? 'chat'}
+            title={sessionTitle}
+            subtitle={sessionSubtitle}
+            onRename={onRenameSession}
+          />
+        ) : (
+          <div className="flex items-center gap-1.5">
+            <img src="/tova-logo.png" alt="" className="size-7" />
+            <h1 className="font-heading text-lg font-semibold">Tova</h1>
+          </div>
+        )}
       </header>
       <div
         ref={scrollRef}
