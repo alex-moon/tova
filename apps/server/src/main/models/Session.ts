@@ -11,6 +11,26 @@ const sessionSchema = new mongoose.Schema(
       type: String,
       default: 'New Chat',
     },
+    /*
+     * #359: who owns the title. 'system' = derived from the opening message;
+     * 'user' = renamed by the user, and no system process may overwrite it
+     * after that. Existing documents predate the field and are 'system'.
+     */
+    titleSource: {
+      type: String,
+      enum: ['system', 'user'],
+      default: 'system',
+    },
+    /*
+     * #359: the system-maintained one-line summary of what the chat is about
+     * (a soft scope signal for retrieval, and the better library label).
+     * Generated/revised fire-and-forget on a turn cadence; null until the
+     * first revision lands. Never user-editable today.
+     */
+    subtitle: {
+      type: String,
+      default: null,
+    },
     deletedAt: {
       type: Date,
       default: null,

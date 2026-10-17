@@ -656,3 +656,53 @@ describe('Send to worker (#255)', () => {
     await waitFor(() => expect((input as HTMLTextAreaElement).value).toBe(''));
   });
 });
+
+describe('Chat header title + subtitle (#359)', () => {
+  afterEach(cleanup);
+
+  it('shows the brand on a new chat and the two-line identity on a persisted chat', () => {
+    const { rerender } = renderChat([], false, { sessionId: null });
+    expect(screen.queryByTestId('chat-title')).toBeNull();
+
+    rerender(
+      <ChatWindow
+        messages={[]}
+        onSendMessage={vi.fn()}
+        isLoading={false}
+        onOpenSidebar={vi.fn()}
+        sessionId="s1"
+        sessionTitle="Predictive processing"
+        sessionSubtitle="The reading thread on perception"
+      />,
+    );
+    expect(screen.getByTestId('chat-title')).toHaveTextContent('Predictive processing');
+    expect(screen.getByTestId('chat-subtitle')).toHaveTextContent(
+      'The reading thread on perception',
+    );
+  });
+
+  it('renames from the header and keeps an empty edit as a cancel', () => {
+    const onRenameSession = vi.fn();
+    renderChat([], false, {
+      sessionId: 's1',
+      sessionTitle: 'Predictive processing',
+      onRenameSession,
+    });
+
+    fireEvent.click(screen.getByTestId('chat-title'));
+    const input = screen.getByTestId('chat-title-input') as HTMLInputElement;
+    expect(input.value).toBe('Predictive processing');
+
+    fireEvent.change(input, { target: { value: '  Perception thread  ' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    expect(onRenameSession).toHaveBeenCalledWith('Perception thread');
+    expect(screen.queryByTestId('chat-title-input')).toBeNull();
+
+    fireEvent.click(screen.getByTestId('chat-title'));
+    const cancel = screen.getByTestId('chat-title-input');
+    fireEvent.change(cancel, { target: { value: '   ' } });
+    fireEvent.keyDown(cancel, { key: 'Escape' });
+    expect(onRenameSession).toHaveBeenCalledTimes(1);
+    expect(screen.queryByTestId('chat-title-input')).toBeNull();
+  });
+});

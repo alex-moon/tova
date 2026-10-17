@@ -15,6 +15,7 @@ import {
   type RosterRoutingResult,
 } from '../services/racingService';
 import { generateChatTitle } from '../services/titleService';
+import { reviseSessionSubtitle, type SubtitleTurn } from '../services/subtitleService';
 import { hasPermission, ROUTING_PERMISSION } from '../services/userService';
 import { buildSystemContent, timestampHeader } from '../services/promptAssembly';
 import { ensureUserLocation } from '../services/geoLocationService';
@@ -452,6 +453,40 @@ const createSessionWithUser = async (
 ) => {
   const title = await generateChatTitle(content);
   return Session.create({ userId, title, incognito });
+};
+
+/*
+ * #359: the subtitle is a soft, revisable scope signal — never worth turn
+ * latency, so the revision runs fire-and-forget after the assistant save.
+ * Cadence: the first subtitle after turn 2 (one full exchange — turn one
+ * only would repeat the title's first-message guess), then every 6th turn.
+ * Input is tight on purpose: the current subtitle ("here's what you said
+ * this was — is it still?") plus the last few turns.
+ */
+const SUBTITLE_FIRST_TURN = 2;
+const SUBTITLE_EVERY_TURNS = 6;
+const SUBTITLE_INPUT_TURNS = 3;
+
+const maybeReviseSubtitle = async (sessionId: string): Promise<void> => {
+  try {
+    const turns = await Message.countDocuments({ sessionId, role: 'assistant' });
+    if (turns !== SUBTITLE_FIRST_TURN && turns % SUBTITLE_EVERY_TURNS !== 0) return;
+    const [session, recent] = await Promise.all([
+      Session.findById(sessionId).select({ subtitle: 1 }).lean(),
+      Message.find({ sessionId })
+        .sort({ timestamp: -1 })
+        .limit(SUBTITLE_INPUT_TURNS)
+        .select({ role: 1, content: 1 })
+        .lean<{ role: 'user' | 'assistant'; content: string }[]>(),
+    ]);
+    const current = (session?.subtitle ?? null) as string | null;
+    const next = await reviseSessionSubtitle(current, recent.slice().reverse() as SubtitleTurn[]);
+    if (next && next !== current) {
+      await Session.updateOne({ _id: sessionId }, { $set: { subtitle: next } });
+    }
+  } catch (err) {
+    console.error('Subtitle revision error:', redactForLog(err));
+  }
 };
 
 /*
@@ -924,6 +959,7 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
       metrics: await buildMessageMetrics(String(session!._id), assistantContent),
     });
     await assistantMessage.save();
+    void maybeReviseSubtitle(String(session!._id));
 
     // #255 (F4): the completion notification has now landed in the chat stream
     // (this turn's assistant message persisted), so mark the drained tasks
@@ -1346,6 +1382,7 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
       metrics: await buildMessageMetrics(String(session!._id), assistantContent),
     });
     await assistantMessage.save();
+    void maybeReviseSubtitle(String(session!._id));
 
     // #255 (F4): the notification landed with this persisted turn — mark the
     // drained tasks notified now, not at read time, so a stream that errored
@@ -1409,6 +1446,29 @@ router.delete('/sessions/:id', authenticate, async (req: AuthRequest, res) => {
     res.json({ success: true });
   } catch (_err) {
     res.status(500).json({ message: 'Error deleting session' });
+  }
+});
+
+// #359: rename a chat. The title is user-owned from the first rename on —
+// `titleSource: 'user'` is what any future system-side title generation must
+// respect (no auto-overwrite once touched).
+router.patch('/sessions/:id', authenticate, async (req: AuthRequest, res) => {
+  try {
+    const title = typeof req.body?.title === 'string' ? req.body.title.trim() : '';
+    if (!title || title.length > 120) {
+      return res.status(400).json({ message: 'Title must be 1-120 characters' });
+    }
+    const session = await Session.findOneAndUpdate(
+      { _id: req.params.id, userId: req.user?.id, deletedAt: null },
+      { title, titleSource: 'user' },
+      { new: true },
+    );
+    if (!session) {
+      return res.status(404).json({ message: 'Session not found' });
+    }
+    res.json(session);
+  } catch (_err) {
+    res.status(500).json({ message: 'Error renaming session' });
   }
 });
 
