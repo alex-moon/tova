@@ -4,12 +4,23 @@
 // Usage: npx tsx scripts/eval-tool-history-ab.ts [--reps 3]
 import 'dotenv/config';
 import mongoose from 'mongoose';
-import type { CompletionOptions, LlmConnector, LlmProvider } from '../apps/server/src/main/services/llmTypes';
-import { deepinfraConnector, fireworksConnector, groqConnector } from '../apps/server/src/main/services/mastraService';
+import type {
+  CompletionOptions,
+  LlmConnector,
+  LlmProvider,
+} from '../apps/server/src/main/services/llmTypes';
+import {
+  deepinfraConnector,
+  fireworksConnector,
+  groqConnector,
+} from '../apps/server/src/main/services/mastraService';
 import { buildSystemContent } from '../apps/server/src/main/services/promptAssembly';
 import { retrieveWorkspaceBlock } from '../apps/server/src/main/services/workspaceRetrievalService';
 import { classifyAssistantTurn } from '../apps/server/src/main/services/honestyGuardService';
-import { pendingCompletionsFor, completionNotificationLine } from '../apps/server/src/main/services/taskNotificationService';
+import {
+  pendingCompletionsFor,
+  completionNotificationLine,
+} from '../apps/server/src/main/services/taskNotificationService';
 import { listRoster } from '../apps/server/src/main/services/rosterConfig';
 import { outputTokensFor, promptCharsFrom } from '../apps/server/src/main/services/outputTokenCap';
 import {
@@ -97,7 +108,9 @@ const rehydrate = {
       totalChars: 12197,
       truncated: true,
       ...(chars
-        ? { note: `Preview of the first ${chars} characters — call again with offset/limit to read further.` }
+        ? {
+            note: `Preview of the first ${chars} characters — call again with offset/limit to read further.`,
+          }
         : {}),
     };
   },
@@ -271,7 +284,13 @@ async function main() {
     taskBlock = '';
   }
 
-  const system = buildSystemContent(user, false, user.settings?.timezone, workspaceBlock, taskBlock);
+  const system = buildSystemContent(
+    user,
+    false,
+    user.settings?.timezone,
+    workspaceBlock,
+    taskBlock,
+  );
   const armA: WireMessage[] = [
     { role: 'system', content: system },
     ...messagesFromPersistedHistory(newestFirst, user.settings?.timezone).map((m) => ({
@@ -289,15 +308,27 @@ async function main() {
   ];
 
   const roster = await listRoster();
-  const refs = roster.flatMap((m) => m.providers.map((p) => ({ provider: p.provider, model: m.modelId, contextLength: m.contextLength })));
-  console.log(`session ${sessionId} · ${turns.length} turns · arms A/B · ${refs.length} models · ${reps} reps\n`);
+  const refs = roster.flatMap((m) =>
+    m.providers.map((p) => ({
+      provider: p.provider,
+      model: m.modelId,
+      contextLength: m.contextLength,
+    })),
+  );
+  console.log(
+    `session ${sessionId} · ${turns.length} turns · arms A/B · ${refs.length} models · ${reps} reps\n`,
+  );
 
   const results: RepResult[] = [];
   const deadRefs = new Set<string>();
   for (const ref of refs) {
     const refKey = `${ref.provider}/${ref.model}`;
     if (deadRefs.has(refKey)) continue;
-    for (const [arm, messages] of [['A', armA], ['B', armB], ['C', armC]] as const) {
+    for (const [arm, messages] of [
+      ['A', armA],
+      ['B', armB],
+      ['C', armC],
+    ] as const) {
       for (let i = 0; i < reps; i += 1) {
         try {
           const r = await runRep(arm, messages, ref, sessionId);
@@ -310,7 +341,15 @@ async function main() {
           );
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
-          results.push({ arm, provider: ref.provider, model: ref.model, toolsCalled: [], flagged: false, reply: '', error: msg });
+          results.push({
+            arm,
+            provider: ref.provider,
+            model: ref.model,
+            toolsCalled: [],
+            flagged: false,
+            reply: '',
+            error: msg,
+          });
           console.error(`[${arm}] ${refKey} #${i + 1}: ERROR ${msg}`);
           // A backend that cannot serve the model at all will not recover mid-run.
           if (msg.includes('Model not found')) {

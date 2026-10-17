@@ -46,40 +46,32 @@ describe('resolveSystemPrompt', () => {
     }
   });
 
-  it('commits to the workspace identity and memory honesty (#263)', () => {
+  it('commits to the workspace identity and memory honesty (#263, #384)', () => {
     const prompt = resolveSystemPrompt();
-    expect(prompt).toContain('personal assistant');
-    expect(prompt).toContain(
-      "their files, the conversations you've had with them, and work you've run on their behalf",
-    );
-    // Never pretend to remember what wasn't given; never hide where it came from.
-    expect(prompt).toContain("Never pretend to remember something you weren't given");
-    expect(prompt).toContain('never hide where something came from');
-    expect(prompt).toContain(
-      'Attribution is what makes memory feel like being known rather than watched',
-    );
+    expect(prompt).toContain('operating the user’s workspace');
+    expect(prompt).toContain('answered from tool output, not from description');
+    // Past results are never current state; snippets are context, not facts.
+    expect(prompt).toContain('Never recite an earlier tool result as current state');
+    expect(prompt).toContain('context to verify, not facts to assert');
   });
 
-  it('treats retrieved context as an offer and absence as information (#263)', () => {
+  it('treats absence as information and demands fresh reads (#263, #384)', () => {
     const prompt = resolveSystemPrompt();
-    expect(prompt).toContain('as an offer, not a fact');
-    expect(prompt).toContain('forcing a fragment in is worse than leaving it out');
-    expect(prompt).toContain('the live conversation always outranks stale material');
-    expect(prompt).toContain('that is information, not failure');
-    // The anti-reflex guard: invite intent only when it would change what you do.
-    expect(prompt).toContain('knowing more would genuinely change what you do');
-    expect(prompt).toContain('intake interview');
+    expect(prompt).toContain('Use only what is actually present');
+    expect(prompt).toContain('absence is information');
+    expect(prompt).toContain('say what you cannot see');
+    expect(prompt).toContain('when current state matters, run the tool again');
   });
 
-  it('draws the weights/world epistemic line (#263)', () => {
+  it('operationalizes the tool epistemic (#263, #384)', () => {
     const prompt = resolveSystemPrompt();
-    expect(prompt).toContain('Trust yourself for what lives in you');
-    expect(prompt).toContain('Trust tools for what lives in the world');
+    expect(prompt).toContain('Get facts from tools');
+    expect(prompt).toContain('call it before quoting any file');
     // Arithmetic is a tool case, not a weights case.
     // @see #283
-    expect(prompt).toContain('work it through the calculator rather than trusting your head');
-    expect(prompt).toContain('"Let me check" is a virtue, not a stall');
-    expect(prompt).toContain('say so plainly rather than papering over it');
+    expect(prompt).toContain('arithmetic via calculate');
+    expect(prompt).toContain('describing work you did not do is fabrication');
+    expect(prompt).toContain('do not present recalled content as fresh');
   });
 
   it('lets conversations finish, because memory lives in the workspace (#263)', () => {
@@ -94,9 +86,9 @@ describe('resolveSystemPrompt', () => {
     const brevityRule = prompt.indexOf('Keep answers focused');
     expect(brevityRule).toBeGreaterThan(-1);
     for (const phrase of [
-      "Never pretend to remember something you weren't given",
-      'as an offer, not a fact',
-      'Trust tools for what lives in the world',
+      'Never recite an earlier tool result',
+      'Get facts from tools',
+      'absence is information',
       'help it finish',
     ]) {
       expect(prompt.indexOf(phrase)).toBeGreaterThan(-1);

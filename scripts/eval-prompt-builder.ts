@@ -5,12 +5,23 @@
 //   npx tsx scripts/eval-prompt-builder.ts [--reps 8] [--concurrency 5]
 import 'dotenv/config';
 import mongoose from 'mongoose';
-import type { CompletionOptions, LlmConnector, LlmProvider } from '../apps/server/src/main/services/llmTypes';
-import { deepinfraConnector, fireworksConnector, groqConnector } from '../apps/server/src/main/services/mastraService';
+import type {
+  CompletionOptions,
+  LlmConnector,
+  LlmProvider,
+} from '../apps/server/src/main/services/llmTypes';
+import {
+  deepinfraConnector,
+  fireworksConnector,
+  groqConnector,
+} from '../apps/server/src/main/services/mastraService';
 import { buildSystemContent } from '../apps/server/src/main/services/promptAssembly';
 import { retrieveWorkspaceBlock } from '../apps/server/src/main/services/workspaceRetrievalService';
 import { classifyAssistantTurn } from '../apps/server/src/main/services/honestyGuardService';
-import { pendingCompletionsFor, completionNotificationLine } from '../apps/server/src/main/services/taskNotificationService';
+import {
+  pendingCompletionsFor,
+  completionNotificationLine,
+} from '../apps/server/src/main/services/taskNotificationService';
 import { listRoster } from '../apps/server/src/main/services/rosterConfig';
 import { outputTokensFor, promptCharsFrom } from '../apps/server/src/main/services/outputTokenCap';
 import {
@@ -30,7 +41,10 @@ const MODELS = ['DeepSeek', 'GLM'];
 const PROVIDER_FILTER = 'deepinfra';
 
 const reps = Math.max(1, Number(process.argv[process.argv.indexOf('--reps') + 1] ?? '') || 8);
-const concurrency = Math.max(1, Number(process.argv[process.argv.indexOf('--concurrency') + 1] ?? '') || 5);
+const concurrency = Math.max(
+  1,
+  Number(process.argv[process.argv.indexOf('--concurrency') + 1] ?? '') || 5,
+);
 
 type HistoryTurn = { role: string; content: string; timestamp?: Date };
 
@@ -91,7 +105,16 @@ const runRep = async (
 const armSystem = (full: string, bits: (0 | 1)[]): string => {
   const chunks = full.split('\n\n');
   if (chunks.length < 9) throw new Error('unexpected system layout');
-  const needled = ['You are Tova', 'You work over', 'Treat anything retrieved', 'Trust yourself', 'Talk like a smart', 'For anything emotionally heavy', 'Memory lives in the workspace', 'Keep answers focused'];
+  const needled = [
+    'You are Tova',
+    'You work over',
+    'Treat anything retrieved',
+    'Trust yourself',
+    'Talk like a smart',
+    'For anything emotionally heavy',
+    'Memory lives in the workspace',
+    'Keep answers focused',
+  ];
   needled.forEach((n, i) => {
     if (!chunks[i].startsWith(n)) throw new Error(`paragraph ${i + 1} not found (want "${n}")`);
   });
@@ -154,17 +177,34 @@ async function main() {
   }));
 
   const rosterRefs = (await listRoster())
-    .flatMap((m) => m.providers.map((p) => ({ provider: p.provider, model: m.modelId, contextLength: m.contextLength })))
+    .flatMap((m) =>
+      m.providers.map((p) => ({
+        provider: p.provider,
+        model: m.modelId,
+        contextLength: m.contextLength,
+      })),
+    )
     .filter((r) => MODELS.some((name) => r.model.includes(name)) && r.provider === PROVIDER_FILTER);
-  if (rosterRefs.length < MODELS.length) throw new Error(`wanted ${MODELS.length} refs, roster offered ${rosterRefs.length}`);
+  if (rosterRefs.length < MODELS.length)
+    throw new Error(`wanted ${MODELS.length} refs, roster offered ${rosterRefs.length}`);
 
   // Confirm run: baseline (00000) vs the cold-epistemics + warm-voice candidate (11100 → mask 7).
   const arms = [0, 7].map((mask) => {
-    const bits = [mask & 1, (mask >> 1) & 1, (mask >> 2) & 1, (mask >> 3) & 1, (mask >> 4) & 1] as (0 | 1)[];
-    return { bits, mask, messages: [{ role: 'system' as const, content: armSystem(full, bits) }, ...history] };
+    const bits = [mask & 1, (mask >> 1) & 1, (mask >> 2) & 1, (mask >> 3) & 1, (mask >> 4) & 1] as (
+      0 | 1
+    )[];
+    return {
+      bits,
+      mask,
+      messages: [{ role: 'system' as const, content: armSystem(full, bits) }, ...history],
+    };
   });
-  const cells = rosterRefs.flatMap((ref) => arms.map((arm) => ({ ref, arm, key: `${ref.model}·arm${arm.mask}` })));
-  console.log(`session ${sessionId} · ${arms.length} arms × ${rosterRefs.length} models · ${reps} reps each, interleaved\n`);
+  const cells = rosterRefs.flatMap((ref) =>
+    arms.map((arm) => ({ ref, arm, key: `${ref.model}·arm${arm.mask}` })),
+  );
+  console.log(
+    `session ${sessionId} · ${arms.length} arms × ${rosterRefs.length} models · ${reps} reps each, interleaved\n`,
+  );
 
   const results: (RepResult & { key: string })[] = [];
   for (let i = 0; i < reps; i += 1) {
@@ -173,8 +213,12 @@ async function main() {
         try {
           const r = await runRep(cell.arm.bits, cell.arm.messages, cell.ref, sessionId);
           results.push({ ...r, key: cell.key });
-          const did = r.toolsCalled.length ? `called ${[...new Set(r.toolsCalled)].join(',')}` : 'no tool call';
-          console.log(`[${cell.key}] rep ${i + 1}.${j + 1}: ${did}${r.flagged ? ' · FLAGGED' : ''}`);
+          const did = r.toolsCalled.length
+            ? `called ${[...new Set(r.toolsCalled)].join(',')}`
+            : 'no tool call';
+          console.log(
+            `[${cell.key}] rep ${i + 1}.${j + 1}: ${did}${r.flagged ? ' · FLAGGED' : ''}`,
+          );
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
           results.push({ toolsCalled: [], flagged: false, error: msg, key: cell.key });
@@ -197,7 +241,9 @@ async function main() {
       };
     });
     const show = (label: string, s: typeof base) =>
-      console.log(`${model} ${label}: ${s.invoked}/${s.n} invoked · ${s.read}/${s.n} read_file · ${s.flagged}/${s.n} flagged`);
+      console.log(
+        `${model} ${label}: ${s.invoked}/${s.n} invoked · ${s.read}/${s.n} read_file · ${s.flagged}/${s.n} flagged`,
+      );
     show('baseline', base);
     show('candidate', cand);
     // Two-proportion z on the invocation gap (unreliable when a cell is at/near 0 or 1).
