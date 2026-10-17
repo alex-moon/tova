@@ -188,7 +188,7 @@ describe('Chat route routing metadata', () => {
     // The fire-and-forget classifier also calls generate; only the chat completion may carry the tool results.
     mockGenerate.mockImplementation(async (messages?: { role: string; content: string }[]) => {
       if (isClassifierCall({ messages })) {
-        return { text: CLASSIFIER_REPLY };
+        return structured(CLASSIFIER_REPLY);
       }
       return {
         text: 'Grounded answer',
@@ -450,6 +450,10 @@ describe('Chat route routing metadata', () => {
 const CLASSIFIER_REPLY =
   '{"emotional": true, "technical": false, "abstract": false, "sentiment": "negative", "openEnded": true}';
 
+// The mocked Agent bypasses Mastra's structured-output parsing, so aux mocks carry the validated object the real connector surfaces.
+// @see #368
+const structured = (text: string) => ({ text, object: JSON.parse(text) });
+
 const isClassifierCall = (args?: { messages?: { role: string; content: string }[] }) =>
   args?.messages?.[0]?.content.startsWith('Classify the user prompt') ?? false;
 
@@ -471,7 +475,7 @@ describe('Chat route prompt metrics', () => {
   it('persists deterministic metrics for both turns and the LLM classification for the user turn', async () => {
     mockGenerate.mockImplementation(async (messages?: { role: string; content: string }[]) => {
       if (isClassifierCall({ messages })) {
-        return { text: `\`\`\`json\n${CLASSIFIER_REPLY}\n\`\`\`` };
+        return structured(CLASSIFIER_REPLY);
       }
       return { text: 'e2e-ok' };
     });
@@ -799,7 +803,7 @@ describe('non-streaming tool-only confirmation (#195)', () => {
 
   it('persists and returns a synthesized confirmation when a tool ran with no text', async () => {
     mockGenerate.mockImplementation(async (messages?: { role: string; content: string }[]) => {
-      if (isClassifierCall({ messages })) return { text: CLASSIFIER_REPLY };
+      if (isClassifierCall({ messages })) return structured(CLASSIFIER_REPLY);
       return {
         text: '',
         toolResults: [{ name: 'generate_file', result: { file: { filename: 'agi-final.md' } } }],
@@ -821,7 +825,7 @@ describe('non-streaming tool-only confirmation (#195)', () => {
 
   it('leaves a real assistant answer untouched even when tools ran', async () => {
     mockGenerate.mockImplementation(async (messages?: { role: string; content: string }[]) => {
-      if (isClassifierCall({ messages })) return { text: CLASSIFIER_REPLY };
+      if (isClassifierCall({ messages })) return structured(CLASSIFIER_REPLY);
       return {
         text: 'The document is ready.',
         toolResults: [{ name: 'generate_file', result: { file: { filename: 'agi-final.md' } } }],
@@ -841,7 +845,7 @@ describe('non-streaming tool-only confirmation (#195)', () => {
 
   it('does not confirm a turn whose only tool is current_datetime', async () => {
     mockGenerate.mockImplementation(async (messages?: { role: string; content: string }[]) => {
-      if (isClassifierCall({ messages })) return { text: CLASSIFIER_REPLY };
+      if (isClassifierCall({ messages })) return structured(CLASSIFIER_REPLY);
       return { text: '', toolResults: [{ name: 'current_datetime', result: {} }] };
     });
     const app = createApp();

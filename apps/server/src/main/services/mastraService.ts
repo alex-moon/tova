@@ -1133,17 +1133,41 @@ const buildConnector = (provider: LlmProvider): LlmConnector => {
     },
     /* One-off completion path for auxiliary generation: built with a tool-free agent even when the Brave key is set, so small tool-rejecting models cannot fail the call. */
     // @see #41
-    createToolFreeCompletion: async (options: CompletionOptions): Promise<NeutralCompletion> => {
+    createToolFreeCompletion: (async (options: CompletionOptions): Promise<NeutralCompletion> => {
       const { system, rest } = splitLeadingSystem(options.messages);
-      const result = await agentFor(provider, options.model, false).generate(
-        mastraMessagesFor(provider, rest),
-        { ...callOptionsFrom(options, 'plain', mergedInstructions('', system)), maxSteps: 1 },
-      );
+      const messages = mastraMessagesFor(provider, rest);
+      const base = {
+        ...callOptionsFrom(options, 'plain', mergedInstructions('', system)),
+        maxSteps: 1,
+      };
+      const { structuredOutput } = options;
+      if (structuredOutput) {
+        // Schema-enforced output: validation failure resolves with `fallbackValue` instead of throwing; a missing object (mid-stream structuring failure) degrades to the fallback the same way.
+        // @see #368
+        const result = await agentFor(provider, options.model, false).generate(messages, {
+          ...base,
+          structuredOutput: {
+            schema: structuredOutput.schema,
+            fallbackValue: structuredOutput.fallbackValue,
+            errorStrategy: 'fallback' as const,
+            ...(structuredOutput.jsonPromptInjection !== undefined
+              ? { jsonPromptInjection: structuredOutput.jsonPromptInjection }
+              : {}),
+          },
+        });
+        return {
+          choices: [
+            { message: { content: result.text ?? null }, finishReason: result.finishReason },
+          ],
+          object: result.object ?? structuredOutput.fallbackValue,
+        };
+      }
+      const result = await agentFor(provider, options.model, false).generate(messages, base);
       // Thread the finish reason through so a `length` stop is observable instead of silently scoring as a short answer.
       return {
         choices: [{ message: { content: result.text ?? null }, finishReason: result.finishReason }],
       };
-    },
+    }) as LlmConnector['createToolFreeCompletion'],
   };
 };
 

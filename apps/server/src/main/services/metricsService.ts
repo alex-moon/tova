@@ -3,15 +3,14 @@ import { Message } from '../models/Message';
 import { inferenceService } from './inferenceService';
 import { computeDeterministicMetrics } from './promptMetrics';
 import { config } from '../config';
+import { z } from 'zod';
 
 // Aux model source, read lazily.
 // @see #238
 const llmModel = (): string => config.aux.model;
 
 const LLM_PROMPT =
-  'Classify the user prompt below. Reply with ONLY one JSON object and nothing else, ' +
-  'with exactly these keys: {"emotional": true|false, "technical": true|false, ' +
-  '"abstract": true|false, "sentiment": "positive"|"negative"|"neutral", "openEnded": true|false}. ' +
+  'Classify the user prompt below. ' +
   '"emotional": the prompt is about feelings or personal life rather than a task. ' +
   '"technical": the prompt uses engineering or domain jargon. ' +
   '"abstract": the prompt is strategic/high-level rather than a concrete step-by-step task. ' +
@@ -34,51 +33,43 @@ const NULL_LLM: LlmMetrics = {
   openEnded: null,
 };
 
-const SENTIMENTS = new Set(['positive', 'negative', 'neutral']);
+// Schema-enforced classification; a validation failure resolves with NULL_LLM, which is exactly the parse-failure shape.
+// @see #368
+const FLAGS_SCHEMA = z.object({
+  emotional: z.boolean(),
+  technical: z.boolean(),
+  abstract: z.boolean(),
+  sentiment: z.enum(['positive', 'negative', 'neutral']),
+  openEnded: z.boolean(),
+});
 
-const asBoolean = (value: unknown): boolean | null => (typeof value === 'boolean' ? value : null);
-
-// Extract the first JSON-looking object from raw model output, tolerating markdown fences and prose; null on any failure.
-export const parseLlmFlags = (raw: string | null | undefined): LlmMetrics => {
-  if (!raw) return NULL_LLM;
-  const text = raw.replace(/```[a-z]*/gi, '');
-  let start = text.indexOf('{');
-  while (start !== -1) {
-    // Extend from this '{' to successive '}' until a chunk parses; recovers output where the object sits between prose.
-    for (let end = text.indexOf('}', start); end !== -1; end = text.indexOf('}', end + 1)) {
-      try {
-        const obj = JSON.parse(text.slice(start, end + 1)) as Record<string, unknown>;
-        if (obj && typeof obj === 'object' && !Array.isArray(obj)) {
-          const parsed = {
-            emotional: asBoolean(obj.emotional),
-            technical: asBoolean(obj.technical),
-            abstract: asBoolean(obj.abstract),
-            sentiment:
-              typeof obj.sentiment === 'string' &&
-              SENTIMENTS.has(obj.sentiment.trim().toLowerCase())
-                ? (obj.sentiment.trim().toLowerCase() as LlmMetrics['sentiment'])
-                : null,
-            openEnded: asBoolean(obj.openEnded),
-          };
-          // A decoy JSON object may parse before the real flags; restart scanning after it so decoy-then-flags is not misread as all-nulls.
-          if (
-            parsed.emotional === null &&
-            parsed.technical === null &&
-            parsed.abstract === null &&
-            parsed.sentiment === null &&
-            parsed.openEnded === null
-          ) {
-            break;
-          }
-          return parsed;
-        }
-      } catch {
-        // Keep extending.
-      }
-    }
-    start = text.indexOf('{', start + 1);
+// Classify a prompt and report why flags could be missing: 'parse' = unusable output (the fallback all-null shape), 'error' = the call itself failed.
+export const classifyPromptDimensions = async (
+  content: string,
+  sessionId?: string,
+): Promise<{ llm: LlmMetrics; skipReason: 'parse' | 'error' | null }> => {
+  try {
+    // Tool-free agent, same rationale as the guard classifier; sessionId threads the aux run under the chat's LangSmith thread.
+    // @see #77 #41 #308
+    const completion = await inferenceService.createStructuredCompletion({
+      provider: config.aux.provider,
+      model: llmModel(),
+      messages: [{ role: 'user', content: `${LLM_PROMPT}\n\nPrompt: ${content.trim()}` }],
+      temperature: 0,
+      max_tokens: 100,
+      ...(sessionId ? { trace: { sessionId } } : {}),
+      structuredOutput: {
+        schema: FLAGS_SCHEMA,
+        fallbackValue: NULL_LLM,
+        jsonPromptInjection: 'auto',
+        errorStrategy: 'fallback',
+      },
+    });
+    return { llm: completion.object, skipReason: isAllNullLlm(completion.object) ? 'parse' : null };
+  } catch (err) {
+    console.error('Prompt classification error:', redactForLog(err));
+    return { llm: NULL_LLM, skipReason: 'error' };
   }
-  return NULL_LLM;
 };
 
 const isAllNullLlm = (llm: LlmMetrics): boolean =>
@@ -87,30 +78,6 @@ const isAllNullLlm = (llm: LlmMetrics): boolean =>
   llm.abstract === null &&
   llm.sentiment === null &&
   llm.openEnded === null;
-
-// Classify a prompt and report why flags could be missing: 'parse' = unusable output, 'error' = the call itself failed.
-export const classifyPromptDimensions = async (
-  content: string,
-  sessionId?: string,
-): Promise<{ llm: LlmMetrics; skipReason: 'parse' | 'error' | null }> => {
-  try {
-    // Tool-free agent, same rationale as the guard classifier; sessionId threads the aux run under the chat's LangSmith thread.
-    // @see #77 #41 #308
-    const completion = await inferenceService.createToolFreeCompletion({
-      provider: config.aux.provider,
-      model: llmModel(),
-      messages: [{ role: 'user', content: `${LLM_PROMPT}\n\nPrompt: ${content.trim()}` }],
-      temperature: 0,
-      max_tokens: 100,
-      ...(sessionId ? { trace: { sessionId } } : {}),
-    });
-    const llm = parseLlmFlags(completion?.choices?.[0]?.message?.content);
-    return { llm, skipReason: isAllNullLlm(llm) ? 'parse' : null };
-  } catch (err) {
-    console.error('Prompt classification error:', redactForLog(err));
-    return { llm: NULL_LLM, skipReason: 'error' };
-  }
-};
 
 // Classify a user message and persist the flags into its metrics; never throws for classification problems; `metrics.llmSkipReason` records why flags are null.
 // @see #238

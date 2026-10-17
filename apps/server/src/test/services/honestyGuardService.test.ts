@@ -1,4 +1,4 @@
-import { parseHonestyVerdict, reviewAssistantTurn } from '../../main/services/honestyGuardService';
+import { reviewAssistantTurn } from '../../main/services/honestyGuardService';
 import { Message } from '../../main/models/Message';
 import { muteConsoleError } from '../muteConsole';
 
@@ -7,42 +7,9 @@ const mockCreateToolFree = jest.fn();
 jest.mock('../../main/services/inferenceService', () => ({
   inferenceService: {
     createToolFreeCompletion: (...args: unknown[]) => mockCreateToolFree(...args),
+    createStructuredCompletion: (...args: unknown[]) => mockCreateToolFree(...args),
   },
 }));
-
-describe('parseHonestyVerdict', () => {
-  it('parses a clean verdict object', () => {
-    expect(parseHonestyVerdict('{"claimsToolUse": true, "reason": "quoted file lines"}')).toEqual({
-      flagged: true,
-      reason: 'quoted file lines',
-    });
-    expect(parseHonestyVerdict('{"claimsToolUse": false, "reason": ""}')).toEqual({
-      flagged: false,
-      reason: null,
-    });
-  });
-
-  it('tolerates fences and prose around the object', () => {
-    expect(
-      parseHonestyVerdict('Verdict:\n```json\n{"claimsToolUse": true, "reason": "no tools"}\n```'),
-    ).toEqual({ flagged: true, reason: 'no tools' });
-  });
-
-  it('skips a decoy object before the real verdict', () => {
-    expect(
-      parseHonestyVerdict('{"note": "hi"} then {"claimsToolUse": false, "reason": "ok"}'),
-    ).toEqual({ flagged: false, reason: 'ok' });
-  });
-
-  it('returns null for missing or non-boolean claimsToolUse, and for empty input', () => {
-    expect(parseHonestyVerdict('{"reason": "no flag"}')).toBeNull();
-    expect(parseHonestyVerdict('{"claimsToolUse": "yes", "reason": "x"}')).toBeNull();
-    expect(parseHonestyVerdict('plain prose only')).toBeNull();
-    expect(parseHonestyVerdict('')).toBeNull();
-    expect(parseHonestyVerdict(null)).toBeNull();
-    expect(parseHonestyVerdict(undefined)).toBeNull();
-  });
-});
 
 describe('reviewAssistantTurn', () => {
   beforeEach(() => {
@@ -56,7 +23,7 @@ describe('reviewAssistantTurn', () => {
       content: 'Read it — 87 lines.',
     });
     mockCreateToolFree.mockResolvedValueOnce({
-      choices: [{ message: { content: '{"claimsToolUse": true, "reason": "no tools ran"}' } }],
+      object: { claimsToolUse: true, reason: 'no tools ran' },
     });
     const verdict = await reviewAssistantTurn(String(message._id), message.content as string, []);
     expect(verdict).toEqual({ flagged: true, reason: 'no tools ran' });
@@ -72,12 +39,25 @@ describe('reviewAssistantTurn', () => {
       role: 'assistant',
       content: 'Hello!',
     });
-    mockCreateToolFree.mockResolvedValueOnce({
-      choices: [{ message: { content: '{"claimsToolUse": false, "reason": ""}' } }],
-    });
+    mockCreateToolFree.mockResolvedValueOnce({ object: { claimsToolUse: false, reason: '' } });
     await reviewAssistantTurn(String(message._id), message.content as string, []);
     const persisted = await Message.findById(message._id);
     expect(persisted?.honesty?.flagged).toBe(false);
+  });
+
+  it('#368: passes the verdict schema with fallback and auto injection', async () => {
+    const message = await Message.create({
+      sessionId: '0'.repeat(24),
+      role: 'assistant',
+      content: 'Hello!',
+    });
+    mockCreateToolFree.mockResolvedValueOnce({ object: { claimsToolUse: false, reason: '' } });
+    await reviewAssistantTurn(String(message._id), message.content as string, []);
+    const options = mockCreateToolFree.mock.calls[0][0] as {
+      structuredOutput?: { errorStrategy?: string; jsonPromptInjection?: unknown };
+    };
+    expect(options.structuredOutput?.errorStrategy).toBe('fallback');
+    expect(options.structuredOutput?.jsonPromptInjection).toBe('auto');
   });
 
   it('names the executed tools in the audit prompt and threads the session into the trace', async () => {
@@ -86,9 +66,7 @@ describe('reviewAssistantTurn', () => {
       role: 'assistant',
       content: 'Done.',
     });
-    mockCreateToolFree.mockResolvedValueOnce({
-      choices: [{ message: { content: '{"claimsToolUse": false, "reason": ""}' } }],
-    });
+    mockCreateToolFree.mockResolvedValueOnce({ object: { claimsToolUse: false, reason: '' } });
     await reviewAssistantTurn(
       String(message._id),
       message.content as string,
@@ -100,22 +78,6 @@ describe('reviewAssistantTurn', () => {
     expect(options.model).toBe(process.env.AUX_MODEL || 'openai/gpt-oss-20b');
     expect(JSON.stringify(options.messages)).toContain('read_file');
     expect(options.trace).toEqual({ sessionId: 'session-1' });
-  });
-
-  it('leaves the message unassessed when the verdict is unparseable', async () => {
-    const message = await Message.create({
-      sessionId: '0'.repeat(24),
-      role: 'assistant',
-      content: 'Read it.',
-    });
-    mockCreateToolFree.mockResolvedValueOnce({
-      choices: [{ message: { content: 'no json here' } }],
-    });
-    expect(
-      await reviewAssistantTurn(String(message._id), message.content as string, []),
-    ).toBeNull();
-    const persisted = await Message.findById(message._id);
-    expect(persisted?.honesty).toBeUndefined();
   });
 
   it('leaves the message unassessed and swallows a failed aux call', async () => {

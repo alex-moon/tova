@@ -1,10 +1,21 @@
-import { CompletionOptions, LlmConnector, LlmProvider } from './llmTypes';
+import {
+  CompletionOptions,
+  LlmConnector,
+  LlmProvider,
+  NeutralCompletion,
+  StructuredOutputConfig,
+} from './llmTypes';
 import { deepinfraConnector, fireworksConnector, groqConnector } from './mastraService';
 import { recordModelError } from './modelErrorTally';
 
 /* Delegating LLM service: every completion call goes through here so the provider swaps in one place; the registry stays Partial so a provider can land in plumbing before its connector. */
 // @see #151
-export { CompletionOptions, NeutralCompletion, NeutralChunkStream } from './llmTypes';
+export {
+  CompletionOptions,
+  NeutralCompletion,
+  NeutralChunkStream,
+  StructuredOutputConfig,
+} from './llmTypes';
 export type { LlmConnector, LlmProvider } from './llmTypes';
 
 const connectors: Partial<Record<LlmProvider, LlmConnector>> = {
@@ -42,4 +53,14 @@ export const inferenceService = {
     withTally(options, (connector) => connector.createStreamingCompletion(options)),
   createToolFreeCompletion: async (options: CompletionOptions) =>
     withTally(options, (connector) => connector.createToolFreeCompletion(options)),
+  /** Typed passthrough: a structuredOutput config pins the validated object type end to end. */
+  // @see #368
+  createStructuredCompletion: async <T>(
+    options: CompletionOptions & { structuredOutput: StructuredOutputConfig<T> },
+  ): Promise<NeutralCompletion & { object: T }> =>
+    // The connector's leading non-generic overload wins resolution, so the typed result is asserted once here.
+    // @see #368
+    withTally(options, (connector) => connector.createToolFreeCompletion(options)) as Promise<
+      NeutralCompletion & { object: T }
+    >,
 };

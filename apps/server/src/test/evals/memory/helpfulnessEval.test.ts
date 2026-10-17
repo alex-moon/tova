@@ -3,7 +3,6 @@ import {
   buildJudgePrompt,
   helpfulnessMetrics,
   normaliseFact,
-  parseJudgeVerdict,
   resolveSwappedOutcome,
   runHelpfulnessEval,
   runJudgePreflight,
@@ -11,7 +10,7 @@ import {
 } from '../../../main/evals/memory/helpfulnessEval';
 import type { MemoryScenario } from '../../../main/evals/memory/types';
 
-/* Stage-3 logic with injected dependencies (no Mongo/provider/judge): the swap fold, judge-reply parser, blinded prompt, metric arithmetic, and the two-arm runner loop. */
+/* Stage-3 logic with injected dependencies (no Mongo/provider/judge): the swap fold, blinded prompt, metric arithmetic, and the two-arm runner loop. */
 // @see #289
 
 describe('resolveSwappedOutcome (#289)', () => {
@@ -38,34 +37,6 @@ describe('resolveSwappedOutcome (#289)', () => {
     expect(resolveSwappedOutcome('error', 'B')).toBe('error');
     expect(resolveSwappedOutcome('A', 'error')).toBe('error');
     expect(resolveSwappedOutcome('error', 'error')).toBe('error');
-  });
-});
-
-describe('parseJudgeVerdict (#289)', () => {
-  it('reads the token case-insensitively', () => {
-    expect(parseJudgeVerdict('A')).toBe('A');
-    expect(parseJudgeVerdict('b')).toBe('B');
-    expect(parseJudgeVerdict('tie')).toBe('tie');
-  });
-
-  it('takes the last standalone token after chain-of-thought', () => {
-    expect(parseJudgeVerdict('Weighing A against B, the better answer is B.')).toBe('B');
-  });
-
-  it('does not read a trailing article "a" as the verdict (would invert it)', () => {
-    // A verbose judge reply ending in the article "a" must not invert a correct 'B' verdict identically in both swap orders (a loss silently recorded as a win).
-    expect(parseJudgeVerdict('The answer is B because it gives a clearer explanation.')).toBe('B');
-    expect(parseJudgeVerdict('Answer B is better since it provides a complete answer.')).toBe('B');
-  });
-
-  it('still accepts a lone lowercase "a" as the verdict', () => {
-    expect(parseJudgeVerdict('a')).toBe('A');
-    expect(parseJudgeVerdict('a.')).toBe('A');
-  });
-
-  it('treats an empty or unparseable reply as an error, not a tie', () => {
-    expect(parseJudgeVerdict('')).toBe('error');
-    expect(parseJudgeVerdict('I cannot decide.')).toBe('error');
   });
 });
 

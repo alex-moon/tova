@@ -8,6 +8,7 @@ const mockCreateCompletion = jest.fn();
 jest.mock('../../main/services/inferenceService', () => ({
   inferenceService: {
     createToolFreeCompletion: (...args: unknown[]) => mockCreateToolFree(...args),
+    createStructuredCompletion: (...args: unknown[]) => mockCreateToolFree(...args),
     createCompletion: (...args: unknown[]) => mockCreateCompletion(...args),
   },
 }));
@@ -20,7 +21,7 @@ describe('generateChatTitle', () => {
 
   it('uses the tool-free path, pinned to groq with the small model', async () => {
     mockCreateToolFree.mockResolvedValueOnce({
-      choices: [{ message: { content: 'Restaurant ideas near Bandra' } }],
+      object: { title: 'Restaurant ideas near Bandra' },
     });
     const title = await generateChatTitle('Give me restaurant ideas near Bandra in Mumbai');
     expect(title).toBe('Restaurant ideas near Bandra');
