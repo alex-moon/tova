@@ -139,3 +139,7 @@ const messageSchema = new mongoose.Schema({
 });
 
 export const Message = mongoose.model('Message', messageSchema);
+
+// Every turn reads history newest-first and counts prior messages; without this the per-turn reads are collection scans.
+// @see #377
+messageSchema.index({ sessionId: 1, timestamp: -1 });

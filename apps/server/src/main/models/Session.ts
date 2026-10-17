@@ -47,3 +47,7 @@ const sessionSchema = new mongoose.Schema(
 );
 
 export const Session = mongoose.model('Session', sessionSchema);
+
+// Sidebar order: the user's live chats by most recent activity, on every app load.
+// @see #377
+sessionSchema.index({ userId: 1, deletedAt: 1, lastMessageAt: -1 });
