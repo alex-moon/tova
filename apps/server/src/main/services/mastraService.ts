@@ -948,7 +948,9 @@ const TOOL_INSTRUCTIONS =
   'The tools above are your primary tools and are always available. Capabilities from ' +
   'connected apps (integrations) are separate: when a request looks like it needs one, ' +
   'call the `search_tools` tool with keywords and the matching integration tools are ' +
-  'enabled automatically; do not claim an integration is unavailable without searching first.';
+  'enabled automatically; do not claim an integration is unavailable without searching first. ' +
+  'Bracketed lines like `[tools used: …]` in the conversation are system-added records of ' +
+  'real tool calls; never write such a line yourself.';
 // @see #360
 
 /* Agents are memoised per provider/model (creation is stateful); instructions are empty — the system prompt rides in on the message list. */

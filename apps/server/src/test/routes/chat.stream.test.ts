@@ -9,6 +9,7 @@ import {
   messagesFromPersistedHistory,
   paragraphBreakFor,
   reconcileToolEvent,
+  stripProvenanceLines,
   toolProvenanceLine,
   windowedHistory,
   type PersistedToolEvent,
@@ -1473,6 +1474,24 @@ describe('history window + tool provenance (#360)', () => {
 
     it('ignores malformed entries rather than failing the turn', () => {
       expect(toolProvenanceLine([{ phase: 'result' }, null as never])).toBe('');
+    });
+  });
+
+  describe('stripProvenanceLines (#360 imitation guard)', () => {
+    it('removes a marker line wherever it appears, leaving the rest intact', () => {
+      expect(stripProvenanceLines('Done.\n\n[tools used: list_files]')).toBe('Done.');
+      expect(stripProvenanceLines('first\n[tools used: read_file ×2]\nsecond')).toBe(
+        'first\nsecond',
+      );
+    });
+
+    it('tolerates indentation around an imitated marker', () => {
+      expect(stripProvenanceLines('  [tools used: web_search]  ')).toBe('');
+    });
+
+    it('keeps bracketed prose that is not a provenance line', () => {
+      const text = 'See [tools used: list_files] below\nand [1] references.';
+      expect(stripProvenanceLines(text)).toBe(text);
     });
   });
 

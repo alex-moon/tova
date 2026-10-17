@@ -456,6 +456,15 @@ export const toolProvenanceLine = (
   return `\n\n[tools used: ${summary}]`;
 };
 
+/* Imitation guard: the system-added provenance line must never enter model output — an imitated line is fabricated provenance (the timestamp-leak precedent). */
+// @see #261 #315 #360
+export const stripProvenanceLines = (content: string): string =>
+  content
+    .split('\n')
+    .filter((line) => !/^\s*\[tools used: [^\]]*\]\s*$/.test(line))
+    .join('\n')
+    .trimEnd();
+
 export const messagesFromPersistedHistory = (
   history: {
     role: string;
@@ -825,11 +834,13 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
     // @see #4
     const rawAssistantContent = chatCompletion.choices[0]?.message?.content ?? '';
     const toolResults = chatCompletion.toolResults ?? [];
-    // A tool-only turn ends with a synthesized confirmation instead of silence.
-    // @see #195
-    const assistantContent = rawAssistantContent.trim()
-      ? rawAssistantContent
-      : (confirmationForToolResults(toolResults) ?? rawAssistantContent);
+    // A tool-only turn ends with a synthesized confirmation instead of silence; provenance markers are scrubbed before persist.
+    // @see #195 #360
+    const assistantContent = stripProvenanceLines(
+      rawAssistantContent.trim()
+        ? rawAssistantContent
+        : (confirmationForToolResults(toolResults) ?? rawAssistantContent),
+    );
 
     // Sources from any web_search, persisted only when non-empty.
     // @see #16 #33
@@ -1197,6 +1208,9 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
         sendEvent('delta', { content: confirmation });
       }
     }
+    // Provenance markers are scrubbed before persist — already-streamed deltas can't be recalled, but history must not reinforce the pattern.
+    // @see #360
+    assistantContent = stripProvenanceLines(assistantContent);
 
     // Save assistant message. An empty stream still persists content: '' (fail-visibility); ZDR turns save nothing.
     // @see #4 #116
