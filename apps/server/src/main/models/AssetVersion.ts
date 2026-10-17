@@ -37,6 +37,10 @@ const assetVersionSchema = new mongoose.Schema(
 // One row per (asset, version); the upsert in the write path is idempotent.
 assetVersionSchema.index({ assetId: 1, version: 1 }, { unique: true });
 
+// The daily prune sweeps by age.
+// @see #369
+assetVersionSchema.index({ createdAt: 1 });
+
 export type AssetVersionDocument = mongoose.HydratedDocument<
   mongoose.InferSchemaType<typeof assetVersionSchema>
 >;
