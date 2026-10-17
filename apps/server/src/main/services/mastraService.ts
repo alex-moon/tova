@@ -1,6 +1,7 @@
 import { Agent } from '@mastra/core/agent';
 import { Mastra } from '@mastra/core';
 import { RequestContext } from '@mastra/core/request-context';
+import { ToolSearchProcessor } from '@mastra/core/processors';
 import { InMemoryStore } from '@mastra/core/storage';
 import { Observability } from '@mastra/observability';
 import { buildTracingOptions } from '@mastra/observability';
@@ -150,12 +151,30 @@ const modelSettingsFrom = (options: CompletionOptions) => ({
 
 /* Abort/disconnect plumbing plus `maxSteps` semantics: tools-mode (not the Brave key) drives the loop cap — a low cap starves long-document workflows; userId/sessionId/taskId ride the per-call RequestContext so tools scope per user and attribute provenance, while agents are memoised per provider/model/mode. */
 // @see #16 #159 #52 #58 #252 #298
-/* Connector toolsets: platform + personal connectors resolved per call with a short TTL cache; an empty result forwards no `toolsets` key at all. */
-// @see #36 #329
-const connectorToolsetsFrom = async (options: CompletionOptions) => {
+/* Connector toolsets: platform + personal connectors resolved per call with a short TTL cache; an empty result forwards no extra options at all. The resolved tools are deferred (Anthropic-style deferred loading): a per-call ToolSearchProcessor holds them as its searchable catalog so the agent's primary tools stay in-prompt and connector tools load on demand via `search_tools`. Built as a per-call processor so per-user credentials and loaded state never cross calls. */
+// @see #36 #329 #360
+export const connectorSearchOptionsFrom = async (options: CompletionOptions) => {
   if (!options.userId) return {};
   const toolsets = await connectorToolsetsForUser(options.userId);
-  return Object.keys(toolsets).length ? { toolsets } : {};
+  if (!Object.keys(toolsets).length) return {};
+  const catalog: Record<string, (typeof toolsets)[string][string]> = {};
+  for (const tools of Object.values(toolsets)) {
+    for (const [name, tool] of Object.entries(tools)) {
+      // First connector wins on name collisions (matches the old flat toolsets merge); the id is sanitized because the processor indexes by id and function names must be provider-safe.
+      if (catalog[name]) continue;
+      catalog[name] = createTool({
+        id: name.replace(/[^a-zA-Z0-9_-]/g, '_'),
+        description: tool.description,
+        inputSchema: tool.inputSchema,
+        execute: tool.execute,
+      });
+    }
+  }
+  return {
+    inputProcessors: [
+      new ToolSearchProcessor({ tools: catalog, search: { topK: 5, autoLoad: true } }),
+    ],
+  };
 };
 
 const callOptionsFrom = (
@@ -925,7 +944,12 @@ const TOOL_INSTRUCTIONS =
   'substantial background work — multi-step research, building a long document, ' +
   'anything that would take many tool calls — call `delegate_task` with a ' +
   'complete standalone instruction to hand it to the worker instead of doing it ' +
-  'inline; tell the user it is running in the background and will report back here.';
+  'inline; tell the user it is running in the background and will report back here. ' +
+  'The tools above are your primary tools and are always available. Capabilities from ' +
+  'connected apps (integrations) are separate: when a request looks like it needs one, ' +
+  'call the `search_tools` tool with keywords and the matching integration tools are ' +
+  'enabled automatically; do not claim an integration is unavailable without searching first.';
+// @see #360
 
 /* Agents are memoised per provider/model (creation is stateful); instructions are empty — the system prompt rides in on the message list. */
 const agentCache = new Map<string, Agent>();
@@ -1050,7 +1074,7 @@ const buildConnector = (provider: LlmProvider): LlmConnector => {
         mastraMessagesFor(provider, rest),
         {
           ...callOptionsFrom(options, defaultMode, mergedInstructions(TOOL_INSTRUCTIONS, system)),
-          ...(await connectorToolsetsFrom(options)),
+          ...(await connectorSearchOptionsFrom(options)),
         },
       );
       // Tool executions: FullOutput.toolResults carries every executed call with its structured result; args ride across too so the task sequencer can rebuild chips and replay calls. Mastra nests the fields under `payload` — reading the entry directly yielded `name: ''` and a missing result — so unwrap with an entry-level fallback.
@@ -1092,7 +1116,7 @@ const buildConnector = (provider: LlmProvider): LlmConnector => {
         mastraMessagesFor(provider, rest),
         {
           ...callOptionsFrom(options, defaultMode, mergedInstructions(TOOL_INSTRUCTIONS, system)),
-          ...(await connectorToolsetsFrom(options)),
+          ...(await connectorSearchOptionsFrom(options)),
         },
       );
       // Resolve usage after the real chunks, as a final `usage` chunk; `totalUsage` settles once the stream drains, so awaiting after the loop cannot race.
