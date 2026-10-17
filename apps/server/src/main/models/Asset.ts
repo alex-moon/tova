@@ -133,6 +133,10 @@ const assetSchema = new mongoose.Schema(
 // Cursor-paged per-user listing (`{ userId, _id }` ascending).
 assetSchema.index({ userId: 1, _id: 1 });
 
+// Filename resolution for the agent tools (read/edit by name, duplicate-name versioning).
+// @see #369
+assetSchema.index({ userId: 1, filename: 1 });
+
 // Search queries over converted markdown.
 // @see #67
 assetSchema.index({ markdownExtracted: 1 });
