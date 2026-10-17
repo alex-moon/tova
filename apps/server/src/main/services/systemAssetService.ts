@@ -5,18 +5,13 @@ import { MAX_ASSET_SIZE, sanitizeFilename } from './assetLimits';
 import { enqueueWorkspaceEmbedding } from './workspaceEmbeddingIngest';
 import { config } from '../config';
 
-// Server-side write path for system-generated assets (issue #66): Tova
-// itself creates a file (currently markdown only) and puts it in the user's
-// asset library alongside uploads. Owned by the requesting user, so list /
-// read / delete / attach paths work unchanged; `origin` records provenance.
+// Server-side write path for system-generated assets placed in the user's library; owned by the requesting user so all normal asset paths work unchanged.
+// @see #66
 type CreateSystemAssetResult =
   | { ok: true; fileId: string; filename: string; size: number; createdAt: Date }
   | { ok: false; code: 'invalid' | 'too_large'; message: string };
 
-// The generator emits markdown files only for now (`text/markdown`; the
-// alias stays accepted because presign has always allowed it). Widening the
-// family (plain text, code execution output) is a one-line change here since
-// the full upload allowlist intentionally stays out of this stricter path.
+// The generator emits markdown only; widening the family is a one-line change here.
 const SYSTEM_ALLOWED_CONTENT_TYPES = new Set(['text/markdown', 'text/x-markdown']);
 
 const fail = (code: 'invalid' | 'too_large', message: string): CreateSystemAssetResult => ({
@@ -30,9 +25,8 @@ export const createSystemAsset = async (
   filename: string,
   buffer: Buffer,
   contentType: string,
-  // #252: optional origin for the generated file. Trailing/optional so every
-  // existing call site keeps compiling. Omitted means provenance is left
-  // absent (unknown) — never defaulted.
+  // Optional origin for the generated file; omitted means provenance is left absent (unknown), never defaulted.
+  // @see #252
   provenance?: AssetProvenance,
 ): Promise<CreateSystemAssetResult> => {
   if (!SYSTEM_ALLOWED_CONTENT_TYPES.has(contentType)) {
@@ -72,15 +66,14 @@ export const createSystemAsset = async (
   }
 
   asset.key = key;
-  // The full buffer is the text by construction; no extraction step needed.
-  // Per OQ4 the FULL text is stored — the 12k cap applies only at
-  // prompt-assembly time (truncateForPrompt there, not here).
+  // The full buffer is the text by construction; the 12k cap applies only at prompt-assembly time.
   const text = buffer.toString('utf8');
   asset.textExtracted = text || null;
   asset.status = 'ready';
   await asset.save();
 
-  // #294: embed the generated file's text. Fire-and-forget + flag-gated.
+  // Embed the generated file's text: fire-and-forget + flag-gated.
+  // @see #294
   enqueueWorkspaceEmbedding({
     userId,
     kind: 'file',
@@ -97,16 +90,8 @@ export const createSystemAsset = async (
   };
 };
 
-// #340: agent-side material — e.g. a scraped web page saved so `read_file`
-// can page through it (#350). Unlike system-generated files these are never
-// shown in the library (the assets view lists them only behind its explicit
-// `?origin=system-side` filter) and never offered to the attach picker. So
-// unlike the path above there is no Spaces object (read_file reads the stored
-// text; the row is not attachable, downloadable or editable) and no workspace
-// embedding (web content is not the user's knowledge). Expiry is native:
-// the row carries `expiresAt` and the TTL index deletes it — invisibility
-// costs the user no management burden they didn't opt into, since the
-// agent-side filter/tab exposes inspect + delete anyway.
+// Agent-side material (e.g. a scraped page for read_file): never in the library or attach picker, no Spaces object, no embedding; expiry is a native TTL index.
+// @see #340 #350
 export const createSystemSideAsset = async (
   userId: string,
   filename: string,
@@ -127,24 +112,20 @@ export const createSystemSideAsset = async (
     status: 'ready',
     origin: 'system-side',
     textExtracted: markdown,
-    // Native TTL (index on expiresAt, expireAfterSeconds: 0). 0 days disables
-    // expiry — the field stays absent and TTL never fires for the row.
+    // Native TTL; 0 days disables expiry — the field stays absent and TTL never fires.
+    // @see #340
     ...(ttlDays > 0 ? { expiresAt: new Date(Date.now() + ttlDays * 24 * 60 * 60 * 1000) } : {}),
     ...(sourceUrl ? { sourceUrl } : {}),
     ...(provenance ? { provenance } : {}),
   });
-  // Synthetic key: never dereferenced (no object exists), but the schema
-  // requires the field and views surface it.
+  // Synthetic key: never dereferenced (no object exists), but the schema requires the field.
   asset.key = `agent-side/${String(asset._id)}/${safeName}`;
   await asset.save();
   return { fileId: String(asset._id), filename: safeName };
 };
 
-// #340: reuse a fresh agent-side copy of a URL instead of paying for a
-// re-scrape. The freshness horizon matches the TTL — past it the row is (or
-// soon is) expired and "something might well have changed", so the next
-// fetch re-downloads. Exact-URL match: trivially different URLs (trailing
-// slash, query variants) are distinct cache keys.
+// Reuse a fresh agent-side copy of a URL instead of re-scraping; freshness horizon matches the TTL; exact-URL match.
+// @see #340
 export const findFreshScrape = async (
   userId: string,
   sourceUrl: string,

@@ -1,16 +1,5 @@
-/*
- * #225 eval run service: the grading core extracted from
- * `scripts/run-evals.ts` so the CLI and the scheduled "Evals" path share one
- * code path (same stance as `runModelComparison` for #129). The service owns
- * no Mongo connection lifecycle — in-process it uses the shared connection the
- * server already owns; `scripts/run-evals.ts` keeps connect/disconnect.
- *
- * `runEvalSuite` does the work (seed fixtures, drive `runCase`/`gradeRun` over
- * CASES × models, best-effort LangSmith export) and returns per-case results.
- * `startEvalRun` wraps it with the persisted rollup (`EvalRunRecord`) and the
- * single-run lease (Decision 6). Dependencies are injectable so unit tests can
- * exercise the flows without live providers or LangSmith.
- */
+/* Eval run service: the grading core shared by the CLI and the scheduled path; owns no Mongo lifecycle; runEvalSuite drives cases × models with best-effort LangSmith export; deps injectable. */
+// @see #225 #129
 import fs from 'node:fs';
 import path from 'node:path';
 import type { Client } from 'langsmith';
@@ -24,11 +13,8 @@ import { sweepModels } from './modelConfigService';
 import { ROSTER_SEED, type RosterProvider } from './rosterConfig';
 import { EvalRunRecord } from '../models/EvalRunRecord';
 
-/*
- * #233: the wired providers now include `fireworks` (added to the roster by
- * #232). `groq` stays wired for the auxiliary-model single-run default; the
- * roster sweep (#236) enumerates deepinfra/fireworks rows.
- */
+/* The wired providers now include fireworks; groq stays wired for the aux-model single-run default; the roster sweep enumerates deepinfra/fireworks rows. */
+// @see #233 #232 #236
 export type WiredProvider = 'groq' | RosterProvider;
 
 export const connectorsByProvider = {
@@ -37,8 +23,7 @@ export const connectorsByProvider = {
   fireworks: fireworksConnector,
 } as const;
 
-/** Eval score, stringly typed as the runner always produced it. `error` is a
- * run-level crash recorded in sweep mode, distinct from a graded `fail`. */
+/** Eval score, stringly typed as the runner always produced it; `error` is a run-level crash, distinct from a graded `fail`. */
 export type EvalScore = 'pass' | 'partial' | 'fail' | 'error';
 
 /** One graded case result (the runner's module-local `EvalResult`). */
@@ -63,11 +48,7 @@ export interface EvalCaseEvent {
 const SCORES: Record<EvalScore, number> = { pass: 1, partial: 0.5, fail: 0, error: 0 };
 const DATASET_NAME = 'tova-evals';
 
-/**
- * `@repo:<path>` markers resolve against the repository at grading time, so
- * the golden content expectation moves with the file (README) instead of
- * being duplicated inside the case data.
- */
+/** `@repo:<path>` markers resolve against the repository at grading time, so the expectation moves with the file. */
 export const resolveAssertions = (
   testCase: EvalCase,
   readRepoFile: (path: string) => string,
@@ -81,12 +62,7 @@ export const resolveAssertions = (
       : assertion,
   );
 
-/* Best-effort LangSmith export: the `tova-evals` dataset is created when
- * absent and re-used otherwise (score-over-time stays on one dataset), each
- * case becomes an example, each graded run becomes a run on that example
- * with a 1 (pass) / 0.5 (partial) / 0 (fail) feedback score and the
- * assertion report as the comment. Failures degrade to a warning — the
- * local grading result is unchanged. */
+/* Best-effort LangSmith export: dataset created when absent, each case an example, each graded run posted against it; failures degrade to a warning. */
 export const pushToLangSmith = async (client: Client, results: EvalResult[]): Promise<void> => {
   const ls = client as unknown as {
     hasDataset: (params: { datasetName: string }) => Promise<boolean>;
@@ -98,8 +74,7 @@ export const pushToLangSmith = async (client: Client, results: EvalResult[]): Pr
     ) => Promise<unknown>;
   };
   if (!(await ls.hasDataset({ datasetName: DATASET_NAME }))) await ls.createDataset(DATASET_NAME);
-  // Examples address the dataset by name; re-runs append the fresh results.
-  // The returned example id becomes each run's reference example.
+  // Examples address the dataset by name; re-runs append the fresh results; the returned example id becomes each run's reference.
   const examples: Record<string, string> = {};
   for (const result of results) {
     const example = (await ls.createExample(
@@ -110,11 +85,8 @@ export const pushToLangSmith = async (client: Client, results: EvalResult[]): Pr
     if (example?.id)
       examples[`${result.provider}:${result.model}/${result.testCase.id}`] = example.id;
   }
-  // RunTree is the supported run-submission path in langsmith@0.8 (createRun
-  // queues server-side and returns nothing); posting with a
-  // reference_example_id is what links each graded run to its dataset row.
-  // `model`/`provider` ride in the run metadata so per-model scores
-  // accumulate across sweeps (#158's growing evidence base).
+  // RunTree is the supported run-submission path in langsmith@0.8; reference_example_id links each graded run to its dataset row; model/provider ride the metadata for per-model scores.
+  // @see #158
   const { RunTree } = await import('langsmith');
   const end = new Date();
   for (const result of results) {
@@ -140,21 +112,16 @@ export const pushToLangSmith = async (client: Client, results: EvalResult[]): Pr
   }
 };
 
-/**
- * `--models` csv parsing: entries are `<provider>:<model>` or bare `<model>`
- * (bare = deepinfra — completions are pinned there, #94). Returns null when
- * the flag is absent (single-model mode). Throws on a bad value; the CLI maps
- * that to a non-zero exit and prints the message.
- */
+/* `--models` csv parsing: `<provider>:<model>` or bare `<model>` (deepinfra); null when the flag is absent; throws on a bad value. */
+// @see #94
 export const parseModelsFlag = (
   value: string | undefined,
   warned?: (message: string) => void,
 ): { provider: WiredProvider; model: string }[] | null => {
   if (value === undefined) return null;
   if (value === 'all') {
-    // Wired roster providers only: typesafe/groq are excluded from the roster
-    // sweep (no roster rows, no sweep connector) and that exclusion is stated,
-    // not hidden (#158 plan).
+    // Wired roster providers only: typesafe/groq are excluded from the sweep, stated not hidden.
+    // @see #158
     warned?.(
       'sweep universe: the fixed roster on wired providers (deepinfra, fireworks); ' +
         'other providers are excluded.',
@@ -200,12 +167,7 @@ export interface EvalSuiteDeps {
   onCase?: (event: EvalCaseEvent) => void;
 }
 
-/**
- * Runs the golden suite over every requested model and returns per-case
- * results. Seeds fixtures, clears them on teardown unless `keepFixtures`, and
- * exports to LangSmith when a client is available (best-effort: an export
- * failure never fails the run).
- */
+/** Runs the golden suite over every requested model; seeds fixtures, clears on teardown unless kept, best-effort LangSmith export. */
 export const runEvalSuite = async (
   options: EvalSuiteOptions,
   deps: EvalSuiteDeps = {},
@@ -264,11 +226,8 @@ export const runEvalSuite = async (
   return results;
 };
 
-/**
- * Creates a `langsmith` client when a key is configured, else null. Kept out
- * of `runEvalSuite` so the service never reaches for env ad hoc (issue #142's
- * spirit) and tests inject a mock.
- */
+/** Creates a langsmith client when a key is configured, else null; kept out of runEvalSuite so env access is not ad hoc and tests inject a mock. */
+// @see #142
 export const langsmithClientFromEnv = async (
   apiKey: string | undefined,
 ): Promise<Client | null> => {
@@ -311,12 +270,8 @@ const resolveRunDeps = (deps: EvalRunDeps) => ({
     deps.updateRecord ?? ((id, update) => EvalRunRecord.updateOne({ _id: id }, update).exec()),
 });
 
-/**
- * Writes the `running` lease and returns its id. Rejects with
- * `EvalRunBusyError` when a run is already live — the cross-restart
- * serialisation guard (Decision 6). Kept separate from `executeEvalRun` so a
- * "Run now" route can answer 202 immediately after the lease exists.
- */
+/* Writes the `running` lease; rejects with EvalRunBusyError when a run is live — the cross-restart serialisation guard. Kept separate so a "Run now" route can answer 202 immediately. */
+// @see #225
 export const beginEvalRun = async (
   options: StartEvalRunOptions,
   deps: EvalRunDeps = {},
@@ -333,10 +288,7 @@ export const beginEvalRun = async (
   return String((record as { _id: unknown })._id);
 };
 
-/**
- * Runs the suite for an existing lease and settles the document to
- * `done`/`error`. A run-level crash is recorded, never thrown (Decision 5).
- */
+/** Runs the suite for an existing lease and settles the document to done/error; a run-level crash is recorded, never thrown. */
 export const executeEvalRun = async (
   id: string,
   options: StartEvalRunOptions,
@@ -369,13 +321,8 @@ export const executeEvalRun = async (
   }
 };
 
-/**
- * Persists and executes one suite run. Creates the `running` lease document
- * first (so a crash leaves a reclaimable row), runs the suite, and settles the
- * document to `done`/`error`. Consult `status: 'running'` in Mongo for
- * cross-restart safety (Decision 6): a second caller while one is live is
- * rejected with `EvalRunBusyError`.
- */
+/** Persists and executes one suite run: lease first (a crash leaves a reclaimable row), then run, then settle; a second live caller gets EvalRunBusyError. */
+// @see #225
 export const startEvalRun = async (
   options: StartEvalRunOptions,
   deps: EvalRunDeps = {},
@@ -385,26 +332,16 @@ export const startEvalRun = async (
   return { id, results };
 };
 
-/*
- * #236: the scheduled default is a roster model, not the retired guard model
- * (`openai/gpt-oss-20b` has no roster home). GLM 5.3 Flash is the cheapest
- * roster entry, keeping an unattended daily run as cheap as the roster allows.
- * Sourced from `ROSTER_SEED` so the id cannot drift from the roster definition;
- * override with `TOVA_EVAL_MODELS` (or `TOVA_EVAL_MODEL`/`TOVA_EVAL_PROVIDER`).
- */
+/* The scheduled default is the cheapest roster model (the retired guard model has no roster home); sourced from ROSTER_SEED so the id cannot drift. */
+// @see #236
 const defaultEvalRef = (): { provider: RosterProvider; model: string } => {
   const model = ROSTER_SEED.find((m) => m.modelId === 'zai-org/GLM-5.3-Flash') ?? ROSTER_SEED[0];
   const provider = model.providers.find((p) => p.provider === 'deepinfra') ?? model.providers[0];
   return { provider: provider.provider, model: provider.modelId };
 };
 
-/**
- * Resolves the model set for a scheduled run (OQ2 fallback): the
- * `TOVA_EVAL_MODELS` csv when set, else the runner's single-model default
- * (`TOVA_EVAL_MODEL` / `TOVA_EVAL_PROVIDER`, defaulting to the cheapest roster
- * model on DeepInfra). Values come from config, not ad-hoc `process.env`
- * (issue #142).
- */
+/* Resolves the model set for a scheduled run: TOVA_EVAL_MODELS csv, else the single-model default; values come from config, not ad-hoc process.env. */
+// @see #142
 export const resolveScheduledModels = (
   evals: { models?: string; model?: string; provider?: string } = {},
 ): { provider: WiredProvider; model: string }[] => {

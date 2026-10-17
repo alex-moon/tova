@@ -1,8 +1,5 @@
-// #179: the in-memory ring buffer was removed — retained logs now come from
-// Grafana Cloud (see services/lokiLogs.ts). What remains is the logging
-// backbone: console.* capture (so output stays structured) and durable
-// error-log persistence to MongoDB (issue #175), neither of which depends on
-// a buffer.
+/* The logging backbone: console capture for structured output, plus durable error persistence to MongoDB. */
+// @see #179 #175
 
 import { format } from 'util';
 import { ErrorLog } from '../models/ErrorLog';
@@ -11,9 +8,8 @@ export type LogLevel = 'info' | 'warn' | 'error';
 
 const MAX_MSG_LENGTH = 2000;
 
-// Issue #175: mirror error entries into MongoDB as they are emitted so
-// diagnostics survive a restart. Fire-and-forget: failures are swallowed
-// (never re-logged through console, which would recurse into the capture).
+// Mirror error entries into MongoDB as they are emitted; fire-and-forget (never re-logged through console, which would recurse).
+// @see #175
 const persistErrorEntry = (ts: string, msg: string) => {
   if (process.env.NODE_ENV === 'test') return;
   ErrorLog.create({ bufferId: null, ts, msg }).catch(() => {});
@@ -45,8 +41,7 @@ const record =
   (method: 'log' | 'info' | 'warn' | 'error', level: LogLevel) =>
   (...args: unknown[]) => {
     (originalConsole[method] ?? noop)(...args);
-    // util.format handles printf-style placeholders and object inspection,
-    // matching what the original call put on stdout.
+    // util.format handles printf placeholders and object inspection, matching the original stdout call.
     if (level === 'error') persistErrorEntry(new Date().toISOString(), normalize(format(...args)));
   };
 

@@ -1,12 +1,8 @@
 import { EvalRunRecord } from '../../main/models/EvalRunRecord';
-// The shared jest setup (apps/server/src/test/setup.ts) provides the in-memory
-// Mongo, connects mongoose, syncs indexes, and clears collections per test.
+// The shared jest setup provides the in-memory Mongo, connects mongoose, syncs indexes, and clears collections per test.
 
-/*
- * Plan-225 task 1: the computed eval rollup. Defaults keep a freshly created
- * row in the `running` lease state until the service settles it; the indexes
- * back the list query and the once-per-window idempotency check.
- */
+/* The computed eval rollup: defaults keep a fresh row in the `running` lease state until the service settles it; the indexes back the list query and the once-per-window idempotency check. */
+// @see #225
 describe('EvalRunRecord', () => {
   it('defaults to a running lease with no results', async () => {
     const doc = await EvalRunRecord.create({ startedAt: new Date(), models: ['deepinfra:x'] });
@@ -15,7 +11,8 @@ describe('EvalRunRecord', () => {
     expect(doc.error).toBeNull();
     expect(doc.results).toEqual([]);
     expect(doc.models).toEqual(['deepinfra:x']);
-    // #289: a row is a tool-use run unless stated, with no stages/metrics.
+    // A row is a tool-use run unless stated, with no stages/metrics.
+    // @see #289
     expect(doc.kind).toBe('tool-use');
     expect(doc.stages).toEqual([]);
     expect(doc.metrics).toBeNull();
@@ -67,10 +64,7 @@ describe('EvalRunRecord', () => {
     expect(keys).toContain(JSON.stringify({ kind: 1, startedAt: -1 }));
   });
 
-  // The migration `create-eval-runs` pre-creates `evalruns`. Without the
-  // explicit collection name Mongoose pluralises the model to
-  // `evalrunrecords`, so the migration would create a collection the service
-  // never writes and the intended indexes would never exist.
+  // Without the explicit collection name Mongoose would pluralise to `evalrunrecords`, and the migration's collection and indexes would never be used.
   it('binds to the `evalruns` collection the migration creates', () => {
     expect(EvalRunRecord.collection.name).toBe('evalruns');
   });

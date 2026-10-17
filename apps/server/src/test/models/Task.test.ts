@@ -57,10 +57,7 @@ describe('Task model (#254)', () => {
   });
 
   it('does not entangle the Message schema with tasks (slice invariant)', async () => {
-    // The slice's hard invariant (D1): `Message` must never learn about tasks —
-    // no `taskId`, no `Task` ref. Assert against the *Message* schema, which is
-    // the collection that must stay untouched; asserting on `Task.schema` would
-    // pass even if `taskId` were added to `Message`.
+    // `Message` must never learn about tasks; assert against the *Message* schema, which must stay untouched.
     expect(Message.schema.path('taskId')).toBeUndefined();
     const taskRef = Object.values(Message.schema.paths).some(
       (p) => (p as unknown as { options?: { ref?: string } }).options?.ref === 'Task',

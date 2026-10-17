@@ -1,32 +1,17 @@
-/**
- * Golden set cases for the #112 deterministic evals. Case data is kept
- * separate from the graders so the runner and the LangSmith exporter both
- * consume the same source. What is evaluated is tool use, not the real
- * third-party service: case 1 does not need GitHub, case 2 does not need
- * an actual Bupa policy — the temp Mongo source (`mongoSource.ts`) materialises
- * stand-ins for the asset-library tools, and case 3 needs at most a Brave key
- * already available to the runner.
- */
+/** Golden set cases for the deterministic evals: case data kept separate from the graders. */
+// @see #112
 import type { Assertion } from './types';
 import { noSourcesPattern } from './graders';
 
 export interface EvalCase {
   id: string;
-  /** The raw user prompt as sent. */
   prompt: string;
   description: string;
   assertions: Assertion[];
-  /**
-   * Content the generated file must equal, or a `@repo:<path>` marker
-   * resolved against this repository at grading time (e.g. README.md).
-   */
+  /** Content the generated file must equal, or a `@repo:<path>` marker resolved against the repo. */
   expectedContent?: string;
 }
 
-/**
- * Repro: `@repo:README.md` resolves the actual repo file, so the golden
- * expectation moves with the README instead of duplicating it here.
- */
 export const resolveExpectedContent = (value: string, read: (path: string) => string): string =>
   value.startsWith('@repo:') ? read(value.slice('@repo:'.length)) : value;
 
@@ -38,8 +23,6 @@ export const CASES: EvalCase[] = [
       'Two-tool chain: fetch README.md from the GitHub repo (MCP), then generate_file ' +
       'with filename README.md and content equal to the real README.',
     assertions: [
-      // GitHub rides on the user\u2019s MCP servers, so exact tool names are not
-      // fixed; a *github* substring call is the tool-use signal being evaled.
       { type: 'tool_matching', nameContains: 'github' },
       {
         type: 'tool_called',
@@ -73,8 +56,8 @@ export const CASES: EvalCase[] = [
       { type: 'tool_called', tool: 'web_search' },
       { type: 'tool_called', tool: 'current_datetime' },
       { type: 'tool_not_called', tool: 'list_files' },
-      // #158 rule 1 (OQ2, pinned): a sourced answer must reference its
-      // sources inline as literal links, not just narrate conclusions.
+      // Sourced answers must cite their sources inline as links.
+      // @see #158
       { type: 'text_inline_sources' },
     ],
   },
@@ -103,9 +86,8 @@ export const CASES: EvalCase[] = [
       { type: 'tool_not_called', tool: 'read_file' },
     ],
   },
-  /* #158 cases: refusal + hallucination. The `finalText` assertions in the
-   * two cases below are the deterministic slice of the ticket's rules 1 and
-   * 2; the semantic remainder stays open for an LLM-judge decision. */
+  // Refusal + hallucination cases: the deterministic slice of the ticket's rules 1 and 2.
+  // @see #158
   {
     id: 'benchmaxxed-evals-web',
     prompt:
@@ -121,7 +103,8 @@ export const CASES: EvalCase[] = [
       { type: 'tool_not_called', tool: 'list_files' },
       // Hallucination guard: no answer may narrate searches it never ran.
       { type: 'text_not_claiming_search' },
-      // #158 rule 1 (OQ2, pinned): sourced answers cite inline as links.
+      // Sourced answers cite inline as links.
+      // @see #158
       { type: 'text_inline_sources' },
     ],
   },
@@ -135,9 +118,7 @@ export const CASES: EvalCase[] = [
     assertions: [
       { type: 'tool_called', tool: 'list_files' },
       { type: 'tool_not_called', tool: 'generate_file' },
-      // Rule 2, deterministic form: an explicit no-sources signal in the answer.
-      // The pattern is compiled from NO_SOURCES_PATTERNS so the case cannot
-      // drift from the central refusal regex set.
+      // Explicit no-sources signal, compiled from NO_SOURCES_PATTERNS so the case cannot drift.
       { type: 'text_matches', pattern: noSourcesPattern },
     ],
   },
@@ -164,9 +145,8 @@ export const CASES: EvalCase[] = [
       'the page number (only page 58 of 60 holds the phone).',
     assertions: [
       { type: 'tool_called', tool: 'list_files' },
-      // Navigation signal (#350): the agent lists the unit table of contents
-      // (each unit carries a startLine), then reads the support-contact page
-      // by line range.
+      // Navigation signal: list the unit table of contents, then read the page by line range.
+      // @see #350
       { type: 'tool_called', tool: 'read_file', argsSubset: { unitsOnly: true } },
       { type: 'answer_contains', text: 'page 58' },
     ],

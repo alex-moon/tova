@@ -353,7 +353,6 @@ describe('AssetLibrary — conversion feedback (issue #83)', () => {
     expect(screen.getByTestId('asset-extract-ready')).toHaveTextContent('Text extracted');
     expect(screen.queryByTestId('asset-extracting')).not.toBeInTheDocument();
     expect(vi.mocked(AssetService.list)).toHaveBeenCalledTimes(2);
-    // Silent poll: the grid never went back to the loading placeholder.
     expect(screen.queryByTestId('asset-loading')).not.toBeInTheDocument();
   });
 
@@ -375,8 +374,7 @@ describe('AssetLibrary — conversion feedback (issue #83)', () => {
       await vi.advanceTimersByTimeAsync(0);
     });
     expect(screen.getByTestId('asset-extracting')).toBeInTheDocument();
-    // Transient list failures during the silent poll must not interrupt the
-    // user (no error toast, no loading flash) and must not stop the poll.
+    // Transient list failures during the silent poll must not interrupt the user or stop the poll.
     await act(async () => {
       await vi.advanceTimersByTimeAsync(9000);
     });
@@ -437,8 +435,7 @@ describe('AssetLibrary — inline delete confirm (issue #59)', () => {
     await screen.findByText('notes.txt');
     fireEvent.click(screen.getByRole('button', { name: 'Delete notes.txt' }));
     await screen.findByText('Sure? Irreversible.');
-    // Focus moves to Yes so keyboard/screen-reader users stay oriented when
-    // the card swaps in (focus would otherwise drop to <body>).
+    // Focus moves to Yes so keyboard/screen-reader users stay oriented.
     expect(screen.getByTestId('confirm-yes')).toHaveFocus();
     fireEvent.click(screen.getByTestId('confirm-yes'));
     await waitFor(() => expect(AssetService.delete).toHaveBeenCalledWith('a1'));
@@ -516,9 +513,7 @@ describe('AssetLibrary — audience filter (issue #356)', () => {
     fireEvent.click(screen.getByTestId('asset-filter-agent'));
     await screen.findByText('web-example.com-page.md');
 
-    // Agent view: dropzone gone (uploads could never appear here), per-row
-    // Get gone (no Spaces object behind the row), bulk download hidden even
-    // when selected; delete stays available.
+    // Agent view: no dropzone, no per-row Get, no bulk download even when selected; delete stays.
     expect(screen.queryByTestId('asset-dropzone')).not.toBeInTheDocument();
     expect(
       screen.queryByRole('button', { name: 'Download web-example.com-page.md' }),

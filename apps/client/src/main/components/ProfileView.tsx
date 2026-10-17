@@ -10,8 +10,8 @@ import { useAuth } from '../hooks/useAuth';
 
 const PREFERRED_NAME_LIMIT = 20;
 const CUSTOM_INSTRUCTIONS_LIMIT = 4000;
-// Must match the server-side literal (issue #143) exactly: a typo simply
-// disables the destructive button, so there is no other failure path.
+// Must match the server-side literal exactly; a typo just disables the destructive button.
+// @see #143
 const FACTORY_RESET_CONFIRM = 'RESET';
 
 const ThemeChoice: React.FC<{
@@ -77,8 +77,8 @@ const ProfileView = () => {
   const [preferredName, setPreferredName] = useState(user?.preferredName ?? '');
   const [customInstructions, setCustomInstructions] = useState(user?.customInstructions ?? '');
   const [theme, setTheme] = useState<Theme>(initialTheme);
-  // Startup-chat preference (issue #96): null/absent resolves to the product
-  // default 'recent'.
+  // Null/absent resolves to the product default 'recent'.
+  // @see #96
   const initialStartupChat = user?.startupChat ?? 'recent';
   const [startupChat, setStartupChat] = useState<'recent' | 'new'>(initialStartupChat);
   const initialConfirmDeletes = {
@@ -86,15 +86,14 @@ const ProfileView = () => {
     file: user?.confirmDeletes?.file ?? true,
   };
   const [confirmDeletes, setConfirmDeletes] = useState(initialConfirmDeletes);
-  // 'Incognito by default' (issue #144): the profile alias of the account's
-  // incognito flag (stored as settings.zdr); new chats start incognito when
-  // set. Enabling is forward-looking — saved chats stay until deleted.
+  // Profile alias of the account's incognito flag (settings.zdr); enabling is forward-looking — saved chats stay until deleted.
+  // @see #144
   const initialIncognito = Boolean(user?.incognitoByDefault ?? user?.zdr);
   const [incognito, setIncognito] = useState(initialIncognito);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  // Factory reset (issue #143): enabled only on the exact typed match, and the
-  // server enforces it too — the client check is just UX.
+  // Enabled only on the exact typed match; the server enforces it too — the client check is just UX.
+  // @see #143
   const [resetConfirm, setResetConfirm] = useState('');
   const [resetting, setResetting] = useState(false);
 
@@ -112,7 +111,6 @@ const ProfileView = () => {
         return;
       }
       toast.success('Factory reset complete');
-      // Full reload so every piece of app state re-reads the now-empty data.
       window.location.reload();
     } catch (err) {
       setError(err instanceof AuthError ? err.message : 'Something went wrong.');
@@ -129,25 +127,21 @@ const ProfileView = () => {
       const next = await AuthService.updateProfile({
         preferredName: preferredName.trim(),
         customInstructions,
-        // Only patched when the choice actually moved, so a plain profile
-        // edit cannot silently pin the device's theme onto the account.
+        // Only patched when the choice actually moved, so a plain profile edit cannot pin the device's theme onto the account.
         ...(theme !== initialTheme ? { theme } : {}),
-        // Only patched when the choice actually moved (issue #96).
+        // @see #96
         ...(startupChat !== initialStartupChat ? { startupChat } : {}),
-        // Only patched when a toggle moved, so an unrelated profile edit
-        // cannot touch delete-confirmation prefs (issue #59).
+        // Only patched when a toggle moved, so an unrelated profile edit cannot touch delete-confirmation prefs.
+        // @see #59
         ...(confirmDeletes.chat !== initialConfirmDeletes.chat ||
         confirmDeletes.file !== initialConfirmDeletes.file
           ? { confirmDeletes }
           : {}),
         ...(incognito !== initialIncognito ? { incognitoByDefault: incognito } : {}),
       });
-      // The saved choice rides the mirror immediately so pre-auth pages and
-      // reloads paint it without waiting on the profile round-trip.
+      // The saved choice rides the mirror immediately so pre-auth pages and reloads paint it without waiting on the profile round-trip.
       if (theme !== initialTheme) persistTheme(theme);
       updateUser(next);
-      // A view cannot "close" on save like the old modal did: stay on
-      // /profile and confirm with a toast instead.
       toast.success('Profile saved');
     } catch (err) {
       setError(err instanceof AuthError ? err.message : 'Something went wrong.');
@@ -294,9 +288,8 @@ const ProfileView = () => {
           </fieldset>
         </div>
       </div>
-      {/* Action bar: pinned below the scroll pane so Save stays reachable
-       * regardless of scroll position. Shares the chrome surface treatment
-       * with the composer/sidebar (issue #191). */}
+      {/* Pinned below the scroll pane so Save stays reachable regardless of scroll position. */}
+      {/* @see #191 */}
       <div className="flex shrink-0 justify-end border-t border-border px-6 py-3 panel-surface">
         <Button onClick={save} disabled={pending} data-testid="profile-save">
           {pending ? 'Saving...' : 'Save'}

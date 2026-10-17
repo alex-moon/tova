@@ -1,12 +1,7 @@
 import { MigrationInterface, Db } from 'mongo-migrate-ts';
 
-/*
- * #325: content-version snapshots for assistant-generated files. Every
- * `edit_file` write / restore stores the pre-write and new content here; the
- * unique `{ assetId, version }` index is what makes the write path's upsert
- * idempotent. Pre-create the collection and its indexes so deployed instances
- * have them before first write (same stance as create-eval-runs).
- */
+// Pre-creates the assetversions collection and the unique { assetId, version } index that makes the write-path upsert idempotent.
+// @see #325
 export class CreateAssetVersions implements MigrationInterface {
   async up(db: Db): Promise<void> {
     for (const name of await db.listCollections().toArray()) {

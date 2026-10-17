@@ -13,12 +13,8 @@ import {
   siTrello,
 } from 'simple-icons';
 
-/*
- * Brand mark for a catalog connector (#331): the simple-icons SVG when the
- * slug exists, a brand-colored letter tile otherwise (some brands are not
- * licensed for icon sets — Slack was pulled from simple-icons on trademark
- * request, and lucide dropped brand icons).
- */
+// Simple-icons SVG when the slug exists, a brand-colored letter tile otherwise (some brands are not in simple-icons).
+// @see #331
 
 const BY_SLUG: Record<string, SimpleIcon> = {
   googledrive: siGoogledrive,

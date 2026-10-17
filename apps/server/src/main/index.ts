@@ -39,28 +39,13 @@ import { redactForLog } from './services/logRedaction';
 
 attachConsoleCapture();
 
-/*
- * Process-level safety net (#248). Nothing an outbound fetch or background
- * job does should be able to take the whole server down: before this, a single
- * unhandled rejection (e.g. a stalled `fetch` aborting with a DOMException)
- * hit Node's default and terminated the process, turning every request into a
- * 502 until a redeploy. Rejections are logged and swallowed so the server
- * keeps serving; an uncaught exception is logged and exits, letting Docker's
- * restart policy bring the process back cleanly rather than limp on in an
- * undefined state — with one scoped carve-out (#358): tesseract.js dispatches
- * worker failures from inside its own message handler and can escape with a
- * synchronous throw even when recognizeImage passes `errorHandler` (a
- * double-settled job rejects into a deleted promise slot). The blast radius
- * there is one per-call worker that recognizeImage creates and terminates;
- * the process stays in a defined state and the asset job runner settles the
- * failure, so those are logged and contained instead of exiting.
- */
+// Process-level safety net: rejections logged and swallowed, uncaught exceptions exit, tesseract worker errors contained.
+// @see #248 #358
 export const isTesseractWorkerError = (err: unknown): boolean => {
   const stack =
     typeof err === 'object' && err !== null && 'stack' in err
       ? String((err as { stack?: unknown }).stack ?? '')
       : '';
-  // Matches both tesseract.js and tesseract.js-core (prefix).
   return /node_modules[/\\]tesseract\.js/.test(stack);
 };
 
@@ -93,21 +78,19 @@ export const connectToDatabase = async (mongoUri = buildMongoUri()) => {
 export const createApp = (): Express => {
   const app = express();
 
-  // Coarse geolocation (#50) reads req.ip; behind nginx the socket address is
-  // the proxy, so trust the last TRUST_PROXY_HOPS entries of X-Forwarded-For.
-  // Deploy concern: the outermost proxy must overwrite (not append to)
-  // client-supplied X-Forwarded-For or users could spoof their location.
+  // Behind a proxy, trust only the last TRUST_PROXY_HOPS X-Forwarded-For entries; the outermost proxy must overwrite, not append.
+  // @see #50
   const hops = Number(process.env.TRUST_PROXY_HOPS ?? 1);
   if (Number.isInteger(hops) && hops > 0) {
     app.set('trust proxy', hops);
   }
 
-  // Strict clientside hardening headers; CSP is intentionally using helmet's
-  // defaults (CSP tuning is out of scope for #32).
+  // Strict clientside hardening headers; CSP tuning intentionally out of scope.
+  // @see #32
   app.use(helmet());
 
-  // Same-origin app in both dev (Vite proxy) and prod (static build): no
-  // cross-origin API consumer exists, so no CORS middleware (issue #32).
+  // Same-origin app in dev (Vite proxy) and prod (static build), so no CORS middleware.
+  // @see #32
   const isProduction = process.env.NODE_ENV === 'production';
 
   // JWT configuration should fail at boot in production, not per request.
@@ -177,28 +160,25 @@ export const startServer = async (): Promise<Server> => {
     console.error('MongoDB connection error:', err);
   });
 
-  // Issue #67: in-process conversion worker; no-op under test so route tests
-  // don't inherit background polling.
+  // In-process conversion worker; no-op under test so route tests don't inherit background polling.
+  // @see #67
   if (process.env.NODE_ENV !== 'test') {
     startAssetJobPoller(processAssetConversionJob);
 
-    // #254 (epic #251): the task sequencer poller. Same non-test gate; the
-    // processor is a stub until the sequencer slice lands (the foundation here
-    // is the queue/model/runtime, not the driver).
+    // Task sequencer poller, same non-test gate.
+    // @see #254 #251
     startTaskPoller(processTaskJob);
 
-    // #225/#289: daily eval suites. Off unless TOVA_EVAL_SCHEDULE=daily;
-    // started in the same non-test block so tests never inherit a live provider
-    // job. Both suites run in one tick, strictly sequentially (D19), each with
-    // its own per-kind idempotency (a tool-use run does not suppress memory).
+    // Daily eval suites, both kinds in one strictly sequential tick, off unless scheduled.
+    // @see #225 #289
     startEvalScheduler(
       [
         {
           kind: 'tool-use',
           hasRun: (now) => hasRunForUtcDay(now, 'tool-use'),
           run: async () => {
-            // Best-effort LangSmith export (Decision 4), resolved from config
-            // so the service never reaches for env ad hoc (#142).
+            // Best-effort LangSmith export, config-resolved.
+            // @see #142
             const langsmithClient = await langsmithClientFromEnv(config.langsmith.apiKey);
             return startEvalRun(
               {
@@ -216,10 +196,7 @@ export const startServer = async (): Promise<Server> => {
         {
           kind: 'memory',
           hasRun: (now) => hasRunForUtcDay(now, 'memory'),
-          // Stage 2 only (D13/OQ26): the 36 live gate calls (stage 1) and the
-          // judge/responder calls (stage 3) stay off the unattended path. The
-          // model identities are config-sourced in `memoryEvalRunService`, so a
-          // future stage-1/stage-3 schedule is a config change, not a code one.
+          // Retrieval stage only: gate and judge calls stay off the unattended schedule.
           run: () => startMemoryEvalRun({ stages: ['retrieval'], trigger: 'scheduled' }),
         },
       ],
@@ -228,7 +205,8 @@ export const startServer = async (): Promise<Server> => {
         hourUtc: config.evals.hourUtc ? Number(config.evals.hourUtc) : undefined,
       },
     );
-    // #224: keep the admin Traces summary warm so the tab loads from Mongo.
+    // Keep the admin Traces summary warm so the tab loads from Mongo.
+    // @see #224
     startTraceStatsPoller();
   }
 

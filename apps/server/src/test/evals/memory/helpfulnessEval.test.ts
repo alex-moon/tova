@@ -11,12 +11,8 @@ import {
 } from '../../../main/evals/memory/helpfulnessEval';
 import type { MemoryScenario } from '../../../main/evals/memory/types';
 
-/*
- * #289 stage-3 logic, exercised with injected dependencies so no Mongo,
- * provider, or judge is needed: the swap fold, the judge-reply parser, the
- * blinded prompt, the metric arithmetic, and the two-arm runner loop (including
- * the "no block, no A/B" skip and the counterfactual arm).
- */
+/* Stage-3 logic with injected dependencies (no Mongo/provider/judge): the swap fold, judge-reply parser, blinded prompt, metric arithmetic, and the two-arm runner loop. */
+// @see #289
 
 describe('resolveSwappedOutcome (#289)', () => {
   it('counts only an order-consistent win as a win', () => {
@@ -57,11 +53,7 @@ describe('parseJudgeVerdict (#289)', () => {
   });
 
   it('does not read a trailing article "a" as the verdict (would invert it)', () => {
-    // A verbose judge reply that ends in prose: the standalone "a" is the
-    // English article, not arm A. Without the filter the last match would be
-    // "a" → 'A', inverting a correct 'B' verdict *identically* in both swap
-    // orders, which resolveSwappedOutcome would score as an order-consistent
-    // win — a loss silently recorded as a win.
+    // A verbose judge reply ending in the article "a" must not invert a correct 'B' verdict identically in both swap orders (a loss silently recorded as a win).
     expect(parseJudgeVerdict('The answer is B because it gives a clearer explanation.')).toBe('B');
     expect(parseJudgeVerdict('Answer B is better since it provides a complete answer.')).toBe('B');
   });
@@ -161,9 +153,7 @@ describe('helpfulnessMetrics (#289)', () => {
   });
 
   it('counts a deterministic win when the block and answer carry the fact and the blank arm does not', () => {
-    // The backbone's positive case: retrieval carried the fact AND the with-arm
-    // answer used it, with no counterfactual. This is the signal the judge is a
-    // backstop for, so it must be counted, not just the negative case above.
+    // The backbone's positive case is the signal the judge is a backstop for — count it, not just the negative case above.
     const metrics = helpfulnessMetrics([row({})]);
     expect(metrics.deterministicWins).toBe(1);
     expect(metrics.counterfactualHits).toBe(0);
@@ -239,9 +229,7 @@ describe('runHelpfulnessEval (#289)', () => {
   });
 
   it('flags a length-stopped arm as truncated (T14f/OQ34)', async () => {
-    // A truncated arm must be visible as its own count, not silently read as a
-    // backbone miss: a fact cut off by the budget is a generation-budget
-    // artefact, not a helpfulness one.
+    // A truncated arm must be visible as its own count, not silently read as a backbone miss (a budget artefact, not a helpfulness one).
     const { results, metrics } = await runHelpfulnessEval({
       scenarios: [scenario('s1', 'fact')],
       clear: async () => {},
@@ -278,10 +266,7 @@ describe('runHelpfulnessEval (#289)', () => {
   });
 
   it('does not pay for a second responder call when there is no block to inject', async () => {
-    // With no block the two arms are byte-identical, so the runner reuses the
-    // with-arm answer instead of issuing a duplicate live call. A regression
-    // here would double stage-3 cost and risk the two arms diverging by
-    // sampling noise on a pair that is trivially a tie.
+    // With no block the two arms are byte-identical, so the runner reuses the with-arm answer; a regression would double stage-3 cost.
     let respondCalls = 0;
     const { results } = await runHelpfulnessEval({
       scenarios: [scenario('s1', 'fact')],
@@ -343,9 +328,7 @@ describe('runHelpfulnessEval (#289)', () => {
   });
 
   it('clears fixtures in a finally when seeding throws (T14e)', async () => {
-    // A thrown seed (a Mongo write failure) must not leak the partially-seeded
-    // scenario under the shared `evalUserId` — the same class of leak the
-    // responder-throw case covers, via the other fixture seam.
+    // A thrown seed must not leak the partially-seeded scenario under the shared `evalUserId` — the same leak class as the responder-throw case.
     let clears = 0;
     await expect(
       runHelpfulnessEval({

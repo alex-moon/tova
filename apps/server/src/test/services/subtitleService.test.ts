@@ -1,12 +1,7 @@
 import { reviseSessionSubtitle } from '../../main/services/subtitleService';
 import { muteConsoleError } from '../muteConsole';
-/*
- * #359: subtitle revision is a tool-free aux call, pinned to the aux model
- * like the title. It must degrade to the current subtitle (or null) when the
- * call fails or returns nothing — the signal is revisable by design, so a
- * failed revision never destroys what is already there.
- */
-
+/* Subtitle revision is a tool-free aux call; it must degrade to the current subtitle (or null) on failure — a failed revision never destroys what is already there. */
+// @see #359
 const mockCreateToolFree = jest.fn();
 
 jest.mock('../../main/services/inferenceService', () => ({

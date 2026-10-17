@@ -1,13 +1,5 @@
-/*
- * #289 memory-eval corpus types. The three gate-eval stages share one corpus:
- * a hand-labelled gate set (does a turn refer back?) and a set of scenarios
- * (seed slices + a query) that drive both retrieval hit-rate (stage 2, by slice
- * ID) and injection helpfulness (stage 3, by expected fact + the judge pair).
- *
- * Kept separate from the #112 tool-use `evals/types.ts`: those assertions grade
- * a raw connector run; these describe a seeded workspace and a retrieval/gate
- * question, which the tool-use graders cannot express.
- */
+// Memory-eval corpus types: a hand-labelled gate set plus scenarios driving retrieval and helpfulness.
+// @see #289 #112
 
 /** The three workspace-memory corpus kinds retrieval reads. */
 export type SeedKind = 'chat' | 'file' | 'task';
@@ -22,19 +14,11 @@ export interface MemorySeed {
   text: string;
   /** ISO date. Recency is a tiebreak only, but keeps fixtures deterministic. */
   at: string;
-  /**
-   * Soft-deleted chat seed: materialised, then excluded from the corpus by
-   * `deletedAt` (a `chat`-only flag; file/task seeds ignore it).
-   */
+  /** Soft-deleted chat seed: materialised, then excluded by `deletedAt` (chat-only flag). */
   deleted?: boolean;
 }
 
-/**
- * Scenario shape, so the baseline report shows *where* retrieval fails rather
- * than a single hit-rate: a direct query, a paraphrase with no shared content
- * words, a file, a task (#298), a soft-deleted seed, and a seed buried beyond
- * the bounded pool.
- */
+/** Scenario categories, so the baseline report shows where retrieval fails. */
 export type ScenarioCategory =
   'direct' | 'paraphrase' | 'file' | 'task' | 'deleted-seed' | 'out-of-pool';
 
@@ -47,29 +31,17 @@ export interface MemoryScenario {
   query: string;
   /** Seed id a correct retrieval must surface. */
   expectedSliceId: string;
-  /**
-   * Whether the baseline is expected to surface it. `false` documents a known
-   * miss by construction (a deleted seed, excluded by `deletedAt`). `out-of-pool`
-   * was a miss under the pre-#293 bounded read; since #293 searches the whole
-   * corpus it expects a hit.
-   */
+  /** Whether the baseline is expected to surface it; false documents a known miss by construction. */
+  // @see #293
   expectSurfaced: boolean;
   /** Deterministic substring a helpful answer must contain (stage-3 backbone). */
   expectedFact: string;
-  /**
-   * Filler user messages to bury the seed beyond the pre-#293 bounded pool, for
-   * the `out-of-pool` category. Absent/0 for every other category.
-   */
+  /** Filler messages burying the seed beyond the old bounded pool (`out-of-pool` only). */
+  // @see #293
   poolFill?: number;
 }
 
-/**
- * How a positive turn refers back. `explicit` names the referent; `continuation`
- * carries it only in `history`; `bare-deixis` relies on a pronoun/deictic with no
- * content word and (by construction) no history. Recording the subtype lets
- * recall be reported per subtype (T1b-i): a bar set on bare deixis is a
- * different claim from one set on explicit refer-backs (OQ12/OQ36).
- */
+/** How a positive turn refers back, so recall can be reported per subtype. */
 export type GateSubtype = 'explicit' | 'continuation' | 'bare-deixis';
 
 /** One hand-labelled gate case: does this turn refer back to the user's past work? */

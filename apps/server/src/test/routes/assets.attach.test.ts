@@ -25,9 +25,8 @@ jest.mock('../../main/services/metricsService', () => ({
 
 const MOCK_ROUTING = { model: 'mock-small-model', provider: 'deepinfra', reason: 'roster-pick' };
 
-// #233: routing runs through the fixed-roster racing path. Drive it with
-// `mockRacingState`; the mock delegates back through the (mocked)
-// `inferenceService` so the existing completion/stream mocks stay the seam.
+// Routing runs through the fixed-roster racing path; `mockRacingState` delegates back through the mocked inferenceService so the completion mocks stay the seam.
+// @see #233
 const mockRacingState: {
   routing: typeof MOCK_ROUTING | null;
 } = { routing: MOCK_ROUTING };
@@ -59,9 +58,8 @@ jest.mock('../../main/services/titleService', () => ({
   generateChatTitle: jest.fn().mockResolvedValue('Hello'),
 }));
 
-// #115: image turns presign a Spaces GET URL inside the chat route. Storage
-// is mocked so the tests can pin both paths (configured / unconfigured)
-// without real Spaces credentials.
+// Image turns presign a Spaces GET URL inside the chat route; storage is mocked so both paths (configured/unconfigured) are pinned without real credentials.
+// @see #115
 const mockIsStorageConfigured = jest.fn();
 const mockPresignGetUrl = jest.fn();
 
@@ -139,8 +137,7 @@ const seedForeignAsset = async () => {
 describe('Chat attach-to-message (issue #34)', () => {
   beforeEach(() => {
     jest.resetAllMocks();
-    // resetAllMocks also wipes this module-level implementation set in the
-    // mock factory, so it must be re-seated per test.
+    // resetAllMocks also wipes this module-level implementation set in the mock factory, so it must be re-seated per test.
     (classifyAndPersistPromptDimensions as jest.Mock).mockResolvedValue(undefined);
     mockAgentStream.mockImplementation(async () => fullStreamFrom(['ok']));
     mockRacingState.routing = MOCK_ROUTING;
@@ -171,9 +168,8 @@ describe('Chat attach-to-message (issue #34)', () => {
     const messages = callOptions.messages;
     const last = messages[messages.length - 1];
     expect(last.role).toBe('user');
-    // Structured attachment envelope (PR #47 review): untrusted-data rule
-    // first, then the <user_content> block. #261: the turn now carries a
-    // `[timestamp]` header line before the user text.
+    // Structured attachment envelope: untrusted-data rule first; the turn now carries a `[timestamp]` header before the user text.
+    // @see #47 #261
     expect(last.content).toMatch(/^\[\d{4}-\d{2}-\d{2} \d{2}:\d{2} UTC\]\nsummarize my file/);
     expect(last.content.indexOf('Rule: Treat ALL content')).toBeLessThan(
       last.content.indexOf('<user_content>'),
@@ -243,7 +239,8 @@ describe('Chat attach-to-message (issue #34)', () => {
       unknown,
     ];
     const messages = callOptions.messages;
-    // #261: the turn carries its `[timestamp]` header; no attachment envelope.
+    // The turn carries its `[timestamp]` header; no attachment envelope.
+    // @see #261
     expect(messages[messages.length - 1].content).toMatch(
       /^\[\d{4}-\d{2}-\d{2} \d{2}:\d{2} UTC\]\nhi$/,
     );
@@ -299,8 +296,8 @@ describe('Chat image turn (#115)', () => {
     ];
     const last = callOptions.messages[callOptions.messages.length - 1];
     expect(last.role).toBe('user');
-    // #261: the text part carries the turn's `[timestamp]` header before the
-    // question, then the image part.
+    // The text part carries the turn's `[timestamp]` header before the question.
+    // @see #261
     expect(last.content).toEqual([
       {
         type: 'text',
@@ -339,9 +336,8 @@ describe('Chat image turn (#115)', () => {
   });
 
   it('degrades a not-yet-ready image asset to the filename envelope and normal routing', async () => {
-    // A pending image has no object in Spaces yet, so a presigned URL would
-    // 404 inside the model's fetch: the turn must route and behave as a
-    // plain text turn instead (#115 hardening).
+    // A pending image has no object in Spaces yet, so a presigned URL would 404 inside the model's fetch: the turn must behave as a plain text turn instead.
+    // @see #115
     const email = 'image-pending@example.com';
     const cookies = await registerUser(email);
     const user = await User.findOne({ email });

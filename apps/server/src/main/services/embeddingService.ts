@@ -1,19 +1,7 @@
 import { config } from '../config';
 
-/*
- * #294: embedding client for workspace-memory semantic retrieval.
- *
- * DeepInfra exposes an OpenAI-compatible embeddings endpoint and is already a
- * configured provider with a key (`config.providers.deepinfraApiKey`), so no
- * new secret or vendor is introduced. The endpoint is a single POST, so this
- * is a thin `fetch` rather than a new runtime dependency (`ai` /
- * `@ai-sdk/deepinfra` / `openai` are not installed). This is a deliberate,
- * documented exception to the repo's library-first rule; see
- * docs/plan-294-workspace-retrieval.md (Risks).
- *
- * BGE v1.5 wants an instruction prefix on *queries* only; passages take no
- * prefix. `kind` selects which side of the retrieval a call is on.
- */
+/* Embedding client for workspace-memory retrieval via DeepInfra's OpenAI-compatible endpoint: a deliberate thin-fetch exception to the library-first rule; BGE wants an instruction prefix on queries only. */
+// @see #294
 
 const DEEPINFRA_BASE = 'https://api.deepinfra.com/v1';
 const EMBEDDINGS_URL = `${DEEPINFRA_BASE}/openai/embeddings`;
@@ -26,15 +14,11 @@ export interface EmbedOptions {
   kind?: EmbedKind;
   // Injectable for tests; defaults to global `fetch`.
   fetchImpl?: typeof fetch;
-  // Overrides `config.embeddings.timeoutMs` for this call. The config default
-  // bounds the one-text query embed on the chat hot path; a backfill batch of
-  // 64 passages needs far longer (observed: the 800ms default times out on
-  // real batches).
+  // Overrides the config default, which only bounds the one-text query embed; a backfill batch needs far longer.
   timeoutMs?: number;
 }
 
-// Thrown when the provider key is absent: a configuration fault the caller
-// must not treat as "no results".
+// Thrown when the provider key is absent: a configuration fault the caller must not treat as "no results".
 export class EmbeddingConfigError extends Error {
   constructor(message: string) {
     super(message);
@@ -64,20 +48,7 @@ const orderRows = (rows: EmbeddingRow[]): EmbeddingRow[] => {
   return [...rows].sort((a, b) => (a.index as number) - (b.index as number));
 };
 
-/*
- * Embed a batch of texts. Returns one vector per input, in input order, each
- * validated against `config.embeddings.dim` (a mismatch means the configured
- * model and dimension have diverged, which would corrupt the Atlas index).
- * An empty batch short-circuits without a network call.
- *
- * Context-length recovery: BGE v1.5 models hard-reject any input over the
- * model's 512-token context with a 400, and the client-side
- * `EMBEDDING_MAX_CHARS` cap cannot see token density (code/YAML/OCR text
- * tokenises far denser than the ~3.5 chars/token the cap assumes). On that
- * error the batch falls back to per-text calls, each halving its text until it
- * fits (deterministic per text, so the backfill's hash-skip rule stays
- * correct); below `EMBED_MIN_CHARS` it fails loudly instead.
- */
+/* Embed a batch of texts: one validated vector per input in order (a dim mismatch means config divergence); over-context texts fall back to per-text halving until they fit. */
 export const EMBED_MIN_CHARS = 32;
 
 export class ContextLengthError extends EmbeddingResponseError {}

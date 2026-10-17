@@ -5,9 +5,8 @@ jest.mock('../../main/models/ErrorLog', () => ({
   ErrorLog: { create: jest.fn().mockReturnValue(Promise.resolve({})) },
 }));
 
-// #179: the in-memory ring buffer was removed; this module now only provides
-// console capture + durable error persistence. Retained log viewing lives in
-// lokiLogs.ts (tested separately).
+// Console capture + durable error persistence only; retained viewing lives in lokiLogs.ts.
+// @see #179
 describe('logService', () => {
   beforeEach(() => {
     (ErrorLog.create as jest.Mock).mockClear();

@@ -2,9 +2,7 @@ import dns from 'dns';
 import { fetchPage } from '../../main/services/webFetchService';
 import { muteConsoleError } from '../muteConsole';
 
-// The checker's unit tests live in safeLinkService.test.ts; here it is a
-// controllable stub so the fetch flow (initial URL, redirect hops, gate
-// ordering) is testable in isolation.
+// The checker's unit tests live in safeLinkService.test.ts; here it is a controllable stub so the fetch flow (initial URL, redirect hops, gate ordering) is testable in isolation.
 const mockAssertSafeUrl = jest.fn<Promise<void>, [string]>();
 
 jest.mock('../../main/services/safeLinkService', () => ({
@@ -233,8 +231,7 @@ describe('Web Fetch Service', () => {
     });
 
     it('refuses a redirect whose target host resolves to a private address', async () => {
-      // assertPublicHost runs twice for the ORIGINAL host (pre-loop and at
-      // hop 0), then once for the redirect target: public, public, private.
+      // assertPublicHost runs twice for the ORIGINAL host (pre-loop and at hop 0), then once for the redirect target: public, public, private.
       (dns.promises.lookup as jest.Mock)
         .mockResolvedValueOnce([{ address: '93.184.216.34', family: 4 }])
         .mockResolvedValueOnce([{ address: '93.184.216.34', family: 4 }])

@@ -9,10 +9,8 @@ import {
 } from '../../main/services/rosterConfig';
 import { ModelRoster } from '../../main/models/ModelRoster';
 
-/*
- * #232 weighted primary pick and roster gating (pure functions; no Mongo).
- */
-
+/* Weighted primary pick and roster gating (pure functions; no Mongo). */
+// @see #232
 const model = (overrides: Partial<RosterModel>): RosterModel => ({
   modelId: 'm',
   label: 'M',
@@ -215,8 +213,7 @@ describe('recordTtft (#320 windowed mean)', () => {
     expect(entry?.ttftSamples).toBe(3);
     expect(entry?.ttftMs).toBeCloseTo((100 * 2 + 1000) / 3);
 
-    // Second fold-in: the old mean's weight is capped at W-1 = 2, so the
-    // seeded history decays out instead of weighing in forever.
+    // Second fold-in: the old mean's weight is capped at W-1, so seeded history decays out instead of weighing in forever.
     await recordTtft(modelId, 'deepinfra', 1000);
     entry = await deepinfraEntry();
     expect(entry?.ttftSamples).toBe(3);

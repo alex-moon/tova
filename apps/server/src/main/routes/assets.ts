@@ -15,9 +15,7 @@ import {
   assetRestoreSchema,
 } from '../validation';
 import { spacesWorkspaceStorage } from '../services/workspaceStorage';
-// Presign/confirm domain cores live in services/assetPresign.ts and
-// services/assetConfirm.ts; asset views in services/assetViews.ts; zip-entry
-// helpers in services/assetZip.ts; shared caps in services/assetLimits.ts.
+// Domain cores live in services/: presign/confirm, views, zip helpers, shared caps.
 import { presignItemForUser } from '../services/assetPresign';
 import { confirmAsset } from '../services/assetConfirm';
 import { restoreAssetVersion } from '../services/assetEditService';
@@ -49,20 +47,15 @@ router.post('/presign', authenticate, async (req: AuthRequest, res) => {
         message: parsed.error.issues[0]?.message ?? 'Invalid upload request',
       });
     }
-    // Needed to gate ephemeral chat uploads (#116) on the effective per-chat
-    // incognito flag (#144).
+    // Gate ephemeral chat uploads on the effective per-chat incognito flag.
+    // @see #116 #144
     const user = await User.findById(req.user?.id);
     if (!user) {
       return res.status(404).json({ message: 'User not found' });
     }
 
-    /*
-     * (#144) The effective per-chat flag mirrors the chat routes' decision:
-     * an existing chat's stored `Session.incognito` decides; a new chat's
-     * upload (which must precede session creation, so no session can exist)
-     * uses the composer's `zdr` intent or the profile's 'incognito by
-     * default'. Assets-page uploads (scope !== 'chat') are never ephemeral.
-     */
+    /* The effective per-chat flag mirrors the chat routes: a stored chat's flag decides; a new chat uses the composer intent or the profile default. Assets-page uploads are never ephemeral. */
+    // @see #144
     let incognitoChat = false;
     if (parsed.data.chatId !== undefined) {
       if (!isValidObjectId(parsed.data.chatId)) {
@@ -94,18 +87,14 @@ router.post('/presign', authenticate, async (req: AuthRequest, res) => {
   }
 });
 
-// Bulk upload (issue #68): many files via N normal singleton uploads, one
-// batched presign round-trip. Not a zip container — zip is never an accepted
-// upload format at any layer (see ALLOWED_CONTENT_TYPES above), and uploaded
-// archives are never read or unzipped anywhere.
+// Bulk upload: many files via N singleton uploads, one batched presign round-trip; zip is never an accepted upload format.
+// @see #68
 router.post('/bulk-presign', authenticate, async (req: AuthRequest, res) => {
   try {
     if (!spacesWorkspaceStorage.isConfigured()) {
       return res.status(503).json({ message: 'File storage is not configured' });
     }
-    // Coarse total-size guard on the unvalidated body: over the declared cap
-    // is a payload too big to bother validating (413), and the batch-shape
-    // checks below cover anything finer than that.
+    // Coarse total-size guard on the unvalidated body: over the cap is 413 without validation; finer checks run below.
     if (Array.isArray(req.body)) {
       const rawTotal = req.body.reduce(
         (sum, item) =>
@@ -159,10 +148,7 @@ router.post('/bulk-presign', authenticate, async (req: AuthRequest, res) => {
   }
 });
 
-// POST /api/assets/:id/confirm — browser has PUT the object directly to
-// Spaces; verify it really exists at the expected size, extract light text,
-// and mark it ready. Net object checks run against the real Space so a
-// lying client cannot mark an asset ready.
+// The browser has PUT the object directly to Spaces; verify existence and size against the real Space so a lying client cannot mark an asset ready.
 router.post('/:id/confirm', authenticate, async (req: AuthRequest, res) => {
   try {
     const asset = await ownedAsset(req);
@@ -180,11 +166,8 @@ router.post('/:id/confirm', authenticate, async (req: AuthRequest, res) => {
   }
 });
 
-// POST /api/assets/bulk-confirm — per-item confirm for a batch (issue #68).
-// Each id is looked up scoped to the caller: a foreign or unknown id is a
-// per-item "not found" row, never a route-level 404. Errors are per-item so
-// partial success stays visible per file; no transaction is possible across
-// Spaces PUTs anyway.
+// Per-item confirm for a batch: ids scoped to the caller, errors per-item so partial success stays visible.
+// @see #68
 router.post('/bulk-confirm', authenticate, async (req: AuthRequest, res) => {
   try {
     const parsed = assetBulkConfirmSchema.safeParse(req.body);
@@ -228,13 +211,8 @@ router.post('/bulk-confirm', authenticate, async (req: AuthRequest, res) => {
 router.get('/', authenticate, async (req: AuthRequest, res) => {
   try {
     const userId = req.user?.id;
-    // Ephemeral ZDR chat attachments (#116) live for one turn at most; the
-    // library view is for durable files, so they never appear here. Agent-side
-    // material (#340: scraped pages) is also excluded by default — it exists
-    // so the agent's read_file can page through it, and the attach picker
-    // (which calls this same endpoint with no params) must never offer it.
-    // The owner can still inspect and delete it: `?origin=system-side` flips
-    // the filter to ONLY agent-side rows (the assets view's opt-in tab).
+    // Ephemeral ZDR attachments never appear here; agent-side material is excluded by default — `?origin=system-side` flips to ONLY agent-side rows.
+    // @see #116 #340
     const agentSideOnly = req.query.origin === 'system-side';
     const query: Record<string, unknown> = {
       userId,
@@ -261,10 +239,8 @@ router.get('/', authenticate, async (req: AuthRequest, res) => {
   }
 });
 
-// GET /api/assets/bulk-download — server-generated zip of owned assets
-// (issue #69). Streams each stored object from Spaces into `archiver` —
-// never buffered in memory. NOTE: any future generic `GET /:id` route must
-// be registered *after* this one so `bulk-download` is not swallowed.
+// Server-generated zip of owned assets, streamed from Spaces — never buffered in memory. Any generic GET /:id route must register AFTER this one.
+// @see #69
 router.get('/bulk-download', authenticate, async (req: AuthRequest, res) => {
   const ids = req.query.id;
   const parsed = assetBulkDownloadQuerySchema.safeParse({ id: ids });
@@ -276,8 +252,7 @@ router.get('/bulk-download', authenticate, async (req: AuthRequest, res) => {
 
   try {
     const requested = parsed.data.id.filter((id) => isValidObjectId(id));
-    // Every id malformed would otherwise leave an id-less find — a whole-
-    // library download that bypasses the 50-id cap — so refuse instead.
+    // All ids malformed would otherwise leave an id-less find — a whole-library download bypassing the cap — so refuse.
     if (requested.length === 0) {
       return res.status(400).json({ message: 'No valid asset ids in selection' });
     }
@@ -302,9 +277,7 @@ router.get('/bulk-download', authenticate, async (req: AuthRequest, res) => {
     const archive = archiver('zip', { zlib: { level: 6 } });
     archive.on('warning', (err: archiver.ArchiverError) => console.error('Archive warning:', err));
 
-    // Headers are not written until the first byte of zip data flushes; the
-    // first streamed object is therefore fetched before any header, so a
-    // storage failure on the very first asset can still return clean JSON.
+    // Headers are not written until the first zip byte flushes, so the first object is fetched before any header and a first-asset storage failure can still return clean JSON.
     let started = false;
     const startResponse = () => {
       if (started) return;
@@ -313,7 +286,7 @@ router.get('/bulk-download', authenticate, async (req: AuthRequest, res) => {
         console.error('Archive error:', err);
         res.destroy();
       });
-      // Client gave up / connection dropped: stop feeding the zip.
+      // Client gave up: stop feeding the zip.
       res.on('close', () => archive.abort());
       res.type('application/zip');
       res.setHeader(
@@ -338,8 +311,8 @@ router.get('/bulk-download', authenticate, async (req: AuthRequest, res) => {
         console.error('Asset bulk download stream error:', err);
         archive.abort();
         if (started && res.headersSent) {
-          // Mid-stream: browsers will see a truncated zip (accepted
-          // limitation — see #69 plan, OQ4).
+          // Mid-stream: browsers will see a truncated zip (accepted limitation).
+          // @see #69
           res.destroy();
           return;
         }
@@ -357,10 +330,8 @@ router.get('/bulk-download', authenticate, async (req: AuthRequest, res) => {
   }
 });
 
-// GET /api/assets/:id/content — in-app viewer payload (issue #197): the
-// extracted body (`textExtracted ?? markdownExtracted`), ownership-scoped.
-// Registered after `/bulk-download` per the ordering note above; uses the
-// `/content` suffix so it cannot shadow `/:id/url`.
+// In-app viewer payload: the extracted body, ownership-scoped; the /content suffix cannot shadow /:id/url.
+// @see #197
 router.get('/:id/content', authenticate, async (req: AuthRequest, res) => {
   try {
     const asset = await ownedAsset(req);
@@ -374,9 +345,8 @@ router.get('/:id/content', authenticate, async (req: AuthRequest, res) => {
   }
 });
 
-// GET /api/assets/:id/versions — content history of an assistant-generated
-// file (#325), newest first. Only metadata; the text of a version is fetched
-// by the /content route below. Ownership-scoped.
+// Content history of an assistant-generated file, newest first; only metadata — text comes from the /content route.
+// @see #325
 router.get('/:id/versions', authenticate, async (req: AuthRequest, res) => {
   try {
     const asset = await ownedAsset(req);
@@ -400,8 +370,8 @@ router.get('/:id/versions', authenticate, async (req: AuthRequest, res) => {
   }
 });
 
-// GET /api/assets/:id/versions/:version/content — one version's body, for the
-// viewer's read-only version preview (#325). Ownership-scoped.
+// One version's body, for the viewer's read-only version preview; ownership-scoped.
+// @see #325
 router.get('/:id/versions/:version/content', authenticate, async (req: AuthRequest, res) => {
   try {
     const asset = await ownedAsset(req);
@@ -435,9 +405,8 @@ router.get('/:id/versions/:version/content', authenticate, async (req: AuthReque
   }
 });
 
-// POST /api/assets/:id/restore — restore a prior version as a NEW version
-// (#325), so a restore is itself undoable. Ownership-scoped; only
-// assistant-generated files are editable (enforced in the service).
+// Restore a prior version as a NEW version, so a restore is itself undoable; only assistant-generated files are editable.
+// @see #325
 router.post('/:id/restore', authenticate, async (req: AuthRequest, res) => {
   try {
     const asset = await ownedAsset(req);
@@ -469,11 +438,8 @@ router.post('/:id/restore', authenticate, async (req: AuthRequest, res) => {
   }
 });
 
-// GET /api/assets/:id/thumbnail-url — presigned GET for the derived image
-// thumbnail (issue #208), so the viewer never loads the original. Ownership-
-// scoped like /:id/url. Always 200 for an owned asset, returning the current
-// `thumbnailStatus` and a `url` only once ready, so the client can poll the
-// in-flight state instead of guessing from a status code.
+// Presigned GET for the derived image thumbnail so the viewer never loads the original; always 200 for an owned asset, so the client can poll the in-flight state.
+// @see #208
 router.get('/:id/thumbnail-url', authenticate, async (req: AuthRequest, res) => {
   try {
     const asset = await ownedAsset(req);
@@ -509,10 +475,8 @@ router.get('/:id/url', authenticate, async (req: AuthRequest, res) => {
   }
 });
 
-// DELETE /api/assets/bulk-delete — batch delete of owned assets with the
-// same repeated `?id=` contract as bulk download. Doc-only for now: Spaces
-// objects are left resident (decided #69 review), so a later soft-delete /
-// restore can flip this to an archive without data loss.
+// Bulk delete of owned assets with the same repeated `?id=` contract as bulk download; Spaces objects stay resident (doc-only delete).
+// @see #69
 router.delete('/bulk-delete', authenticate, async (req: AuthRequest, res) => {
   const ids = req.query.id;
   const parsed = assetBulkDeleteQuerySchema.safeParse({ id: ids });
@@ -541,9 +505,8 @@ router.delete('/bulk-delete', authenticate, async (req: AuthRequest, res) => {
   }
 });
 
-// DELETE /api/assets/:id — doc-only delete; the Spaces object stays resident
-// (decided #69 review) so nothing is lost if a restore feature arrives. A
-// missing object is therefore not a concern for the delete path itself.
+// Doc-only delete; the Spaces object stays resident so nothing is lost if a restore feature arrives.
+// @see #69
 router.delete('/:id', authenticate, async (req: AuthRequest, res) => {
   try {
     const asset = await ownedAsset(req);

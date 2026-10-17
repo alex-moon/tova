@@ -25,12 +25,8 @@ export interface ToolEvent {
   domains?: string[];
 }
 
-// Client-side mirror of the server reconcile (#196, D2): a result replaces the
-// most recent still-open call of the same name, carrying its query forward, so
-// the live chip flips spinner → check in place instead of stacking two chips.
-// An unmatched result is appended standalone; a resolved entry is never a merge
-// target, so a like-named second result becomes its own chip. Kept in sync with
-// `reconcileToolEvent` in `apps/server/src/routes/chat.ts` (their tests pin both).
+// Client-side mirror of the server's tool-event reconcile; keep in sync.
+// @see #196
 export const reconcileToolEvents = (list: ToolEvent[], ev: ToolEvent): ToolEvent[] => {
   if (ev.phase === 'result') {
     for (let i = list.length - 1; i >= 0; i -= 1) {
@@ -62,9 +58,8 @@ export interface Message {
   sourceTitles?: SourceTitle[];
   suggestions?: string[];
   tools?: ToolEvent[];
-  // Attached asset reference (issue #34): id persisted server-side;
-  // assetFilename is display-only on the optimistic message (the persisted
-  // history chip is resolved from the file list when needed).
+  // assetId persists server-side; assetFilename is display-only.
+  // @see #34
   assetId?: string;
   assetFilename?: string;
 }
@@ -72,8 +67,8 @@ export interface Message {
 interface Session {
   _id: string;
   title: string;
-  // #359: the system-maintained one-line scope summary; absent until the
-  // first revision lands on the server.
+  // System-maintained scope summary; absent until the first server revision.
+  // @see #359
   subtitle?: string | null;
 }
 
@@ -81,34 +76,31 @@ export function isAdminRoute() {
   return typeof window !== 'undefined' && window.location.pathname.startsWith('/admin');
 }
 
-// Profile has the same separate-URL view treatment as admin (issue #95);
-// both helpers sit together for the deferred app-wide router ticket.
+// @see #95
 export function isProfileRoute() {
   return typeof window !== 'undefined' && window.location.pathname.startsWith('/profile');
 }
 
-// Issue #197: the files view gets its own URL alongside profile/admin. It is
-// `/files`, not `/assets` — the latter collides with Vite's static build
-// directory, which nginx serves ahead of the SPA fallback.
+// `/files`, not `/assets`: the latter collides with Vite's static build directory.
+// @see #197
 export function isFilesRoute() {
   return typeof window !== 'undefined' && window.location.pathname.startsWith('/files');
 }
 
-// Issue #254 (epic #251): the tasks view (list + read-only stream + queued
-// steering composer) gets its own URL alongside /files, /profile, /admin.
+// @see #254 #251
 export function isTasksRoute() {
   return typeof window !== 'undefined' && window.location.pathname.startsWith('/tasks');
 }
 
-// OAuth consent landing (#327): the provider redirect target for mcp.oauth
-// connectors.
+// OAuth consent landing: the provider redirect target.
+// @see #327
 export function isConnectorCallbackRoute() {
   return (
     typeof window !== 'undefined' && window.location.pathname.startsWith('/connectors/callback')
   );
 }
 
-// Issue #331: the connectors view gets its own URL alongside /profile.
+// @see #331
 export function isConnectorsRoute() {
   return typeof window !== 'undefined' && window.location.pathname.startsWith('/connectors');
 }
@@ -125,18 +117,16 @@ function App() {
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [isChatLoading, setIsChatLoading] = useState(false);
-  // #255: bumped when the composer creates a task, so the embedded card
-  // refetches immediately (an empty card does not poll).
+  // Bumped when the composer creates a task, so the embedded card refetches.
+  // @see #255
   const [taskRefreshSignal, setTaskRefreshSignal] = useState(0);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const streamingRef = useRef(false);
-  // Per-chat incognito (#144): the composer toggle's state. `null` means "no
-  // manual choice yet — follow the profile's 'incognito by default'";
-  // true/false is a deliberate override for the chat being started.
+  // null = profile incognito default; true/false is a deliberate per-chat override.
+  // @see #144
   const [incognitoChoice, setIncognitoChoice] = useState<boolean | null>(null);
-  // Startup-chat preference (issue #96): 'recent' re-opens the newest session
-  // once per mount; the ref guard keeps later refetches (after send, delete)
-  // from ever overriding a user-selected or new session.
+  // Re-opens the newest session once per mount; later refetches never override a user selection.
+  // @see #96
   const startupSessionRef = useRef(false);
 
   const fetchSessions = useCallback(async () => {
@@ -170,10 +160,8 @@ function App() {
   useEffect(() => {
     if (startupSessionRef.current || sessions.length === 0) return;
     startupSessionRef.current = true;
-    // 'new' starts with a blank composer; 'recent' (the default when unset)
-    // opens the newest session once sessions have loaded. Incognito-default
-    // users (#144, stored as settings.zdr) never open a saved chat by
-    // default — their turns are stateless.
+    // Incognito-default users (settings.zdr) never open a saved chat by default.
+    // @see #144
     if (user?.zdr) return;
     if ((user?.startupChat ?? 'recent') === 'recent') {
       // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -193,21 +181,17 @@ function App() {
   const handleSendMessage = async (content: string, assetId?: string, assetFilename?: string) => {
     setIsChatLoading(true);
     streamingRef.current = true;
-    // Show the user message immediately
     setMessages((prev) => [
       ...prev,
       { _id: Date.now().toString(), role: 'user', content, assetId, assetFilename },
     ]);
     const streamId = `stream-${Date.now()}`;
     setMessages((prev) => [...prev, { _id: streamId, role: 'assistant', content: '' }]);
-    // Per-chat incognito (#144): a stored chat's flag is fixed at creation
-    // (the server decides off Session.incognito); a new chat uses the
-    // composer toggle's explicit choice, else the profile default.
+    // A stored chat's flag is fixed at creation; a new chat uses the toggle's choice, else the profile default.
+    // @see #144
     const profileIncognito = Boolean(user?.incognitoByDefault ?? user?.zdr);
     const incognito = incognitoChoice ?? profileIncognito;
-    // Existing chats continue by sessionId; new chats carry the toggle's
-    // decision plus, when incognito, a bounded replay of recent turns so the
-    // server-side conversation has context without anything being stored.
+    // New incognito chats send a bounded replay of recent turns so the server has context without storing anything.
     const sessionIdPayload = activeSessionId;
     try {
       const res = await fetch('/api/chat/stream', {
@@ -242,9 +226,8 @@ function App() {
       if (!res.ok || !res.body) {
         if (res.body) {
           const msg = (await res.json().catch(() => null)) as { message?: string } | null;
-          // #168: 503 = every model is cooling off (the server's friendly
-          // message is the primary text); 403 = the geo block. Both surface
-          // verbatim, exactly like the SSE error event would.
+          // 503 (models cooling off) and 403 (geo block) surface the server's message verbatim.
+          // @see #168
           if ((res.status === 403 || res.status === 503) && msg?.message) {
             setMessages((prev) =>
               prev.map((m) =>
@@ -289,8 +272,8 @@ function App() {
               setActiveSessionId(newSessionId);
               fetchSessions();
             }
-            // Provider visibility (#117): show which provider serves the turn
-            // as soon as the router resolves, including mid-stream.
+            // Show the serving provider as soon as the router resolves, including mid-stream.
+            // @see #117
             const routing = data.routing as { provider?: string } | undefined;
             if (routing?.provider) {
               const prov = routing.provider;
@@ -318,9 +301,8 @@ function App() {
               ),
             );
           } else if (event === 'tool') {
-            // Tool feedback for the streaming chip (issue #33): reconciled in
-            // order so a call's result replaces it in place (#196, D2) rather
-            // than stacking a second chip and leaving the spinner stuck.
+            // Reconciled in order so a result replaces its call in place, not a second chip.
+            // @see #33 #196
             const toolEvent = data as unknown as ToolEvent;
             setMessages((prev) =>
               prev.map((m) =>
@@ -345,8 +327,8 @@ function App() {
                       sources: saved.sources,
                       sourceTitles: saved.sourceTitles ?? sourceTitles,
                       suggestions: saved.suggestions,
-                      // #196 (D3): adopt the server-reconciled summaries so
-                      // the settled turn matches what a refresh would load.
+                      // Adopt the server-reconciled summaries so the settled turn matches a refresh.
+                      // @see #196
                       ...(saved.tools ? { tools: saved.tools } : {}),
                     }
                   : m,
@@ -367,15 +349,14 @@ function App() {
     } finally {
       streamingRef.current = false;
       setIsChatLoading(false);
-      // #226: a turn bumps the session's last-message time, so refetch to let
-      // the sidebar (and any "recent chat" ordering) reflect the new order.
+      // A turn bumps the session's last-message time; refetch so the sidebar reflects the new order.
+      // @see #226
       fetchSessions();
     }
   };
 
-  // #255 (F7): hand the composer text to the background worker. The task is
-  // created with this chat as its thin origin; the chat itself stays untouched
-  // until the worker reports back via the completion drain on a later turn.
+  // Hand the composer text to the background worker; the chat stays untouched until the worker reports back.
+  // @see #255
   const handleSendToWorker = async (content: string) => {
     if (!activeSessionId) return;
     try {
@@ -411,8 +392,8 @@ function App() {
     setSidebarOpen(false);
   };
 
-  // #359: user-owned title. The server marks the session 'user'-titled; the
-  // sidebar (and phone header) re-render from the updated row.
+  // User-owned title: the server marks the session 'user'-titled and the UI re-renders from the row.
+  // @see #359
   const handleRenameSession = async (id: string, title: string) => {
     try {
       const res = await axios.patch(`/api/chat/sessions/${id}`, { title });

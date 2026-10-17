@@ -1,15 +1,11 @@
 import mongoose from 'mongoose';
 
-// Issue #175: per-provider-route error tally. One document per
-// (provider, model, status, category) cell, incremented on every failure of
-// that provider route; `lastMessage` keeps the most recent (redacted) error
-// text so a category label can be sanity-checked in diagnostics. The unique
-// compound index supports the $inc/upsert pattern in modelErrorTally.
+// Per-provider-route error tally: one document per (provider, model, status, category) cell.
+// @see #175
 const modelRouteErrorSchema = new mongoose.Schema({
   provider: { type: String, required: true },
   model: { type: String, required: true },
-  // Null when the failure carries no HTTP status (network error, timeout,
-  // unknown provider, abort).
+  // Null when the failure carries no HTTP status (network error, timeout, abort).
   status: { type: Number, default: null },
   category: { type: String, required: true },
   count: { type: Number, default: 0 },

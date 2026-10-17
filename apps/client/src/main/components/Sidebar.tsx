@@ -18,7 +18,8 @@ const avatarInitial = (user: {
 interface Session {
   _id: string;
   title: string;
-  // #359: system-maintained scope line; absent until the first revision.
+  // System-maintained scope line; absent until the first revision.
+  // @see #359
   subtitle?: string | null;
 }
 
@@ -29,8 +30,8 @@ interface SidebarProps {
   onSelectSession: (id: string) => void;
   onNewChat: () => void;
   onDeleteSession: (id: string) => void;
-  // #359: the title is user-owned and renamable at any time — the sidebar
-  // row is the affordance on every viewport (the chat header is phone-only).
+  // The title is user-owned and renamable at any time — the row is the affordance on every viewport.
+  // @see #359
   onRenameSession: (id: string, title: string) => void;
   onClose: () => void;
 }
@@ -47,8 +48,8 @@ const Sidebar: React.FC<SidebarProps> = ({
 }) => {
   const { user, logout } = useAuth();
   const { armedId, arm, onYes, onAlways, onNo } = useConfirmDelete('chat', onDeleteSession);
-  // #359: inline rename state — the row swaps to an input, Enter/blur
-  // commits, Escape cancels (same swap pattern as the confirm-delete card).
+  // Inline rename: the row swaps to an input, Enter/blur commits, Escape cancels.
+  // @see #359
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameDraft, setRenameDraft] = useState('');
   const commitRename = (id: string, original: string) => {
@@ -86,7 +87,7 @@ const Sidebar: React.FC<SidebarProps> = ({
             <Plus />
             New Chat
           </Button>
-          {/* Issue #197: the files view (list + preview) lives at /files. */}
+          {/* @see #197 */}
           <a
             href="/files"
             className="mt-1 flex h-9 w-full items-center justify-center gap-2 rounded-lg px-4 text-sm font-medium transition-colors hover:bg-accent"
@@ -94,7 +95,7 @@ const Sidebar: React.FC<SidebarProps> = ({
             <Files className="size-4 shrink-0" />
             Files
           </a>
-          {/* Issue #254 (epic #251): the tasks view lives at /tasks, beside /files. */}
+          {/* @see #254 #251 */}
           <a
             href="/tasks"
             className="mt-1 flex h-9 w-full items-center justify-center gap-2 rounded-lg px-4 text-sm font-medium transition-colors hover:bg-accent"
@@ -102,7 +103,7 @@ const Sidebar: React.FC<SidebarProps> = ({
             <ListTree className="size-4 shrink-0" />
             Tasks
           </a>
-          {/* Issue #331 (epic #328): the connectors view lives at /connectors. */}
+          {/* @see #331 #328 */}
           <a
             href="/connectors"
             data-testid="sidebar-connectors-link"
@@ -178,9 +179,8 @@ const Sidebar: React.FC<SidebarProps> = ({
                   onClick={() => onSelectSession(session._id)}
                 >
                   <span className="block truncate">{session.title}</span>
-                  {/* #359: the subtitle is the better library label — it
-                      tracks what the chat drifted to, where a first-message
-                      title goes stale. Secondary weight only. */}
+                  {/* The subtitle tracks what the chat drifted to, where a first-message title goes stale. */}
+                  {/* @see #359 */}
                   {session.subtitle && (
                     <span className="block truncate text-xs font-normal text-muted-foreground">
                       {session.subtitle}

@@ -1,12 +1,8 @@
 #!/usr/bin/env node
 import { commands } from './manageCommands';
 
-/*
- * #322: Django-style management command entrypoint. Usage:
- *   npm run manage -- <command> [args]
- * Run bare (or with an unknown command) to list what's available.
- */
-
+// Django-style management command entrypoint; run bare (or unknown) to list commands.
+// @see #322
 const [name, ...args] = process.argv.slice(2);
 
 const command = name ? commands[name] : undefined;

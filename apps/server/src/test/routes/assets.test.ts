@@ -29,8 +29,7 @@ jest.mock('../../main/services/storageService', () => ({
   putObject: (...args: unknown[]) => mockPutObject(...args),
 }));
 
-// Route the enqueue through a mock so the confirm tests can simulate an
-// enqueue failure; by default it forwards to the real implementation.
+// Route the enqueue through a mock so the confirm tests can simulate an enqueue failure; by default it forwards to the real implementation.
 jest.mock('../../main/services/assetJobService', () => {
   const actual = jest.requireActual('../../main/services/assetJobService');
   return {
@@ -79,8 +78,7 @@ const headerForObject = (size: number, contentType?: string) => ({
 const confirmFor = (cookie: string, assetId: string) =>
   request(app).post(`/api/assets/${assetId}/confirm`).set('Cookie', [cookie]).send({});
 
-// expect(...).toBe(XXX) lines below depend on storage being "configured";
-// resetAllMocks wipes module mock defaults, so re-seat the gate per test.
+// The toBe(XXX) lines depend on storage being "configured"; resetAllMocks wipes module mock defaults, so re-seat the gate per test.
 beforeEach(() => {
   (isStorageConfigured as jest.Mock).mockReturnValue(true);
 });
@@ -106,10 +104,8 @@ describe('Assets presign', () => {
     expect(stored?.status).toBe('pending');
   });
 
-  // Pinned per #68's hard rule: zip is never an accepted upload format at
-  // any layer, and ALLOWED_CONTENT_TYPES in services/assetLimits.ts deliberately
-  // excludes it (see the comment there). If this test ever fails, an upload
-  // path has started accepting archives.
+  // Zip is never an accepted upload format at any layer; if this fails, an upload path has started accepting archives.
+  // @see #68
   it('rejects zip uploads outright and creates nothing', async () => {
     const cookie = await registerUser('assets-zip-user@example.com');
     for (const contentType of [
@@ -403,9 +399,8 @@ describe('Assets bulk upload', () => {
     expect(await Asset.findOne({ filename: 'toolarge.bin' })).toBeNull();
   });
 
-  // Pinned per #68's hard rule: zip is never an accepted upload format, even
-  // as one item inside a bulk batch. Nothing is created for it, and its
-  // siblings' presigns are unaffected.
+  // Zip is never an accepted upload format, even as one item in a bulk batch; siblings' presigns are unaffected.
+  // @see #68
   it('rejects a zip item per-item in bulk and creates nothing for it', async () => {
     const response = await bulkPresignFor(cookieBulkUser, [
       item('ok.txt'),
@@ -698,8 +693,8 @@ describe('Assets confirm markdown conversion queue (#67)', () => {
 
     expect(confirm.status).toBe(200);
     const stored = await Asset.findById(assetId);
-    // #209: images now drive the markdown lifecycle via OCR, alongside the
-    // #208 thumbnail. One asset job covers both pending lifecycles.
+    // Images drive the markdown lifecycle via OCR alongside the thumbnail; one asset job covers both pending lifecycles.
+    // @see #209 #208
     expect(stored?.markdownStatus).toBe('pending');
     expect(stored?.thumbnailStatus).toBe('pending');
     expect(await AssetJob.countDocuments({ assetId })).toBe(1);
@@ -733,7 +728,8 @@ describe('Assets confirm markdown conversion queue (#67)', () => {
     expect(stored?.status).toBe('ready');
     expect(stored?.thumbnailStatus).toBe('none');
     expect(stored?.thumbnailKey).toBeNull();
-    // #209: the same job carries OCR, so the markdown lifecycle must revert too.
+    // The same job carries OCR, so the markdown lifecycle must revert too.
+    // @see #209
     expect(stored?.markdownStatus).toBe('none');
     expect(await AssetJob.countDocuments({ assetId })).toBe(0);
   });
@@ -1122,7 +1118,8 @@ describe('Assets ownership isolation', () => {
     const response = await request(app).delete(`/api/assets/${assetId}`).set('Cookie', [cookieA]);
     expect(response.status).toBe(200);
     expect(await Asset.findById(assetId)).toBeNull();
-    // Decided #69 review: Spaces objects stay resident, so nothing deletes.
+    // Spaces objects stay resident (doc-only delete), so nothing deletes.
+    // @see #69
     expect(mockDeleteObject).not.toHaveBeenCalled();
   });
 
@@ -1173,8 +1170,7 @@ describe('Assets bulk download', () => {
   };
 
   beforeEach(async () => {
-    // The suite-wide beforeEach wipes collections between tests, so users
-    // (and their assets) must be created per test, not in beforeAll.
+    // The suite-wide beforeEach wipes collections between tests, so users (and their assets) must be created per test.
     cookieA = await registerUser('assets-bulk-a@example.com');
     await registerUser('assets-bulk-b@example.com');
   });
@@ -1199,9 +1195,7 @@ describe('Assets bulk download', () => {
   });
 
   it('ignores malformed ids instead of falling back to the whole library', async () => {
-    // Regression: filtering ids by isValidObjectId used to leave an empty
-    // $in set, turning the find into {userId, status:'ready'} — i.e. a
-    // download of the caller's entire library from `?id=garbage`.
+    // Regression: filtering ids by isValidObjectId used to leave an empty $in set, turning the find into a download of the caller's entire library from `?id=garbage`.
     await createReadyAsset('assets-bulk-a@example.com', 'owned.txt', 'x');
     const response = await bulkRequest(cookieA, [
       new Types.ObjectId().toHexString().slice(0, -1) + 'z',

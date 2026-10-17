@@ -1,12 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 import { installChatStreamMock } from './helpers/chatMock';
 
-/*
- * Send-a-chat + streamed reply. Auth uses the real local endpoints (same
- * pattern as app.spec.ts); the stream is the shared mocked SSE endpoint so
- * the spec never depends on a live LLM. The mock splits the reply across
- * several delta events to exercise incremental rendering, not a single blob.
- */
+// Real-endpoint auth; shared SSE mock split into deltas to exercise incremental rendering.
 
 const email = process.env.E2E_EMAIL ?? 'formsatz@gmail.com';
 const password = process.env.E2E_PASSWORD ?? 'password';
@@ -15,10 +10,7 @@ test.beforeEach(async ({ page }) => {
   await page.request.post('/api/auth/login', {
     data: { email, password },
   });
-  // Isolate from seeded state: the client opens the newest saved session by
-  // default (`startupChat: 'recent'`), so without this the turn below lands in
-  // a seeded conversation and the fresh-chat assertions flake. Same isolation
-  // pattern as profile.spec.ts.
+  // Mock the sessions list so the turn below cannot land in a seeded session and flake.
   await page.route('**/api/chat/sessions', (route) =>
     route.fulfill({ status: 200, contentType: 'application/json', body: '[]' }),
   );

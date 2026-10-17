@@ -7,12 +7,8 @@ import {
   type MemoryEvalRunDeps,
 } from '../../main/services/memoryEvalRunService';
 
-/*
- * #289 T6: the persisted memory rollup, exercised with injected fakes so no
- * Mongo or provider is needed — the record shape, the sentinel per-case rows,
- * the continuous metrics payload, the global lease, and the error settle.
- * #310: the gate stage is retired — retrieval is the only deterministic stage.
- */
+/* The persisted memory rollup with injected fakes: the record shape, sentinel per-case rows, continuous metrics payload, global lease, error settle; the gate stage is retired. */
+// @see #289 #310
 
 const report: MemoryEvalReport = {
   retrieval: {
@@ -95,7 +91,8 @@ describe('executeMemoryEvalRun (#289 T6)', () => {
       retrieval: { surfacedRate: 1, cutEmpty: 0 },
     });
     expect((update.$set.metrics as { corpusHash: string }).corpusHash).toMatch(/^[0-9a-f]{64}$/);
-    // #310: the gate is retired — no gate model identity on fresh rollups.
+    // No gate model identity on fresh rollups.
+    // @see #310
     expect((update.$set.metrics as { gateModel?: string }).gateModel).toBeUndefined();
   });
 

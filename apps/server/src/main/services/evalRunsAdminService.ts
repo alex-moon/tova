@@ -1,9 +1,5 @@
-/*
- * #225 read side for the admin Evals tab: the stored rollup is projected into
- * shared wire shapes here so routes stay thin (same split as
- * langsmithTracesService / adminLangsmith). Reads Mongo only — the tab never
- * re-queries LangSmith per page load (Decision 1).
- */
+/* Read side for the admin Evals tab: projects stored rollups into wire shapes; reads Mongo only — the tab never re-queries LangSmith per page load. */
+// @see #225
 import { EvalRunRecord, type EvalRunRecordDocument } from '../models/EvalRunRecord';
 import type {
   AdminEvalCaseResult,
@@ -24,9 +20,7 @@ export const clampLimit = (value: number | undefined): number => {
 
 const emptyCounts = (): AdminEvalScoreCounts => ({ pass: 0, partial: 0, fail: 0, error: 0 });
 
-// Membership via a Set, not `score in counts`: `in` walks the prototype chain,
-// so a corrupt stored score like "constructor" would match and add to a
-// function instead of falling through to `error`.
+// Membership via a Set, not `score in counts`: `in` walks the prototype chain, so a corrupt stored score would match instead of falling through to `error`.
 const KNOWN_SCORES = new Set<keyof AdminEvalScoreCounts>(['pass', 'partial', 'fail', 'error']);
 
 const countScores = (results: EvalRunRecordDocument['results']): AdminEvalScoreCounts => {
@@ -45,8 +39,7 @@ const toSummary = (doc: EvalRunRecordDocument): AdminEvalRunSummary => ({
   finishedAt: doc.finishedAt ? doc.finishedAt.toISOString() : null,
   status: doc.status,
   models: doc.models,
-  // Old rows predate the field; the model default covers new writes and the
-  // migration backfills deployed docs, so a missing value reads as tool-use.
+  // Old rows predate the field; new writes default and the migration backfills, so a missing value reads as tool-use.
   kind: (doc.kind ?? 'tool-use') as AdminEvalRunKind,
   counts: countScores(doc.results),
   total: doc.results.length,

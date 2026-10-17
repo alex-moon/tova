@@ -8,11 +8,8 @@ import type {
   AdminEvalRunDetail,
 } from '../../main/types/admin';
 
-/*
- * #225: the Evals tab renders the stored run rollups, drills into a run's
- * per-case breakdown, and triggers a manual run. The service connector is
- * mocked like in AdminLangsmithView.test.tsx (no axios on the floor).
- */
+/* The Evals tab renders stored run rollups, drills into a run's per-case breakdown, and triggers a manual run; the service connector is mocked. */
+// @see #225
 
 const listEvalRuns = vi.fn();
 const getEvalRun = vi.fn();

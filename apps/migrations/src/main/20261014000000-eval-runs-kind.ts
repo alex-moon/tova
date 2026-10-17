@@ -1,11 +1,7 @@
 import { MigrationInterface, Db } from 'mongo-migrate-ts';
 
-/*
- * #289 D14: `evalruns` now serves two suites (tool-use and workspace-memory),
- * disambiguated by a `kind` field. Add the kind-scoped idempotency index and
- * backfill `kind: 'tool-use'` on rows written before the field existed so an
- * old run is never ambiguous.
- */
+// Backfills kind: 'tool-use' on pre-field rows and adds the kind-scoped idempotency index.
+// @see #289
 export class EvalRunsKind implements MigrationInterface {
   async up(db: Db): Promise<void> {
     await db

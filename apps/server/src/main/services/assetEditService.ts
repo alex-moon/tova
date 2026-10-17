@@ -4,25 +4,8 @@ import { spacesWorkspaceStorage } from './workspaceStorage';
 import { MAX_ASSET_SIZE } from './assetLimits';
 import { enqueueWorkspaceEmbedding } from './workspaceEmbeddingIngest';
 
-/*
- * #325: the content-write path for assistant-generated assets. `generate_file`
- * only ever creates a new asset; this is the first mutation-of-content path.
- * Both the `edit_file` tool and the restore route go through `writeAssetContent`
- * so versioning, the Spaces overwrite, and the embedding re-ingest cannot drift
- * between the two.
- *
- * Search/replace (no regex), ported from opencode's edit tool (MIT,
- * github.com/anomalyco/opencode, packages/core/src/tool/plugin/edit.ts): the
- * model quotes the text it saw from `read_file` and the matcher runs a
- * tolerance ladder — exact match, then unicode-normalized (typographic
- * quotes/dashes/spaces), then line-based ignoring trailing whitespace — so a
- * mismatch the model cannot see still applies. Line endings are matched
- * against the LF view and preserved from the file, never converted. A match
- * must still be unique (a repeated match is refused rather than silently
- * editing the wrong occurrence), and failures are typed (`no_match` /
- * `ambiguous` / `no_change`) so the model can retry cleanly. Edits apply
- * sequentially so a later edit sees an earlier one's output.
- */
+/* The content-write path for assistant-generated assets: edit_file and restore share writeAssetContent so versioning, the Spaces overwrite and re-ingest cannot drift; search/replace runs a tolerance ladder (exact → unicode-normalized → line-based), refuses ambiguous matches, and applies edits sequentially. */
+// @see #325
 
 export interface AssetEdit {
   oldText: string;
@@ -117,14 +100,7 @@ const lineEnding = (text: string, fallback: string) => {
   return crlfCount > lfCount ? crlf : '\n';
 };
 
-/**
- * Joins the replacement's lines with line endings taken from the matched
- * source region. A replacement line that keeps a region line (longest common
- * subsequence, compared like the trailing-whitespace tier) reuses that line's
- * ending; a line that changes in place reuses the ending of the line it
- * replaces; only lines beyond those take `fallback`. Unchanged context inside
- * a match therefore keeps its bytes even in a mixed-ending file.
- */
+/** Joins the replacement's lines with line endings taken from the matched region (LCS-aligned), so unchanged context keeps its bytes even in a mixed-ending file. */
 const withRegionEndings = (region: string, replacement: string, fallback: string) => {
   const before = region.split(/\r?\n/);
   const endings = [...region.matchAll(/\r?\n/g)].map((match) => match[0]);
@@ -138,11 +114,7 @@ const withRegionEndings = (region: string, replacement: string, fallback: string
     .join('');
 };
 
-/**
- * For each line of `after`, the index of the `before` line it keeps (longest
- * common subsequence) or, between kept lines, the line it takes the place of;
- * undefined for lines with no counterpart.
- */
+/** For each line of `after`, the index of the `before` line it keeps (LCS), or the line it takes the place of; undefined with no counterpart. */
 const alignLines = (before: string[], after: string[]) => {
   const width = after.length + 1;
   const table = new Uint32Array((before.length + 1) * width);
@@ -176,11 +148,7 @@ const alignLines = (before: string[], after: string[]) => {
   return result;
 };
 
-/**
- * Matches against the LF view `read_file` shows the model, then maps offsets
- * back to the source, so CRLF and mixed line endings neither block matches
- * nor leak into untouched regions.
- */
+/** Matches against the LF view `read_file` shows the model, then maps offsets back, so CRLF never blocks matches or leaks into untouched regions. */
 const matchView = (source: string, oldText: string, newText: string) => {
   const view = source.replace(crlfRegex, '\n');
   const removed = [...source.matchAll(/\r\n/g)].map((match, index) => match.index - index);
@@ -216,9 +184,7 @@ const countBefore = (positions: number[], offset: number) => {
   return low;
 };
 
-// Pure matcher, exported for unit testing. Applies each edit in order against
-// the running content; `oldText` must occur exactly once (a repeated match is
-// refused rather than silently editing the wrong occurrence).
+// Pure matcher, exported for unit testing; each edit applies in order and `oldText` must occur exactly once.
 export const applyEditsToContent = (
   content: string,
   edits: AssetEdit[],
@@ -231,9 +197,7 @@ export const applyEditsToContent = (
   let next = content;
   for (let index = 0; index < edits.length; index += 1) {
     const { oldText, newText } = edits[index]!;
-    // Strings that differ only in \r ask to change line endings themselves, so
-    // they apply to the exact bytes. Every other edit matches the LF view
-    // `read_file` shows the model and keeps the file's endings.
+    // Strings differing only in \r ask to change line endings themselves, so they apply to the exact bytes; others match the LF view and keep the file's endings.
     const endingsOnly = oldText.replace(crRegex, '') === newText.replace(crRegex, '');
     const { matches, replace } = endingsOnly
       ? { matches: findOccurrences(next, oldText), replace: () => newText }
@@ -262,10 +226,7 @@ const snapshotVersion = (asset: AssetDocument, version: number, text: string): P
     { upsert: true },
   );
 
-// Write `content` as the asset's next version. Snapshots the pre-write version
-// and the new version, overwrites the Spaces object at the (unchanged) key, and
-// re-runs the embedding ingest — exactly the downstream effects a fresh
-// generate has. Validation runs before any state is touched.
+// Write `content` as the asset's next version: snapshot pre-write + new version, overwrite the Spaces object, re-run the embedding ingest; validation runs before any state is touched.
 export const writeAssetContent = async (
   asset: AssetDocument,
   content: string,

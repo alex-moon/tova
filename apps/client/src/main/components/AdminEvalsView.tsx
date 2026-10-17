@@ -2,12 +2,8 @@ import { useCallback, useEffect, useState } from 'react';
 import { AdminError, AdminEvalsService } from '../services/admin';
 import type { AdminEvalRunDetail, AdminEvalRunSummary } from '../types/admin';
 
-/*
- * Admin "Evals" tab (#225): recent deterministic-eval suite runs from the
- * stored rollup (never a live LangSmith query), with a per-case drill-down
- * and a manual "Run now". Extracted from AdminView like AdminLangsmithView;
- * mounting is conditional on the tab being active.
- */
+// Admin "Evals" tab: stored eval-rollup runs with per-case drill-down and a manual run, mounted only when the tab is active.
+// @see #225
 
 const formatTime = (iso: string | null): string => {
   if (!iso) return '—';

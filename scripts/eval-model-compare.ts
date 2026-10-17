@@ -3,22 +3,8 @@ import type { LlmProvider } from '../apps/server/src/main/services/llmTypes';
 import { runModelComparison } from '../apps/server/src/main/services/modelCompare';
 import { ROSTER_SEED } from '../apps/server/src/main/services/rosterConfig';
 
-/*
- * #129 one-off eval: run a single prompt against the existing agent on
- * several underlying models and print the answers side by side, informally
- * scored by reading them. Not part of CI; the same comparison is available
- * in the browser via the admin "Compare" view (POST /api/admin/model-compare),
- * which resolves to the same `runModelComparison` service. This script is
- * the parent for a future "sophisticated routing policy" eval harness: a
- * routing rule is only changed after it has been compared here.
- *
- * Usage:
- *   npx tsx scripts/eval-model-compare.ts "prompt text" --models \
- *     deepinfra/zai-org/GLM-5.3-Flash,fireworks/accounts/fireworks/models/glm-5p3-flash
- * Model refs are `<provider>/<model>`; provider is groq|deepinfra|fireworks.
- * Defaults (#236): the fixed roster on both its providers.
- * Needs the relevant provider API keys (DEEPINFRA_API_KEY, FIREWORKS_API_KEY).
- */
+/* One-off eval: run a single prompt against several models side by side; routing rules change only after comparison here. */
+// @see #129 #236
 
 const DEFAULT_REFS = ROSTER_SEED.flatMap((model) =>
   model.providers.map((p) => `${p.provider}/${p.modelId}`),

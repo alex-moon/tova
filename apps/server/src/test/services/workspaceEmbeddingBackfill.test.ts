@@ -10,11 +10,8 @@ import {
   workspaceSliceText,
 } from '../../main/services/workspaceEmbeddingText';
 
-/*
- * #294: the backfill's idempotency rule. The plan is pure, so the skip/embed
- * decision is pinned without a database or a provider call.
- */
-
+/* The backfill's idempotency rule: the plan is pure, so the skip/embed decision is pinned without a database or provider call. */
+// @see #294
 const MODEL = 'BAAI/bge-base-en-v1.5';
 
 const slice = (overrides: Partial<EmbeddableSlice> = {}): EmbeddableSlice => ({
@@ -88,17 +85,15 @@ describe('planEmbeddingWrites (#294)', () => {
   });
 
   it('normalises whitespace so the backfill hashes exactly what ingest writes (#294)', () => {
-    // collectWorkspaceSlices returns chat/task text untrimmed; workspaceSliceText
-    // (the ingest helper) trims. If the backfill did not normalise, the two
-    // paths would hash different text and never agree on "already embedded".
+    // collectWorkspaceSlices returns chat/task text untrimmed; the ingest helper trims. Without normalising, the two paths would hash different text and never agree on "already embedded".
+    // @see #294
     const cases: { slice: EmbeddableSlice; source: Parameters<typeof workspaceSliceText>[0] }[] = [
       {
         slice: slice({ kind: 'chat', id: 'c1', text: '  hello world  ' }),
         source: { kind: 'chat', content: '  hello world  ' },
       },
       {
-        // collectWorkspaceSlices joins non-blank events verbatim, so a trailing
-        // whitespace content survives into the collected text.
+        // collectWorkspaceSlices joins non-blank events verbatim, so trailing whitespace survives into the collected text.
         slice: slice({ kind: 'task', id: 't1', text: 'do it\nworking  ' }),
         source: {
           kind: 'task',
@@ -150,11 +145,8 @@ describe('planEmbeddingWrites (#294)', () => {
   });
 
   it('keys an existing row by the run model even when the projection omits `model` (#294)', () => {
-    // Regression: the backfill projected `kind sourceId textHash` only, so
-    // `row.model` was `undefined` and the key became `chat|m1|undefined` while
-    // the plan looked up `chat|m1|<model>`. The skip never matched and every
-    // run re-embedded the whole corpus. The row here has no `model`, as a
-    // projection that omits it would return.
+    // Regression: the backfill projected `kind sourceId textHash` only, so `row.model` was undefined and the skip never matched — every run re-embedded the whole corpus. The row here has no `model`, as such a projection would return.
+    // @see #294
     const text = 'hello world';
     const hashes = existingEmbeddingHashes(
       [{ kind: 'chat', sourceId: 'm1', textHash: embeddingTextHash(text, MODEL) }],
@@ -167,9 +159,7 @@ describe('planEmbeddingWrites (#294)', () => {
   });
 
   it('keys a row by its own model, so a foreign-model row never satisfies the run model', () => {
-    // Multi-model rows coexist (the bge-m3/gte probe), and each stores its own
-    // `model`. The skip lookup uses the run model, so a bge-m3 row must not be
-    // mistaken for a bge-base row for the same slice.
+    // Multi-model rows coexist and each stores its own `model`; a foreign-model row must never satisfy the run model's skip lookup.
     const text = 'hello world';
     const hashes = existingEmbeddingHashes(
       [

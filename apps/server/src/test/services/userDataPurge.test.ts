@@ -7,14 +7,8 @@ import { Connector } from '../../main/models/Connector';
 import { encryptEnvelope, MCP_ENCRYPTION_KEY_ENV_VAR } from '../../main/services/crypto';
 import { purgeAllUserData } from '../../main/services/userDataPurge';
 
-// Data-level coverage for purgeAllUserData (issue #143 T1): every
-// PII-bearing collection enumerated in the ticket goes to zero for the
-// purging user, user B is untouched, the Spaces sweeps are attempted for
-// each asset key and chat prefix, failures are collected per key. The
-// storage layer is mocked (pattern: assets.attach.test.ts mocks its
-// boundary); the trace purge service is mocked so tracePurge.test.ts covers
-// the LangSmith wire format separately.
-
+// Data-level coverage for purgeAllUserData: every PII-bearing collection goes to zero for the purging user, user B untouched, Spaces sweeps attempted per key with failures collected; storage and trace purge are mocked (tracePurge.test.ts covers the LangSmith wire format).
+// @see #143
 jest.mock('../../main/services/storageService', () => ({
   isStorageConfigured: jest.fn(),
   deleteObject: jest.fn(),
@@ -177,9 +171,7 @@ describe('purgeAllUserData (issue #143: factory reset)', () => {
     await seedAssetsAndMcp(uid);
     mockedIsConfigured.mockReturnValue(false);
 
-    // Storage never configured → no bucket could hold the user's files, so
-    // surface no failedObjects: a spurious warning would tell the user that
-    // data remains when it cannot.
+    // Storage never configured → no bucket could hold the user's files, so surface no failedObjects (a spurious warning would claim data remains when it cannot).
     await expect(purgeAllUserData(uid)).resolves.toEqual({ failedObjects: [] });
     expect(mockedDeleteByKey).not.toHaveBeenCalled();
     expect(mockedListKeys).not.toHaveBeenCalled();

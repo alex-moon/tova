@@ -176,7 +176,6 @@ describe('AssetsView (issue #197)', () => {
     const img = await screen.findByRole('img', { name: 'photo.png' });
     expect(img).toHaveAttribute('src', 'https://spaces.example/thumb');
     expect(AssetService.thumbnailUrl).toHaveBeenCalledWith('img1');
-    // Images never fetch the text content endpoint.
     expect(AssetService.content).not.toHaveBeenCalled();
   });
 
@@ -299,7 +298,6 @@ describe('AssetsView version history (#325)', () => {
 
     fireEvent.click(await screen.findByTestId('assets-version-restore'));
     await waitFor(() => expect(AssetService.restore).toHaveBeenCalledWith('gen1', 1));
-    // A restore closes the version view and reloads the (now current) body.
     await waitFor(() =>
       expect(screen.queryByTestId('assets-version-preview')).not.toBeInTheDocument(),
     );

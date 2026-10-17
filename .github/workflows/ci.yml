@@ -7,12 +7,8 @@ on:
     branches: [main]
 
 jobs:
-  # Which areas of the repo a PR touched, so the `ci` job below only runs
-  # the gate steps affected by the change (issue #141: free-tier minutes).
-  # Direct CLI diff, not a vendor paths-filter action: this repo keeps a
-  # no-third-party-actions convention (see the gitleaks/osv-scanner notes).
-  # Push runs skip detection entirely — their steps run unconditionally so
-  # the deploy gate always validates the full merge result.
+  # Detect which areas a PR touched so the ci job runs only affected gates; push runs get the full gate.
+  # @see #141
   changed:
     runs-on: ubuntu-latest
 
@@ -48,9 +44,7 @@ jobs:
             exit 0
           fi
 
-          # Config/tooling changes can affect anything: force both sides
-          # on. Dependency changes force the server gate (cheapest proxy
-          # for lockfile changes that touch runtime code).
+          # Config/tooling changes force both sides; dependency changes force the server gate.
           server=false
           client=false
           deps=false
@@ -58,12 +52,8 @@ jobs:
           e2e=false
 
           while IFS= read -r file; do
-            # e2e is default-on (#288): it runs unless every changed path is
-            # provably inert for the dev stack the job boots (server + Mongo +
-            # client). Dockerfile is inert here because e2e never builds
-            # images; docs/markdown/skills cannot affect runtime. A new or
-            # unknown path therefore runs e2e — the old allowlist failed open
-            # and silently skipped it.
+            # e2e is default-on: it runs unless every changed path is provably inert for the dev stack.
+            # @see #288
             case "$file" in
               docs/*|*.md|.opencode/*|Dockerfile) ;;
               *) e2e=true ;;
@@ -124,9 +114,7 @@ jobs:
         if: needs.changed.outputs.server == 'true'
         run: npm run test:server
 
-      # Repo-wide prettier (covers server and client, both lockfiles): runs
-      # unconditionally so a mixed PR can't slip through with one side
-      # skipped. Kept single and repo-wide instead of per-side duplications.
+      # Repo-wide prettier runs unconditionally so a mixed PR can't slip through.
       - name: Format check
         run: npm run format:check
 
@@ -142,24 +130,8 @@ jobs:
         if: needs.changed.outputs.client == 'true'
         run: npm run build:client
 
-  # Responsive e2e gate (#220): the mobile (375x667) and desktop Playwright
-  # projects must pass, so a route that overflows at phone width or a stale
-  # assertion is caught mechanically. Default-on (#288): it runs unless every
-  # changed path is provably inert (docs/markdown/skills, Dockerfile), so a
-  # server/shared break that crashes the dev stack this job boots is caught on
-  # the PR, not just on the push to main. (#141 bounded the cost by running it
-  # on client/e2e changes only; that allowlist's fail-open skip is what #288
-  # fixes.)
-  #
-  # Runs against the local stack the way a developer does: a Mongo container,
-  # migrations (seeds the admin user), `db:password` (fixture
-  # password `password`, see AGENTS.md), then the dev server + Vite client.
-  # The chat stream is mocked inside the specs, so no provider keys are needed.
-  #
-  # #257: Mongo runs via a login + `docker run` step, not a `services:` block —
-  # service images are pulled before any step can authenticate, so with
-  # Docker Hub rate-limiting anonymous pulls the job could fail before it
-  # started. A step-based container can log in first (same fix as semgrep).
+  # Responsive e2e gate: mobile+desktop Playwright must pass; Mongo runs via docker run because service images pull before auth.
+  # @see #220 #288 #141 #257
   e2e:
     runs-on: ubuntu-latest
     needs: changed
@@ -183,8 +155,7 @@ jobs:
       - name: Install Playwright browsers
         run: npx playwright install --with-deps chromium
 
-      # Direct CLI docker login (repo convention: no third-party actions).
-      # Skipped when the repo secrets are unset — pulls fall back to anonymous.
+      # Direct CLI docker login (no third-party actions); skipped when secrets are unset.
       - name: Log in to Docker Hub
         env:
           DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
@@ -242,11 +213,8 @@ jobs:
             test-results/
           retention-days: 5
 
-  # Security scans gated on deploy: these run on main pushes only (same
-  # workflow run as `ci`) and the gate below requires them, so deploy
-  # (triggered via workflow_run on CI success) can never race past a failed
-  # scan — they are a deploy gate, not a merge gate. PRs do not run them
-  # (issue #141: scans cease to be a merge gate; security.yml was removed).
+  # Security scans are a deploy gate (main pushes only), not a merge gate.
+  # @see #141
   gitleaks:
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
@@ -256,16 +224,14 @@ jobs:
         with:
           fetch-depth: 0
 
-      # Direct CLI, not gitleaks-action: its v2 PR/reporting flow needs
-      # GitHub API calls this repo can't satisfy.
+      # Direct CLI, not gitleaks-action: its v2 flow needs API calls this repo can't satisfy.
       - name: Detect secrets in full git history
         run: |
           curl -sSfL https://github.com/gitleaks/gitleaks/releases/download/v8.24.3/gitleaks_8.24.3_linux_x64.tar.gz | tar -xz
           ./gitleaks detect --source . --redact --no-banner
 
-  # #257: semgrep runs via a login + `docker run` step instead of a job
-  # `container:` — container images are pulled before any step can
-  # authenticate (same reason the e2e job dropped its services: block).
+  # Semgrep runs via login + docker run: container images pull before any step can authenticate.
+  # @see #257
   semgrep:
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
@@ -301,16 +267,12 @@ jobs:
 
       - run: npm ci
 
-      # better-npm-audit wraps `npm audit` and honours the .nsprc allowlist of
-      # accepted-risk advisories (npm audit itself has no ignore mechanism).
+      # better-npm-audit honours the .nsprc allowlist (npm audit has no ignore mechanism).
       - name: Audit production dependencies
         run: npm run audit
 
-  # dependency-review-action needs GitHub Advanced Security on private repos,
-  # which this repository doesn't have; osv-scanner over the lockfile covers
-  # the same ground self-contained (issue #32 mentions it as the
-  # self-contained alternative). Ported here from the removed security.yml
-  # so lockfile scanning stays part of the main-side deploy gate.
+  # osv-scanner over the lockfile: self-contained alternative to dependency-review-action (needs GH Advanced Security).
+  # @see #32
   osv-scanner:
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
@@ -321,10 +283,7 @@ jobs:
       - name: Scan package-lock.json for known vulnerabilities
         run: docker run --rm -v "$PWD:/repo" ghcr.io/google/osv-scanner:latest --lockfile=/repo/package-lock.json
 
-  # `workflow_run` can report `conclusion: success` for a cancelled run
-  # (known Actions quirk), which would trigger deploy. This gate always
-  # runs and fails unless everything it guards succeeded — including when
-  # a job was cancelled — so a cancelled run never looks successful.
+  # Gate always runs and fails unless every guard succeeded — a cancelled workflow_run must never look successful.
   ci-gate:
     needs: [ci, e2e, gitleaks, semgrep, npm-audit, osv-scanner]
     if: always()
@@ -343,10 +302,8 @@ jobs:
               fi
             done
           else
-            # PR run: deploy is gated on push-to-main runs only; PR-side
-            # scans were removed (scans are a deploy gate, not a merge gate).
-            # The e2e job is skipped only for provably-inert PRs (docs/markdown,
-            # #141/#288), so only a failed run fails the gate — skipped is fine.
+            # PR runs: scans are a deploy gate only; e2e skipped only for provably-inert PRs.
+            # @see #141 #288
             if [[ "${{ needs.ci.result }}" != "success" ]]; then
               echo "ci result: ${{ needs.ci.result }}"
               exit 1

@@ -24,11 +24,8 @@ import {
   type WorkspaceSlice,
 } from '../../main/services/workspaceRetrievalService';
 
-/*
- * #253: workspace memory retrieval. Scoring is pure; the Mongo-backed read
- * joins messages to their session titles and never throws; the block is capped
- * and empty-on-nothing.
- */
+/* Workspace memory retrieval: scoring is pure; the Mongo read never throws; the block is capped. */
+// @see #253
 
 const slice = (over: Partial<WorkspaceSlice> = {}): WorkspaceSlice => ({
   kind: 'chat',
@@ -79,15 +76,13 @@ describe('workspaceRetrievalService', () => {
     });
 
     it('returns no picks when every document tokenises to nothing', () => {
-      // #309: title tokens count as document tokens, so a truly empty doc needs
-      // an empty title as well as empty text.
+      // Title tokens count as document tokens, so a truly empty doc needs an empty title too.
+      // @see #309
       expect(pickTopSlices('budget', [slice({ text: 'the a of', title: '' })])).toEqual([]);
     });
 
-    // N=3; A=`budget`, B=`budget move`, C=`move`; q=`budget`; avgdl=4/3.
-    // Hand-computed BM25: A ≈ 0.5236 (shorter doc wins), B ≈ 0.3902, C = 0.
-    // Title-neutral (`title: ''`) so the pins stay text-only — the title fold
-    // is pinned separately in pickTopSlices' #309 tests.
+    // Hand-computed BM25 pins; title-neutral so the pins stay text-only.
+    // @see #309
     it('normalises by document length and drops zero-overlap docs', () => {
       const picks = pickTopSlices('budget', [
         slice({ id: 'A', title: '', text: 'budget' }),
@@ -99,8 +94,7 @@ describe('workspaceRetrievalService', () => {
       expect(picks[1].score).toBeCloseTo(0.3902, 3);
     });
 
-    // N=3; A=`rare`, B=`common`, C=`common`; q=`rare common`. The rarer term
-    // carries the higher IDF, so A outranks B.
+    // The rarer term carries the higher IDF, so A outranks B.
     it('weights rare terms above common terms (IDF)', () => {
       const at = new Date('2026-06-01');
       const picks = pickTopSlices('rare common', [
@@ -112,14 +106,10 @@ describe('workspaceRetrievalService', () => {
       expect(picks[0].score).toBeGreaterThan(picks[1].score);
     });
 
-    // The non-negative IDF form keeps a term that appears in *every* document
-    // slightly positive, so a ubiquitous-but-relevant slice still surfaces
-    // (classic BM25 IDF can go negative and drop it).
+    // Non-negative IDF keeps a ubiquitous-but-relevant slice surfacing.
     it('still scores a term present in every document', () => {
-      // Equal BM25 scores, so the order falls to the recency tie-break. Pin
-      // `at` equal so the id-asc tie-break decides deterministically; the
-      // default `new Date()` in the `slice` helper can straddle a millisecond
-      // boundary under load and flip the pair (a latent flake from #293).
+      // Pin `at` equal so the id-asc tie-break decides; the default `new Date()` can straddle a millisecond (latent flake).
+      // @see #293
       const at = new Date('2026-06-01');
       const picks = pickTopSlices('budget', [
         slice({ id: 'A', text: 'budget', at }),
@@ -130,9 +120,8 @@ describe('workspaceRetrievalService', () => {
     });
 
     it('ignores a query term absent from every document', () => {
-      // Pin `at` so the two runs differ only by the absent term; the default
-      // `new Date()` can straddle a millisecond between calls and flip
-      // deep-equality (same latent flake from #293 as above).
+      // Pin `at` so the two runs differ only by the absent term; the default `new Date()` can straddle a millisecond.
+      // @see #293
       const at = new Date('2026-06-01');
       const withAbsent = pickTopSlices('budget zzzz', [slice({ id: 'A', text: 'budget', at })]);
       const withoutAbsent = pickTopSlices('budget', [slice({ id: 'A', text: 'budget', at })]);
@@ -175,8 +164,8 @@ describe('workspaceRetrievalService', () => {
       expect(pickTopSlices('budget', many, 3)).toHaveLength(3);
     });
 
-    // #309: the title (a file's filename) carries terms the content cannot
-    // supply — "that AGI file" must match `agi-final.md` with no content hit.
+    // The title carries terms the content cannot supply.
+    // @see #309
     it('matches a title-only term when the content shares nothing (#309)', () => {
       const picks = pickTopSlices('that AGI file, give me a summary of it', [
         slice({ id: 'agi', title: 'agi-final.md', text: 'the rollout completes in three phases' }),
@@ -197,8 +186,7 @@ describe('workspaceRetrievalService', () => {
         text: 'the excess per claim and the premium',
       });
       const picks = pickTopSlices('insurance policy excess', [boosted, plain]);
-      // Both share "excess" with the query; only the title terms ("insurance",
-      // "policy") break the tie — and must favour the filename match.
+      // Only the title terms break the tie, favouring the filename match.
       expect(picks[0].slice.id).toBe('named');
     });
 
@@ -348,8 +336,7 @@ describe('workspaceRetrievalService', () => {
     });
 
     it('is not starved by a busier other user (pool scoped session-first)', async () => {
-      // Regression: a global newest-first message scan would fill the window
-      // with `other`'s flood, leaving this user's own history out entirely.
+      // Regression: a global newest-first scan would fill the window with the other user's flood.
       const userId = String(new Types.ObjectId());
       const other = String(new Types.ObjectId());
       const session = await Session.create({ userId, title: 'Move' });
@@ -376,8 +363,8 @@ describe('workspaceRetrievalService', () => {
     });
 
     it('surfaces a seed buried beyond the old bounded pool (#293)', async () => {
-      // Regression: the pre-#293 read kept only the newest 200 messages, so a
-      // matching chat older than that window was unreachable by construction.
+      // Regression: the old read kept only the newest 200 messages, hiding older matching chats.
+      // @see #293
       const userId = String(new Types.ObjectId());
       const session = await Session.create({ userId, title: 'Old policy' });
       await Message.create({
@@ -576,12 +563,8 @@ describe('workspaceRetrievalService', () => {
     });
   });
 
-  /*
-   * #294, task 8: the semantic stage is the one non-unit-testable piece
-   * (`$vectorSearch` is Atlas-only). These tests inject `embed`/`search` so the
-   * degradation contract — every failure path returns `[]`, never throws — is
-   * pinned in CI. No test makes a provider call.
-   */
+  /* The semantic stage is Atlas-only, so inject embed/search to pin the degradation contract (every failure returns []). */
+  // @see #294
   describe('vectorCandidates (#294)', () => {
     const query = 'what do you know about my partner';
 
@@ -601,9 +584,7 @@ describe('workspaceRetrievalService', () => {
     });
 
     it('passes the userId and model through to the search filter', async () => {
-      // The Atlas filter compares exactly: a string `userId` against an ObjectId
-      // field would silently match nothing, so the stage must forward the raw
-      // ids unchanged (the default search casts `userId` at the driver edge).
+      // The Atlas filter compares exactly; the stage must forward raw ids unchanged.
       const search = jest.fn(async () => []);
       await vectorCandidates(query, 'user-1', 'model-x', 6, {
         embed: async () => [[1]],
@@ -669,10 +650,8 @@ describe('workspaceRetrievalService', () => {
     });
   });
 
-  /*
-   * #294, task 9: reciprocal rank fusion. Pure, so every branch is unit-tested
-   * with hand-built rankings.
-   */
+  /* Reciprocal rank fusion: pure, so every branch is unit-tested with hand-built rankings. */
+  // @see #294
   describe('rrfFuse (#294)', () => {
     const a = slice({ id: 'a', at: new Date('2024-01-01') });
     const b = slice({ id: 'b', at: new Date('2024-01-02') });
@@ -776,11 +755,8 @@ describe('workspaceRetrievalService', () => {
     });
   });
 
-  /*
-   * #294, task 10: the fusion wiring. The vector stage is injectable, so the
-   * pipeline (BM25 -> vector -> intersect -> RRF) is pinned without Mongo or a
-   * provider, and the flag-off contract is explicit.
-   */
+  /* The fusion wiring is pinned without Mongo or a provider; the flag-off contract is explicit. */
+  // @see #294
   describe('rankWorkspaceSlices (#294)', () => {
     const a = slice({
       id: 'a',
@@ -789,8 +765,8 @@ describe('workspaceRetrievalService', () => {
     });
     const b = slice({
       id: 'b',
-      // #309: an unrelated title too — the title now carries BM25 weight, so a
-      // 'Budget chat' title would leak a match into the non-matching control.
+      // The title now carries BM25 weight, so a 'Budget chat' title would leak a match into the control.
+      // @see #309
       title: 'Weather chat',
       text: 'an unrelated note about the weather',
       at: new Date('2024-01-02'),
@@ -823,7 +799,8 @@ describe('workspaceRetrievalService', () => {
       const vectorCandidates = jest.fn(async () => [{ sourceId: 'c', score: 0.9 }]);
       const ranked = await rankWorkspaceSlices('a paraphrase with no overlap', 'u', slices, 6, {
         vectorCandidates,
-        // #305: the reranker grades this pair confidently relevant — keep it.
+        // The reranker grades this pair confidently relevant — keep it.
+        // @see #305
         rerank: async () => [RERANK_CUT * 100],
       });
       expect(ranked.map((s) => s.id)).toContain('c');
@@ -834,7 +811,8 @@ describe('workspaceRetrievalService', () => {
       const vectorCandidates = jest.fn(async () => [{ sourceId: 'ghost', score: 0.99 }]);
       const ranked = await rankWorkspaceSlices('what is the budget', 'u', slices, 6, {
         vectorCandidates,
-        // #305: a null rerank degrades to the un-cut fused ranking.
+        // A null rerank degrades to the un-cut fused ranking.
+        // @see #305
         rerank: async () => null,
       });
       expect(ranked.map((s) => s.id)).toEqual(['a']);
@@ -848,7 +826,8 @@ describe('workspaceRetrievalService', () => {
     });
   });
 
-  // #305: the post-retrieval relevance bar. Pure via the injectable rerank.
+  // The post-retrieval relevance bar: pure via the injectable rerank.
+  // @see #305
   describe('rerankAndCut (#305)', () => {
     it('cuts candidates below the threshold and orders the rest by relevance', async () => {
       const a = slice({ id: 'a', text: 'budget' });

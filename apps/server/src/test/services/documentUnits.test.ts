@@ -1,8 +1,7 @@
 import { extractUnits } from '../../main/services/documentUnits';
 
-// Issue #159: units slice the already-capped conversion output per PDF page
-// or per top-level heading, falling back to a single whole-doc unit.
-
+// Units slice the already-capped conversion output per PDF page or per top-level heading, falling back to a single whole-doc unit.
+// @see #159
 describe('extractUnits — PDF (#159)', () => {
   it('splits on pdf-parse page separators so unit n is page n', () => {
     const markdown = 'alpha\n-- 1 of 3 --\nbeta\n-- 2 of 3 --\ngamma\n-- 3 of 3 --\n';
@@ -31,8 +30,7 @@ describe('extractUnits — PDF (#159)', () => {
   it('tolerates separator-shaped lines inside page text via anchoring', () => {
     const markdown = 'see -- 9 of 99 inline\n-- 1 of 2 --\ntext two\n-- 2 of 2 --\nend';
     const units = extractUnits('doc.pdf', markdown);
-    // The inline `-- 9 of 99` inside page text is not a separator (anchoring),
-    // so only the two line-anchored ones split the document.
+    // The inline `-- 9 of 99` inside page text is not a separator (anchoring), so only the line-anchored ones split the document.
     expect(units).toHaveLength(3);
     expect(units[0].text).toBe('see -- 9 of 99 inline');
     expect(units[1]).toEqual({ index: 2, label: 'Page 2', text: 'text two' });
@@ -77,9 +75,7 @@ describe('extractUnits — headings (#159)', () => {
     ]);
   });
 
-  // Regression for the review pass: a `#` line inside a fenced code block
-  // registered as the shallowest heading and collapsed the whole doc to one
-  // unit, disabling every heading split.
+  // Regression: a `#` line inside a fenced code block registered as the shallowest heading and collapsed the whole doc to one unit, disabling every heading split.
   it('ignores heading-shaped lines inside fenced code blocks', () => {
     const doc = ['## A', 'body a', '```md', '# Fake heading', '```', '## B', 'body b'].join('\n');
     const units = extractUnits('doc.md', doc);

@@ -15,8 +15,7 @@ const GOOGLE_AUTH_URL = 'https://accounts.google.com/o/oauth2/v2/auth';
 const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token';
 const GOOGLE_USERINFO_URL = 'https://openidconnect.googleapis.com/v1/userinfo';
 
-// Fetch name/picture from Google's userinfo endpoint. Both fields are
-// tolerated-absent (users/orgs may withhold them); invalid values are dropped.
+// Fetch name/picture from Google's userinfo endpoint; fields are tolerated-absent and invalid values dropped.
 const fetchGoogleProfile = async (
   accessToken: string,
 ): Promise<{ name?: string; avatarUrl?: string }> => {
@@ -31,8 +30,7 @@ const fetchGoogleProfile = async (
   const data = (await res.json()) as { name?: unknown; picture?: unknown };
   const profile: { name?: string; avatarUrl?: string } = {};
   if (typeof data.name === 'string' && data.name.trim()) {
-    // Bounded to match the User schema maxlength so a hostile payload can
-    // never push save() past validation and break login.
+    // Bounded to match the User schema maxlength so a hostile payload can never push save() past validation.
     profile.name = data.name.trim().slice(0, 100);
   }
   if (typeof data.picture === 'string' && data.picture.trim()) {
@@ -63,8 +61,7 @@ const issueSessionCookie = (user: UserDocument, res: express.Response) => {
   res.cookie('token', token, {
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',
-    // 'lax' rather than 'strict': Google OAuth returns via a cross-site
-    // top-level GET, and 'strict' cookies are not sent on that navigation.
+    // 'lax' rather than 'strict': the OAuth return is a cross-site top-level GET, and 'strict' cookies are not sent on that navigation.
     sameSite: 'lax',
     maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
   });
@@ -148,8 +145,7 @@ router.get('/google', (req, res) => {
   res.cookie('google_state', state, {
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',
-    // 'lax': the provider redirect back to /callback is a cross-site
-    // top-level GET; under 'strict' the state cookie would not be sent.
+    // 'lax': the provider redirect back is a cross-site top-level GET; 'strict' would drop the state cookie.
     sameSite: 'lax',
     maxAge: 10 * 60 * 1000, // 10 minutes
   });
@@ -213,9 +209,7 @@ router.get('/google/callback', async (req, res) => {
       return res.status(401).send('Google account email could not be verified');
     }
 
-    // Profile enrichment is non-fatal: authentication must never break on it.
-    // Google's OIDC docs only "might provide" name/picture as id_token claims,
-    // so the userinfo endpoint is the reliable source.
+    // Profile enrichment is non-fatal: the userinfo endpoint is the reliable source for name/picture.
     let profile: { name?: string; avatarUrl?: string } | undefined;
     if (body.access_token) {
       try {
@@ -240,8 +234,7 @@ router.post('/logout', (req, res) => {
   res.json({ message: 'Logged out' });
 });
 
-// User lookup happens in the handler (verify is the shared middleware) so
-// that live role/permission changes are reflected on every read.
+// User lookup happens in the handler so live role/permission changes are reflected on every read.
 router.get('/me', authenticate, async (req: AuthRequest, res) => {
   try {
     const user = await User.findById(req.user?.id);
@@ -249,8 +242,8 @@ router.get('/me', authenticate, async (req: AuthRequest, res) => {
       res.clearCookie('token');
       return res.status(401).json({ message: 'User no longer exists' });
     }
-    // Coarse geolocation (#50): resolves at most once per user per week and
-    // never throws; fresh or cooldown-suppressed calls return immediately.
+    // Coarse geolocation: resolves at most once per user per week and never throws.
+    // @see #50
     await ensureUserLocation(user, req.ip);
     const userPayload = toAuthUser(user);
     res.json({ user: userPayload });

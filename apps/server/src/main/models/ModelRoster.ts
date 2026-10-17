@@ -1,21 +1,9 @@
 import mongoose from 'mongoose';
 
-/*
- * #232: the fixed model roster. Replaces the tier-shaped
- * `providerroutings` rows (one row = one model+provider+tier) with a
- * per-MODEL document carrying a paired `providers[]` list, so each roster
- * model is registered once and owns both of its serverless backends.
- *
- * The tier collection is deliberately left in place — its deletion is #233.
- * This collection is the source of truth for the racing path only.
- */
+// The fixed model roster: one document per model carrying its paired provider backends.
+// @see #232 #233
 
-/*
- * Per-provider entry: which backend serves this model and the rolling TTFT
- * figure used by the weighted primary pick. `enabled` allows an operator to
- * take one backend out of the race without removing the model (OQ6 — cool-off
- * / disable is kept per provider, not per model).
- */
+/** Per-provider backend entry: serving backend, rolling TTFT, and an operator disable switch. */
 const rosterProviderSchema = new mongoose.Schema(
   {
     provider: {
@@ -23,11 +11,7 @@ const rosterProviderSchema = new mongoose.Schema(
       enum: ['deepinfra', 'fireworks'],
       required: true,
     },
-    /*
-     * The provider's own model id (DeepInfra catalog id or Fireworks
-     * `accounts/fireworks/models/...` id) — distinct from the roster model's
-     * display id, and sent verbatim to the provider.
-     */
+    /** The provider's own model id, sent verbatim to the provider. */
     modelId: {
       type: String,
       required: true,
@@ -36,15 +20,8 @@ const rosterProviderSchema = new mongoose.Schema(
       type: Boolean,
       default: true,
     },
-    /*
-     * Per-provider pricing (#235): USD per 1M tokens, split input/output, both
-     * optional. Under racing the winning provider's price is the one that
-     * applied, and two providers of one model can differ — so the price lives
-     * on the provider entry, not the model. The model-root prices remain as the
-     * default/fallback for a turn whose provider is unknown (legacy rows) or a
-     * provider entry with no price. A missing price is "unknown" (≠ free,
-     * #199); cached pricing is deliberately not modelled.
-     */
+    /** Per-provider USD/1M pricing; the winning provider's price applies, model-root prices are the fallback. */
+    // @see #235 #199
     inputPrice: {
       type: Number,
       min: 0,
@@ -53,13 +30,7 @@ const rosterProviderSchema = new mongoose.Schema(
       type: Number,
       min: 0,
     },
-    /*
-     * Rolling TTFT (OQ2: per-provider rollup on the routing doc). `ttftMs` is
-     * the running mean over `ttftSamples` observations; `ttftUpdatedAt` is the
-     * last observation. All three are absent on a provider that has never won
-     * a race — absent is "unknown", never 0 (the weighted score falls back to
-     * a neutral default for unknown).
-     */
+    /** Rolling TTFT mean over samples; absent is "unknown", never 0. */
     ttftMs: {
       type: Number,
       min: 0,
@@ -71,11 +42,8 @@ const rosterProviderSchema = new mongoose.Schema(
     ttftUpdatedAt: {
       type: Date,
     },
-    /*
-     * Cool-off timestamp (#168/#213 semantics kept per provider): set when a
-     * backend fails. Absent/null = not cooling off. Expiry applied lazily on
-     * read — no timers.
-     */
+    /** Cool-off timestamp set when a backend fails; expiry applied lazily on read. */
+    // @see #168 #213
     disabledUntil: {
       type: Date,
       default: null,
@@ -85,11 +53,7 @@ const rosterProviderSchema = new mongoose.Schema(
 );
 
 const modelRosterSchema = new mongoose.Schema({
-  /*
-   * Roster display id, unique per model (e.g. `deepseek-ai/DeepSeek-V4.1-Flash`).
-   * This is the key the routing document is addressed by, not a
-   * `{tier, provider, model}` tuple.
-   */
+  /** Roster display id, unique per model; the key the routing document is addressed by. */
   modelId: {
     type: String,
     required: true,
@@ -99,12 +63,8 @@ const modelRosterSchema = new mongoose.Schema({
     type: String,
     required: true,
   },
-  /*
-   * Capability + pricing metadata, owned once per model (not per provider):
-   * `tools`/`vision` are descriptive capability flags (nothing gates on them
-   * at runtime since #316), `contextLength` sizes the output budget, and the
-   * two prices feed the weighted score and the cost view.
-   */
+  /** Capability + pricing metadata owned once per model, not per provider. */
+  // @see #316
   tools: {
     type: Boolean,
     default: true,

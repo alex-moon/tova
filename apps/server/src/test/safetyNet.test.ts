@@ -1,9 +1,7 @@
 import { installProcessSafetyNet, isTesseractWorkerError } from '../main/index';
 
-// #248 wired the net; #358 exposed the first escape class worth containing
-// instead of exiting: tesseract.js throws from inside its own Worker message
-// dispatch, scoped to a per-call worker. These tests pin both the
-// classification and the listener wiring (contain tesseract, exit otherwise).
+/* Pins the safety net's classification and listener wiring: contain tesseract worker errors (thrown from inside Worker message dispatch), exit otherwise. */
+// @see #248 #358
 
 const tesseractShapedError = (): Error =>
   Object.assign(new Error("Error: ENOENT: no such file or directory, open '/x/y.gz'"), {

@@ -2,8 +2,8 @@ import crypto from 'crypto';
 import { User, UserDocument } from '../models/User';
 import { AuthUser } from '@tova/shared';
 
-// Single projection from a user document to the GET /api/auth/me wire shape.
-// Shared with PATCH /api/profile so the two endpoints cannot drift (issue #35).
+// Single projection from a user document to the /me wire shape, shared with PATCH /api/profile so the endpoints cannot drift.
+// @see #35
 export const toAuthUser = (user: UserDocument): AuthUser => {
   const payload: AuthUser = {
     id: user._id.toString(),
@@ -20,16 +20,16 @@ export const toAuthUser = (user: UserDocument): AuthUser => {
   if (user.settings?.startupChat) payload.startupChat = user.settings.startupChat;
   if (user.settings?.zdr) {
     payload.zdr = user.settings.zdr;
-    // 'Incognito by default' (#144) reads the same storage slot; the two
-    // wire names are aliases of one flag, exposed in lockstep.
+    // 'Incognito by default' reads the same storage slot; the two wire names are aliases of one flag, exposed in lockstep.
+    // @see #144
     payload.incognitoByDefault = user.settings.zdr;
   }
   if (user.settings?.confirmDeletes) payload.confirmDeletes = user.settings.confirmDeletes;
-  // IANA timezone (#261) rides only once captured from the browser.
+  // IANA timezone rides only once captured from the browser.
+  // @see #261
   if (user.settings?.timezone) payload.timezone = user.settings.timezone;
-  // Country-level geolocation (#50) rides only once resolved; no timestamp
-  // is exposed — route consumers never need it and the "remove my location"
-  // follow-up can pick it up if it turns out to want it.
+  // Country-level geolocation rides only once resolved; no timestamp exposed.
+  // @see #50
   if (user.location?.country && user.location.countryCode)
     payload.location = {
       country: user.location.country,
@@ -45,11 +45,8 @@ export const hasPermission = async (userId: string, permission: string): Promise
   return Boolean(user?.permissions?.includes(permission));
 };
 
-// Resolve a user by email: existing emails resolve to that user (linking the
-// Google identity if provided); otherwise a new user is created. New users do
-// not get any permissions, so they cannot use the model router until granted.
-// `profile` (Google-owned name/avatar) is stored on create and overwritten on
-// refresh; user-owned fields (preferredName, settings) are never touched here.
+// Resolve a user by email, linking the Google identity when provided; new users get no permissions; Google-owned fields overwrite on refresh, user-owned fields are never touched here.
+// @see #35
 export const resolveOrCreateUser = async (
   email: string,
   googleId?: string,

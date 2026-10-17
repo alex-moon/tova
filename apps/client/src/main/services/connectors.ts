@@ -6,10 +6,8 @@ import type {
   ConnectorOAuthStartInput,
 } from '@shared/connectors';
 
-// Normalised connector-registry failure: message comes from the server
-// response when one arrived, otherwise the call's fallback. (Formerly
-// McpError in types/mcp.ts — died into the shared-contract move, #329;
-// mirrors AdminError from the PR #27 review.)
+// Normalised connector-registry failure: server message when one arrived, else the fallback.
+// @see #329
 export class ConnectorError extends Error {
   constructor(message = 'Something went wrong.', options?: { cause?: unknown }) {
     super(message, options);
@@ -17,9 +15,7 @@ export class ConnectorError extends Error {
   }
 }
 
-// StrictMode (dev) double-fires the callback effect: two completeOAuth calls
-// for the same state must share one request, not race two token exchanges
-// (the provider's code is single-use).
+// StrictMode double-fires the callback effect: two calls for one state must share one request (the provider's code is single-use).
 const inflightComplete = new Map<string, Promise<ConnectorInfo>>();
 
 const toConnectorError = (err: unknown, fallback: string): ConnectorError => {
@@ -30,8 +26,8 @@ const toConnectorError = (err: unknown, fallback: string): ConnectorError => {
   return new ConnectorError(fallback, { cause: err });
 };
 
-// Service separating views from axios; the connector registry (personal
-// connectors writable, platform rows read-only per API design, #329).
+// Service separating views from axios; personal connectors writable, platform rows read-only.
+// @see #329
 const ConnectorService = {
   async list(): Promise<ConnectorInfo[]> {
     try {
@@ -59,9 +55,8 @@ const ConnectorService = {
     }
   },
 
-  // OAuth connect flow (#327): start returns the provider consent URL the
-  // browser must be redirected to; complete exchanges the relayed code for
-  // the stored connector; reauth restarts consent for a dead grant.
+  // OAuth connect flow: start returns the consent URL, complete exchanges the code, reauth restarts consent.
+  // @see #327
   async startOAuth(input: ConnectorOAuthStartInput): Promise<string> {
     try {
       const res = await axios.post<{ authorizationUrl: string }>(

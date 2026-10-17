@@ -4,12 +4,8 @@ import { Task } from '../../main/models/Task';
 import { TaskEvent } from '../../main/models/TaskEvent';
 import { delegateTaskTool } from '../../main/services/mastraService';
 
-/*
- * Tool-level test for `delegate_task` (#255, F2/F3). As with the asset tools,
- * the jest module mapper replaces `@mastra/core/tools`' createTool with the
- * identity function, so the config object is inspectable and `execute` can be
- * invoked directly with a constructed request context.
- */
+/* Tool-level test for `delegate_task`: createTool is the identity function under the module mapper, so the config is inspectable and `execute` is invoked directly with a constructed request context. */
+// @see #255
 
 const execute = (
   delegateTaskTool as unknown as {

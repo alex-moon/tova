@@ -1,24 +1,8 @@
-/*
- * #213: provider error classification shared by the racing runtime
- * (`racingService.ts`, via `modelFailover.ts`) and the diagnostics tally
- * (`modelErrorTally.ts`).
- *
- * Kept in a leaf module (no service imports) so both callers can use it
- * without an import cycle: `modelErrorTally` → `inferenceService` is already
- * reached from `racingService` via `inferenceService`.
- */
+/* Provider error classification shared by the racing runtime and the diagnostics tally; leaf module (no service imports) so both callers avoid an import cycle. */
+// @see #213
 
-/*
- * Endpoint overload is a *per-endpoint transient* failure, distinct from an
- * account rate limit even though both can arrive as HTTP 429. DeepInfra
- * reports it as `code: "engine_overloaded"` / "Model busy, retry later" in the
- * response body.
- *
- * Detection is body-first (AI-SDK `APICallError` exposes the parsed body as
- * `data` and/or `responseBody`), then a narrow message fallback for the
- * Mastra-wrapped error shape observed in the ticket. The message set is
- * deliberately small: "rate limit" / TPM / RPM wording must never match here.
- */
+/* Endpoint overload is a per-endpoint transient, distinct from an account rate limit even though both can arrive as 429; detection is body-first with a narrow message fallback that must never match rate-limit wording. */
+// @see #213
 const providerErrorCode = (err: unknown): string => {
   const carrier = err as
     { data?: { error?: { code?: unknown } }; responseBody?: unknown } | null | undefined;

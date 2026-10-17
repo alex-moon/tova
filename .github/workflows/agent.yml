@@ -1,22 +1,4 @@
-# Personal coding agent: comment "@agent <task>" on any issue or PR, open a
-# new issue whose body starts with "@agent", or run manually from the Actions
-# tab. Powered by the Goose CLI + DeepInfra.
-#
-# Model routing:
-#   @agent        -> deepseek-ai/DeepSeek-V4.1-Flash  (well-spec'd work: CI fixes, tweaks)
-#   @agent-think  -> zai-org/GLM-5.3-Flash            (vague/ambiguous work: design, refactors)
-#
-# The agent always receives the thread's context (auto-gathered in the "Build
-# task + pick model" step): instruction, PR/issue state, check rollup, thread
-# comments, and any #NNN tickets referenced anywhere in the thread. Anything
-# deeper (failed-log bodies etc.) is the agent's job via the gh CLI.
-#
-# To switch to Fireworks when DeepInfra is saturated, change three lines in
-# the "Run goose" step:
-#   OPENAI_HOST: https://api.fireworks.ai
-#   OPENAI_BASE_PATH: inference/v1/chat/completions
-#   OPENAI_API_KEY: ${{ secrets.FIREWORKS_API_KEY }}
-# (Fireworks model slugs differ — check the dashboard.)
+# Personal coding agent: triggered by "@agent" comments/issues or manually; powered by the Goose CLI + DeepInfra.
 
 name: Agent
 
@@ -79,7 +61,6 @@ jobs:
         run: |
           set -euo pipefail
 
-          # --- Instruction: manual prompt > comment > issue body -------------
           if [ -n "${MANUAL_PROMPT:-}" ]; then
             INSTRUCTION="$MANUAL_PROMPT"
           elif [ "$GITHUB_EVENT_NAME" = "issues" ]; then
@@ -88,7 +69,6 @@ jobs:
             INSTRUCTION="$COMMENT"
           fi
 
-          # --- Model routing (before prefix stripping) -----------------------
           case "$INSTRUCTION" in
             '@agent-think'*) MODEL='zai-org/GLM-5.3-Flash' ;;
             *)               MODEL='deepseek-ai/DeepSeek-V4.1-Flash' ;;
@@ -99,7 +79,6 @@ jobs:
           INSTRUCTION="${INSTRUCTION#"@agent"}"
           printf '%s\n' "$INSTRUCTION" > instruction.txt
 
-          # --- Thread context (best-effort; agent has gh for anything deeper) -
           CONTEXT=context.md
           : > "$CONTEXT"
 
@@ -134,7 +113,6 @@ jobs:
             } >> "$CONTEXT" || true
           fi
 
-          # --- Referenced tickets (#NNN) from anything gathered so far -------
           for num in $(grep -hoE '#[0-9]+' "$CONTEXT" instruction.txt 2>/dev/null \
                          | tr -d '#' | grep -v "^$NUMBER\$" | sort -un | head -5); do
             {
@@ -178,6 +156,5 @@ jobs:
               printf '%s\n' "- Create a branch named agent/task, commit your work there, push it, and open a PR against main using the gh CLI."
             fi
           } > task.txt
-          # goose run is non-interactive by default and exits when done; --no-session
-          # skips session-file state, which is what the docs recommend for CI one-offs.
+          # --no-session skips session-file state, the docs' recommendation for CI one-offs.
           goose run --no-session -t "$(cat task.txt)"

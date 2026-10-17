@@ -54,8 +54,8 @@ const admin = (): AdminUser => ({
   updatedAt: '2026-09-11T00:00:00.000Z',
 });
 
-// #168: GET /api/admin/models returns { models, errors } — every mock uses
-// this helper so the payload shape stays consistent with the contract.
+// Shared mock payload helper so every mock stays consistent with the { models, errors } contract.
+// @see #168
 const modelsPayload = (models: Record<string, unknown>[] = [], errors: unknown[] = []) => ({
   models,
   errors,
@@ -173,7 +173,8 @@ describe('AdminView models table (issue #33/#104)', () => {
     expect(screen.queryByText('Loading users...')).not.toBeInTheDocument();
   });
 
-  // #234 OQ5: providers are edited independently.
+  // Providers are edited independently.
+  // @see #234
   it('disables a single provider and preserves the other via the API', async () => {
     setup();
     fireEvent.click(await screen.findByTestId('admin-tab-models'));
@@ -200,7 +201,8 @@ describe('AdminView models table (issue #33/#104)', () => {
     expect(await screen.findByText('No models configured.')).toBeInTheDocument();
   });
 
-  // #115: capabilities are surfaced as read-only badges per row.
+  // Capabilities are surfaced as read-only badges per row.
+  // @see #115
   it('renders vision/tools capability badges with the context length', async () => {
     listModels.mockResolvedValue(
       modelsPayload([
@@ -255,8 +257,8 @@ describe('AdminView models table (issue #33/#104)', () => {
     await waitFor(() => expect(listModels).toHaveBeenCalledTimes(2));
   });
 
-  // #217/#234: the manual form is gone. Add = search BOTH provider catalogs,
-  // review the summary and post a roster model with the resolved providers.
+  // Add = search BOTH provider catalogs, review the summary, post a roster model with the resolved providers.
+  // @see #217 #234
   it('searches both provider catalogs and adds a model with the resolved providers', async () => {
     setup();
     lookupModel.mockImplementation((provider: string) =>
@@ -379,8 +381,8 @@ describe('AdminView models table (issue #33/#104)', () => {
     expect(screen.queryByTestId('model-form-submit')).not.toBeInTheDocument();
   });
 
-  // #217: Refresh replaces the old Edit button — re-pull provider-owned values
-  // and update the row in place (tier/provider/model/eligible untouched).
+  // Refresh re-pulls provider-owned values and updates the row in place.
+  // @see #217
   it('refreshes a row from the provider catalog', async () => {
     setup();
     lookupModel.mockResolvedValue({
@@ -417,7 +419,8 @@ describe('AdminView models table (issue #33/#104)', () => {
     expect(updateModel).not.toHaveBeenCalled();
   });
 
-  // #234 OQ4: price is a soft score input now — no hard cap/over-cap badge.
+  // Price is a soft score input now — no hard cap/over-cap badge.
+  // @see #234
   it('renders the in/out price pair and a dash when unpriced, with no over-cap badge', async () => {
     listModels.mockResolvedValue(
       modelsPayload([
@@ -453,10 +456,8 @@ describe('AdminView models table (issue #33/#104)', () => {
   });
 });
 
-/*
- * #168: cool-off badge on the inventory rows and the per-model error
- * diagnostics table (errors tallied per provider route by #175).
- */
+/* Cool-off badge on the inventory rows and the per-model error diagnostics table. */
+// @see #168 #175
 describe('AdminView cool-off badge and error diagnostics (#168)', () => {
   afterEach(cleanup);
 
@@ -550,8 +551,8 @@ describe('AdminView cool-off badge and error diagnostics (#168)', () => {
     expect(table).toHaveTextContent('429 · rate_limit');
     expect(table).toHaveTextContent('network');
     expect(table).toHaveTextContent('7');
-    // #219: the long error message is collapsed by default and only revealed
-    // in its own row when the toggle is clicked.
+    // The long error message is collapsed by default, revealed in its own row on toggle.
+    // @see #219
     expect(table).not.toHaveTextContent('connection reset');
     fireEvent.click(
       await screen.findByTestId('admin-model-error-toggle-deepinfra-other-model-none'),

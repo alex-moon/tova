@@ -1,12 +1,7 @@
 import mongoose from 'mongoose';
 
-// Computed eval rollup (#225), house style of ModelMetricStat: one document
-// per execution of the deterministic eval suite (`apps/server/src/evals/`), across
-// one or more models. Written by evalRunService; read by the admin Evals tab
-// so a page load never re-queries LangSmith (the #179/#186 "stored so a
-// deploy does not wipe it" rationale). `status: 'running'` is the serialisation
-// lease (Decision 6); a stranded row is reclaimed by the scheduler's stale
-// sweep (mirrors requeueStaleAssetJobs).
+// Computed eval rollup: one document per suite execution; `status: 'running'` is the serialisation lease.
+// @see #225 #179 #186
 const evalRunRecordSchema = new mongoose.Schema({
   startedAt: {
     type: Date,
@@ -25,9 +20,8 @@ const evalRunRecordSchema = new mongoose.Schema({
     type: String,
     default: null,
   },
-  // #289 D9: one collection serves both eval suites. `kind` disambiguates a
-  // memory run from the tool-use golden suite; existing rows default to
-  // `tool-use` (the migration backfills the same on deployed docs).
+  // One collection serves both eval suites; existing rows default to `tool-use`.
+  // @see #289
   kind: {
     type: String,
     enum: ['tool-use', 'memory'],
@@ -37,21 +31,17 @@ const evalRunRecordSchema = new mongoose.Schema({
     type: [String],
     default: [],
   },
-  // Which memory stages a run executed (`['gate','retrieval']`); empty for a
-  // tool-use run. Kept on the record so a partial scheduled run is explicit.
+  // Memory stages the run executed; kept so a partial scheduled run is explicit.
   stages: {
     type: [String],
     default: [],
   },
-  // Continuous memory rollup (precision/recall@k/win-rate) that does not fit the
-  // per-case `results` scores. `Mixed` preserves the run service's typed payload
-  // as written; the read side projects it into `AdminEvalMemoryMetrics`.
+  // Continuous memory rollup that doesn't fit the per-case `results` scores.
   metrics: {
     type: mongoose.Schema.Types.Mixed,
     default: null,
   },
-  // Per-case outcomes: caseId + model + provider + score + report. `report`
-  // is the graded assertion summary (or the ungraded error message).
+  // Per-case outcomes; `report` is the graded assertion summary or the ungraded error message.
   results: {
     type: [
       {
@@ -71,15 +61,13 @@ const evalRunRecordSchema = new mongoose.Schema({
 evalRunRecordSchema.index({ startedAt: -1 });
 // Idempotency / catch-up check: "is there a run in this window?".
 evalRunRecordSchema.index({ status: 1, startedAt: -1 });
-// #289 D14: kind-scoped idempotency, so a tool-use run today does not suppress
-// the memory run (and vice versa).
+// Kind-scoped idempotency: a tool-use run must not suppress the memory run.
+// @see #289
 evalRunRecordSchema.index({ kind: 1, startedAt: -1 });
 
 export type EvalRunRecordDocument = mongoose.HydratedDocument<
   mongoose.InferSchemaType<typeof evalRunRecordSchema>
 >;
 
-// Explicit collection name: the migration (`create-eval-runs`) and the
-// documented rollup name is `evalruns`; Mongoose would otherwise pluralise the
-// model to `evalrunrecords` and leave the pre-created collection/index unused.
+// Explicit collection name: the migration pre-created `evalruns`; Mongoose would pluralise differently.
 export const EvalRunRecord = mongoose.model('EvalRunRecord', evalRunRecordSchema, 'evalruns');

@@ -1,22 +1,15 @@
 import type { Page } from '@playwright/test';
 
-/*
- * Shared `/api/chat/stream` mock (extracted from app.spec.ts). Fulfils the
- * SSE endpoint with configurable incremental delta events so specs can test
- * the streaming UI instead of a single blob, and captures every POST body
- * that reached it so specs can assert the ZDR request contract
- * (history vs sessionId — see App.tsx, issue #116).
- */
+// Shared SSE mock: configurable deltas plus POST-body capture for the ZDR request contract.
+// @see #116
 
 export interface ChatStreamCapture {
   bodies: () => string[];
 }
 
 const buildSse = (opts: { sessionId?: string; deltas: string[] }) => {
-  // Mirror the real server: an incognito (ZDR) turn persists nothing and
-  // returns no session, so a request with no sessionId and zdr:true must not
-  // be handed one back — otherwise the client adopts a session and the next
-  // turn stops replaying history (issue #116 contract, profile.spec.ts).
+  // A zdr turn gets no session back, or the client adopts it and stops replaying history.
+  // @see #116
   const meta = opts.sessionId ? `data: {"sessionId":"${opts.sessionId}"}` : 'data: {}';
   const events = ['event: meta', meta, ''];
   for (const delta of opts.deltas) {
@@ -39,8 +32,7 @@ export function installChatStreamMock(
     const req = route.request();
     const body = req.postData() ?? '';
     if (req.method() === 'POST') bodies.push(body);
-    // A new incognito chat carries zdr:true and no sessionId; the real server
-    // returns no session for it.
+    // The real server returns no session for an incognito (zdr) chat.
     let zdr = false;
     if (req.method() === 'POST') {
       try {

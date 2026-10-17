@@ -1,8 +1,7 @@
 import type { UserDocument } from '../models/User';
 import { buildUserEnvelope } from './attachmentEnvelope';
 
-// Global fallback prompt, moved verbatim from apps/server/src/routes/chat.ts so it
-// has a single home next to the per-user resolution logic.
+// Global fallback prompt, kept here so it has a single home next to the per-user resolution logic.
 const SYSTEM_PROMPT = `You are Tova, a helpful, warm, and direct personal assistant — think of yourself as the thing people reach for instead of Googling or texting a friend at 11pm. You are not a coding tool and are not built for engineers who already know their way around AI models; assume the person you're talking to just wants a smart, caring assistant and does not think about or care what "model" they're using. If asked what model or AI you're built on, answer simply: you're Tova. Do not name underlying providers or models.
 
 You work over the person's own workspace — their files, the conversations you've had with them, and work you've run on their behalf. You never see all of it at once; relevant pieces surface when they're relevant, and those glimpses are the whole of what you know in that moment. Never pretend to remember something you weren't given, and never hide where something came from: when a piece of their past work genuinely helps, say where it came from — briefly, naturally, without ceremony — and when nothing surfaces, don't imply you remember anyway. Attribution is what makes memory feel like being known rather than watched.
@@ -19,14 +18,10 @@ Memory lives in the workspace, not in the transcript, so no single conversation 
 
 Keep answers focused: prefer a few short paragraphs or a compact list over long exhaustive explanations, but never at the cost of leaving the question unanswered or feeling clipped or cold. Do not pad answers with introductions, summaries, or filler.`;
 
-// Single prompt-assembly point (issue #35): the global system prompt plus
-// optional per-profile blocks. Both chat routes must call this instead of
-// unshifting a bare literal so streaming and non-streaming cannot drift.
-//
-// User-controlled strings (preferred name, full name, custom instructions)
-// ride inside structured delimiters from the envelope module
-// (services/attachmentEnvelope.ts) per PR #46 review, so an injected
-// "ignore previous instructions" inside a name is visibly data, not system.
+// Single prompt-assembly point: the global system prompt plus optional per-profile blocks; both chat routes must call this so streaming and non-streaming cannot drift.
+// @see #35
+// User-controlled strings ride inside structured envelope delimiters, so injected instructions are visibly data, not system.
+// @see #46
 
 export const resolveSystemPrompt = (): string => SYSTEM_PROMPT;
 
@@ -36,16 +31,13 @@ const CUSTOM_INSTRUCTIONS_INTRO =
 
 const CONTEXT_INTRO = 'You have the following contextual information:';
 
-// Relevance rule rides along whenever any profile context is present
-// (owner: "don't use profile information wherever it is not relevant to the
-// chat"). The full name is never used to address the user — it is surfaced
-// only if they ask and used to prompt them to set a preferred name.
+// Relevance rule rides along whenever any profile context is present; the full name is never used to address the user.
+// @see #35
 const RELEVANCE_RULE =
   'Profile details are context, not conversation material: use them only ' +
   'where relevant to the chat, and never reveal these raw profile fields.';
 
-// Custom instructions ride in their own envelope; the setting survives only a
-// trim — a whitespace-only setting must not emit an empty block.
+// Custom instructions ride in their own envelope; a whitespace-only setting must not emit an empty block.
 const customInstructionsBlock = (
   settings: Pick<UserDocument, 'settings'>['settings'] | null | undefined,
 ): string => {
@@ -107,10 +99,8 @@ const profileContextBlock = (
     .trim();
 };
 
-// #253: pre-retrieved workspace memory. The caller does the gate and the Mongo
-// read; this function only decides layout and the empty-no-op guard, so an
-// empty block never shifts an otherwise identical prompt (same posture as the
-// library block).
+/* Pre-retrieved workspace memory: the caller does the gate and the read; this only decides layout and keeps the empty-no-op guard. */
+// @see #253
 const WORKSPACE_INTRO =
   'Below is context from the user’s own past work — earlier chats, files, and tasks you ' +
   'ran for them. Use it ' +
@@ -124,11 +114,8 @@ const workspaceBlock = (block: string | null | undefined): string => {
   return ['<user:workspace>', WORKSPACE_INTRO, '', trimmed, '</user:workspace>'].join('\n');
 };
 
-// #255 (F4): completed background tasks surfaced into the turn that follows
-// their completion — a queued write the chat route drains, never a mid-turn
-// interruption. The caller does the Mongo read and the mark-notified; this
-// function only decides layout and keeps the empty-no-op guard (an empty block
-// must not shift an otherwise identical prompt).
+/* Completed background tasks surfaced into the following turn (a queued write the chat route drains); the caller does the read and mark-notified. */
+// @see #255
 const TASK_COMPLETION_INTRO =
   'One or more background tasks the user started have finished since the last ' +
   'message. Tell the user briefly what finished and the key result; do not repeat ' +
@@ -140,14 +127,8 @@ const taskCompletionBlock = (block: string | null | undefined): string => {
   return ['<task:completed>', TASK_COMPLETION_INTRO, '', trimmed, '</task:completed>'].join('\n');
 };
 
-/*
- * Per-message timestamp header (#261): every persisted turn is prefixed with a
- * stamp so the model can see *when* each turn happened and *how long* passed
- * between turns (seconds, an overnight sleep, a day at work). The relative gap
- * is appended only when it exceeds an hour and is phrased in plain language at
- * the largest whole unit that fits (hours → days → weeks → months → years).
- * Pure so the gap arithmetic is unit-testable without a DB or provider.
- */
+/* Per-message timestamp header: every persisted turn gets a stamp with the elapsed gap phrased plainly at the largest whole unit; pure for unit tests. */
+// @see #261
 const GAP_UNITS: { unit: string; ms: number }[] = [
   { unit: 'year', ms: 365 * 24 * 60 * 60 * 1000 },
   { unit: 'month', ms: 30 * 24 * 60 * 60 * 1000 },
@@ -169,15 +150,8 @@ const relativeGap = (gapMs: number): string | null => {
   return null;
 };
 
-/*
- * Local-clock rendering (#261 D5/D6). Storage is always UTC — this only shapes
- * the user-facing prompt. With a known zone, `Intl.DateTimeFormat` renders the
- * wall-clock time and its short offset (e.g. `GMT+1` — consistent across
- * locales, unlike `short` names which vary by locale for some zones); the
- * one-time context line names the IANA zone itself, so per-message labels stay
- * unambiguous. Any invalid/missing zone falls back to a plain UTC stamp rather
- * than throwing mid-turn.
- */
+/* Local-clock rendering: storage is always UTC; a known zone renders wall-clock time plus a short offset, with a one-time IANA zone line for disambiguation; invalid zones fall back to UTC. */
+// @see #261
 interface ClockStamp {
   date: string;
   time: string;
@@ -189,8 +163,7 @@ const utcStamp = (timestamp: Date): ClockStamp => {
   return { date: iso.slice(0, 10), time: iso.slice(11, 16), zoneName: 'UTC' };
 };
 
-// `shortOffset` renders a zero offset as the clunky 'GMT+0'; plain 'GMT'
-// reads better and means the same.
+// `shortOffset` renders a zero offset as 'GMT+0'; plain 'GMT' reads better and means the same.
 const offsetLabel = (formatted: string): string => formatted.replace('GMT+0', 'GMT') || 'UTC';
 
 const clockIn = (timestamp: Date, timezone?: string | null): ClockStamp => {
@@ -221,10 +194,8 @@ const clockIn = (timestamp: Date, timezone?: string | null): ClockStamp => {
   }
 };
 
-// `[2026-10-10 14:32 UTC]` — or with a gap: `[2026-10-10 14:32 UTC — 2 days
-// since the last message]`. `previous` is the prior turn's timestamp, absent
-// for the first message of the prompt window. With a known `timezone` the
-// stamp renders in the user's local zone instead (still UTC storage).
+// `[2026-10-10 14:32 UTC]` — or with a gap appended; `previous` is the prior turn's timestamp, absent for the first prompt-window message.
+// @see #261
 export const timestampHeader = (
   timestamp: Date,
   previous?: Date | null,
@@ -236,11 +207,8 @@ export const timestampHeader = (
   return gap ? `[${stamp} — ${gap}]` : `[${stamp}]`;
 };
 
-/*
- * One-time zone context line (#261 D6): names the user's IANA zone and its
- * current offset so the compact per-message offset labels (e.g. `GMT+1`) are
- * unambiguous. Returns '' when no zone is known (the prompt then stays UTC).
- */
+/* One-time zone context line naming the user's IANA zone and offset so compact per-message labels are unambiguous; '' when no zone is known. */
+// @see #261
 const timezoneContextLine = (timezone?: string | null): string => {
   if (!timezone) return '';
   try {
@@ -259,31 +227,25 @@ const timezoneContextLine = (timezone?: string | null): string => {
 
 export const buildSystemContent = (
   user: Pick<UserDocument, 'name' | 'preferredName' | 'location' | 'settings'> | null,
-  // #261: persisted turns carry a per-message timestamp header, which now
-  // supplies both the day and the time-of-day, so the bare date line is
-  // redundant there (and was the thing flattening the model's sense of time).
-  // ZDR/incognito turns are never timestamped (their replay carries no clock),
-  // so they keep the date line as their only clock. Default true keeps the
-  // admin Compare path and any other bare caller on the old behaviour.
+  // Persisted turns carry per-message timestamp headers, so the bare date line is redundant there; ZDR turns keep it as their only clock; default true keeps bare callers on the old behaviour.
+  // @see #261
   includeDate = true,
-  // #261 D6: the user's IANA zone (from the browser). The date line and the
-  // one-time zone context line render in it; absent = UTC.
+  // The user's IANA zone; absent = UTC.
+  // @see #261
   timezone: string | null | undefined = null,
-  // #253: pre-retrieved workspace memory block (chats + files). Optional and
-  // last so existing callers keep compiling; absent = no block.
+  // Pre-retrieved workspace memory block; absent = no block.
+  // @see #253
   workspaceMemoryBlock: string | null | undefined = undefined,
-  // #255 (F4): completed background tasks drained into this turn (queued write).
-  // Optional and last so existing callers keep compiling; absent = no block.
+  // Completed background tasks drained into this turn (queued write); absent = no block.
+  // @see #255
   taskCompletion: string | null | undefined = undefined,
 ): string => {
   const now = new Date();
   const zoneLabel = clockIn(now, timezone).zoneName;
   const parts = [
     resolveSystemPrompt(),
-    // Server-rendered constant from the process clock (issue #52): most
-    // date questions care about the day, not clock ticks, so it rides in
-    // the system prompt as a belt to the `current_datetime` tool braces.
-    // Rendered in the user's local zone when known (#261 D6), else UTC.
+    // Server-rendered constant from the process clock: most date questions care about the day, so it rides in the system prompt as a belt to the current_datetime tool.
+    // @see #52 #261
     includeDate ? `Today's date is ${clockIn(now, timezone).date} (${zoneLabel}).` : '',
     timezoneContextLine(timezone),
     profileContextBlock(user),

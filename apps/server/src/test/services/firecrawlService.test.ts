@@ -1,9 +1,8 @@
 import dns from 'dns';
 import { firecrawlScrape } from '../../main/services/firecrawlService';
 
-// #340: the Firecrawl fallback scraper. The Safe Browsing checker is stubbed
-// here (its own unit tests live in safeLinkService.test.ts); DNS and global
-// fetch are mocked so the request shape and error mapping are testable.
+// The Firecrawl fallback scraper; Safe Browsing is stubbed here (unit tests in safeLinkService.test.ts); DNS and global fetch are mocked so request shape and error mapping are testable.
+// @see #340
 const mockAssertSafeUrl = jest.fn<Promise<void>, [string]>();
 
 jest.mock('../../main/services/safeLinkService', () => ({

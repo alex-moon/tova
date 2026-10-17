@@ -27,8 +27,8 @@ const userSchema = new mongoose.Schema(
       type: [String],
       default: [],
     },
-    // Profile fields (issue #35). `name` and `avatarUrl` are optional: only
-    // present once populated (Google login or PATCH /api/profile).
+    // Profile fields; optional, populated by Google login or PATCH /api/profile.
+    // @see #35
     name: {
       type: String,
       trim: true,
@@ -55,39 +55,35 @@ const userSchema = new mongoose.Schema(
             maxlength: 4000,
             default: null,
           },
-          // Theme preference (issue #53): null = no explicit choice, the
-          // client follows prefers-color-scheme then light.
+          // null = no explicit choice; the client follows prefers-color-scheme then light.
+          // @see #53
           theme: {
             type: String,
             enum: ['light', 'dark'],
             default: null,
           },
-          // Startup-chat preference (issue #96): null = no explicit choice;
-          // the client starts from the most recent chat then.
+          // null = no explicit choice; the client starts from the most recent chat.
+          // @see #96
           startupChat: {
             type: String,
             enum: ['recent', 'new'],
             default: null,
           },
-          // Zero-data-retention preference (issue #116): when true, chat
-          // turns and file attachments made in chat are never persisted to
-          // Mongo/S3; Assets-page uploads are unaffected. Forward-looking
-          // only: it stops new writes and does not purge pre-existing data.
+          // When true, chat turns and chat attachments are never persisted; stops new writes, no purge.
+          // @see #116
           zdr: {
             type: Boolean,
             default: false,
           },
-          // IANA timezone from the browser (#266 follow-up to #261):
-          // `Intl.DateTimeFormat().resolvedOptions().timeZone`, e.g.
-          // 'Europe/London'. Absent = unknown; the prompt falls back to UTC.
+          // IANA timezone from the browser; absent = unknown, the prompt falls back to UTC.
+          // @see #266 #261
           timezone: {
             type: String,
             maxlength: 64,
             default: null,
           },
-          // Delete-confirmation preferences (issue #59): only `false` is ever
-          // written explicitly ("Always" or a Profile toggle); absent keys
-          // default to true, so legacy docs need no backfill.
+          // Only `false` is ever written explicitly; absent keys default to true, no legacy backfill.
+          // @see #59
           confirmDeletes: {
             type: new mongoose.Schema(
               {
@@ -103,9 +99,8 @@ const userSchema = new mongoose.Schema(
       ),
       default: null,
     },
-    // Coarse country-level geolocation (issue #50), resolved server-side from
-    // the request IP. Absent = unresolved; only country/countryCode and the
-    // resolution timestamp are ever stored — no city or lat/lon data.
+    // Coarse country-level geolocation resolved server-side; no city or lat/lon data stored.
+    // @see #50
     location: {
       type: new mongoose.Schema(
         {
@@ -135,16 +130,14 @@ userSchema.pre('save', async function () {
   }
 });
 
-// Method to check password
 userSchema.methods.comparePassword = async function (this: UserDocument, password: string) {
   return bcrypt.compare(password, this.passwordHash);
 };
 
 export interface UserSettings {
   customInstructions: string | null;
-  // Absent at the TS level when never written; runtime default is null = no
-  // explicit preference (issue #53). Marked optional so existing partial
-  // literals (`{ customInstructions }`) keep typechecking.
+  // Optional so partial literals keep typechecking; runtime default null = no explicit preference.
+  // @see #53
   theme?: 'light' | 'dark';
   startupChat?: 'recent' | 'new';
   zdr?: boolean;

@@ -6,10 +6,8 @@ import TaskService, {
   type TaskSummary,
 } from '../../main/services/tasks';
 
-// Client task service (#254, epic #251). Pins the request contract against
-// `apps/server/src/routes/tasks.ts` (D15): the list cursor param, the detail
-// GET, the instruction POST body, and the cancel POST — plus the error
-// normalisation the UI depends on for a 409/404 message to surface verbatim.
+// Pins the request contract against the server tasks route, plus the error normalisation the UI depends on.
+// @see #254 #251
 vi.mock('axios', () => ({
   default: {
     get: vi.fn(),

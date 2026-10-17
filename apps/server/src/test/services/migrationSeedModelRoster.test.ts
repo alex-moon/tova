@@ -3,13 +3,8 @@ import mongoose from 'mongoose';
 import { SeedModelRoster } from '../../../../migrations/src/main/20261008000000-seed-model-roster';
 import { ROSTER_SEED } from '../../main/services/rosterConfig';
 
-/*
- * #232: the roster migration must upgrade a deployed database to the fixed
- * model roster. App-level seeding only recovers an EMPTY `modelrosters`
- * collection, so an upgrade needs this migration. The test also pins the
- * migration rows to `ROSTER_SEED` so the two sources cannot drift.
- */
-
+/* The roster migration must upgrade a deployed database to the fixed model roster (app-level seeding only recovers an empty collection); the migration rows are pinned to ROSTER_SEED so the two sources cannot drift. */
+// @see #232
 describe('migration SeedModelRoster', () => {
   let db: Db;
 
@@ -42,8 +37,8 @@ describe('migration SeedModelRoster', () => {
       ]),
     );
 
-    // #316: MiniMax is out of the roster and must not be seeded into a fresh
-    // database — it would otherwise join every turn's race as eligible.
+    // MiniMax is out of the roster and must not be seeded into a fresh database — it would otherwise join every turn's race as eligible.
+    // @see #316
     const minimax = await db
       .collection('modelrosters')
       .findOne({ modelId: 'MiniMaxAI/MiniMax-M3' });
@@ -78,9 +73,8 @@ describe('migration SeedModelRoster', () => {
         outputPrice?: number;
       }>;
       for (const p of seed.providers) {
-        // Per-provider identity AND price must match the seed (#235): one model
-        // has two providers whose prices differ, so drift here would misprice
-        // every raced turn.
+        // Per-provider identity AND price must match the seed: one model has two providers whose prices differ, so drift here would misprice every raced turn.
+        // @see #235
         expect(rows).toEqual(
           expect.arrayContaining([
             expect.objectContaining({

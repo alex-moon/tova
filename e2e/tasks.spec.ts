@@ -1,12 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 
-/*
- * Task view (issue #254, epic #251). The task API is fully mocked at the page
- * level, so this exercises the client contract (list → detail read-only stream
- * → queued steering composer → terminal state) without depending on a running
- * sequencer or seeded tasks. Runs in both the mobile (375x667) and desktop
- * projects; the detail layout swaps in place on a phone.
- */
+// Task list, detail stream, and steering composer contract, fully page-mocked.
+// @see #254 #251
 
 const email = process.env.E2E_EMAIL ?? 'formsatz@gmail.com';
 
@@ -101,8 +96,7 @@ test('lists tasks and opens the read-only stream', async ({ page }) => {
   await expect(page.locator('[data-testid="task-row-e2e-task-1"]')).toBeVisible();
   await page.locator('[data-testid="task-row-e2e-task-1"]').click();
 
-  // The "Back" affordance is the phone master/detail swap (md:hidden), so it
-  // is asserted at phone width only.
+  // The "Back" affordance is the phone-only master/detail swap.
   if (isMobileViewport(page)) {
     await expect(page.locator('[data-testid="task-detail-back"]')).toBeVisible();
   }

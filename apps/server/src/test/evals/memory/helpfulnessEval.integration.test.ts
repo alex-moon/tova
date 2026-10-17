@@ -2,13 +2,8 @@ import { MEMORY_SCENARIOS } from '../../../main/evals/memory/corpus';
 import { runHelpfulnessEval } from '../../../main/evals/memory/helpfulnessEval';
 import { clearMemoryCorpus } from '../../../main/evals/memory/memorySource';
 
-/*
- * #289 stage-3 integration: the two-arm loop over *real* Mongo fixtures (the
- * default seed/clear/retrieve), with only the provider calls faked. This pins
- * that the block is built from the seeded slice, both arms run, and the judge
- * is handed the arms in both orders — the live responder/judge are the only
- * pieces the unit tests cannot cover.
- */
+/* Stage-3 integration over real Mongo fixtures with only provider calls faked: the block builds from the seeded slice, both arms run, and the judge sees both orders. */
+// @see #289
 describe('helpfulness eval integration (#289)', () => {
   afterAll(async () => {
     await clearMemoryCorpus();
@@ -26,8 +21,7 @@ describe('helpfulness eval integration (#289)', () => {
           : { content: 'I have nothing on that.' },
       judge: async (_query, a, b) => {
         judgeOrders.push([a, b]);
-        // A judge that always picks the first answer: with-arm-as-A wins, and
-        // with-arm-as-B loses, so the fold must collapse it to a tie.
+        // A judge that always picks the first answer must fold to a tie (with-arm-as-A wins, with-arm-as-B loses).
         return 'A';
       },
     });

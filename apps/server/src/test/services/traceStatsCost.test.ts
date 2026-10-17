@@ -24,7 +24,8 @@ const row = (partial: Partial<AdminLangsmithStatsPayload['models'][number]>) => 
   ...partial,
 });
 
-// #235: a roster model carrying two priced providers (the dual-price case).
+// A roster model carrying two priced providers (the dual-price case).
+// @see #235
 const seedModel = (
   modelId: string,
   providers: { provider: string; inputPrice?: number; outputPrice?: number }[],
@@ -115,9 +116,8 @@ describe('applyCostToStats (#224/#235)', () => {
   });
 
   it('uses the model-only fallback when the rollup names a dual-priced model (#235)', async () => {
-    // The LangSmith rollup is model-keyed; with two priced providers the
-    // fallback prefers the fully-priced, alphabetically-first provider
-    // (`deepinfra`). The rollup cannot split by provider until #237 exports it.
+    // The rollup is model-keyed; with two priced providers the fallback prefers the fully-priced, alphabetically-first provider. The rollup cannot split by provider until the per-row export lands.
+    // @see #235 #237
     await seedModel('dual/model', [
       { provider: 'fireworks', inputPrice: 10, outputPrice: 10 },
       { provider: 'deepinfra', inputPrice: 1, outputPrice: 1 },

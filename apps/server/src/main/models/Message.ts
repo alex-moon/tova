@@ -13,11 +13,8 @@ const messageSchema = new mongoose.Schema({
   },
   content: {
     type: String,
-    /*
-     * Empty provider responses are persisted as '' (fail-visibility, #4 J);
-     * only undefined/null is invalid. `required: true` would also reject '',
-     * which forced a place-holder into the DB instead.
-     */
+    /** Empty provider responses persist as ''; only undefined/null is invalid. */
+    // @see #4
     validate: {
       validator: (v: unknown) => v !== null && v !== undefined,
       message: 'Message content must be a string (empty string allowed)',
@@ -26,28 +23,19 @@ const messageSchema = new mongoose.Schema({
   modelName: {
     type: String,
   },
-  /*
-   * Provider that served this turn's completion (issue #117 user visibility:
-   * 'deepinfra · openai/gpt-oss-120b' in the message footer). Additive and
-   * optional — old turns have no provider and render italics models only.
-   */
+  /** Provider that served this turn's completion, shown in the message footer. */
+  // @see #117
   provider: {
     type: String,
   },
-  /*
-   * Provenance URLs from web_search tool runs (issue #16), attached to the
-   * assistant message only when non-empty — one message per turn stays true;
-   * tool internals are trace artifacts, not separate messages.
-   */
+  /** Provenance URLs from web_search runs, attached to the assistant message only when non-empty. */
+  // @see #16
   sources: {
     type: [String],
     default: undefined,
   },
-  /*
-   * Per-source page titles from the same web_search runs (issue #33), keyed
-   * by URL so the client renders the sources block with real titles on
-   * reload — without it the block can only label links by hostname.
-   */
+  /** Per-source page titles keyed by URL, so the client renders real titles on reload. */
+  // @see #33
   sourceTitles: {
     type: [
       {
@@ -58,20 +46,14 @@ const messageSchema = new mongoose.Schema({
     ],
     default: undefined,
   },
-  /*
-   * Generated follow-up questions (issue #33) for the composer chips; absent
-   * when generation was skipped/failed — the client falls back to statics.
-   */
+  /** Generated follow-up questions for the composer chips; absent when skipped or failed. */
+  // @see #33
   suggestions: {
     type: [String],
     default: undefined,
   },
-  /*
-   * Reconciled tool-use summaries for the assistant turn (#196): one entry per
-   * resolved call (or an orphan result with no matching call), so the chat can
-   * render tool chips after a refresh. Additive/optional — old messages have
-   * no `tools` and render exactly as before, no migration required.
-   */
+  /** Reconciled tool-use summaries so the chat can render tool chips after a refresh. */
+  // @see #196
   tools: {
     type: [
       {
@@ -87,13 +69,8 @@ const messageSchema = new mongoose.Schema({
     ],
     default: undefined,
   },
-  /*
-   * Token usage for the assistant turn (issue #224): the provider's
-   * prompt/completion split and the turn total (across tool steps). All
-   * optional — old turns have no usage and the per-message cost view renders
-   * '—'; a provider that reports nothing also leaves this absent (unknown,
-   * not 0). Additive/optional, no migration required.
-   */
+  /** Token usage for the assistant turn; absent means unknown, never 0. */
+  // @see #224
   usage: {
     type: {
       _id: false,
@@ -103,10 +80,8 @@ const messageSchema = new mongoose.Schema({
     },
     default: undefined,
   },
-  /*
-   * Attached asset reference (issue #34): a single-file FK per the owner's
-   * comment — a column, not an array, until multi-attach is asked for.
-   */
+  /** Attached asset reference: a single-file FK, not an array. */
+  // @see #34
   assetId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Asset',

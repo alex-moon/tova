@@ -1,20 +1,8 @@
 import { groqConnector } from '../../main/services/mastraService';
 import { RequestContext } from '@mastra/core/request-context';
 
-/*
- * Spike/projector test for #58: the caller's userId must reach a built-in
- * tool's `execute` through Mastra's request context, without being baked
- * into the memoised agent instance. The full runtime path (tool execute →
- * requestContext.get) was verified against the real `@mastra/core@1.66.0`
- * machinery at planning time (tool context's second `execute` argument
- * carries `requestContext` built from `generate` call options); this suite
- * pins the service side of that contract — the fresh per-call context this
- * module builds in `callOptionsFrom`.
- *
- * The agent module is mocked the way every suite does (CJS/ESM constraint):
- * the mock records the exact call options `mastraService` passes, which is
- * all the request-context plumbing needs to be correct on this side.
- */
+/* The caller's userId must reach a built-in tool's `execute` through Mastra's request context, never baked into the memoised agent instance; the agent module is mocked (CJS/ESM constraint) and records the exact call options mastraService passes. */
+// @see #58
 
 const mockGenerate = jest.fn();
 const mockStream = jest.fn();

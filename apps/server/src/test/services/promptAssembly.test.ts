@@ -75,7 +75,8 @@ describe('resolveSystemPrompt', () => {
     const prompt = resolveSystemPrompt();
     expect(prompt).toContain('Trust yourself for what lives in you');
     expect(prompt).toContain('Trust tools for what lives in the world');
-    // Arithmetic is a tool case, not a weights case (#283): the calculator.
+    // Arithmetic is a tool case, not a weights case.
+    // @see #283
     expect(prompt).toContain('work it through the calculator rather than trusting your head');
     expect(prompt).toContain('"Let me check" is a virtue, not a stall');
     expect(prompt).toContain('say so plainly rather than papering over it');
@@ -104,12 +105,7 @@ describe('resolveSystemPrompt', () => {
   });
 
   it('introduces no mechanical trigger conditions (D7)', () => {
-    // Dispositions generalise, conditions fire wrongly: the stance layer must
-    // stay free of "when the user …, then …" trigger constructions. The guard
-    // is deliberately narrow — "if they …" is ordinary prose ("if they reopen
-    // it"), and a broad guard would reject the prompt's own voice. What it
-    // rejects is the trigger *table* opener that pairs a subject with a
-    // consequent.
+    // The stance layer must stay free of "when the user …, then …" trigger constructions; the guard is deliberately narrow ("if they …" is ordinary prose) and rejects only the trigger-table opener pairing a subject with a consequent.
     expect(resolveSystemPrompt()).not.toMatch(/\bwhen(ever)? the (user|person|human)\b/i);
   });
 });
@@ -163,15 +159,11 @@ describe('timestampHeader (#261)', () => {
     ).toBe('[2026-10-10 14:32 UTC — 2 days since the last message]');
   });
 
-  /*
-   * Local-zone rendering (#261 D6): with a stored zone the stamp renders the
-   * user's wall-clock time and its short offset; without (or with a bad zone)
-   * it stays exactly the UTC form above.
-   */
+  /* Local-zone rendering: with a stored zone the stamp renders the user's wall-clock time and short offset; without (or bad) it stays the UTC form. */
+  // @see #261
   it('renders the stamp in the user’s local zone with its offset (#261)', () => {
     const at = (iso: string) => new Date(iso);
-    // London summer (BST, UTC+1) and winter (GMT); Kolkata offsets by half
-    // hours; New York is west (minus, morning same instant).
+    // London summer/winter, Kolkata half-hours, New York west.
     expect(timestampHeader(at('2026-07-10T14:32:00Z'), undefined, 'Europe/London')).toBe(
       '[2026-07-10 15:32 GMT+1]',
     );
@@ -205,8 +197,9 @@ describe('buildSystemContent / user timezone (#261 D6)', () => {
       /The user's timezone is Europe\/London \(currently GMT(?:[+-]\d+(?::\d+)?)?\)\./,
     );
     // The date line renders in the user's zone, not UTC.
+    // @see #52
     expect(content).toMatch(/Today's date is \d{4}-\d{2}-\d{2} \(GMT(?:[+-]\d+(?::\d+)?)?\)\./);
-    // It sits before any user envelope, like the old UTC line did (#52).
+    // It sits before any user envelope.
     expect(content.indexOf("Today's date is")).toBeLessThan(
       content.indexOf('You have the following contextual information:'),
     );
@@ -289,10 +282,8 @@ describe('buildSystemContent / envelope-based profile data (issue #35, PR #46 re
     );
   });
 
-  // #261: persisted turns get a per-message timestamp header instead of the
-  // bare date line, so the date line is dropped when `includeDate` is false
-  // (the persisted call sites pass it off; ZDR and the admin Compare path keep
-  // it on).
+  // Persisted turns get a per-message timestamp header instead of the bare date line, so the date line is dropped when the caller opts out.
+  // @see #261
   it('drops the date line when the caller opts out (persisted turns, #261)', () => {
     const content = buildSystemContent(null, false);
     expect(content).not.toContain("Today's date is");
@@ -344,8 +335,8 @@ describe('buildSystemContent / coarse location (issue #50)', () => {
     ).toHaveLength(1);
   });
 
-  // #310: the file-library injection is retired — the envelope never renders,
-  // whatever callers pass positionally.
+  // The file-library envelope never renders.
+  // @see #310
   it('never emits the file-library envelope (#310)', () => {
     expect(
       buildSystemContent(userWith({ preferredName: 'Alex' })).split('<user:file_library>'),

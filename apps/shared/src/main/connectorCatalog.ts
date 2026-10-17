@@ -1,7 +1,5 @@
-// Curated connector catalog (#331, epic #328; ranking per #326's market-share
-// research). The single source the client grid reads; server validation joins
-// it when it needs to (#330). Entries carry everything the UI needs to render
-// a card and drive the connect modal without a network round-trip.
+// Curated connector catalog: the single source the client grid reads; server validation joins it when needed.
+// @see #331 #328 #326 #330
 import type { ConnectorDefinition } from './connectors';
 
 export type ConnectorCatalogState = 'live' | 'watchlisted';
@@ -11,8 +9,7 @@ export type CatalogEntry = ConnectorDefinition & {
   state: ConnectorCatalogState;
   // Watchlisted entries must say why, in honest copy.
   watchlistNote?: string;
-  // Brand color for the letter-tile logo fallback (brands without a
-  // licensed simple-icons mark, e.g. Slack).
+  // Brand color for the letter-tile logo fallback (no licensed simple-icons mark).
   brandColor?: string;
 };
 

@@ -1,18 +1,8 @@
 import { groqConnector } from '../../main/services/mastraService';
 import type { CompletionOptions, NeutralStreamChunk } from '../../main/services/llmTypes';
 
-/*
- * #224: token usage must survive the neutral LLM boundary so the chat route
- * can persist it per assistant message. Mastra's `FullOutput` exposes `usage`
- * (last step) and `totalUsage` (all steps), each a `LanguageModelUsage` with
- * `inputTokens`/`outputTokens`/`totalTokens` as `number | undefined`.
- *
- * These tests pin the mapping:
- * - non-streaming: `totalUsage ?? usage`, normalised;
- * - streaming: a single trailing `usage` chunk after the real chunks;
- * - absent/NaN sub-fields dropped (unknown ≠ 0), and no `usage` field/chunk
- *   emitted at all when the provider reported nothing.
- */
+/* Token usage must survive the neutral LLM boundary: non-streaming `totalUsage ?? usage` normalised, streaming as a single trailing usage chunk, absent/NaN dropped (unknown ≠ 0). */
+// @see #224
 
 const mockGenerate = jest.fn();
 const mockStream = jest.fn();

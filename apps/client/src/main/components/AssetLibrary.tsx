@@ -20,8 +20,8 @@ const formatSize = (bytes: number): string => {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 };
 
-// Issue #252: short, human label for a file's provenance. Unknown (null/absent)
-// renders nothing — absence means unknown, never faked as "Uploaded".
+// Unknown provenance renders nothing — absence is never faked as "Uploaded".
+// @see #252
 const provenanceLabel = (kind: string | undefined): string | null => {
   if (kind === 'upload') return 'Uploaded';
   if (kind === 'chat') return 'From chat';
@@ -29,8 +29,8 @@ const provenanceLabel = (kind: string | undefined): string | null => {
   return null;
 };
 
-// Type icon only (owner constraint on issue #34): file contents are never
-// rendered or previewed in the browser — the grid shows icons, not thumbs.
+// Icons only, never content previews — file contents are not rendered in the browser.
+// @see #34
 const IconFor: React.FC<{ contentType: string; filename: string }> = ({
   contentType,
   filename,
@@ -48,17 +48,14 @@ const IconFor: React.FC<{ contentType: string; filename: string }> = ({
 };
 
 interface AssetLibraryProps {
-  // Issue #197: the library is always the embedded pane now — the separate
-  // `/files` view hosts it beside a preview. `onSelect` reports a clicked
-  // asset; `selectedId` highlights the current one.
+  // The library is always an embedded pane beside a preview; onSelect reports a click, selectedId highlights.
+  // @see #197
   onSelect?: (asset: AssetSummary) => void;
   selectedId?: string | null;
 }
 
-// Issue #356: which audience the list shows. 'mine' is the classic library
-// (uploads + system-generated, the server's default); 'agent' flips the
-// server's `?origin=system-side` filter to ONLY agent-facing files (pages
-// fetch_url saved for read_file).
+// 'agent' flips the server filter to ONLY agent-facing files (pages fetch_url saved for read_file).
+// @see #356
 type AssetFilter = 'mine' | 'agent';
 
 const AssetLibrary: React.FC<AssetLibraryProps> = ({ onSelect, selectedId = null }) => {
@@ -107,17 +104,14 @@ const AssetLibrary: React.FC<AssetLibraryProps> = ({ onSelect, selectedId = null
 
   const switchFilter = (next: AssetFilter) => {
     if (next === filter) return;
-    // Clear the previous audience's rows and selection up front: a stale row
-    // must never sit under a delete click aimed at the new list.
+    // A stale row must never sit under a delete click aimed at the new list.
     setFilter(next);
     setAssets([]);
     setSelectedIds(new Set());
   };
 
-  // Issue #83: while any listed asset is still converting, poll the list
-  // silently (no loading flash) so pending cards turn ready/failed in place.
-  // Issue #208: an image's thumbnail is a second async lifecycle, so poll
-  // while either is pending.
+  // Poll silently while conversion or thumbnail work is pending so cards settle in place.
+  // @see #83 #208
   const anyPending = assets.some(
     (a) => a.markdownStatus === 'pending' || a.thumbnailStatus === 'pending',
   );
@@ -127,10 +121,8 @@ const AssetLibrary: React.FC<AssetLibraryProps> = ({ onSelect, selectedId = null
     return () => clearInterval(timer);
   }, [anyPending, load]);
 
-  // Issue #68 bulk upload: feed every selected file through uploadMany and
-  // expose per-file rows (progress on upload, message on error) plus an
-  // aggregate outcome. Partial failure keeps the successes; per-file errors
-  // resolve from the service rather than throwing, so this reports either way.
+  // Per-file rows with progress/error plus an aggregate outcome; per-file errors resolve from the service rather than throwing.
+  // @see #68
   const handleFiles = useCallback(async (files: FileList | null) => {
     if (!files?.length) return;
     const list = Array.from(files);
@@ -202,9 +194,8 @@ const AssetLibrary: React.FC<AssetLibraryProps> = ({ onSelect, selectedId = null
     else void handleDelete(id);
   });
 
-  // Agent-side rows have no Spaces object behind them (synthetic key), so a
-  // presigned download can never resolve — hide object-backed affordances
-  // whenever the selection contains one (#356).
+  // Agent-side rows have no object behind them, so a presigned download can never resolve.
+  // @see #356
   const anyAgentSideSelected = assets.some(
     (a) => selectedIds.has(a.id) && a.origin === 'system-side',
   );
@@ -253,9 +244,8 @@ const AssetLibrary: React.FC<AssetLibraryProps> = ({ onSelect, selectedId = null
     <>
       <div className="flex h-14 shrink-0 items-center justify-between gap-2 border-b border-border px-4">
         <h2 className="font-heading text-lg font-semibold">Files</h2>
-        {/* Issue #356: audience switch — user-facing files vs agent-facing
-            ones (pages fetch_url saved). Compact segmented control so it fits
-            beside the title at phone width. */}
+        {/* Audience switch: user-facing vs agent-facing files; compact so it fits beside the title at phone width. */}
+        {/* @see #356 */}
         <div
           className="flex shrink-0 items-center rounded-lg border border-border p-0.5"
           role="group"
@@ -524,8 +514,8 @@ const AssetLibrary: React.FC<AssetLibraryProps> = ({ onSelect, selectedId = null
           </>
         )}
       </div>
-      {/* Uploads are user-origin files: in the Agent files view they could
-          never appear in this filtered list, so the dropzone hides (#356). */}
+      {/* Uploads are user-origin and could never appear in the agent list, so the dropzone hides. */}
+      {/* @see #356 */}
       {filter === 'mine' && (
         <div className="shrink-0 border-t border-border p-4">
           <button
@@ -587,8 +577,7 @@ const AssetLibrary: React.FC<AssetLibraryProps> = ({ onSelect, selectedId = null
     </>
   );
 
-  // Issue #197: the `/files` view hosts this list as a plain pane (no modal
-  // overlay) beside the preview.
+  // @see #197
   return (
     <div
       className="flex h-full min-h-0 flex-col border-r border-border panel-surface"

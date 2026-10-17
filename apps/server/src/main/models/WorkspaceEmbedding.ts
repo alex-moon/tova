@@ -1,20 +1,7 @@
 import mongoose from 'mongoose';
 
-/*
- * #294: one embedding vector per workspace slice (a user message, an asset's
- * extracted text, or a task's event stream). Vectors live in their own
- * collection rather than on the source docs so:
- *
- *  - `Message`/`Asset`/`Task` reads stay lean (chat history is hot);
- *  - multiple models can coexist side by side (the owner's bge-m3/gte probe),
- *    keyed by `model`, without mixing dimensions in the Atlas index;
- *  - a backfill can upsert idempotently on the unique key.
- *
- * `sourceId` is the source document's Mongo `_id` as a string; because that is
- * globally unique, `userId` is redundant in the key (it is kept as the
- * `$vectorSearch` ownership filter). Retrieval intersects vector hits with the
- * collected slice set, so an orphaned row (its source deleted) is dropped.
- */
+// One embedding vector per workspace slice, kept off the hot source collections; keyed by (kind, sourceId, model).
+// @see #294
 const workspaceEmbeddingSchema = new mongoose.Schema(
   {
     userId: {
@@ -30,9 +17,7 @@ const workspaceEmbeddingSchema = new mongoose.Schema(
     sourceId: { type: String, required: true },
     model: { type: String, required: true },
     dim: { type: Number, required: true },
-    // A Mongoose array defaults to `[]` and `required` does not reject that,
-    // so the non-empty check is explicit: a stored vector with no values is a
-    // corrupt row, never a valid one.
+    // Mongoose arrays default to `[]` and `required` doesn't reject that, so non-empty is explicit.
     vector: {
       type: [Number],
       required: true,
@@ -41,8 +26,7 @@ const workspaceEmbeddingSchema = new mongoose.Schema(
         message: 'vector must be non-empty',
       },
     },
-    // sha256 of the (truncated) embed text + model; a mismatch is what makes a
-    // re-run re-embed a changed slice and skip an unchanged one.
+    // sha256 of the embed text + model; drives re-embed-on-change and skip-if-unchanged.
     textHash: { type: String, required: true },
   },
   { collection: 'workspace_embeddings', timestamps: true },

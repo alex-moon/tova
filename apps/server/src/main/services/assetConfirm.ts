@@ -7,19 +7,15 @@ import { extractText, isExtractable } from './textExtraction';
 import { safeAsset } from './assetViews';
 import { enqueueWorkspaceEmbedding } from './workspaceEmbeddingIngest';
 
-// Presign + confirm headroom: pending assets older than this cannot be
-// confirmed, so stale rows never revive (plan honest-boundaries for #34).
+// Presign + confirm headroom: stale pending rows can never be confirmed back to life.
+// @see #34
 const CONFIRM_MAX_AGE_MS = 60 * 60 * 1000;
 
 // Extraction stays light: only objects up to this size are pulled back.
 const MAX_EXTRACT_BYTES = 1_000_000;
 
-// Core of POST /:id/confirm (and, per #68, of the bulk confirm per-item
-// loop): assumes the asset row is already known to belong to the caller —
-// ownership is the caller's lookup (a foreign id must read as "not found",
-// never as an error row). Returns a typed rejection instead of throwing so
-// bulk can map per-item outcomes; the single route maps the same shape to a
-// status code.
+/* Core of POST /:id/confirm and the bulk per-item loop: assumes the caller already verified ownership; returns a typed rejection instead of throwing so bulk can map per-item outcomes. */
+// @see #68
 type ConfirmResult =
   | { status: 'ok'; asset: ReturnType<typeof safeAsset> }
   | { status: 'rejected'; code: number; message: string };
@@ -59,26 +55,14 @@ const confirmAsset = async (asset: AssetDocument): Promise<ConfirmResult> => {
   let text: string | null = null;
   if (isExtractable(asset.filename) && head.size <= MAX_EXTRACT_BYTES) {
     const buf = await spacesWorkspaceStorage.getByKey(asset.key);
-    // Store the full extracted text (OQ4): the 12k cap applies at prompt-assembly
-    // time (truncateForPrompt in the attach envelope / read_file), never here — so
-    // a long document is recoverable via read_file instead of being lost at ingest.
+    // Store the FULL extracted text — the 12k cap applies only at prompt-assembly time, so a long document stays recoverable via read_file.
     if (buf) text = extractText(asset.filename, buf);
     if (text !== null) asset.textExtracted = text === '' ? null : text;
   }
 
   asset.status = 'ready';
-  // Ephemeral assets (#116) never queue work: the job would keep derived
-  // objects alive in storage after the turn deletes the row and bytes.
-  // Fast-path extraction already covers the turn's prompt needs.
-  // Issue #67: fast-path extraction won, nothing to convert. Otherwise queue
-  // a background conversion job — the response latency of /confirm stays low,
-  // conversion retries under the job cap, and a failed conversion never fails
-  // the asset (the binary is fine).
-  // Issue #208: images additionally queue a thumbnail job so the /assets
-  // viewer never loads the original; the two pending lifecycles share one job.
-  // Issue #209: images also queue OCR, so they now drive the markdown
-  // lifecycle too (the processor branches on image content type before the
-  // convertible guard).
+  // Ephemeral assets never queue work: derived jobs would outlive the row and bytes. Images queue a shared conversion+OCR+thumbnail job so the viewer never loads the original.
+  // @see #116 #67 #208 #209
   const isImage = isImageContentType(asset.contentType);
   const needsConversion = text === null && isConvertible(asset.filename);
   const needsOcr = isImage;
@@ -93,10 +77,7 @@ const confirmAsset = async (asset: AssetDocument): Promise<ConfirmResult> => {
       asset.thumbnailKey = null;
     }
     await asset.save();
-    // Enqueue is best-effort: the asset is confirmed and the binary is
-    // fine, so a failed enqueue must not 500 the confirm. Reverting the
-    // pending flags avoids a forever-'pending' badge on an asset no poller
-    // will ever claim a job for; the failure is logged for diagnosis.
+    // Enqueue is best-effort: revert the pending flags so no forever-'pending' badge outlives an unclaimed job.
     try {
       await enqueueAssetJob(asset._id);
     } catch (enqueueErr) {
@@ -111,10 +92,8 @@ const confirmAsset = async (asset: AssetDocument): Promise<ConfirmResult> => {
     return { status: 'ok', asset: safeAsset(asset) };
   }
   await asset.save();
-  // #294: embed the fast-path extracted text. Fire-and-forget and flag-gated
-  // inside the helper. Ephemeral (ZDR) uploads are never embedded — the durable
-  // derived-data invariant — so the guard is explicit here, not left to the
-  // helper (which only knows the text, not the ephemeral flag).
+  // Embed the fast-path extracted text: fire-and-forget, flag-gated, and explicitly never for ephemeral uploads (the helper cannot know the flag).
+  // @see #294
   if (!asset.ephemeral) {
     enqueueWorkspaceEmbedding({
       userId: String(asset.userId),

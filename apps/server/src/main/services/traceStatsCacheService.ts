@@ -6,36 +6,18 @@ import {
   type TraceStatsCacheDocument,
 } from '../models/TraceStatsCache';
 
-/*
- * Background poller for the admin Traces summary cache (#224). The overview
- * is the useful part of the tab and was recomputed on every load from a paged
- * live sweep; this job recomputes it every ~120s and upserts one document per
- * window, so the route serves the summary from Mongo.
- *
- * Shape mirrors `assetJobService`: module-level `busy` guard to skip ticks
- * while the previous sweep is still in flight (a sweep can take seconds against
- * a rate-limited upstream), an `unref`ed interval so it never holds the process
- * open, idempotent start, `stop`/`isRunning` accessors, and it is started from
- * `index.ts` only outside tests.
- *
- * The job stores tokens only; cost is joined at read time so a price correction
- * is reflected immediately (decision 4).
- */
+/* Background poller for the admin Traces summary cache: recomputes the overview every ~120s and upserts one document per window so the route serves it from Mongo; tokens only — cost joins at read time. */
+// @see #224
 
 export const DEFAULT_TRACE_STATS_INTERVAL_MS = 120_000;
 
-// The window the poller pre-computes. The route still accepts a `days` param,
-// but only this default window is cached; other windows fall back to live
-// (decision 6).
+// The window the poller pre-computes; other windows fall back to live.
 export const TRACE_STATS_WINDOW_DAYS = 7;
 
-// A cache older than two intervals reads as stale; the route then falls back
-// to a live sweep so the tab never shows a frozen summary.
+// A cache older than two intervals reads as stale; the route then falls back to a live sweep so the tab never shows a frozen summary.
 export const TRACE_STATS_STALE_MS = DEFAULT_TRACE_STATS_INTERVAL_MS * 2;
 
-// Compute the rollup and upsert it for the window. Returns the written
-// document, or null when tracing is unconfigured (nothing to cache — the route
-// still answers 503 in that case, unchanged).
+// Compute the rollup and upsert it for the window; null when tracing is unconfigured (nothing to cache).
 export const runTraceStatsTick = async (
   days: number = TRACE_STATS_WINDOW_DAYS,
 ): Promise<TraceStatsCacheDocument | null> => {
@@ -84,10 +66,7 @@ export const startTraceStatsPoller = (
   timer = setInterval(() => {
     if (busy) return;
     busy = true;
-    // A failed sweep must not kill the poller *or* the process; the next tick
-    // retries, and the route's stale fallback covers the gap. The `.catch` is
-    // load-bearing: a bare `.finally` re-throws the original rejection, and an
-    // unhandled rejection from this voided promise terminates the process.
+    // A failed sweep must not kill the poller or the process; the `.catch` is load-bearing — a bare `.finally` re-throws the rejection and an unhandled rejection terminates the process.
     void runTraceStatsTick()
       .catch((err) => {
         console.error('Trace stats poll failed:', redactForLog(err));

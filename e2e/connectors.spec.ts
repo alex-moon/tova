@@ -1,12 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 
-/*
- * Connectors view (#331, epic #328): the curated grid, the per-connector
- * modal, and the custom-URL affordance. Fully page-mocked (same isolation
- * pattern as the other specs) — the OAuth flow itself is verified by the
- * server slice (#327) and the hand-verification gate (#330); here the UI
- * contract is what is pinned, in both mobile and desktop projects.
- */
+// Pins the connectors UI contract, fully page-mocked; the OAuth flow is verified server-side.
+// @see #331 #328 #327 #330
 
 const email = process.env.E2E_EMAIL ?? 'formsatz@gmail.com';
 
@@ -48,7 +43,8 @@ test('grid renders the catalog with statuses and opens the modal', async ({ page
 
   await expect(page.getByTestId('connector-card-notion-status')).toHaveText('Connected');
   await expect(page.getByTestId('connector-card-trello-status')).toHaveText('Connect');
-  // #333: watchlisted entries never render — the grid shows the golden six.
+  // Watchlisted entries never render.
+  // @see #333
   await expect(page.getByTestId('connector-card-spotify')).toHaveCount(0);
   await expect(page.getByTestId('connector-card-slack')).toHaveCount(0);
   await expect(page.getByTestId('connectors-count')).toHaveText('1 connected');

@@ -1,10 +1,5 @@
-/**
- * One graded eval run (#158): streams the agent's answer through the given
- * connector entry point and records tool calls in order from the neutral
- * stream (#16), alongside the assistant's accumulated final text. Extracted
- * from `scripts/run-evals.ts` so the delta-accumulation is unit-testable
- * (the script itself is not, since importing it kicks off `main()`).
- */
+/** One graded eval run: streams the agent's answer through a connector entry point. */
+// @see #158 #16
 import type { EvalCase } from './cases';
 import type { EvalRun } from './types';
 import type { CompletionOptions, NeutralStreamChunk } from '../services/llmTypes';
@@ -14,14 +9,8 @@ type CreateStreaming = (
   options: CompletionOptions,
 ) => Promise<AsyncIterable<NeutralStreamChunk> | null | undefined>;
 
-/**
- * Streams the agent's answer for the case prompt; records tool calls in
- * order and accumulates `chunk.delta` into `finalText` so graders can run
- * the #158 text assertions (no-citation-without-search, explicit
- * no-sources refusal). `generate_file` content rides in the call's scalar
- * args, which is what `generatedContent` extracts for the `content_equals`
- * case; the assembled prompt is simply the caller's own message list.
- */
+/** Streams the answer, records tool calls in order, and accumulates `chunk.delta` into `finalText`. */
+// @see #158
 export const runCase = async (
   createStreamingCompletion: CreateStreaming,
   options: CompletionOptions,
@@ -42,8 +31,8 @@ export const runCase = async (
   const generateCall = toolCalls.find((call) => call.name === 'generate_file');
   const generatedContent =
     typeof generateCall?.args?.content === 'string' ? generateCall.args.content : undefined;
-  // #159 cases grade the assistant's final answer and possibly several
-  // generated files, so both are captured alongside the tool calls.
+  // Capture generated files so cases can grade answers and files, not just tool calls.
+  // @see #159
   const generatedFiles = toolCalls
     .filter((call) => call.name === 'generate_file' && typeof call.args?.content === 'string')
     .map((call) => ({

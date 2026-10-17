@@ -16,10 +16,8 @@ jest.mock('@mastra/core/agent', () => {
 
 const MOCK_ROUTING = { model: 'mock-small-model', reason: 'roster-pick' };
 
-// #233: routing now runs through the fixed-roster racing path. Drive it by
-// setting `mockRacingState.routing`; the mock delegates the actual provider
-// call back through the real `inferenceService` so the mocked Mastra Agent
-// stays the observable dispatch boundary.
+// Routing now runs through the fixed-roster racing path; the mock delegates the actual provider call back through the real inferenceService so the mocked Mastra Agent stays the observable dispatch boundary.
+// @see #233
 const mockRacingState: { routing: typeof MOCK_ROUTING | null; error?: unknown } = {
   routing: MOCK_ROUTING,
 };
@@ -61,18 +59,15 @@ jest.mock('../../main/services/titleService', () => ({
   generateChatTitle: jest.fn().mockResolvedValue('Hello'),
 }));
 
-// #359: subtitle revision is fire-and-forget on a turn cadence; the mock lets
-// the cadence describe assert when it fires without any aux call.
+// Subtitle revision is fire-and-forget on a turn cadence; the mock lets the cadence describe assert when it fires without any aux call.
+// @see #359
 const mockRevise = jest.fn();
 jest.mock('../../main/services/subtitleService', () => ({
   reviseSessionSubtitle: (...args: unknown[]) => mockRevise(...args),
 }));
 
-// #238: the enrichment pass is a separate aux call; the route tests pin the
-// main completion's arguments, so stub enrichment to a no-op block and keep
-// it off `inferenceService.mock.calls`.
-// #310: the enrichment gate is retired — no vote to stub. The trace-fact
-// helpers stay real so the routes' metadata is derived from the live retrieval.
+// The enrichment aux call is stubbed off the mocked inference-call slots; with the gate retired the trace-fact helpers stay real.
+// @see #238 #310
 jest.mock('../../main/services/workspaceTraceFacts', () =>
   jest.requireActual('../../main/services/workspaceTraceFacts'),
 );
@@ -166,9 +161,7 @@ describe('Chat route routing metadata', () => {
   });
 
   it('dispatches a DeepInfra-routed turn to the DeepInfra provider end-to-end', async () => {
-    // Plan task-9 bullet: the DeepInfra path must be exercised at the route
-    // level, not only in the connector unit tests. The mocked Agent ctor
-    // model string is the observable dispatch boundary.
+    // The DeepInfra path must be exercised at the route level, not only in connector unit tests; the mocked Agent ctor model string is the observable dispatch boundary.
     mockRacingState.routing = {
       model: 'Qwen/Qwen2.5-72B-Instruct',
       reason: 'roster-pick',
@@ -192,8 +185,7 @@ describe('Chat route routing metadata', () => {
   });
 
   it('persists deduped sources when the agent ran web_search (#16)', async () => {
-    // The fire-and-forget classifier also calls generate; only the chat
-    // completion may carry the tool results.
+    // The fire-and-forget classifier also calls generate; only the chat completion may carry the tool results.
     mockGenerate.mockImplementation(async (messages?: { role: string; content: string }[]) => {
       if (isClassifierCall({ messages })) {
         return { text: CLASSIFIER_REPLY };
@@ -248,12 +240,8 @@ describe('Chat route routing metadata', () => {
   });
 
   describe('per-user system prompt (issue #35)', () => {
-    // #198: the connector strips the caller's leading system message(s) out of
-    // the messages array and folds them into the per-call `instructions`
-    // override, merged with the agent's tool instructions (which lead the
-    // merged string, separated by exactly one blank line). Dropping only that
-    // first separator leaves the caller's own system content — which may itself
-    // contain blank lines — intact.
+    // The connector strips the caller's leading system message(s) and folds them into the per-call `instructions` override, merged after the agent's tool instructions with one blank line — dropping only that separator leaves the caller's content intact.
+    // @see #198
     const systemContentFromCall = (): string => {
       for (const call of mockGenerate.mock.calls) {
         const messages = call[0] as unknown as { role: string; content: string }[] | undefined;
@@ -321,9 +309,8 @@ describe('Chat route routing metadata', () => {
       expect(content).toContain('<user:preferred_name>\nAlex\n</user:preferred_name>');
     });
 
-    // #253/#310: the non-streaming route injects the workspace-memory block
-    // whenever the flag is on — the same wiring the streaming route has, so the
-    // two cannot drift.
+    // The non-streaming route injects the workspace-memory block whenever the flag is on — the same wiring the streaming route has, so the two cannot drift.
+    // @see #253 #310
     it('injects the workspace-memory block when the flag is on (#253, #310)', async () => {
       const app = createApp();
       const cookies = await registerUser(app, 'prompt-workspace@example.com');
@@ -354,8 +341,8 @@ describe('Chat route routing metadata', () => {
       }
     });
 
-    // #293/#310: with the kill switch unset, no workspace block is injected and
-    // the retrieval service is never reached.
+    // With the kill switch unset, no workspace block is injected and the retrieval service is never reached.
+    // @see #293
     it('injects no workspace block when the flag is off (#293)', async () => {
       const app = createApp();
       const cookies = await registerUser(app, 'prompt-workspace-off@example.com');
@@ -722,11 +709,10 @@ describe('streamingErrorMessage (#77, #117)', () => {
       ),
     ).toMatch(/Rate limited/);
     expect(streamingErrorMessage(new Error('helpful nudge: TPM exceeded'))).toMatch(/Rate limited/);
-    // Slug-form bodies rethrown without a status code (DeepInfra-style
-    // `rate_limit_exceeded`) must match too — separators are not just spaces.
+    // Slug-form bodies rethrown without a status code must match too — separators are not just spaces.
     expect(streamingErrorMessage(new Error('rate_limit_exceeded'))).toMatch(/Rate limited/);
-    // 413 takes precedence — it is the more specific diagnosis of the same
-    // "tokens" family, and #117 must not unlink #77's message.
+    // 413 takes precedence — the more specific diagnosis of the same "tokens" family.
+    // @see #117 #77
     expect(streamingErrorMessage({ statusCode: 413, message: 'TPM exceeded' })).toMatch(
       /connectors/,
     );

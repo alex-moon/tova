@@ -56,7 +56,6 @@ test('send a message, stream a mocked reply, then switch sessions in the sidebar
   await expect(page.locator('p').filter({ hasText: /^OK$/ })).toBeVisible();
   // Model attribution is intentionally not asserted here under the mock.
 
-  // Switch to another session via the sidebar (if one exists); history renders.
   if (isMobileViewport(page)) {
     await page.getByRole('button', { name: 'Open menu' }).click();
   }

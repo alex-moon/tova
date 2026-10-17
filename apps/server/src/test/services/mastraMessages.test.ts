@@ -1,12 +1,8 @@
 import { mastraMessagesFor } from '../../main/services/mastraService';
 import type { CompletionOptions } from '../../main/services/llmTypes';
 
-/*
- * #115: the neutral message contract widens to OpenAI-style content parts.
- * Mastra consumes AI-SDK-style parts, so the DeepInfra connector maps
- * `image_url` parts onto `image` parts (image: URL) and Groq must reject
- * part arrays outright — completions with images never route there (#94).
- */
+/* The neutral message contract widens to OpenAI-style content parts: the DeepInfra connector maps image_url parts onto image parts and Groq must reject part arrays outright. */
+// @see #115 #94
 
 const messagesWith = (content: CompletionOptions['messages'][number]['content']) => [
   { role: 'system' as const, content: 'You are Tova.' },

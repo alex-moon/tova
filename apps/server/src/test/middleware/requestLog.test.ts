@@ -3,9 +3,8 @@ import express from 'express';
 import { requestLog } from '../../main/middleware/requestLog';
 import { attachConsoleCapture, detachConsoleCapture } from '../../main/services/logService';
 
-// #179: the in-memory ring buffer was removed, so requestLog is observed via
-// the console line it emits (logger writes to console; retained viewing is
-// covered by lokiLogs.test.ts).
+// requestLog is observed via the console line it emits; retained viewing is covered by lokiLogs.test.ts.
+// @see #179
 describe('requestLog middleware', () => {
   let info: jest.SpyInstance;
   let warn: jest.SpyInstance;

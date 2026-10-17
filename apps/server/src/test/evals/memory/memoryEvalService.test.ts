@@ -11,12 +11,8 @@ import {
 } from '../../../main/evals/memory/memoryEvalService';
 import type { MemoryScenario } from '../../../main/evals/memory/types';
 
-/*
- * #289 runner logic, exercised with injected dependencies so no Mongo, provider,
- * or LangSmith is needed: retrieval metric arithmetic, the per-scenario
- * reseed/retrieve loop, and the dataset export. #310 retired the gate stage —
- * the labelled GATE_CASES corpus stays as the product-rule record.
- */
+/* Runner logic with injected dependencies (no Mongo/provider/LangSmith): retrieval metric arithmetic, the per-scenario reseed/retrieve loop, the dataset export. */
+// @see #289 #310
 
 describe('retrievalMetrics (#289)', () => {
   const row = (
@@ -162,8 +158,7 @@ describe('pushMemoryCorpusToLangSmith (#289)', () => {
       MEMORY_DATASET_NAME,
     );
     expect(created).toEqual([MEMORY_DATASET_NAME, MEMORY_DATASET_NAME]);
-    // The subtype rides the gate example, so the shareable corpus carries the
-    // same per-subtype split the local metrics report (T1b-i).
+    // The subtype rides the gate example, so the shareable corpus carries the same per-subtype split the local metrics report.
     expect(outputs[0]).toMatchObject({ refersBack: true, subtype: 'explicit' });
   });
 });

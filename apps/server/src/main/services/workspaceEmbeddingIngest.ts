@@ -15,22 +15,8 @@ import {
   type EmbeddingTextSource,
 } from './workspaceEmbeddingText';
 
-/*
- * #294: the write side of workspace semantic retrieval. Two entry points:
- *
- *  - `embedWorkspaceSlice` embeds one slice on ingest (a user message saved, an
- *    asset's text extracted, a task settled). Fire-and-forget: it is never on
- *    the response path and never throws.
- *  - `embedWorkspaceUser` backfills one user's whole collected corpus. The
- *    backfill script and the #289 eval runner share it, so the ingest path and
- *    the backfill path cannot derive different text (they both go through
- *    `workspaceSliceText` + `truncateForEmbedding`) — which is what keeps the
- *    `textHash` skip rule idempotent.
- *
- * Both are gated by `WORKSPACE_MEMORY_ENABLED` at the call site that decides
- * whether to run at all; `embedWorkspaceSlice` also checks it directly so an
- * accidental caller cannot embed while the feature is off.
- */
+/* The write side of workspace semantic retrieval: per-slice ingest (fire-and-forget, never throws) and per-user backfill (shared with the eval runner so both paths derive identical text, keeping the hash skip rule idempotent); both gated by WORKSPACE_MEMORY_ENABLED. */
+// @see #294 #289
 
 // Batch size for the backfill; keeps one request well under provider limits.
 export const EMBED_BATCH = 64;
@@ -44,11 +30,7 @@ export interface EmbedWorkspaceSliceInput {
   source: EmbeddingTextSource;
 }
 
-/*
- * Embed and upsert one slice. Returns without a write when the feature is off,
- * the text is empty, or the provider fails — every failure is logged and
- * swallowed, so an ingest hook can never break the turn that triggered it.
- */
+/* Embed and upsert one slice; no write when the feature is off, the text is empty, or the provider fails — an ingest hook can never break the turn that triggered it. */
 export const embedWorkspaceSlice = async (
   input: EmbedWorkspaceSliceInput,
   deps: { embed?: (texts: string[]) => Promise<number[][]> } = {},
@@ -78,10 +60,7 @@ export const embedWorkspaceSlice = async (
   }
 };
 
-/*
- * Fire-and-forget wrapper for the request/worker hot paths. `embedWorkspaceSlice`
- * already swallows, so the returned promise is intentionally not awaited.
- */
+/* Fire-and-forget wrapper for the request/worker hot paths; the promise is intentionally not awaited. */
 export const enqueueWorkspaceEmbedding = (input: EmbedWorkspaceSliceInput): void => {
   void embedWorkspaceSlice(input);
 };
@@ -105,12 +84,7 @@ export interface EmbedUserDeps {
   dryRun?: boolean;
 }
 
-/*
- * Backfill one user's collected corpus. Idempotent: only slices whose
- * `textHash` differs from the stored row are (re-)embedded, so a second run
- * over an unchanged corpus writes nothing. Best-effort per batch — a provider
- * failure is counted and skipped, not thrown.
- */
+/* Backfill one user's collected corpus; idempotent by textHash; best-effort per batch. */
 export const embedWorkspaceUser = async (
   userId: string,
   deps: EmbedUserDeps = {},
@@ -119,8 +93,8 @@ export const embedWorkspaceUser = async (
   const model = config.embeddings.model;
 
   const collected = await collectWorkspaceSlices(userId);
-  // #309: the slice title (a file's filename) rides along so the planned embed
-  // text is byte-identical with the ingest path's folded text.
+  // The slice title rides along so the planned embed text is byte-identical with the ingest path's folded text.
+  // @see #309
   const slices: EmbeddableSlice[] = collected.map((slice) => ({
     kind: slice.kind,
     id: slice.id,
@@ -146,9 +120,7 @@ export const embedWorkspaceUser = async (
   };
   if (deps.dryRun) return result;
 
-  // The backfill timeout, not the hot-path one: a 64-passage batch
-  // cold-embeds in seconds, which the 800ms hot-path budget cannot cover
-  // (observed live: the default timed out on real batches).
+  // The backfill timeout, not the hot-path one: a 64-passage batch cold-embeds in seconds, which the hot-path budget cannot cover.
   const embed =
     deps.embed ??
     ((texts: string[]) =>

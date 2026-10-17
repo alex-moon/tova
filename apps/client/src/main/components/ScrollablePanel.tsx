@@ -7,20 +7,14 @@ interface ScrollablePanelProps {
   headerAdornment?: React.ReactNode;
   panelTestId?: string;
   bodyTestId?: string;
-  /**
-   * Overrides the default capped modal-card styling; e.g. the admin page fills
-   * its viewport slot instead of capping at 85dvh.
-   */
+  /** Overrides the default capped modal-card styling. */
   panelClassName?: string;
   bodyClassName?: string;
   children?: React.ReactNode;
 }
 
-/**
- * Standard capped panel with a pinned header and one internal scroller
- * (issue #79): the body grows and scrolls rather than clipping, regardless of
- * viewport height.
- */
+/** Standard capped panel with a pinned header and one internal scroller. */
+// @see #79
 const ScrollablePanel: React.FC<ScrollablePanelProps> = ({
   title,
   headerAdornment,

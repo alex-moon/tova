@@ -1,10 +1,8 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
-// Atmospheric depth (issue #191) is a token layer in index.css: the wash, the
-// panel solidity gradient and the edge glow all derive per theme from the
-// --c-* primitives. These tests parse the real stylesheet so a stray raw hex in
-// a depth token, or a token dropped from one theme, fails loudly.
+// Depth tokens are parsed from the real stylesheet so a stray hex or missing token fails loudly.
+// @see #191
 
 const CSS = readFileSync(
   new URL(import.meta.url).pathname.replace(/depth-tokens\.test\.ts$/, '../main/index.css'),

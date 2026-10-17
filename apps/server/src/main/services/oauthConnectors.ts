@@ -18,27 +18,11 @@ import type { ConnectorDocument } from '../models/Connector';
 import { Connector } from '../models/Connector';
 import { decryptEnvelope, encryptEnvelope } from './crypto';
 
-/*
- * OAuth engine for mcp.oauth connectors (#327, epic #328). Tova is the OAuth
- * client; the browser is the consent surface. All RFC plumbing (discovery
- * well-knowns incl. path-inserted variants, dynamic client registration
- * RFC 7591, PKCE RFC 7636, token exchange RFC 6749) comes from the MCP SDK's
- * auth module; this file owns only the Tova-side state: pending consents,
- * the encrypted token vault, and the proactive refresh policy.
- *
- * Flow: POST /api/connectors/oauth/start probes discovery on the endpoint,
- * registers a client, and returns the consent URL (pending record keyed by
- * state, 10-minute TTL). The provider redirects the browser to the client's
- * /connectors/callback (same-origin app in dev and prod — no CORS story);
- * that page POSTs the code+state to /api/connectors/oauth/callback, which
- * exchanges the code and creates (or, with pending.connectorId, updates) the
- * connector. Tokens live in the connector document's encrypted `oauth`
- * envelope, so factory reset sweeps them (purge interlock, #327 comment).
- */
+/* OAuth engine for mcp.oauth connectors: Tova is the client, the browser the consent surface; all RFC plumbing comes from the MCP SDK — this file owns pending consents, the encrypted token vault, and the proactive refresh policy. */
+// @see #327 #328
 
 const PENDING_TTL_MS = 10 * 60 * 1000;
-// Refresh an access token that expires within this window; the proactive
-// skew keeps mid-turn expiry rare without a background prober.
+// Refresh an access token expiring within this window; the proactive skew keeps mid-turn expiry rare without a background prober.
 const REFRESH_SKEW_MS = 60 * 1000;
 
 export interface ConnectorOAuthVault {
@@ -47,19 +31,12 @@ export interface ConnectorOAuthVault {
   expiresAt?: number;
   tokenType?: string;
   scope?: string;
-  // The RFC 8707 resource indicator the grant was issued for; re-sent on
-  // refresh so the AS refreshes against the same resource.
+  // The RFC 8707 resource indicator the grant was issued for; re-sent on refresh.
   resource?: string;
-  // The authorization server that issued these tokens plus the metadata it
-  // served at discovery: refreshAuthorization does NOT re-discover — without
-  // the stored metadata it would fall back to `{asUrl}/token`, wrong for any
-  // server with custom endpoints.
+  // The issuing authorization server plus the metadata it served: refreshAuthorization does NOT re-discover — without it, refresh would fall back to `{asUrl}/token`, wrong for custom-endpoint servers.
   authorizationServerUrl: string;
   metadata?: AuthorizationServerMetadata;
-  // DCR-registered client (RFC 7591), reused on re-auth so a provider sees
-  // one client per Tova server rather than one per consent. The FULL SDK
-  // shape (snake_case, incl. token_endpoint_auth_method) is persisted —
-  // narrowing it would make refresh guess the auth method.
+  // DCR-registered client, reused on re-auth so a provider sees one client per Tova server; the FULL SDK shape is persisted — narrowing it would make refresh guess the auth method.
   clientInformation?: OAuthClientInformationMixed;
 }
 
@@ -71,21 +48,15 @@ interface PendingOAuth {
   authorizationServerUrl: string;
   metadata: AuthorizationServerMetadata;
   clientInformation: OAuthClientInformationMixed;
-  // RFC 8707 resource indicator from the endpoint's protected-resource doc;
-  // echoed on the token exchange so the AS binds the tokens to the resource.
+  // RFC 8707 resource indicator from the endpoint's protected-resource doc; echoed on the token exchange so the AS binds the tokens to the resource.
   resource?: string;
   codeVerifier: string;
-  // Set by the re-auth path: the callback updates this row instead of
-  // creating a new one.
+  // Set by the re-auth path: the callback updates this row instead of creating a new one.
   connectorId?: string;
   expiresAt: number;
 }
 
-// Pending consents are in-memory by design: nothing secret is stored (PKCE
-// verifier + state only — no tokens exist yet), the app is single-process,
-// and an abandoned consent self-cleans; a restart mid-consent just fails the
-// exchange with "expired" and the user retries. No collection, so the
-// factory-reset sweep is untouched.
+// Pending consents are in-memory by design: nothing secret is stored yet, the app is single-process, an abandoned consent self-cleans, and no collection means the factory-reset sweep is untouched.
 const pending = new Map<string, PendingOAuth>();
 
 const prunePending = (now = Date.now()): void => {
@@ -104,20 +75,13 @@ export class ConnectorOAuthError extends Error {
 export interface ConnectorOAuthProbe {
   authorizationServerUrl: string;
   metadata: AuthorizationServerMetadata;
-  // The RFC 9728 doc when the endpoint served one. Its `resource` is the
-  // canonical RFC 8707 indicator and its `scopes_supported` the per-server
-  // scope set — both must ride the authorization request or multi-product
-  // authorization servers (Atlassian) cannot route consent to the right
-  // product (Trello consent came back as the Rovo site picker without it,
-  // #330 verification pass).
+  // The RFC 9728 doc when the endpoint served one; its `resource` and `scopes_supported` must ride the authorization request or multi-product authorization servers cannot route consent to the right product.
+  // @see #330
   resourceMetadata?: OAuthProtectedResourceMetadata;
 }
 
-// SSRF posture parity with the connector url itself (https-only, #36): the
-// discovery hops (RFC 9728 authorization_servers, then the AS metadata's
-// endpoints) are fetched server-side from user-supplied input, so each must
-// clear the same bar. Loopback/private hosts are rejected too — the private
-// address spaces are not legitimate public authorization servers.
+// SSRF posture parity with the connector url itself (https-only): discovery hops are fetched server-side from user input, so each must clear the same bar; loopback/private hosts are rejected.
+// @see #36
 const PRIVATE_HOST =
   /^(localhost|127\.|10\.|192\.168\.|169\.254\.|172\.(1[6-9]|2\d|3[01])\.|\[::1\])/i;
 
@@ -134,13 +98,8 @@ const assertPublicHttpsUrl = (raw: string | URL, what: string): URL => {
   return parsed;
 };
 
-/*
- * Probe an MCP endpoint for OAuth per the MCP auth spec: protected-resource
- * metadata (RFC 9728) names the authorization servers; fall back to treating
- * the endpoint origin itself as the authorization server (the pre-9728
- * shape). Returns null when nothing advertises OAuth — the endpoint stays a
- * token-form (mcp.pat) candidate.
- */
+/* Probe an MCP endpoint for OAuth per the MCP auth spec: protected-resource metadata names the AS, falling back to the endpoint origin itself; null when nothing advertises OAuth. */
+// @see #327
 export const probeConnectorOAuth = async (url: string): Promise<ConnectorOAuthProbe | null> => {
   let authorizationServerUrl: string | undefined;
   let resourceMetadata: OAuthProtectedResourceMetadata | undefined;
@@ -159,8 +118,7 @@ export const probeConnectorOAuth = async (url: string): Promise<ConnectorOAuthPr
   assertPublicHttpsUrl(authorizationServerUrl, 'OAuth authorization server');
   try {
     const metadata = await discoverAuthorizationServerMetadata(authorizationServerUrl);
-    // An authorization endpoint is the one thing a usable AS metadata must
-    // carry; anything less is not an OAuth server we can drive.
+    // An authorization endpoint is the one thing a usable AS metadata must carry.
     if (!metadata?.authorization_endpoint) return null;
     // Same bar for the endpoints discovery asks Tova to contact.
     assertPublicHttpsUrl(metadata.authorization_endpoint, 'OAuth authorization endpoint');
@@ -170,17 +128,13 @@ export const probeConnectorOAuth = async (url: string): Promise<ConnectorOAuthPr
       assertPublicHttpsUrl(metadata.registration_endpoint, 'OAuth registration endpoint');
     return { authorizationServerUrl, metadata, resourceMetadata };
   } catch (err) {
-    // A discovery doc pointing Tova at private/http endpoints is not "no
-    // OAuth" — surface why, so the failure is diagnosable.
+    // A discovery doc pointing Tova at private/http endpoints is not "no OAuth" — surface why so the failure is diagnosable.
     if (err instanceof ConnectorOAuthError) throw err;
     return null;
   }
 };
 
-// Redirect URI: the app origin the consent redirect must land on. The app is
-// same-origin in dev (Vite proxy) and prod (static build), so the start
-// request's own Origin (POST) / Referer is the correct base; the env
-// override covers non-standard deployments.
+// Redirect URI base: the app is same-origin in dev and prod, so the start request's own Origin/Referer is correct; the env override covers non-standard deployments.
 export const redirectOriginFrom = (headers: {
   origin?: string | string[];
   referer?: string | string[];
@@ -204,15 +158,8 @@ const clientMetadata = (redirectUri: string): OAuthClientMetadata => ({
   token_endpoint_auth_method: 'none',
 });
 
-/*
- * Operator-configured static OAuth clients (#342): providers without RFC
- * 7591 dynamic client registration (GitHub, Slack, Google, Spotify) cannot
- * mint Tova a client at consent time. CONNECTORS_OAUTH_CLIENTS is a JSON
- * map from authorization-server ORIGIN to { clientId, clientSecret }; when
- * the probed AS matches, the static client replaces DCR entirely. The vault
- * persists the static client information like any DCR result, so exchange
- * and refresh are unchanged (the SDK drives client_secret_post from it).
- */
+/* Operator-configured static OAuth clients: providers without RFC 7591 DCR cannot mint Tova a client at consent time; a matching static client replaces DCR entirely, persisted like any DCR result. */
+// @see #342
 interface StaticOAuthClient {
   clientId: string;
   clientSecret: string;
@@ -240,8 +187,7 @@ export interface StartConnectorOAuthOptions {
   name: string;
   redirectOrigin: string | undefined;
   userId: string;
-  // Existing connector being re-authed; its vault client registration (if
-  // any) is reused instead of a fresh DCR.
+  // Existing connector being re-authed; its vault client registration (if any) is reused instead of a fresh DCR.
   connectorId?: string;
   existingVault?: ConnectorOAuthVault | null;
 }
@@ -267,10 +213,8 @@ export const startConnectorOAuth = async (
     );
   }
 
-  // Client selection, most-stable first (#342): an operator static client
-  // wins (stable identity across restarts), then a vaulted DCR registration
-  // (only reusable against the AS that issued it — a provider that moved its
-  // authorization_servers gets a fresh DCR), then a fresh DCR.
+  // Client selection, most-stable first: a static client wins, then a vaulted DCR registration (only reusable against its issuing AS), then a fresh DCR.
+  // @see #342
   const staticClient = staticClientFor(probe.authorizationServerUrl);
   const reusableClient =
     options.existingVault?.authorizationServerUrl === probe.authorizationServerUrl
@@ -302,15 +246,12 @@ export const startConnectorOAuth = async (
     }
   }
 
-  // RFC 8707 resource indicator + the per-server scope set, verbatim from
-  // the endpoint's protected-resource doc. Without them a multi-product
-  // authorization server cannot tell which product is being authorized —
-  // Atlassian served its Rovo/Jira site picker for a Trello-only account.
+  // RFC 8707 resource indicator + per-server scope set, verbatim from the protected-resource doc; without them a multi-product AS cannot tell which product is being authorized.
+  // @see #330
   const resource = probe.resourceMetadata?.resource;
   const scope = probe.resourceMetadata?.scopes_supported?.join(' ');
 
-  // State is generated here (not by the SDK): it keys the pending record the
-  // callback matches against, binding the consent to this start call.
+  // State is generated here (not by the SDK): it keys the pending record the callback matches against.
   const state = randomBytes(32).toString('base64url');
   const started = await startAuthorization(probe.authorizationServerUrl, {
     metadata: probe.metadata,
@@ -342,8 +283,7 @@ export const startConnectorOAuth = async (
 export interface CompleteConnectorOAuthOptions {
   code: string;
   state: string;
-  // Caller identity: a pending record is bound to the session that started
-  // it, so a different cookie landing on the callback cannot complete it.
+  // Caller identity: a pending record is bound to the session that started it, so a different cookie cannot complete it.
   userId: string;
 }
 
@@ -356,8 +296,7 @@ const readConnectorVault = (connector: ConnectorDocument): ConnectorOAuthVault |
   }
 };
 
-// Read of the encrypted vault; also used by the re-auth path in the routes
-// to hand the stored DCR client registration back to startConnectorOAuth.
+// Read of the encrypted vault; also used by the re-auth path to hand the stored DCR registration back to startConnectorOAuth.
 export { readConnectorVault };
 
 const vaultFromTokens = (
@@ -369,8 +308,7 @@ const vaultFromTokens = (
   previous?: ConnectorOAuthVault | null,
 ): ConnectorOAuthVault => ({
   accessToken: tokens.access_token,
-  // Providers may omit refresh_token on re-issue; keep the previous one
-  // rather than dropping the grant's only refresh credential.
+  // Providers may omit refresh_token on re-issue; keep the previous one rather than dropping the grant's only refresh credential.
   refreshToken: tokens.refresh_token ?? previous?.refreshToken,
   expiresAt:
     typeof tokens.expires_in === 'number'
@@ -386,11 +324,7 @@ const vaultFromTokens = (
 
 const vaultPayload = (vault: ConnectorOAuthVault): string => JSON.stringify(vault);
 
-/*
- * Complete a consent: match the pending record, exchange the code, and
- * create (fresh connect) or update (re-auth) the connector. Returns the
- * saved document.
- */
+/* Complete a consent: match the pending record, exchange the code, create (fresh) or update (re-auth) the connector. */
 export const completeConnectorOAuth = async ({
   code,
   state,
@@ -408,10 +342,7 @@ export const completeConnectorOAuth = async ({
     throw new ConnectorOAuthError('This sign-in attempt belongs to a different session', 404);
   }
 
-  // The record is kept until the exchange settles: the client callback page
-  // can legitimately race itself (React StrictMode double-fires the effect
-  // in dev), and the provider's code is single-use — a replay is answered
-  // with the provider's error, not a confusing "state not recognised".
+  // The record is kept until the exchange settles: the callback page can race itself (StrictMode), and the provider's code is single-use — a replay gets the provider's error, not "state not recognised".
   let tokens: OAuthTokens;
   try {
     tokens = await exchangeAuthorization(record.authorizationServerUrl, {
@@ -424,8 +355,7 @@ export const completeConnectorOAuth = async ({
     });
   } catch (err) {
     pending.delete(state);
-    // No provider detail is echoed (it can embed response bodies); the
-    // server log carries the specifics.
+    // No provider detail is echoed (it can embed response bodies); the server log carries the specifics.
     console.error('connector oauth exchange failed:', String(err));
     throw new ConnectorOAuthError(
       'Sign-in could not be completed. Start again from settings.',
@@ -472,9 +402,7 @@ export const completeConnectorOAuth = async ({
   return doc;
 };
 
-// Single-flight refresh per connector: concurrent chat turns must not race a
-// rotating refresh token (many providers invalidate a refresh token once
-// used). Keyed by connector id; the loser awaits the winner's promise.
+// Single-flight refresh per connector: concurrent turns must not race a rotating refresh token (many providers invalidate it once used); the loser awaits the winner's promise.
 const refreshInFlight = new Map<string, Promise<ConnectorOAuthVault | null>>();
 
 const refreshVault = async (
@@ -485,9 +413,7 @@ const refreshVault = async (
   const existing = refreshInFlight.get(key);
   if (existing) return existing;
   const promise = (async () => {
-    // Both a refresh token and the DCR client identity are needed to
-    // refresh; missing either means the grant cannot be renewed — the same
-    // terminal state as a rejected refresh: re-consent required.
+    // Both a refresh token and the DCR client identity are needed; missing either is the same terminal state as a rejected refresh: re-consent required.
     if (!vault.refreshToken || !vault.clientInformation) {
       connector.authState = 'needs-reauth';
       await connector.save().catch(() => undefined);
@@ -513,8 +439,7 @@ const refreshVault = async (
       await connector.save();
       return next;
     } catch {
-      // Revoked or expired grant: mark for re-auth; the doc-level marker is
-      // what the UI reads ("re-connect"), no tokens are returned.
+      // Revoked or expired grant: mark for re-auth — the doc-level marker is what the UI reads, no tokens are returned.
       connector.authState = 'needs-reauth';
       await connector.save().catch(() => undefined);
       return null;
@@ -531,19 +456,11 @@ const refreshVault = async (
 const needsRefresh = (vault: ConnectorOAuthVault): boolean =>
   typeof vault.expiresAt === 'number' && vault.expiresAt <= Date.now() + REFRESH_SKEW_MS;
 
-/*
- * mcp.oauth branch of the auth seam (connectorService.authFor): a bearer
- * header from the vault, refreshed proactively when inside the skew window.
- * Returns undefined (anonymous) when the grant is dead — the connector then
- * fails its handshake and drops out of the toolsets, chat proceeds degraded,
- * and the UI shows re-connect.
- */
+/* mcp.oauth branch of the auth seam: a bearer header from the vault, refreshed proactively inside the skew window; undefined when the grant is dead. */
 export const oauthAuthHeaders = async (
   connector: ConnectorDocument,
 ): Promise<Record<string, string> | undefined> => {
-  // A grant already marked dead is only revived by re-auth (which clears
-  // the marker); keep hammering a revoked refresh token per chat turn is a
-  // doomed provider round-trip some providers lock out.
+  // A grant already marked dead is only revived by re-auth; hammering a revoked refresh token per turn is a doomed round-trip some providers lock out.
   if (connector.authState === 'needs-reauth') return undefined;
   const vault = readConnectorVault(connector);
   if (!vault?.accessToken) return undefined;

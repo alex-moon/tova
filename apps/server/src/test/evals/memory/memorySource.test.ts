@@ -6,14 +6,8 @@ import {
 import { MEMORY_SCENARIOS } from '../../../main/evals/memory/corpus';
 import { clearMemoryCorpus, seedMemoryScenario } from '../../../main/evals/memory/memorySource';
 
-/*
- * #289 retrieval integration: seed a scenario's real Mongo rows, run the real
- * retrieval read, and check whether the expected slice ID surfaced. These pin
- * the deterministic outcomes the current ranker (and the deleted filter)
- * produce, so a later ranking change (#294) has a diff to show. #293 replaced
- * the bounded-pool overlap score with whole-corpus BM25, which flips the
- * `out-of-pool` case to a hit; `paraphrase` stays a miss (lexical ranker).
- */
+/* Retrieval integration: seed real Mongo rows, run the real read, check whether the expected slice surfaced — pinning the deterministic outcomes the current ranker produces so a later ranking change has a diff to show. */
+// @see #289 #293 #294
 describe('memory corpus retrieval (#289)', () => {
   afterAll(async () => {
     await clearMemoryCorpus();
@@ -42,10 +36,7 @@ describe('memory corpus retrieval (#289)', () => {
   });
 
   it('materialises file and task slices at the seed date (deterministic fixtures)', async () => {
-    // `Asset`/`Task` are `timestamps: true`, so without pinning the seeder would
-    // stamp `createdAt`/`updatedAt` with wall-clock now and the corpus's `at`
-    // would be silently ignored — a latent trap for any future scenario that
-    // relies on recency ordering. Assert the slice carries the declared date.
+    // `Asset`/`Task` are `timestamps: true`, so without pinning, wall-clock now would silently override the corpus's `at` — a trap for future recency-ordering scenarios.
     for (const id of ['retrieval-file-lease-pets', 'retrieval-task-budget']) {
       const scenario = MEMORY_SCENARIOS.find((s) => s.id === id)!;
       const seed = scenario.seeds.find((s) => s.id === scenario.expectedSliceId)!;
@@ -55,9 +46,8 @@ describe('memory corpus retrieval (#289)', () => {
     }
   });
 
-  // Baseline gap: the paraphrase shares no content word, so lexical overlap
-  // scores zero. This is the case #293 (BM25) / #294 (embeddings) are measured
-  // against; when either lands, this assertion flips to `true`.
+  // Baseline gap: the paraphrase shares no content word, so lexical overlap scores zero — the case BM25/embeddings are measured against.
+  // @see #293 #294
   it('does not surface a paraphrase (lexical baseline)', async () => {
     expect((await retrieve('retrieval-paraphrase-partner')).surfaced).toBe(false);
   });
@@ -71,14 +61,7 @@ describe('memory corpus retrieval (#289)', () => {
   });
 
   it('carries the expected fact into the block exactly when the slice surfaces', async () => {
-    // Stage 3's deterministic backbone asserts the with-arm block carries the
-    // expected fact. The block is built by `matchSnippet` (a 160-char window
-    // centred on the prompt match) under a 1200-char cap, so a fact outside the
-    // window — or pushed out when several slices compete — would make the
-    // backbone unreachable even though the slice surfaced: a fixture defect
-    // masquerading as a stage-3 failure. Conversely, on a by-construction miss
-    // the block is empty, so the fact must be absent. Assert the two agree for
-    // every scenario, not just the ones the baseline surfaces.
+    // The block is built by `matchSnippet` under a 1200-char cap, so a fact outside the window would make stage 3's backbone unreachable (a fixture defect masquerading as a stage-3 failure); on a by-construction miss the block must be empty. Assert both agree for every scenario.
     for (const scenario of MEMORY_SCENARIOS) {
       await clearMemoryCorpus();
       const idMap = await seedMemoryScenario(scenario);

@@ -11,13 +11,8 @@ import {
   startConnectorOAuth,
 } from '../../main/services/oauthConnectors';
 
-/*
- * OAuth engine tests (#327). The MCP SDK's auth module is mocked at the
- * module boundary (it is the battle-tested dependency; what we own is the
- * orchestration, the vault, and the refresh policy). The mocked flow:
- * probe → DCR → PKCE start → (browser) → exchange → encrypted vault.
- */
-
+/* OAuth engine tests: the MCP SDK's auth module is mocked at the module boundary (what we own is the orchestration, the vault, and the refresh policy); flow: probe → DCR → PKCE start → exchange → encrypted vault. */
+// @see #327
 jest.mock('@modelcontextprotocol/sdk/client/auth.js', () => ({
   discoverOAuthProtectedResourceMetadata: jest.fn(),
   discoverAuthorizationServerMetadata: jest.fn(),
@@ -196,8 +191,8 @@ describe('startConnectorOAuth', () => {
       'https://as.example.com',
       expect.objectContaining({
         clientInformation: { client_id: 'dcr-client', client_secret: 'dcr-secret' },
-        // RFC 8707 resource indicator + per-server scopes, verbatim from the
-        // endpoint's protected-resource doc (#330 verification pass).
+        // RFC 8707 resource indicator + per-server scopes, verbatim from the endpoint's protected-resource doc.
+        // @see #330
         resource: 'https://mcp.example.com/mcp',
         scope: 'read:things write:things',
       }),
@@ -344,8 +339,8 @@ describe('completeConnectorOAuth', () => {
 
   it('wraps exchange failures as 422 without echoing provider detail', async () => {
     const { state, userId } = await start();
-    // The SDK error can embed the raw response body — never echoed to the
-    // client (SSRF reflection guard, #327 review).
+    // The SDK error can embed the raw response body — never echoed to the client (reflection guard).
+    // @see #327
     exchangeAuthorization.mockRejectedValue(new Error('invalid_grant: Raw body: secret-thing'));
     const err = await completeConnectorOAuth({ code: 'c', state, userId }).catch(
       (e: ConnectorOAuthError) => e,
@@ -374,9 +369,7 @@ describe('completeConnectorOAuth', () => {
 describe('oauthAuthHeaders (refresh policy)', () => {
   const userId = '507f1f77bcf86cd799439011';
   const createOauthConnector = async (vault: Record<string, unknown>) => {
-    // Vault is written as an already-encrypted-looking envelope; the mocked
-    // decryptEnvelope path below parses it. To keep the real crypto, encrypt
-    // for real via the module under test's sibling (encryptEnvelope).
+    // Vault is written as an already-encrypted-looking envelope for the mocked decrypt path; with real crypto, encrypt via the module under test's sibling.
     const { encryptEnvelope } = await import('../../main/services/crypto');
     return Connector.create({
       type: 'mcp.oauth',

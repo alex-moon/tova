@@ -41,8 +41,7 @@ const seedMessage = async (
     role: string;
   }> = {},
 ) => {
-  // Create a fresh owner per call so seed order never depends on
-  // registration side effects in individual tests.
+  // Create a fresh owner per call so seed order never depends on registration side effects.
   const owner =
     overrides.ownerId ??
     String(
@@ -59,11 +58,8 @@ const seedMessage = async (
   return String(message._id);
 };
 
-/*
- * #233: the tier-era (band, model) feedback tally is gone; these tests cover
- * the thumbs up/down route as a user feature only.
- */
-
+/* The thumbs route covered as a user feature only. */
+// @see #233
 describe('POST /api/messages/:messageId/feedback', () => {
   it('records a vote and returns the updated message with feedback state', async () => {
     const app = createApp();

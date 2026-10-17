@@ -9,11 +9,8 @@ import type {
   AdminTraceDetail,
 } from '../../main/types/admin';
 
-/*
- * #186: the Traces tab renders the joined trace rows and the stats strip,
- * refetches on filter changes, and drills into the run tree. The service
- * connector is mocked like in AdminView.test.tsx (no axios on the floor).
- */
+/* The Traces tab renders trace rows and the stats strip, refetches on filter changes, and drills into the run tree; the service connector is mocked. */
+// @see #186
 
 const listTraces = vi.fn();
 const getTrace = vi.fn();
@@ -186,7 +183,8 @@ describe('AdminLangsmithView (#186)', () => {
     const row = await screen.findByTestId('langsmith-trace-trace-1');
     expect(row).toHaveTextContent('success');
     expect(row).toHaveTextContent('openai/gpt-oss-20b');
-    // #237: the row names the serving provider alongside the model.
+    // The row names the serving provider alongside the model.
+    // @see #237
     expect(row).toHaveTextContent('openai/gpt-oss-20b · groq');
     expect(row).toHaveTextContent('585');
 
@@ -196,8 +194,8 @@ describe('AdminLangsmithView (#186)', () => {
     expect(stats).toHaveTextContent('2');
   });
 
-  // #308: the Memory column shows the guard outcome (+ hit count when the
-  // guard fired), an em dash for pre-#308 traces, and timeout in the error tone.
+  // The Memory column shows the guard outcome (+ hit count), an em dash for pre-metadata traces, timeout in the error tone.
+  // @see #308
   it('renders the workspace memory column per trace (#308)', async () => {
     listTraces.mockResolvedValue(
       tracesPayload([
@@ -237,8 +235,7 @@ describe('AdminLangsmithView (#186)', () => {
     render(<AdminLangsmithView />);
     const stats = await screen.findByTestId('langsmith-stats');
 
-    // A provider-bearing row renders `model · provider`; the legacy
-    // no-provider row renders the model alone.
+    // A provider-bearing row renders `model · provider`; the legacy no-provider row renders the model alone.
     const row = screen.getByTestId('langsmith-model-openai/gpt-oss-20b-groq');
     expect(row).toHaveTextContent('openai/gpt-oss-20b · groq');
     expect(row).toHaveTextContent('400ms');
@@ -323,7 +320,8 @@ describe('AdminLangsmithView (#186)', () => {
     expect(screen.getByTestId('langsmith-run-llm-1')).toHaveTextContent(
       "llm: 'openai/gpt-oss-20b'",
     );
-    // #237: the llm run names its provider and its time-to-first-token.
+    // The llm run names its provider and its time-to-first-token.
+    // @see #237
     expect(screen.getByTestId('langsmith-run-llm-1')).toHaveTextContent(
       'openai/gpt-oss-20b · groq',
     );

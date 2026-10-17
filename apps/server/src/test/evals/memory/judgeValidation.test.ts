@@ -8,11 +8,8 @@ import {
 import type { JudgeVerdict } from '../../../main/evals/memory/helpfulnessEval';
 import type { MemoryScenario } from '../../../main/evals/memory/types';
 
-/*
- * #289 T5 judge-validation logic, exercised with an injected fake judge so no
- * provider or Mongo is needed: the constructed-pair construction, the three-class
- * accuracy/kappa arithmetic, the error exclusion, and the absent-class null.
- */
+/* Judge-validation logic with an injected fake judge: constructed-pair construction, three-class accuracy/kappa arithmetic, error exclusion, absent-class null. */
+// @see #289
 
 const label = (id: string, better: JudgeLabelClass): JudgeLabel => ({
   id,

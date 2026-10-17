@@ -10,14 +10,8 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
 
-    # Post-deploy eval smoke disabled: it was warn-only (continue-on-error) and
-    # only pushed to the LangSmith `tova-evals` dataset, nothing the app reads.
-    # It needed a `mongo:7` service container pull, which failed without Docker
-    # Hub credentials. Re-enable by restoring the `services: mongo` block and the
-    # "Post-deploy evals" step — service images are pulled before any step can
-    # authenticate, so convert it to a login + `docker run` step instead (the
-    # pattern the e2e job uses in ci.yml). The nightly all-models sweep still
-    # runs separately (see .iteration/docs/plan-158-more-evals.md).
+    # Post-deploy eval smoke disabled: warn-only, and its mongo service pull failed without Docker Hub creds.
+    # @see #158
 
     # Runs only on successful pushes to main (not PR events).
     if: >
@@ -46,8 +40,7 @@ jobs:
           chmod 600 ~/.ssh/known_hosts
 
       - name: Deploy to ajmoon.com
-        # DOCKERHUB_* authenticate the deploy host's `docker compose build`
-        # pulls (scripts/deploy.sh pipes the token through ssh stdin).
+        # DOCKERHUB_* authenticate the deploy host's build pulls; deploy.sh pipes the token via ssh stdin.
         env:
           DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
           DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}

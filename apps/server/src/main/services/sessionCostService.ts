@@ -3,26 +3,8 @@ import { Session } from '../models/Session';
 import { estimateCostUsd, loadPriceIndex, priceFor } from './traceStatsCost';
 import type { AdminSessionCostRow, AdminSessionsCostPayload } from '@tova/shared';
 
-/*
- * Per-session cost breakdown for the admin Traces tab (#224). The model rollup
- * comes from LangSmith llm runs; this view comes from our own persisted
- * `Message` rows, which carry the per-role message counts the session table
- * needs (the model rollup above covers model-level spend from LangSmith).
- *
- * Message in = `role:'user'`, message out = `role:'assistant'`. Token totals and
- * cost cover only the assistant messages that carry `usage` — that field only
- * exists from #224 onward, so counts and token/cost totals describe different
- * rows until usage builds up. The skew is expected and surfaced in the UI.
- *
- * Cost is joined at read time from roster prices (USD per 1M, #199), keyed by
- * `(model, provider)` (#235): each turn is priced by the provider that actually
- * served it, since one model's two providers can carry different prices. The
- * group carries the persisted `Message.provider`; a legacy turn with no
- * provider falls back to the model-only pick, same as `traceStatsCost`
- * (unknown ≠ free: a message whose model has no known price contributes nothing
- * to the session cost and, if no message in the session is priced, the row
- * renders `—`).
- */
+/* Per-session cost breakdown from our own Message rows; token/cost totals cover only turns carrying usage (post-#224), priced per (model, provider) with unknown ≠ free. */
+// @see #224 #199 #235
 
 export interface SessionCostOptions {
   /** Window start; messages newer than this are included. */
@@ -36,11 +18,8 @@ const DEFAULT_LIMIT = 50;
 const finiteOr = (value: unknown): number =>
   typeof value === 'number' && Number.isFinite(value) ? value : 0;
 
-// One row per (session, model, provider) produced by the aggregation below.
-// Grouping server-side keeps the result bounded by distinct session×model×
-// provider tuples rather than by every message in the window (the window can be
-// 30 days wide). The provider dimension is what makes dual-price models price
-// correctly (#235): each turn is billed at its serving provider's rate.
+// One row per (session, model, provider): grouping server-side keeps the result bounded; the provider dimension prices dual-provider models correctly.
+// @see #235
 interface GroupedRow {
   _id: { sessionId: unknown; modelName?: string | null; provider?: string | null };
   messagesIn: number;
@@ -57,10 +36,8 @@ export const sessionCostBreakdown = async (
 ): Promise<AdminSessionsCostPayload> => {
   const limit = options.limit ?? DEFAULT_LIMIT;
 
-  // Only assistant messages can carry token usage, but message-in counts come
-  // from user rows, so the grouping covers both roles. `usageCount` counts
-  // assistant rows that actually carry usage, so a model whose only turns
-  // predate #224 is not priced at $0 (unknown ≠ free).
+  // Grouping covers both roles; `usageCount` counts assistant rows with usage so a legacy model is not priced at $0 (unknown ≠ free).
+  // @see #224
   const grouped = await Message.aggregate<GroupedRow>([
     { $match: { timestamp: { $gte: options.since } } },
     {
@@ -91,9 +68,7 @@ export const sessionCostBreakdown = async (
     },
   ]);
 
-  // One roster read prices every group: the index resolves `(model, provider)`
-  // with a model-only fallback for legacy turns (same resolver as the LangSmith
-  // rollup).
+  // One roster read prices every group, with a model-only fallback for legacy turns.
   const priceIndex = await loadPriceIndex();
 
   interface Acc {
@@ -128,17 +103,13 @@ export const sessionCostBreakdown = async (
 
     let inputTokens = finiteOr(row.inputTokens);
     const outputTokens = finiteOr(row.outputTokens);
-    // Fallback (plan OC-7): a provider that reported only a total with no
-    // split must not be silently priced at `$0`. Treat the total as input so
-    // the turn still contributes an estimate.
+    // A provider that reported only a total with no split must not be priced at $0; treat the total as input.
     if (inputTokens === 0 && outputTokens === 0) {
       inputTokens = finiteOr(row.totalTokens);
     }
     acc.inputTokens += inputTokens;
     acc.outputTokens += outputTokens;
-    // A (session, model) group with no logged usage (all turns before #224)
-    // has no known spend: do NOT price it at `$0`, which would misreport
-    // "unlogged" as "free". Only groups that carry token data contribute cost.
+    // A group with no logged usage has no known spend: unlogged must not misreport as free.
     const cost =
       row.usageCount > 0
         ? estimateCostUsd(

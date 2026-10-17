@@ -10,8 +10,8 @@ jest.mock('../../main/services/lokiLogs', () => ({
   queryRetainedLogs: jest.fn(),
 }));
 
-// #217: the provider catalog call is mocked — the route suite pins the guard,
-// validation and found/miss/failure mapping, never a live provider request.
+// The provider catalog call is mocked — the suite pins the guard, validation and found/miss/failure mapping, never a live provider request.
+// @see #217
 jest.mock('../../main/services/providerModelLookup', () => ({
   lookupProviderModel: jest.fn(),
 }));
@@ -23,8 +23,6 @@ const cookieOf = (res: request.Response) => {
   return Array.isArray(cookie) ? cookie : [cookie];
 };
 
-// registers the user, promotes them in Mongo, then re-logs in so the JWT
-// carries the admin role (the guard reads role from the token)
 const registerAdmin = async (app: ReturnType<typeof createApp>, email: string) => {
   await request(app).post('/api/auth/register').send({ email, password: 'password123' });
   await User.updateOne({ email }, { role: 'admin' });
@@ -210,8 +208,8 @@ describe('admin routes', () => {
     expect(res.status).toBe(401);
   });
 
-  // Drift test for the shared contract (issue #20): the wire payload of
-  // GET /api/admin/users must type-match AdminUser field-for-field.
+  // Drift test for the shared contract: the wire payload of GET /api/admin/users must type-match AdminUser field-for-field.
+  // @see #20
   it('returns user payloads matching the shared AdminUser contract', async () => {
     const app = createApp();
     const cookie = await registerAdmin(app, 'contract-admin@example.com');
@@ -255,8 +253,8 @@ describe('admin routes', () => {
       expect(nonAdmin.status).toBe(403);
     });
 
-    // #234: one row per model, its providers nested. The tier column and the
-    // feedback tallies are gone; TTFT rides each provider entry.
+    // One row per model, its providers nested; the tier column and feedback tallies are gone.
+    // @see #234
     it('lists one roster row per model with nested providers and TTFT', async () => {
       const app = createApp();
       const cookie = await registerAdmin(app, 'models-admin@example.com');
@@ -312,8 +310,8 @@ describe('admin routes', () => {
       });
     });
 
-    // #168/#213: the cool-off lives per provider now; the error tallies stay
-    // keyed provider+model and ride the same payload.
+    // The cool-off lives per provider now; the error tallies stay keyed provider+model and ride the same payload.
+    // @see #168 #213
     it('surfaces per-provider disabledUntil and per-model error tallies in the payload', async () => {
       const app = createApp();
       const cookie = await registerAdmin(app, 'models-cooloff@example.com');
@@ -331,8 +329,8 @@ describe('admin routes', () => {
         eligible: true,
         providers: [{ provider: 'fireworks', modelId: 'accounts/fireworks/models/test-healthy' }],
       });
-      // #175 tally rows (modelrouteerrors) are the single diagnostics
-      // mechanism — the admin table reads them (OQ-7 lean consolidation).
+      // The tally rows are the single diagnostics mechanism the admin table reads.
+      // @see #175
       await ModelRouteError.create({
         provider: 'deepinfra',
         model: 'test-cooling',
@@ -517,8 +515,8 @@ describe('admin routes', () => {
         expect(missing.status).toBe(404);
       });
 
-      // #234: a provider edit must preserve the system-owned rolling TTFT and
-      // cool-off; only modelId/enabled are operator-owned.
+      // A provider edit must preserve the system-owned rolling TTFT and cool-off; only modelId/enabled are operator-owned.
+      // @see #234
       it('preserves provider TTFT and cool-off across an edit', async () => {
         const until = new Date(Date.now() + 60 * 60 * 1000);
         const doc = await ModelRoster.create({
@@ -578,9 +576,8 @@ describe('admin routes', () => {
         expect(created.status).toBe(409);
       });
 
-      // #199: prices are admin-editable config; the list surfaces them and the
-      // weighted score reads them. Non-negative finite numbers only (sub-cent
-      // rates like 0.085 are legal, so not integers).
+      // Prices are admin-editable config; non-negative finite numbers only (sub-cent rates are legal, so not integers).
+      // @see #199
       it('creates, updates, lists and clears model prices', async () => {
         const created = await request(app)
           .post('/api/admin/models')
@@ -779,13 +776,8 @@ describe('admin retained logs endpoint (#179)', () => {
   });
 });
 
-/*
- * POST /api/admin/model-compare (issue #129): shared-core direct model
- * comparison behind the admin guard. Only validation is asserted here —
- * the runner itself (connectors, agent path) is unit-tested in
- * services/modelCompare.test.ts, so this suite never pays for a real
- * completion call.
- */
+/* Model-compare route: only validation is asserted — the runner is unit-tested in modelCompare.test.ts, so this suite never pays for a real completion. */
+// @see #129
 describe('POST /api/admin/model-compare (issue #129)', () => {
   it('rejects the unauthenticated and non-admin', async () => {
     const app = createApp();
@@ -833,11 +825,8 @@ describe('POST /api/admin/model-compare (issue #129)', () => {
   });
 });
 
-/*
- * GET /api/admin/model-lookup (#217): resolves provider-owned model details
- * behind the admin guard. The service is mocked — the contract under test here
- * is the route (guard, validation, found/miss/failure mapping, key isolation).
- */
+/* Model-lookup route: the service is mocked — the contract under test is the route (guard, validation, found/miss/failure mapping, key isolation). */
+// @see #217
 describe('GET /api/admin/model-lookup (#217)', () => {
   const lookupProviderModel = jest.requireMock('../../main/services/providerModelLookup')
     .lookupProviderModel as jest.Mock;
@@ -913,8 +902,8 @@ describe('GET /api/admin/model-lookup (#217)', () => {
     expect(miss.body).toEqual({ found: false });
   });
 
-  // #234: Fireworks is a first-class lookup provider; it reports context/vision
-  // but no prices (those stay absent, never 0).
+  // Fireworks is a first-class lookup provider; it reports context/vision but no prices (absent, never 0).
+  // @see #234
   it('resolves a fireworks catalog entry without prices', async () => {
     const app = createApp();
     const cookie = await registerAdmin(app, 'lookupfw@example.com');

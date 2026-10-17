@@ -94,12 +94,8 @@ describe('#112 golden set', () => {
     expect(resolveExpectedContent('any literal', () => 'unused')).toBe('any literal');
   });
 
-  /*
-   * The eval runner is not in CI, so a @repo: path that no longer resolves
-   * against the real repo (as `@repo:README.md` did after the #257 monorepo
-   * move — the reader's root is `apps/`, not the git root) fails silently
-   * until the next live run. Pin every marker against the actual reader.
-   */
+  /* The runner is not in CI, so a @repo: marker that no longer resolves fails silently until the next live run — pin every marker against the actual reader. */
+  // @see #257
   it('every @repo: marker in CASES resolves against the real repo reader', () => {
     for (const testCase of CASES) {
       const markers = [

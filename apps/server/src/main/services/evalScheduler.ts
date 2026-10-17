@@ -1,42 +1,16 @@
-/*
- * #225 scheduled eval runs. Modelled on `assetJobService`'s in-process
- * poller (no cron dependency is present, and one daily job does not justify
- * adding one). A tick is a no-op unless the current UTC day still has no run
- * and the configured start hour has passed, so restarts do not double-run;
- * a catch-up check closes the "redeploy around midnight" gap (OQ1 fallback).
- * The suites are injectable so tests drive them with fake timers.
- *
- * #289 T8: one tick now runs **both** eval suites — the tool-use golden suite
- * and the memory stage-2 (retrieval) suite — each with its **own** per-kind
- * idempotency, so a tool-use run today does not suppress the memory run (and
- * vice versa). They run **strictly sequentially** (D19): the two suites share
- * one reserved `evalUserId`, so they must never overlap. The lease
- * (`findRunning`, in the run services) stays **global** (D14) as the backstop
- * for a manual "Run now" overlapping a tick.
- *
- * Eval failures never crash the server: every suite is wrapped, each run
- * records its own `error` row, and a stale `running` lease older than the
- * sweep window is reclaimed at start (OQ7 fallback, mirroring
- * `requeueStaleAssetJobs`).
- */
+/* Scheduled eval runs: an in-process poller (modelled on assetJobService); a tick is a no-op unless the UTC day has no run per kind; both suites run strictly sequentially; failures never crash the server. */
+// @see #225 #289
 import { EvalRunRecord } from '../models/EvalRunRecord';
 
 const DEFAULT_TICK_MS = 15 * 60 * 1000;
 
-// A stranded `running` row (server died mid-run) blocks all future runs
-// under the serialisation lease, so the scheduler reclaims one older than
-// this at start. 2× a generous suite duration.
+// A stranded `running` row blocks all future runs, so the scheduler reclaims one older than this (2× a generous suite duration) at start.
 export const STALE_EVAL_RUNNING_MS = 2 * 60 * 60 * 1000;
 
 /** The two suites that share the `evalruns` collection (D9). */
 export type EvalRunKind = 'tool-use' | 'memory';
 
-/**
- * One suite a tick can run: a **per-kind** idempotency check plus the run
- * itself. The scheduler executes suites in array order and awaits each to
- * completion before the next, so the shared `evalUserId` fixtures cannot
- * clobber each other (D19).
- */
+/* One suite a tick can run: a per-kind idempotency check plus the run; suites execute in array order so the shared fixtures cannot clobber each other. */
 export interface EvalSuite {
   kind: EvalRunKind;
   /** True when this kind already ran in the current UTC day. */
@@ -50,12 +24,7 @@ export interface EvalSchedulerOptions {
   /** Earliest UTC hour (0–23) a daily run may start. Default 0 (midnight). */
   hourUtc?: number;
   tickMs?: number;
-  /**
-   * Boot self-heal for a stranded `running` lease. Injectable so timer tests
-   * can disarm the Mongo call (fake timers otherwise stall the driver). Called
-   * with no kind, so it reclaims a stranded row of **either** kind — correct,
-   * because the lease is global (D14).
-   */
+  /** Boot self-heal for a stranded `running` lease; called with no kind because the lease is global. Injectable so timer tests can disarm the Mongo call. */
   reclaimStaleRuns?: (maxAgeMs?: number, kind?: EvalRunKind) => Promise<unknown>;
 }
 
@@ -67,12 +36,7 @@ let busy = false;
 export const utcDayStart = (date: Date): Date =>
   new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
 
-/**
- * True when a run already exists for the current UTC day. Used by each suite's
- * per-kind gate (and the boot catch-up check). `kind` scopes the check so the
- * daily suite can run both kinds in one window (D14); omit it for the legacy
- * any-kind check.
- */
+/** True when a run already exists for the current UTC day, scoped by kind when given; any status counts (a failed run still occupied the window). */
 export const hasRunForUtcDay = async (
   now: Date = new Date(),
   kind?: EvalRunKind,
@@ -82,8 +46,7 @@ export const hasRunForUtcDay = async (
   const existing = await EvalRunRecord.findOne({
     ...(kind ? { kind } : {}),
     startedAt: { $gte: start, $lt: end },
-    // Any status counts: a failed run still occupied the window; re-running
-    // is the manual "Run now" path, not the scheduler's job.
+    // Any status counts: a failed run still occupied the window; re-running is the manual "Run now" path.
     status: { $in: ['running', 'done', 'error'] },
   })
     .select({ _id: 1 })
@@ -92,12 +55,7 @@ export const hasRunForUtcDay = async (
   return existing !== null;
 };
 
-/**
- * Reclaims a stranded `running` lease older than `maxAgeMs`. Mirrors
- * `requeueStaleAssetJobs`: the lease is settled to `error` (the run never
- * finished) so the next tick can proceed. `kind` scopes the sweep; the
- * scheduler omits it because the lease is global (D14).
- */
+/** Reclaims a stranded `running` lease older than `maxAgeMs`, settling it to `error`; scopes by kind when given. */
 export const reclaimStaleEvalRuns = async (
   maxAgeMs: number = STALE_EVAL_RUNNING_MS,
   kind?: EvalRunKind,
@@ -118,11 +76,7 @@ const dueNow = (opts: EvalSchedulerOptions, now: Date): boolean => {
   return now.getUTCHours() >= hour;
 };
 
-/**
- * One scheduler tick: catch-up-aware, idempotent per kind, never stacking.
- * Suites run strictly sequentially (D19); one suite's failure is caught so it
- * cannot skip the next (each run already records its own `error` row).
- */
+/** One scheduler tick: catch-up-aware, idempotent per kind, never stacking; one suite's failure is caught so it cannot skip the next. */
 export const runEvalSchedulerTick = async (
   suites: EvalSuite[],
   opts: EvalSchedulerOptions,
@@ -131,9 +85,7 @@ export const runEvalSchedulerTick = async (
   if (!opts.enabled) return;
   if (!dueNow(opts, now)) return;
   for (const suite of suites) {
-    // Both the per-kind idempotency check and the run are isolated per suite:
-    // a transient Mongo error in one suite's `hasRun` must not skip the next
-    // suite for the tick (the run service settles its own lease to `error`).
+    // Both the idempotency check and the run are isolated per suite: a transient Mongo error in one suite's `hasRun` must not skip the next.
     try {
       if (await suite.hasRun(now)) continue;
       await suite.run();

@@ -1,20 +1,5 @@
-/*
- * #294: create the Atlas Vector Search index over `workspace_embeddings`.
- *
- *   npx tsx scripts/create-vector-index.ts
- *   npm run db:vector-index
- *
- * Atlas-only: `$vectorSearch` / `createSearchIndex` do not exist on local
- * `mongod`, so this refuses a non-`mongodb+srv://` MONGODB_URL. Run it against
- * the live cluster after `npm run db:backfill-embeddings`; re-running is safe
- * (the index is existence-checked).
- *
- * If the live tier disallows programmatic creation (some docs say shared M0
- * requires the Atlas UI), create the same definition in the UI:
- *   vector  path=vector  numDimensions=<EMBEDDING_DIM>  similarity=cosine
- *   filter  path=model
- *   filter  path=userId
- */
+/* Create the Atlas Vector Search index over `workspace_embeddings`; Atlas-only and safe to re-run. */
+// @see #294
 import 'dotenv/config';
 import { MongoClient } from 'mongodb';
 import { buildMongoUri } from '../apps/shared/src/main/mongoUri';
@@ -33,9 +18,7 @@ const main = async (): Promise<void> => {
   const client = new MongoClient(url);
   try {
     await client.connect();
-    // `db()` with no name uses the database from the connection string (the
-    // app connects to the same one), so a non-`tova` Atlas/eval target is
-    // honoured instead of silently creating the index on `tova`.
+    // `db()` with no name uses the connection string's database, honouring a non-`tova` Atlas/eval target.
     const collection = client
       .db()
       .collection('workspace_embeddings') as unknown as SearchIndexManager;

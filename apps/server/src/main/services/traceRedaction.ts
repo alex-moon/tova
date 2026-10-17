@@ -1,10 +1,5 @@
-// Issue #145 audit: LangSmith trace payloads are a leak surface. The
-// exporter (node_modules/@mastra/langsmith/dist/index.js) posts
-// `span.input` / `span.output` / `span.errorInfo` verbatim — prompt content
-// and retrieved chat text land in the LangSmith project. redactForLog()
-// covers console emission only, so this module redacts the same policy at
-// the trace transport: a subclass hook rewrites every exported span payload
-// before it reaches RunTree.
+// Trace payloads are a leak surface: redact every exported span payload at the transport, beyond console-only log redaction.
+// @see #145
 
 import type { AnyExportedSpan, TracingEvent } from '@mastra/core/observability';
 import { LangSmithExporter } from '@mastra/langsmith';

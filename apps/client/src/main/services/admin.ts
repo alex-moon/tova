@@ -16,9 +16,7 @@ import type {
   AdminSessionsCostPayload,
 } from '../types/admin';
 
-// Normalised admin failure: message comes from the server response when one
-// arrived, otherwise the call's fallback. Views catch AdminError and read
-// .message without importing axios (PR #27 review).
+// Normalised admin failure: server message when one arrived, else the fallback; views read .message without importing axios.
 export class AdminError extends Error {
   constructor(message = 'Something went wrong.', options?: { cause?: unknown }) {
     super(message, options);
@@ -34,8 +32,7 @@ const toAdminError = (err: unknown, fallback: string): AdminError => {
   return new AdminError(fallback, { cause: err });
 };
 
-// Connector separating views from axios. All admin API traffic goes through
-// this class; views should not import axios directly (PR #19 review).
+// Connector separating views from axios; all admin API traffic goes through this class.
 const AdminService = {
   async listUsers(): Promise<AdminUser[]> {
     try {
@@ -67,11 +64,8 @@ const AdminService = {
 
 export default AdminService;
 
-// Model inventory with CRUD (issue #104, roster-shaped in #234): list,
-// create, update, delete roster models in the admin view. Mutations return the
-// row id (POST/PUT) or nothing (DELETE); callers refetch for the authoritative
-// list. #168: the list also carries per-model error diagnostics (deploy wipes
-// logs, so the shapes accumulate in Mongo instead).
+// Model inventory CRUD over roster rows; mutations return the row id, callers refetch; the list carries per-model error diagnostics.
+// @see #104 #234 #168
 export type ModelInput = Partial<
   Omit<AdminModel, 'id' | 'providers' | 'contextLength' | 'inputPrice' | 'outputPrice'>
 > & {
@@ -116,9 +110,8 @@ const deleteModel = async (id: string): Promise<void> => {
   }
 };
 
-// #217/#234: provider catalog lookup. DeepInfra reports context/prices/vision;
-// Fireworks reports context/vision but no prices. The response's `found: false`
-// is a normal miss, not an error.
+// Provider catalog lookup; `found: false` is a normal miss, not an error.
+// @see #217 #234
 const lookupModel = async (
   provider: 'deepinfra' | 'fireworks',
   model: string,
@@ -133,9 +126,8 @@ const lookupModel = async (
   }
 };
 
-// Direct model comparison (issue #129): one prompt through the existing
-// agent on chosen model rows. Row shape mirrors the models payload so the
-// view can forward selections straight from the inventory table.
+// Direct model comparison: one prompt through the existing agent on chosen model rows.
+// @see #129
 const compareModels = async (
   prompt: string,
   models: { provider: string; model: string; contextLength?: number }[],
@@ -167,9 +159,8 @@ export interface ListLogsParams {
   limit?: number;
 }
 
-// Retained logs (#179): one time-window page from Grafana Cloud Loki. No
-// cursor — the view re-queries the window; `configured`/`error` describe
-// degradation when Loki is absent or unreachable.
+// Retained logs: one time-window page from Grafana Cloud Loki; no cursor.
+// @see #179
 const listLogs = async (params: ListLogsParams = {}): Promise<AdminLogsPayload> => {
   try {
     const res = await axios.get<AdminLogsPayload>('/api/admin/logs', { params });
@@ -181,9 +172,8 @@ const listLogs = async (params: ListLogsParams = {}): Promise<AdminLogsPayload> 
 
 const AdminLogsService = { listLogs };
 
-// PAT management (#184): the Access tab's list/generate/revoke. The create
-// response carries the plaintext token exactly once — nothing here ever
-// stores or re-fetches it.
+// PAT list/generate/revoke; the create response carries the plaintext token exactly once.
+// @see #184
 const listPats = async (): Promise<AdminPatsPayload> => {
   try {
     const res = await axios.get<AdminPatsPayload>('/api/admin/pats');
@@ -212,8 +202,8 @@ const revokePat = async (id: string): Promise<void> => {
 
 const AdminPatsService = { listPats, createPat, revokePat };
 
-// LangSmith read view (#186): recent traces with a drill-down tree, and the
-// per-model stats rollup — the evidence-first routing loop, in-app.
+// LangSmith read view: recent traces with a drill-down tree, and the per-model stats rollup.
+// @see #186
 export interface ListTracesParams {
   errorsOnly?: boolean;
   model?: string;
@@ -255,7 +245,8 @@ const listStats = async (days = 7): Promise<AdminLangsmithStatsPayload> => {
   }
 };
 
-// #224: per-session cost breakdown from our own Message rows (no LangSmith).
+// Per-session cost breakdown from our own Message rows (no LangSmith).
+// @see #224
 const listSessionCosts = async (days = 7): Promise<AdminSessionsCostPayload> => {
   try {
     const res = await axios.get<AdminSessionsCostPayload>('/api/admin/langsmith/sessions', {
@@ -269,9 +260,8 @@ const listSessionCosts = async (days = 7): Promise<AdminSessionsCostPayload> => 
 
 const AdminLangsmithService = { listTraces, getTrace, listStats, listSessionCosts };
 
-// Eval rollup read view (#225): recent suite runs and one run's per-case
-// breakdown, plus the manual "Run now" trigger. The run starts in the
-// background server-side, so runNow resolves as soon as the lease exists.
+// Eval rollup read view: recent suite runs, per-case breakdown, manual "Run now" (starts in the background).
+// @see #225
 const listEvalRuns = async (limit?: number): Promise<AdminEvalRunsPayload> => {
   try {
     const res = await axios.get<AdminEvalRunsPayload>('/api/admin/evals/runs', {

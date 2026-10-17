@@ -1,17 +1,8 @@
 import { getJwtSecret } from './jwt';
 import type { LlmProvider } from '../services/llmTypes';
 
-/*
- * Central, typed server config surface (issue #142). One module over every
- * env var currently read in apps/server/src. Semantics are byte-identical to the
- * call sites: same `||`/`??` operators, same fallbacks, same truthiness —
- * no new validation, no new required vars, no parsing (consumers keep their
- * own Number.parseInt/NaN handling until the follow-up sweep).
- *
- * Accessors are lazy functions, not module-scope constants: some entrypoints
- * load env after import and tests mutate process.env directly (see
- * storageService.ts for the original write-up of that constraint).
- */
+// Central typed config surface; lazy accessors because env loads after import in some entrypoints and tests mutate process.env.
+// @see #142
 
 export { getJwtSecret, JWT_SECRET_ENV_VAR } from './jwt';
 
@@ -64,21 +55,16 @@ export const config = {
     },
   },
 
-  // #340: Firecrawl web-data API, used as the fetch_url fallback when a plain
-  // fetch is blocked (JS-heavy pages, anti-bot/WAF challenges). Optional;
-  // unset means fetch_url keeps its native-only behaviour.
+  // Firecrawl web-data API, the fetch_url fallback for blocked pages; unset keeps native-only behaviour.
+  // @see #340
   firecrawl: {
     get apiKey(): string | undefined {
       return process.env.FIRECRAWL_API_KEY;
     },
   },
 
-  // #340: TTL (in days) for agent-side assets (origin 'system-side' — scraped
-  // pages the agent reads via read_file). The horizon is a staleness policy:
-  // within it, follow-up questions reuse the saved copy instead of paying for
-  // a re-scrape; past it, the page is expired AND stale ("something might
-  // well have changed"), so the next scrape re-downloads. 0 disables expiry
-  // (rows kept indefinitely).
+  // TTL in days for agent-side scraped assets — a staleness policy for reuse vs re-scrape; 0 disables expiry.
+  // @see #340
   agentAssets: {
     get ttlDays(): number {
       const raw = process.env.AGENT_ASSET_TTL_DAYS;
@@ -88,24 +74,21 @@ export const config = {
     },
   },
 
-  // Provider API keys. Mastra reads these implicitly for inference; the
-  // model-lookup service (#217) reads DeepInfra's catalog directly, so the
-  // key is surfaced here rather than reached for ad hoc.
+  // Provider API keys surfaced here so consumers have one place to read credentials.
+  // @see #217
   providers: {
     get deepinfraApiKey(): string | undefined {
       return process.env.DEEPINFRA_API_KEY;
     },
-    // #232: Mastra reads FIREWORKS_API_KEY implicitly for inference; surfaced
-    // here for parity with the DeepInfra key so config consumers have one
-    // place to read provider credentials.
+    // Surfaced for parity with the DeepInfra key; Mastra reads it implicitly for inference.
+    // @see #232
     get fireworksApiKey(): string | undefined {
       return process.env.FIREWORKS_API_KEY;
     },
   },
 
-  // #179: Grafana Cloud (hosted Loki) for retained logs. `url` is the full
-  // push URL (as supplied by Grafana Cloud); the read side strips the
-  // /loki/api/v1/push suffix to reach the query API on the same host.
+  // Grafana Cloud hosted Loki for retained logs; url is the push URL and the read side derives the query API host.
+  // @see #179
   loki: {
     get url(): string | undefined {
       return process.env.LOKI_URL;
@@ -124,10 +107,8 @@ export const config = {
     },
   },
 
-  // #253: workspace memory (retrieval across chats and files). Off by default
-  // — a wrong injection pollutes every turn, so the block ships opt-in until
-  // the gate evals exist. The block's character budget is BLOCK_CAP in
-  // workspaceRetrievalService (the library index competes for the same budget).
+  // Workspace-memory retrieval across chats and files; off by default until the gate evals exist.
+  // @see #253
   workspaceMemory: {
     get enabled(): boolean {
       const raw = process.env.WORKSPACE_MEMORY_ENABLED;
@@ -136,12 +117,8 @@ export const config = {
     },
   },
 
-  // #238: the aux model source for the small, latency-insensitive LLM calls
-  // (chat title, follow-ups, prompt metrics, enrichment).
-  // Replaces the tier-era `ROUTER_SMALL_MODEL`/`ROUTER_GUARD_MODEL` reads. The
-  // owner retired small models for *chat routing* only; a single cheap fixed
-  // aux model is kept. Default is the retired guard model on its old provider
-  // so the wire behaviour is unchanged.
+  // Aux model for small latency-insensitive calls; default keeps the retired guard model's wire behaviour.
+  // @see #238
   aux: {
     get model(): string {
       return process.env.AUX_MODEL || 'openai/gpt-oss-20b';
@@ -151,23 +128,8 @@ export const config = {
     },
   },
 
-  // #289: the stage-3 helpfulness eval. The judge is deliberately a different
-  // model from the gate (`openai/gpt-oss-20b`) so self-preference bias cannot
-  // flatter the gate. Owner-selected (2026-10-14, judge-probe sweep): the
-  // original ticket pin (`openai/gpt-oss-120b` on Groq) kept the same family
-  // as the gate, and the validation sweep found `Qwen/Qwen3-235B-A22B-Instruct-
-  // 2507` scores 100%/100% on the judge-validation sets (vs the incumbent's
-  // 81.8%/100%), is a different family from the gate AND from the responder
-  // default (`zai-org/GLM-5.3-Flash`), rides the DeepInfra key the embeddings
-  // already use, and is the cheapest of the validated finalists. Overridable
-  // so a judge swap (OQ2/OQ29) needs no code change.
-  //
-  // The responder is the roster default (`resolveScheduledModels`), but pinned
-  // here (T14c) so the arm is not moved silently by a `ROSTER_SEED` edit and a
-  // model sweep (OQ24/OQ29) is a config change. `responderModel`/`Provider`
-  // return `undefined` when unset, so the caller keeps the roster fallback.
-  // `paceMs` (T15d) is the inter-call delay that keeps a ~4-call-per-scenario
-  // run under the provider RPM (OQ32).
+  // Helpfulness eval models: judge is a different family than the gate; responder and paces pinned so sweeps are config changes.
+  // @see #289
   memoryEval: {
     get judgeModel(): string {
       return process.env.MEMORY_JUDGE_MODEL || 'Qwen/Qwen3-235B-A22B-Instruct-2507';
@@ -191,19 +153,13 @@ export const config = {
       const parsed = raw === undefined || raw === '' ? NaN : Number(raw);
       return Number.isFinite(parsed) && parsed >= 0 ? parsed : 1000;
     },
-    // T15c: the gate stage makes one aux call per case (36 at n=36), which can
-    // trip the aux provider's RPM. 2000ms keeps a burst under Groq's 30 RPM;
-    // config-sourced so the budget (OQ32) is a config change.
+    // Gate pace: keeps a per-case aux burst under the provider RPM.
     get gatePaceMs(): number {
       const raw = process.env.MEMORY_EVAL_GATE_PACE_MS;
       const parsed = raw === undefined || raw === '' ? NaN : Number(raw);
       return Number.isFinite(parsed) && parsed >= 0 ? parsed : 2000;
     },
-    // T5: judge validation makes one judge call per pair (~37 across both sets)
-    // as a fast single-token burst, which trips Groq's 30 RPM at the 1000ms
-    // stage-3 pace (observed live: a 429 at 1s spacing). 2000ms matches the
-    // gate's rate-limit headroom; config-sourced so the budget (OQ32) is a
-    // config change.
+    // Judge pace: keeps the validation burst under Groq's 30 RPM.
     get judgePaceMs(): number {
       const raw = process.env.MEMORY_EVAL_JUDGE_PACE_MS;
       const parsed = raw === undefined || raw === '' ? NaN : Number(raw);
@@ -217,15 +173,8 @@ export const config = {
     },
   },
 
-  // #294: workspace-memory semantic retrieval (embeddings + Atlas Vector
-  // Search). `model` and `dim` are config-driven because the Atlas index
-  // dimension is fixed at creation time: switching model is a config change
-  // plus a re-index and re-backfill (the owner's "probe bge-m3/gte" path).
-  // `timeoutMs` bounds the query embed + `$vectorSearch` on the chat hot path
-  // before retrieval degrades to the BM25 result; `backfillTimeoutMs` bounds
-  // one backfill batch (64 passages cold-embeds in seconds — the hot-path
-  // budget times out there). All parse+fallback so a malformed env degrades to
-  // the default.
+  // Workspace-memory semantic retrieval; dim is fixed by the Atlas index so a model switch is config plus re-index.
+  // @see #294
   embeddings: {
     get model(): string {
       return process.env.EMBEDDING_MODEL || 'BAAI/bge-base-en-v1.5';
@@ -247,16 +196,13 @@ export const config = {
     },
   },
 
-  // #254 (epic #251): the task sequencer's budget knobs. `maxSteps` is the
-  // step cap (above the chat cap of 12, below a runaway); `maxCostUsd` is the
-  // per-task spend ceiling. Both parse+fallback like `aux.enrichmentTimeoutMs`
-  // so a malformed env degrades to the default rather than a NaN budget.
+  // Task sequencer budget knobs; a malformed env degrades to the default rather than a NaN budget.
+  // @see #254 #251
   task: {
     get maxSteps(): number {
       const raw = process.env.TASK_MAX_STEPS;
       const parsed = raw === undefined || raw === '' ? NaN : Number(raw);
-      // Floor *before* the positivity guard: `0.5` is positive but floors to a
-      // zero-step budget, which must degrade to the default, not become 0.
+      // Floor before the positivity guard: 0.5 floors to zero, which must degrade to the default, not become 0.
       const floored = Math.floor(parsed);
       return Number.isFinite(parsed) && floored > 0 ? floored : 25;
     },
@@ -267,10 +213,8 @@ export const config = {
     },
   },
 
-  // #225: scheduled eval suite. Off by default — a fresh deploy must not
-  // start live provider calls unattended (OQ4). `schedule` is `off|daily`;
-  // `hourUtc` is the earliest UTC hour a daily run may start. Names follow
-  // the runner's existing singular `TOVA_EVAL_*` family (TOVA_EVAL_MODEL).
+  // Scheduled eval suite; off by default so a fresh deploy makes no unattended provider calls.
+  // @see #225
   evals: {
     get schedule(): string {
       return process.env.TOVA_EVAL_SCHEDULE || 'off';
@@ -281,9 +225,7 @@ export const config = {
     get models(): string | undefined {
       return process.env.TOVA_EVAL_MODELS;
     },
-    // Single-model fallback when `models` is unset (the runner's existing
-    // `TOVA_EVAL_MODEL` / `TOVA_EVAL_PROVIDER` pair). An unset pair resolves to
-    // a roster default (cheapest roster model) in `resolveScheduledModels`.
+    // Single-model fallback when models is unset; an unset pair resolves to a roster default.
     get model(): string | undefined {
       return process.env.TOVA_EVAL_MODEL;
     },

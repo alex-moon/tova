@@ -46,8 +46,7 @@ describe('toolDegrade helpers (#82)', () => {
     const ctxA = asCtx();
     markToolFailed(ctxA, 'mcp_set/tool');
     expect(toolIsFailed(ctxA, 'mcp_set/tool')).toBe(true);
-    // A fresh RequestContext (fresh completion) has not seen the failure: no
-    // session-long leakage, which mirrors the per-completion scope.
+    // A fresh RequestContext (fresh completion) has not seen the failure — no session-long leakage, mirroring the per-completion scope.
     expect(toolIsFailed(asCtx(), 'mcp_set/tool')).toBe(false);
   });
 

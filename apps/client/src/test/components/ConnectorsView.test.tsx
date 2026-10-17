@@ -61,8 +61,8 @@ describe('ConnectorsView (#331)', () => {
   it('renders the live grid in market-share order with status badges', async () => {
     render(<ConnectorsView />);
     await screen.findByTestId('connector-card-dropbox');
-    // #333 wash-up: the grid shows the verified ("golden six") set only —
-    // watchlisted entries stay in the catalog as data but never render.
+    // The grid shows only the verified ("golden six") set; watchlisted entries never render.
+    // @see #333
     const ids = ['dropbox', 'notion', 'trello', 'linear', 'atlassian', 'github'];
     for (let i = 0; i < ids.length; i += 1) {
       expect(screen.getByTestId(`connector-card-${ids[i]}`)).toBeInTheDocument();
@@ -72,8 +72,7 @@ describe('ConnectorsView (#331)', () => {
         expect(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
       }
     }
-    // Watchlisted providers do not render cards at all — connectable via the
-    // custom URL affordance instead.
+    // Watchlisted providers do not render cards; connect via the custom URL affordance instead.
     expect(screen.queryByTestId('connector-card-slack')).not.toBeInTheDocument();
     expect(screen.queryByTestId('connector-card-spotify')).not.toBeInTheDocument();
     expect(screen.getByTestId('connector-card-trello-status')).toHaveTextContent('Connect');
@@ -109,8 +108,7 @@ describe('ConnectorsView (#331)', () => {
     add.mockResolvedValue(patRow);
     render(<ConnectorsView />);
     fireEvent.click(await screen.findByTestId('connector-card-github'));
-    // A PAT connect requires a token up front (a tokenless row is a dead
-    // end: there is no update-token path).
+    // A PAT connect requires a token up front; there is no update-token path.
     expect(screen.getByTestId('connector-modal-connect')).toBeDisabled();
     fireEvent.change(screen.getByTestId('connector-modal-token'), {
       target: { value: 'api-token-1' },
@@ -134,7 +132,6 @@ describe('ConnectorsView (#331)', () => {
     // Real provider path, not the generic fallback.
     expect(steps).toHaveTextContent('personal-access-tokens');
     expect(steps).toHaveTextContent('Fine-grained token');
-    // Scope guidance present (GitHub: narrow repository set).
     expect(steps).toHaveTextContent('invisible to the assistant');
   });
 

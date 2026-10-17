@@ -7,17 +7,8 @@ import { WorkspaceEmbedding } from '../../models/WorkspaceEmbedding';
 import { evalUserId, ensureEvalUser } from '../mongoSource';
 import type { MemoryScenario, MemorySeed } from './types';
 
-/*
- * #289 scenario fixtures. Each scenario is materialised into the reserved eval
- * user's workspace, so retrieval reads real `Session`/`Message`/`Asset`/`Task`
- * rows exactly as the chat path would — no retrieval test-doubles. Scenarios
- * are isolated by clearing before each seed, so one scenario's slices cannot
- * leak into another's hit-rate.
- *
- * `seedMemoryScenario` returns a seed-id → real-Mongo-id map: the corpus speaks
- * in stable synthetic ids, but hit-rate must match the id retrieval actually
- * emitted (`WorkspaceSlice.id`).
- */
+// Scenario fixtures materialised into the reserved eval user's workspace; corpus ids map to real Mongo ids.
+// @see #289
 
 export type SeedIdMap = Record<string, string>;
 
@@ -27,8 +18,7 @@ const seedChat = async (seed: MemorySeed): Promise<string> => {
     userId: evalUserId,
     title: seed.title,
     lastMessageAt: at,
-    // A soft-deleted seed is materialised then excluded by `deletedAt`, exactly
-    // as a user-deleted chat is — the corpus's `deleted-seed` case.
+    // Soft-deleted seed: materialised, then excluded by `deletedAt` as a user-deleted chat is.
     deletedAt: seed.deleted ? at : null,
   });
   const message = await Message.create({
@@ -41,10 +31,7 @@ const seedChat = async (seed: MemorySeed): Promise<string> => {
 };
 
 const seedFile = async (seed: MemorySeed): Promise<string> => {
-  // `timestamps: true` would otherwise stamp `createdAt` with wall-clock now,
-  // ignoring `seed.at` and making the fixture non-deterministic (the corpus
-  // contract says `at` keeps fixtures deterministic). Mongoose respects an
-  // explicit `createdAt`, and the retrieval slice reads it as the slice's `at`.
+  // Explicit `createdAt` keeps fixtures deterministic; Mongoose would otherwise stamp wall-clock now.
   const at = new Date(seed.at);
   const asset = await Asset.create({
     userId: evalUserId,
@@ -61,8 +48,7 @@ const seedFile = async (seed: MemorySeed): Promise<string> => {
 };
 
 const seedTask = async (seed: MemorySeed): Promise<string> => {
-  // The task slice reads `updatedAt`, so pin both timestamps to `seed.at` for
-  // the same determinism reason as `seedFile`.
+  // The task slice reads `updatedAt`, so pin both timestamps to `seed.at` for determinism.
   const at = new Date(seed.at);
   const task = await Task.create({
     userId: evalUserId,
@@ -82,13 +68,8 @@ const seedOne = (seed: MemorySeed): Promise<string> => {
   return seedTask(seed);
 };
 
-/*
- * Bury the scenario's seed behind the pre-#293 bounded pool with newer filler
- * turns, so the `out-of-pool` case proves the seed is reachable past the old
- * 200-message window (the ticket's "old relevant chat outside the bounded
- * recent pool"). #293 searches the whole corpus, so the seed is now surfaced
- * despite the filler.
- */
+// Bury the seed behind the old bounded pool with newer filler, proving the out-of-pool case is reachable.
+// @see #293
 const fillPool = async (count: number): Promise<void> => {
   const start = Date.parse('2026-09-30T10:00:00.000Z');
   const session = await Session.create({
@@ -129,9 +110,7 @@ export const clearMemoryCorpus = async (): Promise<void> => {
   await TaskEvent.deleteMany({ taskId: { $in: taskIds } });
   await Task.deleteMany({ userId: evalUserId });
 
-  // #294: a previous scenario's embeddings would otherwise occupy the Atlas
-  // `$vectorSearch` candidate window for the next scenario (the vector hits are
-  // intersected with the freshly seeded slices, so stale rows can never surface
-  // — but they still consume the ANN budget). Clear them with the rest.
+  // Stale embeddings would otherwise consume the `$vectorSearch` ANN budget for the next scenario.
+  // @see #294
   await WorkspaceEmbedding.deleteMany({ userId: evalUserId });
 };

@@ -3,10 +3,7 @@ import { Connector } from '../../main/models/Connector';
 
 describe('Connector model', () => {
   beforeAll(async () => {
-    // Mongoose builds indexes asynchronously on connect; under CI load the
-    // unique partial index on (scope, userId, url) may not exist yet when the
-    // first write lands. Await the build explicitly so the duplicate-key
-    // expectation is deterministic.
+    // Mongoose builds indexes asynchronously; await explicitly so the duplicate-key expectation is deterministic under CI load.
     await Connector.init();
   });
 
@@ -121,15 +118,14 @@ describe('Connector model', () => {
   });
 
   it('rejects connector types outside the storable enum (#329)', async () => {
-    // mcp.oauth / api / sdk are contract-level names; only mcp.pat is
-    // storable until #327 extends the enum.
+    // Only mcp.pat is storable for now.
+    // @see #329 #327
     const doc = new Connector({
       scope: 'user',
       userId: new mongoose.Types.ObjectId(),
       name: 'bad-type',
       url: 'https://mcp.example.com',
-      // Runtime value the static enum cannot express yet; the model must
-      // still refuse to store it.
+      // Runtime value the static enum cannot express yet; the model must still refuse it.
       type: 'api' as unknown as 'mcp.pat',
     });
     await expect(doc.validate()).rejects.toThrow();

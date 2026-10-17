@@ -12,8 +12,8 @@ vi.mock('../../main/services/assets', async (importOriginal) => {
   };
 });
 
-// #255: the embedded TaskCard mounts with a sessionId and calls the task
-// service; mock it so these feature tests never touch axios.
+// Mock the task service: the embedded TaskCard mounts and would otherwise hit axios.
+// @see #255
 vi.mock('../../main/services/tasks', async (importOriginal) => {
   const original = await importOriginal<typeof import('../../main/services/tasks')>();
   return {
@@ -68,8 +68,8 @@ const renderChat = (
     />,
   );
 
-// Settled turns collapse the summary box (#196, D5); tests that assert on the
-// individual chips must expand it first. The streaming case auto-expands.
+// Settled turns collapse the tool summary box; expand before asserting on individual chips.
+// @see #196
 const expandTools = () => fireEvent.click(screen.getByTestId('tool-summary-toggle'));
 
 describe('Tool chip (issue #33)', () => {
@@ -173,7 +173,6 @@ describe('Tool-use summary box (issue #196)', () => {
       true,
     );
     expect(screen.getByTestId('tool-summary')).toHaveTextContent('Used 2 tools');
-    // streaming ⇒ open without a click
     expect(screen.getByTestId('tool-chips')).toBeInTheDocument();
   });
 
@@ -300,7 +299,6 @@ describe('Wide markdown tables (issue #197)', () => {
     ]);
     const table = document.querySelector('.markdown-body table');
     expect(table).toBeInTheDocument();
-    // The table's parent scrolls, so the table never widens the chat column.
     expect(table?.parentElement).toHaveClass('overflow-x-auto');
   });
 });

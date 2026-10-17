@@ -27,8 +27,7 @@ const userWith = (overrides: Partial<UserDocument> = {}): UserDocument =>
   }) as unknown as UserDocument;
 
 beforeEach(() => {
-  // Spies repeat across tests through spyOn: clear their history so a
-  // stale updateOne call from an earlier case can never contaminate this one.
+  // Spies repeat across tests through spyOn: clear their history so a stale updateOne call cannot contaminate this one.
   jest.resetAllMocks();
   RESET_GEO_COOLDOWN_FOR_TESTS();
   global.fetch = jest.fn();
@@ -205,8 +204,7 @@ describe('ensureUserLocation caching (#50)', () => {
     const user = userWith();
     await ensureUserLocation(user, '8.8.8.8');
     await ensureUserLocation(user, '8.8.8.8');
-    // Each failed resolve tries both providers; the second ensure call must
-    // short-circuit entirely on the cooldown (no further fetches).
+    // Each failed resolve tries both providers; the second ensure call must short-circuit entirely on the cooldown.
     expect(global.fetch).toHaveBeenCalledTimes(2);
     expect(User.updateOne).not.toHaveBeenCalled();
   });
@@ -227,8 +225,7 @@ describe('ensureUserLocation caching (#50)', () => {
       .mockResolvedValue(okJson({ ip: '8.8.8.8', country: 'FI' }));
     const user = userWith();
     await ensureUserLocation(user, '8.8.8.8');
-    // Simulate the retry of a second request process (no shared in-process
-    // cooldown): delete + resolve again.
+    // Simulate the retry of a second request process (no shared in-process cooldown).
     RESET_GEO_COOLDOWN_FOR_TESTS();
     await ensureUserLocation(user, '8.8.8.8');
     expect(user.location?.countryCode).toBe('FI');

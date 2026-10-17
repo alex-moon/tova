@@ -10,37 +10,21 @@ import { OCR_MAX_INPUT_BYTES, finalizeOcrText, isNearEmpty, recognizeImage } fro
 import { rasterizePdf } from './pdfRasterize';
 import { enqueueWorkspaceEmbedding } from './workspaceEmbeddingIngest';
 
-// Real processor for the asset-job queue (issue #67, extended by #208 and
-// #209): a job covers whatever the asset still needs. Documents get the
-// extension toolchain run and the markdown persisted; images get a bounded
-// thumbnail derived and stored alongside the original, and — since #209 —
-// their text recovered via OCR so the agent and viewer see it; image-only
-// PDFs fall back to OCR when pdf-parse yields no text layer. Jobs whose asset
-// is gone or whose lifecycles have both moved on settle as done without
-// touching storage. A single job may cover both (markdown and thumbnail) when
-// both are pending.
+/* Real processor for the asset-job queue: a job covers whatever the asset still needs — document conversion, OCR, thumbnails; gone assets settle as done untouched. */
+// @see #67 #208 #209
 
-// Match the asset upload cap (MAX_ASSET_SIZE in services/assetLimits.ts);
-// declared
-// here instead of imported to keep the route module free of worker deps.
+// Matches the asset upload cap, declared here to keep the route module free of worker deps.
 export const MAX_CONVERSION_INPUT_BYTES = 15 * 1024 * 1024;
 
-// OCR (issue #209): recover text from a raster buffer, normalise it through
-// the shared store-time cap, and treat a blank result as a failure so the
-// lifecycle reads honestly rather than as a success-looking empty. The
-// "no text" error surfaces via markdownFailureReason like any conversion
-// failure.
+/* OCR: recover text from a raster buffer, normalise through the store-time cap; a blank result throws so the lifecycle reads honestly. */
+// @see #209
 const ocrBuffer = async (buffer: Buffer): Promise<string> => {
   const text = finalizeOcrText(await recognizeImage(buffer));
   if (text.length === 0) throw new Error('no text found by OCR');
   return text;
 };
 
-// Assemble per-page OCR text into the same `-- n of n --` shape pdf-parse
-// emits, so `extractUnits` splits a scanned PDF into page units with no new
-// read path. `total` is the document's full page count; pages beyond the cap
-// are not OCRed (best effort — the text we did recover is still worth
-// storing).
+/* Assemble per-page OCR text into the pdf-parse `-- n of n --` shape so extractUnits splits a scanned PDF with no new read path; pages beyond the cap are not OCRed (best effort). */
 const ocrPdfBuffer = async (buffer: Buffer): Promise<string> => {
   const { pages, totalPages } = await rasterizePdf(buffer);
   if (pages.length === 0) throw new Error('no pages rasterised for OCR');
@@ -57,9 +41,8 @@ const ocrPdfBuffer = async (buffer: Buffer): Promise<string> => {
 const processConversion = async (
   asset: NonNullable<Awaited<ReturnType<typeof loadAsset>>>,
 ): Promise<void> => {
-  // Issue #209: images are not "convertible" (no markdown toolchain runs for
-  // them), yet they now drive this lifecycle via OCR. Branch on the image
-  // content type *before* the isConvertible guard, or every image job throws.
+  // Images are not "convertible", yet they drive this lifecycle via OCR — branch on the image content type BEFORE the isConvertible guard, or every image job throws.
+  // @see #209
   const isImage = isImageContentType(asset.contentType);
   const isPdf = extensionOf(asset.filename) === 'pdf';
   if (!isImage && !isConvertible(asset.filename)) {
@@ -75,17 +58,13 @@ const processConversion = async (
 
   let markdown: string;
   if (isImage) {
-    // A large image risks exhausting RAM once tesseract allocates its
-    // rasters/WASM; skip it with an explicit reason the client already
-    // surfaces (markdownStatus 'failed' + reason).
+    // A large image risks exhausting RAM once tesseract allocates its rasters; skip with an explicit reason the client already surfaces.
     if (buffer.byteLength > OCR_MAX_INPUT_BYTES) {
       throw new Error('too large for OCR');
     }
     markdown = await ocrBuffer(buffer);
   } else if (isPdf) {
-    // Try the text layer first: born-digital PDFs keep it and never pay the
-    // OCR cost. Only a (near-)empty result — or the empty-markdown throw —
-    // means the PDF is scanned and needs rasterise + OCR.
+    // Try the text layer first: born-digital PDFs keep it and never pay the OCR cost; a (near-)empty result means scanned and needs rasterise + OCR.
     const extracted = await convertToMarkdown(asset.filename, buffer).catch((err: unknown) => {
       const message = err instanceof Error ? err.message : String(err);
       if (message.includes('empty markdown')) return null;
@@ -104,14 +83,14 @@ const processConversion = async (
   }
 
   asset.markdownExtracted = markdown;
-  // Issue #159: slice the (already-capped) conversion into per-unit text.
+  // Slice the (already-capped) conversion into per-unit text.
+  // @see #159
   asset.set('units', extractUnits(asset.filename, markdown));
   asset.markdownStatus = 'ready';
   asset.markdownFailureReason = null;
   await asset.save();
-  // #294: embed the freshly converted text. Jobs only run for non-ephemeral
-  // assets (the confirm path never queues one for an ephemeral upload), and the
-  // helper is fire-and-forget + flag-gated.
+  // Embed the freshly converted text: fire-and-forget, flag-gated; jobs never run for ephemeral assets.
+  // @see #294
   if (!asset.ephemeral) {
     enqueueWorkspaceEmbedding({
       userId: String(asset.userId),
@@ -162,11 +141,8 @@ export const processAssetConversionJob = async (job: AssetJobDocument): Promise<
   const needsThumbnail = asset.thumbnailStatus === 'pending';
   if (!needsConversion && !needsThumbnail) return;
 
-  // Run each pending lifecycle independently so a failure in one does not
-  // deny the other its result: since #209 an image carries both, and a blank
-  // raster that fails OCR must not also lose its (perfectly derivable)
-  // thumbnail. The first error still propagates so the job loop retries /
-  // terminal-fails the failed lifecycle; the successful one is already saved.
+  // Run each pending lifecycle independently so a failure in one does not deny the other; the first error still propagates for retry/terminal-fail.
+  // @see #209
   const errors: unknown[] = [];
   if (needsThumbnail) {
     try {

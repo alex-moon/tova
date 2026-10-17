@@ -47,8 +47,7 @@ describe('PATCH /api/profile (issue #35)', () => {
     expect(user.preferredName).toBe('Alex');
     expect(user.settings?.customInstructions).toBe('Always answer in list form.');
 
-    // PATCH response and GET /me must carry an identical field set (plan
-    // task 3 drift requirement).
+    // PATCH response and GET /me must carry an identical field set (drift requirement).
     const me = await request(app).get('/api/auth/me').set('Cookie', cookie);
     expect(Object.keys(res.body.user).sort()).toEqual(Object.keys(me.body.user).sort());
     expect(me.body.user).toEqual(res.body.user);
@@ -105,12 +104,10 @@ describe('PATCH /api/profile (issue #35)', () => {
     await patchProfile(app, cookie, { customInstructions: '' });
 
     const user = await getUser('patch-clear-prompt@example.com');
-    // Schema rehydrates a cleared field as its default (null), never '':
-    // '' would block per-user prompt resolution downstream.
+    // The schema rehydrates a cleared field as null, never '' — '' would block per-user prompt resolution downstream.
     expect(user.settings?.customInstructions).toBeNull();
 
-    // Whitespace-only input clears too, so a blank prompt cannot disable the
-    // system message.
+    // Whitespace-only input clears too, so a blank prompt cannot disable the system message.
     await patchProfile(app, cookie, { customInstructions: '   ' });
     const user2 = await getUser('patch-clear-prompt@example.com');
     expect(user2.settings?.customInstructions).toBeNull();
@@ -161,8 +158,7 @@ describe('PATCH /api/profile (issue #35)', () => {
   it('saves a theme preference and reports it on PATCH and /me, omitted when unset', async () => {
     const { app, cookie } = await registerUser('patch-theme@example.com');
 
-    // Before any save the field is absent from the wire payload (same
-    // convention as preferredName/customInstructions).
+    // Before any save the field is absent from the wire payload (same convention as preferredName/customInstructions).
     const before = await request(app).get('/api/auth/me').set('Cookie', cookie);
     expect(before.body.user).not.toHaveProperty('theme');
 
@@ -200,8 +196,7 @@ describe('PATCH /api/profile (issue #35)', () => {
       expect(res.status).toBe(400);
     }
 
-    // Unset on a fresh user: settings stays null (lazily created), so a
-    // rejected body must never have materialized a preference.
+    // Unset on a fresh user: settings stays null (lazily created), so a rejected body must never materialize a preference.
     const user = await getUser('patch-theme-invalid@example.com');
     expect(user.settings?.theme ?? null).toBeNull();
   });
@@ -249,8 +244,7 @@ describe('PATCH /api/profile (issue #35)', () => {
   it('saves a startupChat preference and reports it on PATCH and /me, omitted when unset (issue #96)', async () => {
     const { app, cookie } = await registerUser('patch-startup@example.com');
 
-    // Before any save the field is absent from the wire payload (same
-    // convention as theme).
+    // Before any save the field is absent from the wire payload (same convention as theme).
     const before = await request(app).get('/api/auth/me').set('Cookie', cookie);
     expect(before.body.user).not.toHaveProperty('startupChat');
 
@@ -288,15 +282,13 @@ describe('PATCH /api/profile (issue #35)', () => {
       expect(res.status).toBe(400);
     }
 
-    // Unset on a fresh user: settings stays null (lazily created), so a
-    // rejected body must never have materialized a preference.
+    // Unset on a fresh user: settings stays null (lazily created), so a rejected body must never materialize a preference.
     const user = await getUser('patch-startup-invalid@example.com');
     expect(user.settings?.startupChat ?? null).toBeNull();
   });
 
-  // Browser-reported IANA timezone (#261): persisted on settings so the chat
-  // prompt can render user-facing times in the user's local zone. Same
-  // wire conventions as theme/startupChat — absent until set.
+  // Browser-reported IANA timezone: persisted on settings so the prompt can render local times; same wire conventions — absent until set.
+  // @see #261
   it('saves the timezone, reports it on PATCH and /me, and leaves it untouched when absent (#261)', async () => {
     const { app, cookie } = await registerUser('patch-tz@example.com');
 
@@ -341,8 +333,7 @@ describe('PATCH /api/profile (issue #35)', () => {
   it('saves the zdr preference and reports it on PATCH and /me (issue #116)', async () => {
     const { app, cookie } = await registerUser('patch-zdr@example.com');
 
-    // Before any save the field is absent from the wire payload (same
-    // convention as theme: false is the default, never explicitly sent).
+    // Before any save the field is absent from the wire payload (same convention: false is the default, never explicitly sent).
     const before = await request(app).get('/api/auth/me').set('Cookie', cookie);
     expect(before.body.user).not.toHaveProperty('zdr');
 
@@ -356,8 +347,8 @@ describe('PATCH /api/profile (issue #35)', () => {
     const user = await getUser('patch-zdr@example.com');
     expect(user.settings?.zdr).toBe(true);
 
-    // Turning it back off persists false but keeps the payload omitted
-    // (truthy-only delivery, same as theme/startupChat).
+    // Turning it back off persists false but keeps the payload omitted (truthy-only delivery).
+    // @see #116
     const off = await patchProfile(app, cookie, { zdr: false });
     expect(off.status).toBe(200);
     expect(off.body.user).not.toHaveProperty('zdr');
@@ -384,8 +375,7 @@ describe('PATCH /api/profile (issue #35)', () => {
       expect(res.status).toBe(400);
     }
 
-    // Unset on a fresh user: settings stays null (lazily created), so a
-    // rejected body must never have materialized a preference.
+    // Unset on a fresh user: settings stays null (lazily created), so a rejected body must never materialize a preference.
     const user = await getUser('patch-zdr-invalid@example.com');
     expect(user.settings?.zdr ?? null).toBeNull();
   });
@@ -457,7 +447,7 @@ describe('PATCH /api/profile (issue #35)', () => {
 
       const remaining = await Session.find({ _id: { $in: docIds } }).lean();
       expect(remaining).toHaveLength(2);
-      // Not even soft-deleted: the flag no longer touches data at all.
+      // Not even soft-deleted: the flag does not touch data at all.
       expect(remaining.every((s) => s.deletedAt === null)).toBe(true);
       expect(await Message.countDocuments({ sessionId: { $in: docIds } })).toBe(4);
     });
@@ -499,8 +489,8 @@ describe('PATCH /api/profile (issue #35)', () => {
     expect(res.body.user.theme).toBe('dark');
     expect(res.body.user.confirmDeletes).toEqual({ chat: false, file: true });
 
-    // The reverse order: zdr off together with an unrelated key must not
-    // resurrect any other persisted field (order-dependence guard).
+    // The reverse order: zdr off together with an unrelated key must not resurrect any other persisted field (order-dependence guard).
+    // @see #144
     const off = await patchProfile(app, cookie, { preferredName: 'A', zdr: false });
     expect(off.status).toBe(200);
     expect(off.body.user).not.toHaveProperty('zdr');

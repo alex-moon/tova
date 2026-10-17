@@ -1,13 +1,8 @@
 import { generateFollowups, parseSuggestions } from '../../main/services/followupService';
 import { muteConsoleError } from '../muteConsole';
 
-/*
- * Issue #41: follow-up generation must go through the tool-free completion
- * path (the suggestion model rejects tool-carrying requests when the Brave
- * key attaches web_search), and parsing must degrade gracefully on the
- * malformed outputs that model intermittently emits instead of dropping
- * the whole response.
- */
+/* Follow-up generation must go through the tool-free completion path (the suggestion model rejects tool-carrying requests), and parsing must degrade gracefully on malformed outputs. */
+// @see #41
 
 const mockCreateToolFree = jest.fn();
 const mockCreateCompletion = jest.fn();

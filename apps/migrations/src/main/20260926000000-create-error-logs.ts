@@ -1,11 +1,7 @@
 import { MigrationInterface, Db } from 'mongo-migrate-ts';
 
-/*
- * #175: durable error log storage. logService mirrors every error-level
- * entry into this collection; the migration pre-creates the collection and
- * the createdAt index so deployed instances have it before first write and
- * no lazy-create flakiness.
- */
+// Pre-creates the errorlogs collection and createdAt index so deployed instances have it before first write.
+// @see #175
 export class CreateErrorLogs implements MigrationInterface {
   async up(db: Db): Promise<void> {
     for (const name of await db.listCollections().toArray()) {

@@ -1,18 +1,8 @@
-/*
- * Jest stub: `@mastra/core` root entry. The real build ships ESM-only
- * transitive deps (`@sindresorhus/slugify`) that ts-jest cannot parse —
- * the same constraint documented on the agents entry stub. Unit suites
- * exercise their own mocks at the call boundary; these stubs only exist
- * so module resolution of `mastraService.ts` succeeds offline.
- */
+/* Jest stub for the `@mastra/core` root entry: the real build ships ESM-only transitive deps ts-jest cannot parse; these stubs exist only so module resolution of mastraService.ts succeeds offline. */
 
 export class Mastra {
   constructor(public readonly config: unknown) {}
 
-  /*
-   * mastraService registers every constructed agent via `mastra.addAgent`
-   * (observability since #5). The stub only needs the call to succeed —
-   * the agent behaviour itself lives behind the mocked agent module.
-   */
+  /* The stub only needs addAgent to succeed; agent behaviour lives behind the mocked agent module. */
   addAgent(): void {}
 }

@@ -1,11 +1,5 @@
-/**
- * Temporary Mongo source for the #112 evals (#112): a synthetic eval user
- * with a small seeded asset library in the local `tova` database. Run scope:
- * the asset tools read through the shared Mongoose connection, so the
- * fixtures live in the same database under a reserved user id rather than
- * in a second connection/database. Seeding is idempotent (upserts are keyed
- * on userId + filename); `clearEvalSource` removes every eval artifact.
- */
+/** Temporary Mongo source for the evals: a synthetic eval user with a seeded asset library. */
+// @see #112
 import mongoose from 'mongoose';
 import { Asset } from '../models/Asset';
 import { User } from '../models/User';
@@ -16,9 +10,8 @@ const EVAL_USER_ID_HEX = '6f61e78155a5b2c0d3e1f7a2';
 export const evalUserId = new mongoose.Types.ObjectId(EVAL_USER_ID_HEX);
 export const evalUserEmail = 'eval-fixture@tova.local';
 
-/* Content for the #112 Bupa case: the retrieval eval is "search my files
- * then read the policy" — what it says about fertility treatment must be
- * discoverable only inside the seeded file, never from web search. */
+// Content for the Bupa case: the fact must be discoverable only inside the seeded file.
+// @see #112
 const BUPA_POLICY_TEXT = `Bupa Health Insurance — policy schedule PROV-2026-00318
 Covered benefits:
 - Fertility treatment: 60% coverage, up to £4,000 per cycle, requires GP referral.
@@ -40,14 +33,8 @@ const FIXTURE_FILES: { filename: string; contentType: string; text: string }[] =
   },
 ];
 
-/* #159 case A fixture: a 60-page manual whose support phone number sits on
- * page 58. Units are seeded directly as pages (the PDF conversion path emits
- * exactly these on a real long document); answer material — the phone
- * number — exists only here, and every filler page is unique and free of it.
- * Filler is sized so the JOINED full text clearly exceeds MAX_PROMPT_TEXT_CHARS
- * (12k): a lazy whole-file read truncates well before page 58 and cannot see
- * the phone, so the case genuinely forces line paging instead of being
- * passable with one big read. */
+// Case A fixture: the answer exists only on page 58; filler sized so a lazy whole-file read truncates first.
+// @see #159
 export const SUPPORT_PHONE = '+44 20 7946 0812';
 export const SUPPORT_PHONE_PAGE = 58;
 
@@ -71,9 +58,7 @@ const longManualUnits = (): AssetUnit[] => {
       label: `Page ${index}`,
       text:
         index === SUPPORT_PHONE_PAGE
-          ? // The phone sits beyond the 120-char `unitsOnly` preview window, so
-            // the preview can identify this page as the support-contact
-            // appendix without handing over either eval answer directly.
+          ? // Phone sits beyond the 120-char `unitsOnly` preview: page identifiable, not given away.
             'Appendix: support contact details.\nThis appendix collects the published ' +
             'support channels for the appliance, last revised at this edition\u2019s ' +
             `release. Support phone number: ${SUPPORT_PHONE} ` +
@@ -84,11 +69,8 @@ const longManualUnits = (): AssetUnit[] => {
   return units;
 };
 
-/* #159 case B fixture: six heading-2 sections (no H1 — extraction splits at
- * the shallowest level present, so a stray H1 would collapse the whole doc
- * to one unit and the split eval would lose its long-document shape). Units
- * are seeded through the real `extractUnits` so the fixture mirrors what the
- * conversion job would produce. */
+// Case B fixture: six heading-2 sections (no H1), seeded through real `extractUnits`.
+// @see #159
 const HANDBOOK_FILENAME = 'project-handbook.md';
 const HANDBOOK_SECTIONS = [
   {
@@ -122,7 +104,6 @@ interface FixtureWithUnits {
   units: AssetUnit[];
 }
 
-/** All eval assets: filename + contentType + full text + pre-extracted units. */
 const FIXTURE_ASSETS = (): FixtureWithUnits[] => [
   ...FIXTURE_FILES.map((file) => ({
     ...file,

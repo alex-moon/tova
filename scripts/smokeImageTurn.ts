@@ -2,20 +2,8 @@ import 'dotenv/config';
 import zlib from 'node:zlib';
 import { deepinfraConnector, groqConnector } from '../apps/server/src/main/services/mastraService';
 
-/*
- * Manual smoke for #115: drives the real in-process DeepInfra connector
- * (`deepinfraConnector` -> `mastraMessagesFor` -> Mastra agent) with a
- * multimodal turn (text + `image_url` data URI part) against whatever model
- * the caller names. Requires DEEPINFRA_API_KEY in .env. No Mongo, no
- * storage: the image part is a data URI of an in-memory generated PNG, so
- * this exercises the full #115 mapping path minus presigned Spaces URLs
- * (those need DO_SPACES_* credentials; the URL variant is probed live in
- * the plan doc).
- *
- * Usage: npx tsx scripts/smokeImageTurn.ts [model]
- *   model defaults to Qwen/Qwen3-VL-30B-A3B-Instruct (seeded large-tier
- *   vision; all image turns route large-only per the #115 user decision).
- */
+/* Manual smoke for the multimodal mapping path: real DeepInfra connector with a text+image data-URI turn; usage: npx tsx scripts/smokeImageTurn.ts [model]. */
+// @see #115
 
 const MODEL = process.argv[2] ?? 'Qwen/Qwen3-VL-30B-A3B-Instruct';
 
@@ -64,8 +52,8 @@ async function main() {
   const result = await deepinfraConnector.createToolFreeCompletion({
     provider: 'deepinfra',
     model: MODEL,
-    // Same part shape the chat route assembles (#115): text turn text plus
-    // the image under `image_url.url`.
+    // Same part shape the chat route assembles: text plus the image under `image_url.url`.
+    // @see #115
     messages: [
       {
         role: 'user',

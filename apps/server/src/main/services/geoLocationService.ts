@@ -1,10 +1,7 @@
 import { User, UserDocument } from '../models/User';
 
-// Coarse, country-level geolocation (issue #50). Only country + countryCode
-// are ever extracted from a provider payload and persisted; everything else
-// (city, lat/lon, ISP, …) is dropped at parse time and never leaves this
-// module. Both providers failing degrades to `null` — chat never depends on
-// this succeeding.
+// Coarse, country-level geolocation: only country + countryCode are ever persisted; both providers failing degrades to null — chat never depends on this succeeding.
+// @see #50
 
 export interface CoarseLocation {
   country: string;
@@ -17,21 +14,17 @@ const IP_API_URL = 'http://ip-api.com/json/?fields=country,countryCode';
 // Short per-provider timeout so a hung lookup cannot stall a request.
 const PROVIDER_TIMEOUT_MS = 2000;
 
-// Re-resolve at most once per user per week (ticket #50).
+// Re-resolve at most once per user per week.
+// @see #50
 const RESOLVE_INTERVAL_MS = 7 * 24 * 60 * 60 * 1000;
 
-// After a failed lookup, don't hammer the providers on every request: an
-// in-process cooldown suppresses repeats for this long (Mongo is NOT written
-// on failure, so a success right after a transient outage still lands).
+// After a failed lookup, an in-process cooldown suppresses repeats (Mongo is NOT written on failure, so a success right after a transient outage still lands).
 const FAILURE_COOLDOWN_MS = 60 * 60 * 1000;
 
-// userId -> timestamp of the last failed resolve attempt. Never stores
-// successes (a success goes to Mongo); write-only growth of one entry per
-// user is acceptable at this scale.
+// Timestamps of last failed resolve per user; never stores successes (those go to Mongo).
 const failureCooldown = new Map<string, number>();
 
-// Providers occasionally vary case (ip-api is uppercase, but lowercase inputs
-// are normalized below): accept 2-letter ASCII, normalize at the boundary.
+// Accept 2-letter ASCII in any case; normalized at the boundary.
 const TWO_LETTER_CODE_ANY_CASE = /^[A-Za-z]{2}$/;
 
 const privateRanges: [string, string][] = [
@@ -66,9 +59,7 @@ const rangeContains = (ip: string, range: [string, string]): boolean => {
   return value >= lo && value <= hi;
 };
 
-// Empty / unparsable / local / private / link-local addresses resolve as
-// "private" so dev and CI (localhost, docker bridge IPs) never hit live
-// geolocation providers.
+// Empty/unparsable/local/private/link-local addresses resolve as "private" so dev and CI never hit live providers.
 export const isPrivateIp = (ip: string | undefined): boolean => {
   if (!ip || typeof ip !== 'string') return true;
   const trimmed = ip.trim();
@@ -82,11 +73,10 @@ export const isPrivateIp = (ip: string | undefined): boolean => {
   ) {
     return true;
   }
-  // IPv4-mapped IPv6 (::ffff:10.0.0.7) — check the embedded v4 part.
+  // IPv4-mapped IPv6 — check the embedded v4 part.
   const v4 = trimmed.startsWith('::ffff:') ? trimmed.slice(7) : trimmed;
   if (v4.includes(':')) {
-    // Any other IPv6 address: treat as non-private so public v6 clients geo
-    // resolve; known-link-local/ULA prefixes are caught above.
+    // Any other IPv6 address: treat as non-private so public v6 clients geo resolve; link-local/ULA prefixes are caught above.
     return false;
   }
   return privateRanges.some((range) => rangeContains(v4, range));
@@ -117,9 +107,7 @@ const fetchProvider = async (
   }
 };
 
-// Primary: country.is — {ip, country} with `country` the 2-letter code. The
-// IP is echoed back in the response; requiring a match defends against a
-// wrong/proxied answer for the requested address.
+// Primary: country.is — requiring the echoed IP to match defends against a wrong/proxied answer.
 const resolveCountryIs = (ip: string | undefined): Promise<CoarseLocation | null> =>
   fetchProvider(COUNTRY_IS_URL, (data) => {
     if (typeof data.ip !== 'string' || data.ip !== ip) return null;
@@ -130,8 +118,7 @@ const resolveCountryIs = (ip: string | undefined): Promise<CoarseLocation | null
     return { country: code, countryCode: code };
   });
 
-// Fallback: ip-api.com — keep only country/countryCode even though the API
-// returns more; the narrow type is what bounds what can be persisted.
+// Fallback: ip-api.com — keeping only country/countryCode bounds what can be persisted.
 const resolveIpApi = (): Promise<CoarseLocation | null> =>
   fetchProvider(IP_API_URL, (data) => {
     if (!isCoarseLocation(data)) return null;
@@ -153,13 +140,8 @@ const isFresh = (location: UserDocument['location']): boolean =>
     Date.now() - new Date(location.resolvedAt).getTime() < RESOLVE_INTERVAL_MS,
   );
 
-// Single entry point for call sites: read cached state off the user doc,
-// resolve only when missing or stale, and persist a successful result.
-// Resolves in place on the passed document so the same request can build the
-// chat prompt from it without a second Mongo read. Failure paths return
-// silently (no Mongo write, no throw) — chat must never block on geo.
-// `ip` may be undefined: Express types req.ip accordingly and the private-IP
-// guard treats a missing IP as unresolvable.
+// Single entry point: read cached state, resolve only when missing/stale, persist a success in place so the same request can build the prompt from it; failures return silently.
+// @see #50
 export const ensureUserLocation = async (
   user: UserDocument,
   ip: string | undefined,

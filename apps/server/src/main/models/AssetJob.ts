@@ -1,10 +1,7 @@
 import mongoose from 'mongoose';
 
-// Mongo-backed conversion queue (issue #67): one row per asset conversion
-// attempt chain. Poller-v1 runs in-process with a single consumer, so an
-// atomic `pending -> processing` claim without a lease field is sufficient;
-// a processor crash mid-job leaves a stuck `processing` row, which a later
-// requeue-on-boot sweep can clear (plan Open Question C).
+// Mongo-backed conversion queue: single-consumer atomic `pending -> processing` claim is sufficient.
+// @see #67
 const assetJobSchema = new mongoose.Schema(
   {
     assetId: {
@@ -17,8 +14,7 @@ const assetJobSchema = new mongoose.Schema(
       enum: ['pending', 'processing', 'done', 'failed'],
       default: 'pending',
     },
-    // Incremented on every claim; reaching MAX_JOB_ATTEMPTS on a failure
-    // terminal-fails the job.
+    // Incremented on every claim; MAX_JOB_ATTEMPTS on a failure terminal-fails the job.
     attempts: {
       type: Number,
       default: 0,

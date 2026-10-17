@@ -9,12 +9,8 @@ import { AssetJob } from '../../main/models/AssetJob';
 import { Connector } from '../../main/models/Connector';
 import { FACTORY_RESET_CONFIRM } from '../../main/validation';
 
-// Route-level coverage for the factory reset (issue #143), superseding the
-// old purgeUserChats coverage (plan 136, T5): typed confirmation is required,
-// nothing PII-bearing survives the POST (sessions hard-deleted, messages,
-// assets, job rows all swept), the user's settings and account survive, other
-// users are untouched — and the removed ZDR first-enable auto-purge truly no
-// longer fires.
+/* Route-level coverage for the factory reset: typed confirmation required, nothing PII-bearing survives, settings/account survive, other users untouched, and the removed first-enable auto-purge stays gone. */
+// @see #143
 
 const registerUser = async (email: string) => {
   const app = createApp();
@@ -66,8 +62,8 @@ const expectNothingPIIBearingRemains = async (
   expect(await Asset.countDocuments({ userId: uid })).toBe(0);
   // AssetJob has no userId — it must have been swept via the user's asset ids.
   if (assetId) expect(await AssetJob.countDocuments({ assetId })).toBe(0);
-  // User-scoped connector configs carry urls + encrypted auth headers —
-  // secret material at rest — so they must be swept too.
+  // User-scoped connector configs carry urls + encrypted auth headers (secret material at rest) — they must be swept too.
+  // @see #143
   expect(await Connector.countDocuments({ scope: 'user', userId: uid })).toBe(0);
 };
 
@@ -122,8 +118,7 @@ describe('POST /api/profile/factory-reset (issue #143)', () => {
       preReadIds.map((s) => s._id),
       seeded.assetId,
     );
-    // The account itself and its preferences survive — the user can stay
-    // signed in and keep using Tova from a clean state.
+    // The account itself and its preferences survive — the user stays signed in from a clean state.
     const me = await request(app).get('/api/auth/me').set('Cookie', cookie);
     expect(me.status).toBe(200);
     expect(me.body.user.email).toBe('reset-ok@example.com');

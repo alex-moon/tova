@@ -8,19 +8,8 @@ export interface EncryptedEnvelope {
   ciphertext: string;
 }
 
-/*
- * AES-256-GCM envelope encryption for user-supplied MCP auth tokens
- * (issues #36, #80). Tokens must be decryptable — the server replays the
- * plaintext in the Authorization header on every MCP call — so a one-way
- * hash (bcrypt et al.) is not an option; reversible encryption is required.
- * Tokens are never stored in plaintext: the Mongo doc keeps
- * `{ iv, tag, ciphertext }` and toJSON strips the envelope entirely.
- * Long term, Atlas encrypted-at-rest could replace this scheme (#80).
- *
- * Key resolution: the raw env value is stretched to 32 bytes with SHA-256 so
- * operators can supply any passphrase-format key without a separate
- * "must be exactly 64 hex chars" failure mode.
- */
+/* AES-256-GCM envelope encryption for user-supplied auth tokens: reversible encryption required (the server replays the plaintext per call), never stored in plaintext; the raw env key is stretched via SHA-256. */
+// @see #36 #80
 const derivedKey = (keyMaterial: string): Buffer =>
   crypto.createHash('sha256').update(keyMaterial, 'utf8').digest();
 
@@ -36,9 +25,7 @@ const resolveKey = (): Buffer => {
 
 export const encryptEnvelope = (plaintext: string): EncryptedEnvelope => {
   const iv = crypto.randomBytes(12);
-  // authTagLength pinned at construction, not just getAuthTag(): the
-  // decrypter must reject shorter-than-16-byte tags rather than accept them
-  // (semgrep gcm-no-tag-length).
+  // authTagLength pinned at construction: the decrypter must reject shorter-than-16-byte tags (semgrep gcm-no-tag-length).
   const cipher = crypto.createCipheriv('aes-256-gcm', resolveKey(), iv, { authTagLength: 16 });
   const ciphertext = Buffer.concat([cipher.update(plaintext, 'utf8'), cipher.final()]);
   return {

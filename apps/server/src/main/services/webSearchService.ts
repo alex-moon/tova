@@ -8,16 +8,12 @@ export interface SearchResult {
   url: string;
 }
 
-// Throws when the search call itself fails (HTTP error, network, bad JSON)
-// so the caller — the `web_search` tool wrapper — can perform the graceful
-// degradation (#82). A missing key or blank query is not a failure: those
-// return [] as "no results". The chat turn must never fail because of the
-// search provider; that guarantee now lives in the tool wrapper.
+// Throws when the search call itself fails so the tool wrapper owns graceful degradation; a missing key or blank query returns [] as "no results".
+// @see #82
 export const webSearch = async (query: string): Promise<SearchResult[]> => {
   const apiKey = process.env.BRAVE_SEARCH_API_KEY;
   if (!apiKey) return [];
-  // An empty query (malformed tool arguments fall back to '') would hit the
-  // API pointlessly; treat it as "no results" without spending quota.
+  // An empty query would hit the API pointlessly; treat it as "no results" without spending quota.
   if (!query.trim()) return [];
   try {
     const response = await fetch(`${BRAVE_ENDPOINT}?q=${encodeURIComponent(query)}`, {
@@ -44,10 +40,8 @@ export const webSearch = async (query: string): Promise<SearchResult[]> => {
       ];
     });
   } catch (err) {
-    // Rethrow (#82): the tool wrapper (not this service) performs the
-    // graceful degradation — marking the tool failed and degrading to an
-    // empty result with a descriptive error — so the turn still never
-    // fails, but distinguishable from a genuinely-empty search.
+    // Rethrow: the tool wrapper performs the degradation, so the turn never fails but the failure stays distinguishable from a genuinely-empty search.
+    // @see #82
     console.error('Web search error:', redactForLog(err));
     const message = err instanceof Error ? err.message : String(err);
     throw new Error(message || 'Brave search failed');

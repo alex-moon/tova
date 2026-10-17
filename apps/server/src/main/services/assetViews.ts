@@ -6,48 +6,38 @@ const safeAsset = (asset: AssetDocument): unknown => ({
   contentType: asset.contentType,
   size: asset.size,
   status: asset.status,
-  // #340: which audience the file is for — 'user-upload' | 'system-generated'
-  // | 'system-side' (agent-only working material, e.g. a scraped page). Lets
-  // the viewer hide attach/download affordances that need a Spaces object.
+  // Which audience the file is for; lets the viewer hide attach/download affordances that need a Spaces object.
+  // @see #340
   origin: asset.origin,
-  // #325: current content version. > 1 means the file has edit history the
-  // viewer can show; 1 for uploads and never-edited generated files.
+  // Current content version; > 1 means the file has edit history the viewer can show.
+  // @see #325
   version: asset.version ?? 1,
-  // #252: where the file came from. Absent provenance serialises as explicit
-  // null so the client sees a stable key and can tell "unknown" from "field
-  // missing in an old payload"; never faked from the scalar `origin`.
+  // Absent provenance serialises as explicit null so "unknown" is distinguishable from "field missing"; never faked.
+  // @see #252
   provenance: (asset.provenance as AssetProvenance | undefined) ?? null,
-  // lets the UI tell the user when no text could be extracted (issue #34
-  // owner ask) — the extracted text itself stays server-side, never a
-  // client-rendered payload.
-  // Issue #83: markdown conversion output counts as text — align with the
-  // chat read path (textExtracted ?? markdownExtracted) so library picks of
-  // converted PDFs don't report a false "no text extracted".
+  // Lets the UI say when no text could be extracted; the extracted text itself stays server-side.
+  // @see #34
+  // Markdown conversion output counts as text, aligning with the chat read path so converted PDFs don't falsely report "no text".
+  // @see #83
   hasText: Boolean(asset.textExtracted ?? asset.markdownExtracted),
-  // Issue #67: conversion lifecycle for the library UI badge; no markdown
-  // text ever reaches the client.
+  // Conversion lifecycle for the library UI badge; no markdown text ever reaches the client.
+  // @see #67
   markdownStatus: asset.markdownStatus,
-  // Issue #83: surface the worker's last failure reason for the failed-card
-  // tooltip (metadata only — no markdown text content).
+  // The worker's last failure reason for the failed-card tooltip (metadata only).
+  // @see #83
   markdownFailureReason: asset.markdownFailureReason ?? null,
-  // Issue #208: thumbnail lifecycle so the library/viewer can wait for the
-  // derived preview instead of loading the original. The key itself stays
-  // server-side (only the presigned URL route reveals it).
+  // Thumbnail lifecycle so the library/viewer can wait for the derived preview; the key itself stays server-side.
+  // @see #208
   thumbnailStatus: asset.thumbnailStatus,
   createdAt: asset.createdAt,
 });
 
-// Issue #197: the in-app viewer needs the extracted body, which `safeAsset`
-// deliberately omits. This view is only returned by the single-asset
-// `GET /api/assets/:id/content` route (ownership-scoped) — never by the list.
-// Precedence matches the chat read path (`textExtracted ?? markdownExtracted`):
-// the fast UTF-8 path wins for txt/md/csv, converted markdown otherwise.
+// The in-app viewer needs the extracted body, which safeAsset deliberately omits; only the single-asset content route returns it (ownership-scoped); precedence matches the chat read path.
+// @see #197
 const previewAsset = (asset: AssetDocument): unknown => {
   const content = asset.textExtracted ?? asset.markdownExtracted ?? null;
-  // Issue #197: a Markdown upload keeps its source in `textExtracted` (the
-  // fast UTF-8 path) — it is still markdown and must be rendered, not shown
-  // as literal text. Converted documents (markdownExtracted) are markdown too.
-  // Everything else is plain text.
+  // A Markdown upload keeps its source in textExtracted — still markdown and must be rendered, not shown as literal text; converted documents are markdown too.
+  // @see #197
   const isMarkdownFile =
     asset.contentType === 'text/markdown' || /\.(md|markdown)$/i.test(asset.filename);
   const format =
@@ -60,12 +50,14 @@ const previewAsset = (asset: AssetDocument): unknown => {
     contentType: asset.contentType,
     size: asset.size,
     status: asset.status,
-    // #340: see safeAsset — the viewer hides object-backed actions for
-    // agent-side rows (they have no Spaces object at all).
+    // The viewer hides object-backed actions for agent-side rows (no Spaces object at all).
+    // @see #340
     origin: asset.origin,
-    // #325: current content version (see safeAsset).
+    // Current content version (see safeAsset).
+    // @see #325
     version: asset.version ?? 1,
-    // #252: same contract as `safeAsset` — explicit null when unknown.
+    // Same contract as `safeAsset` — explicit null when unknown.
+    // @see #252
     provenance: (asset.provenance as AssetProvenance | undefined) ?? null,
     // null when nothing was extracted — the viewer shows "(no extracted text)".
     content,
@@ -73,8 +65,8 @@ const previewAsset = (asset: AssetDocument): unknown => {
     format,
     markdownStatus: asset.markdownStatus,
     markdownFailureReason: asset.markdownFailureReason ?? null,
-    // Issue #208: the viewer renders an image thumbnail, not the original;
-    // this tells it whether that thumbnail exists yet.
+    // The viewer renders an image thumbnail, not the original; this tells it whether that thumbnail exists yet.
+    // @see #208
     thumbnailStatus: asset.thumbnailStatus,
     createdAt: asset.createdAt,
   };

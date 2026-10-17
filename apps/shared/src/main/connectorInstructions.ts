@@ -1,9 +1,5 @@
-// Per-provider token-setup instructions for PAT connectors (#332, epic #328).
-// Content as data: the connect modal renders steps from here, keyed by the
-// catalog entry's `instructionsRef`. One render path; provider content lives
-// here and nowhere else. Each step is one thing to do in the provider's UI;
-// `scopeNote` carries narrow-vs-broad guidance and says what breaks when
-// the user goes narrow.
+// Per-provider token-setup instructions for PAT connectors, rendered as data by the connect modal.
+// @see #332 #328
 import type { CatalogEntry } from './connectorCatalog';
 
 export interface ConnectorInstructionStep {
@@ -66,7 +62,6 @@ export const CONNECTOR_INSTRUCTIONS: Record<string, ConnectorInstructions> = {
   },
 };
 
-// Resolved instructions for a catalog entry: real content when the ref
-// resolves, undefined so the modal can fall back to generic copy.
+// Real content when the ref resolves, undefined so the modal can fall back to generic copy.
 export const instructionsFor = (entry: CatalogEntry): ConnectorInstructions | undefined =>
   entry.instructionsRef ? CONNECTOR_INSTRUCTIONS[entry.instructionsRef] : undefined;

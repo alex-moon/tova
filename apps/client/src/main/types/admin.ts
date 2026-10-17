@@ -1,26 +1,26 @@
-// Public shape of an admin-visible user record, as returned by
-// GET /api/admin/users. Re-exported from the shared client/server contract
-// (issue #20) in apps/shared/src/contracts.ts; the server projection lives in
-// apps/server/src/routes/admin.ts.
+// Public admin user record, re-exported from the shared contract.
+// @see #20
 export type { AdminUser } from '@shared/contracts';
-// Public shape of a read-only admin models row, as returned by
-// GET /api/admin/models (issue #33). Re-exported from the shared contract.
+// Read-only admin models row; re-exported from the shared contract.
+// @see #33
 export type { AdminModel, AdminModelProvider } from '@shared/contracts';
-// #168: per-model error diagnostics rows and the full models payload.
+// Per-model error diagnostics rows and the full models payload.
+// @see #168
 export type { AdminModelError, AdminModelsPayload } from '@shared/contracts';
-// #217: provider catalog lookup response (GET /api/admin/model-lookup).
+// Provider catalog lookup response.
+// @see #217
 export type { AdminModelLookup } from '@shared/contracts';
-// Public shape of a log buffer row and the logs response, as returned by
-// GET /api/admin/logs (issue #76). Re-exported from the shared contract.
+// Log row and logs response; re-exported from the shared contract.
+// @see #76
 export type { AdminLogEntry, AdminLogsPayload } from '@shared/contracts';
-// Model comparison shapes (issue #129), as returned by
-// POST /api/admin/model-compare. Re-exported from the shared contract.
+// Model comparison shapes; re-exported from the shared contract.
+// @see #129
 export type { ModelComparisonRun, ModelComparisonResult } from '@shared/contracts';
-// PAT shapes (#184): list rows (metadata only) and the one-time creation
-// response, as returned by GET/POST/DELETE /api/admin/pats.
+// PAT shapes: list rows (metadata only) and the one-time creation response.
+// @see #184
 export type { AdminPat, AdminPatCreated, AdminPatsPayload } from '@shared/contracts';
-// LangSmith read view shapes (#186), as returned by
-// GET /api/admin/langsmith/traces, /langsmith/traces/:id, /langsmith/stats.
+// LangSmith read view shapes.
+// @see #186
 export type {
   AdminTraceRow,
   AdminTracesPayload,
@@ -31,8 +31,8 @@ export type {
   AdminSessionCostRow,
   AdminSessionsCostPayload,
 } from '@shared/contracts';
-// Eval rollup shapes (#225), as returned by GET /api/admin/evals/runs and
-// GET /api/admin/evals/runs/:id.
+// Eval rollup shapes.
+// @see #225
 export type {
   AdminEvalScoreCounts,
   AdminEvalRunSummary,
