@@ -44,9 +44,14 @@ export const assembleTaskHistory = (events: TaskEventDocument[]): CompletionOpti
       continue;
     }
     if (event.role === 'assistant') {
-      const replay = event.content
-        ? event.content
-        : (event.tools ?? []).map((t) => renderToolReplay(t as TaskToolEvent)).join('\n');
+      // Text and tools replay together; a dropped tool blinds the next step.
+      // @see #362
+      const replay = [
+        event.content,
+        ...(event.tools ?? []).map((t) => renderToolReplay(t as TaskToolEvent)),
+      ]
+        .filter(Boolean)
+        .join('\n');
       if (replay) messages.push({ role: 'assistant', content: replay });
       continue;
     }

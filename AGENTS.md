@@ -109,6 +109,7 @@ Retained production logs live in Grafana Cloud (hosted Loki) and are readable di
 Comments are aggressively culled (#364): they bloat the agent context window without making the code better. House style for all code you write or edit, tests included:
 
 - Every comment is a single line capturing only high-level intent — no multi-line prose, no narration of what the next line already says.
+- Keep every comment line under 80 characters including indentation — do not wrap a long comment across several short lines; cut it until it fits or delete it.
 - Ticket references go on a separate following line, in the form `// @see #123 #456` (multiple numbers allowed, no ticket explanation). A bare `// @see #N` with no intent line is fine when the code speaks for itself.
 - JSDoc follows the same rule: a one-liner `/** ... */` at most, plus an `@see` line.
 - If one line is not enough to explain it, the explanation belongs in the ticket or plan doc — or the code needs renaming, not annotating.
