@@ -1146,7 +1146,9 @@ describe('Chat streaming route', () => {
         if (isClassifierCall({ messages })) return structured(CLASSIFIER_REPLY);
         if (isHonestyGuardCall({ messages })) {
           return {
+            text: '{"claimsToolUse": true, "reason": "claims a file read with no tools executed"}',
             object: { claimsToolUse: true, reason: 'claims a file read with no tools executed' },
+            finishReason: 'stop',
           };
         }
         return { text: '[]' };
@@ -1216,7 +1218,11 @@ describe('Chat streaming route', () => {
       mockGenerate.mockImplementation(async (messages?: { role: string; content: string }[]) => {
         if (isClassifierCall({ messages })) return structured(CLASSIFIER_REPLY);
         if (isHonestyGuardCall({ messages })) {
-          return { object: { claimsToolUse: true, reason: 'fabricated read' } };
+          return {
+            text: '{"claimsToolUse": true, "reason": "fabricated read"}',
+            object: { claimsToolUse: true, reason: 'fabricated read' },
+            finishReason: 'stop',
+          };
         }
         return { text: '[]' };
       });

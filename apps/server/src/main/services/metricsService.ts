@@ -56,7 +56,9 @@ export const classifyPromptDimensions = async (
       model: llmModel(),
       messages: [{ role: 'user', content: `${LLM_PROMPT}\n\nPrompt: ${content.trim()}` }],
       temperature: 0,
-      max_tokens: 100,
+      // Reasoning models spend hidden reasoning tokens from this budget before any flags text; too small and every classification is empty (starved-blind).
+      // @see #378 #4
+      max_tokens: 1024,
       ...(sessionId ? { trace: { sessionId } } : {}),
       structuredOutput: {
         schema: FLAGS_SCHEMA,
@@ -65,7 +67,13 @@ export const classifyPromptDimensions = async (
         errorStrategy: 'fallback',
       },
     });
-    return { llm: completion.object, skipReason: isAllNullLlm(completion.object) ? 'parse' : null };
+    const skipReason = isAllNullLlm(completion.object) ? ('parse' as const) : null;
+    if (skipReason === 'parse') {
+      console.warn(
+        'Prompt classification: unparseable classifier output — flags left null; check the aux model token budget.',
+      );
+    }
+    return { llm: completion.object, skipReason };
   } catch (err) {
     console.error('Prompt classification error:', redactForLog(err));
     return { llm: NULL_LLM, skipReason: 'error' };
