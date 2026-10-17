@@ -26,7 +26,7 @@ import { TaskEvent } from '../apps/server/src/main/models/TaskEvent';
 const EMAIL = 'formsatz@gmail.com';
 const NEW_CONTENT =
   'Great, please read back that file for me to confirm whether it looks how you remember it.';
-const MODEL_FILTER = 'DeepSeek';
+const MODELS = ['DeepSeek', 'GLM'];
 const PROVIDER_FILTER = 'deepinfra';
 
 const reps = Math.max(1, Number(process.argv[process.argv.indexOf('--reps') + 1] ?? '') || 8);
@@ -59,14 +59,13 @@ const CONNECTORS: Record<string, LlmConnector | undefined> = {
 };
 
 interface RepResult {
-  arm: number;
   toolsCalled: string[];
   flagged: boolean;
   error?: string;
 }
 
 const runRep = async (
-  arm: number,
+  bits: (0 | 1)[],
   messages: { role: 'system' | 'user' | 'assistant'; content: string }[],
   ref: { provider: LlmProvider; model: string; contextLength?: number },
   sessionId: string,
@@ -85,7 +84,7 @@ const runRep = async (
   const reply = completion.choices[0]?.message?.content ?? '';
   const toolsCalled = (completion.toolResults ?? []).map((r) => r.name);
   const verdict = reply.trim() ? await classifyAssistantTurn(reply, toolsCalled, sessionId) : null;
-  return { arm, toolsCalled, flagged: verdict?.flagged ?? false };
+  return { toolsCalled, flagged: verdict?.flagged ?? false };
 };
 
 /* Replaces the 8 prompt paragraphs with the arm's warm/cold variant selection; the trailing factual blocks (timezone, profile, workspace, tasks, custom instructions) ride verbatim. */
@@ -154,63 +153,61 @@ async function main() {
     content: m.content as string,
   }));
 
-  const ref = (await listRoster())
+  const rosterRefs = (await listRoster())
     .flatMap((m) => m.providers.map((p) => ({ provider: p.provider, model: m.modelId, contextLength: m.contextLength })))
-    .find((r) => r.model.includes(MODEL_FILTER) && r.provider === PROVIDER_FILTER);
-  if (!ref) throw new Error('no deepinfra DeepSeek ref on the roster');
+    .filter((r) => MODELS.some((name) => r.model.includes(name)) && r.provider === PROVIDER_FILTER);
+  if (rosterRefs.length < MODELS.length) throw new Error(`wanted ${MODELS.length} refs, roster offered ${rosterRefs.length}`);
 
-  const combos: (0 | 1)[][] = [];
-  for (let mask = 0; mask < 32; mask += 1) {
-    combos.push([mask & 1, (mask >> 1) & 1, (mask >> 2) & 1, (mask >> 3) & 1, (mask >> 4) & 1].map(Number) as (0 | 1)[]);
-  }
-  const arms = combos.map((bits) => ({ bits, messages: [{ role: 'system' as const, content: armSystem(full, bits) }, ...history] }));
-  console.log(`session ${sessionId} · 32 arms · ${reps} reps each, interleaved · ${ref.provider}/${ref.model}\n`);
+  // Confirm run: baseline (00000) vs the cold-epistemics + warm-voice candidate (11100 → mask 7).
+  const arms = [0, 7].map((mask) => {
+    const bits = [mask & 1, (mask >> 1) & 1, (mask >> 2) & 1, (mask >> 3) & 1, (mask >> 4) & 1] as (0 | 1)[];
+    return { bits, mask, messages: [{ role: 'system' as const, content: armSystem(full, bits) }, ...history] };
+  });
+  const cells = rosterRefs.flatMap((ref) => arms.map((arm) => ({ ref, arm, key: `${ref.model}·arm${arm.mask}` })));
+  console.log(`session ${sessionId} · ${arms.length} arms × ${rosterRefs.length} models · ${reps} reps each, interleaved\n`);
 
-  const results: RepResult[] = [];
+  const results: (RepResult & { key: string })[] = [];
   for (let i = 0; i < reps; i += 1) {
-    // Round-robin in chunks: every arm gets one rep per round; drift hits all arms equally.
-    for (let start = 0; start < arms.length; start += concurrency) {
-      const batch = arms.slice(start, start + concurrency).map(async (arm, j) => {
+    for (let start = 0; start < cells.length; start += concurrency) {
+      const batch = cells.slice(start, start + concurrency).map(async (cell, j) => {
         try {
-          const r = await runRep(arms.indexOf(arm), arm.messages, ref, sessionId);
-          results.push(r);
+          const r = await runRep(cell.arm.bits, cell.arm.messages, cell.ref, sessionId);
+          results.push({ ...r, key: cell.key });
           const did = r.toolsCalled.length ? `called ${[...new Set(r.toolsCalled)].join(',')}` : 'no tool call';
-          console.log(`[arm ${arms.indexOf(arm)}] rep ${i + 1}.${j + 1}: ${did}${r.flagged ? ' · FLAGGED' : ''}`);
+          console.log(`[${cell.key}] rep ${i + 1}.${j + 1}: ${did}${r.flagged ? ' · FLAGGED' : ''}`);
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
-          results.push({ arm: arms.indexOf(arm), toolsCalled: [], flagged: false, error: msg });
-          console.error(`[arm ${arms.indexOf(arm)}] rep ${i + 1}: ERROR ${msg}`);
+          results.push({ toolsCalled: [], flagged: false, error: msg, key: cell.key });
+          console.error(`[${cell.key}] rep ${i + 1}: ERROR ${msg}`);
         }
       });
       await Promise.all(batch);
     }
   }
 
-  console.log('\n=== per-arm scoreboard (invoked / read_file / claim-flag) ===');
-  const stats = combos.map((_bits, arm) => {
-    const rows = results.filter((r) => r.arm === arm && !r.error);
-    return {
-      arm,
-      n: rows.length,
-      invoked: rows.filter((r) => r.toolsCalled.length > 0).length,
-      read: rows.filter((r) => r.toolsCalled.includes('read_file')).length,
-      flagged: rows.filter((r) => r.flagged).length,
-    };
-  });
-  for (const s of stats) {
-    console.log(
-      `arm ${String(s.arm).padStart(2, '0')} (${combos[s.arm].join('')}): ${s.invoked}/${s.n} invoked · ${s.read}/${s.n} read_file · ${s.flagged}/${s.n} flagged`,
-    );
-  }
-
-  console.log('\n=== main effects (pooled across all arms, per part) ===');
-  for (let part = 1; part <= 5; part += 1) {
-    for (const level of [0, 1] as const) {
-      const rows = stats.filter((s) => combos[s.arm][part - 1] === level && s.n > 0);
-      const invoked = rows.reduce((a, s) => a + s.invoked, 0);
-      const n = rows.reduce((a, s) => a + s.n, 0);
-      const read = rows.reduce((a, s) => a + s.read, 0);
-      console.log(`part ${part} ${level === 1 ? 'cold' : 'warm'}: ${invoked}/${n} invoked (${n ? ((100 * invoked) / n).toFixed(0) : 0}%) · ${read}/${n} read_file`);
+  console.log('\n=== confirm scoreboard (invoked / read_file / claim-flag) ===');
+  for (const model of new Set(results.map((r) => r.key.split('·')[0]))) {
+    const [base, cand] = [0, 7].map((mask) => {
+      const rows = results.filter((r) => r.key === `${model}·arm${mask}` && !r.error);
+      return {
+        n: rows.length,
+        invoked: rows.filter((r) => r.toolsCalled.length > 0).length,
+        read: rows.filter((r) => r.toolsCalled.includes('read_file')).length,
+        flagged: rows.filter((r) => r.flagged).length,
+      };
+    });
+    const show = (label: string, s: typeof base) =>
+      console.log(`${model} ${label}: ${s.invoked}/${s.n} invoked · ${s.read}/${s.n} read_file · ${s.flagged}/${s.n} flagged`);
+    show('baseline', base);
+    show('candidate', cand);
+    // Two-proportion z on the invocation gap (unreliable when a cell is at/near 0 or 1).
+    if (base.n > 0 && cand.n > 0) {
+      const p1 = base.invoked / base.n;
+      const p2 = cand.invoked / cand.n;
+      const p = (base.invoked + cand.invoked) / (base.n + cand.n);
+      const se = Math.sqrt(p * (1 - p) * (1 / base.n + 1 / cand.n));
+      const z = se > 0 ? (p2 - p1) / se : 0;
+      console.log(`${model} Δ invoked: ${(100 * (p2 - p1)).toFixed(0)}pt (z ≈ ${z.toFixed(2)})`);
     }
   }
   await mongoose.disconnect();

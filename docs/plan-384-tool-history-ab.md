@@ -117,9 +117,33 @@ production prompt exactly) and a cold variant (operational/terse rewrite).
   effects, not single cells.
 - Flag counts remain contaminated by the no-userId design — relative signal only.
 
-## Follow-ups (updated)
+## Confirm run (baseline `00000` vs candidate `11100`, n=20/arm, both models, interleaved, deepinfra)
 
-- Routing: prefer GLM-5.3-Flash for tool-needing turns (both probes' evidence).
-- Confirm run: bits `11100` vs baseline at higher N (≥20/arm), then extend to GLM.
-- Prompt rewrite, if confirmed: keep paras 5-8's voice verbatim, replace paras 1-4's
-  knowledge parts with the operational cold variants, dedup the anti-fabrication rule.
+| model | baseline | candidate | Δ invoked |
+|---|---|---|---|
+| DeepSeek-V4.1-Flash | 16/20 · 2 flagged | 16/20 · 0 flagged | 0pt (z ≈ 0.00) |
+| GLM-5.3-Flash | 18/20 · 1 flagged | 18/20 · 0 flagged | 0pt (z ≈ 0.00) |
+
+- **The GLM risk is retired**: identical invocation (18/20 → 18/20), flags 1 → 0. The
+  rewrite cannot be said to undermine GLM on this evidence.
+- **The DeepSeek benefit did not replicate**: 0pt at n=20. Detecting the factorial's
+  +5-7pt main effect would need n≈500/arm — below any feasible measurement floor.
+  Treat the factorial signal as suggestive only.
+- **New headline: DeepSeek's invocation is high-variance across runs.** Same backend,
+  same setup, identical prompt: 40-100% between runs today (3/5 → 5/5 → 16/20), while
+  GLM sat at 90-100% in every run. Variance, not mean, is DeepSeek's defining trait in
+  this harness — and variance is what the honesty guard keeps catching at the tail.
+
+## Verdict
+
+- Ship-safe: the deduplicated prompt (cold epistemics + warm voice) causes no
+  measurable harm to either model and reduces claim-flags to 0/20 in this run; its
+  reliability benefit is unproven. Worth shipping for the dedup and clarity alone.
+- Reliability lever: route tool-needing turns to GLM-5.3-Flash; keep the honesty guard
+  as the tail net for whatever DeepSeek turns it still receives.
+
+## Follow-ups (final for this ticket)
+
+- Prompt rewrite PR (paras 1-4 → operational variants, voice verbatim, dedup'd
+  fabrication rule) — ready to open with this evidence.
+- Routing preference for GLM on tool-shaped turns.
