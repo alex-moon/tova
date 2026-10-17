@@ -25,6 +25,7 @@ import { startAssetJobPoller } from './services/assetJobService';
 import { startTaskPoller } from './services/taskService';
 import { processTaskJob } from './services/taskProcessor';
 import { startTraceStatsPoller } from './services/traceStatsCacheService';
+import { startAssetVersionPruner } from './services/assetVersionPrune';
 import { processAssetConversionJob } from './services/assetJobProcessor';
 import { startEvalScheduler, hasRunForUtcDay } from './services/evalScheduler';
 import {
@@ -210,6 +211,10 @@ export const startServer = async (): Promise<Server> => {
     // Keep the admin Traces summary warm so the tab loads from Mongo.
     // @see #224
     startTraceStatsPoller();
+
+    // Daily prune of superseded asset versions (older than a year).
+    // @see #369
+    startAssetVersionPruner();
   }
 
   return app.listen(port, () => {
