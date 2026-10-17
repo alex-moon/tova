@@ -359,8 +359,10 @@ describe('Chat streaming route', () => {
     // The persisted path still drops the redundant date line.
     // @see #261
     expect(options.instructions).not.toContain("Today's date is");
-    // Storage is untouched: the persisted message keeps its raw content.
-    const stored = await Message.findOne({ sessionId: session._id, role: 'user' });
+    // Storage is untouched: the persisted message keeps its raw content; explicit sort — natural order is not stable once the per-session index exists (#377).
+    const stored = await Message.findOne({ sessionId: session._id, role: 'user' }).sort({
+      timestamp: 1,
+    });
     expect(stored?.content).toBe('first turn');
     expect(new Date(stored?.timestamp as Date).toISOString()).toBe('2026-10-08T14:32:00.000Z');
   });
