@@ -50,7 +50,9 @@ export const reviewAssistantTurn = async (
         },
       ],
       temperature: 0,
-      max_tokens: 120,
+      // Reasoning models spend hidden reasoning tokens from this budget before any verdict text; too small and every verdict is empty or truncated (the #129 shape).
+      // @see #378 #4
+      max_tokens: 1024,
       ...(sessionId ? { trace: { sessionId } } : {}),
       structuredOutput: {
         schema: VERDICT_SCHEMA,
@@ -59,6 +61,15 @@ export const reviewAssistantTurn = async (
         errorStrategy: 'fallback',
       },
     });
+    // A starved or empty reply (reasoning models burn the budget on hidden reasoning) is garbage, not a clean verdict: leave the message unassessed rather than record a false "clean".
+    // @see #378
+    const raw = completion.choices[0]?.message?.content ?? '';
+    if (!raw.trim() || completion.choices[0]?.finishReason === 'length') {
+      console.warn(
+        `Honesty guard: unclassifiable verdict (finishReason=${completion.choices[0]?.finishReason ?? 'none'}) — turn left unassessed; check the aux model's token budget.`,
+      );
+      return null;
+    }
     const verdict: HonestyVerdict = {
       flagged: completion.object.claimsToolUse,
       reason: completion.object.reason?.trim() ? completion.object.reason.trim() : null,
