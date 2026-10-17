@@ -48,8 +48,8 @@
   --header-height: 60px;
   /* #359 feedback: the sidebar is the rename/browse surface, so titles need
    * room to read in full (subtitles may still ellipsize). Desktop keeps one
-   * fixed column width; the phone drawer takes most of the viewport. */
-  --sidebar-width: 300px;
+   * fixed column width (owner-tuned: 390px); the phone drawer is full-bleed. */
+  --sidebar-width: 390px;
 }
 
 :root {
@@ -225,11 +225,13 @@ body {
 }
 
 @media (width < 48rem) {
-  /* #359 feedback: the drawer rides over the chat, so give the text most of
-   * the viewport — titles should read in full (subtitles may ellipsize).
-   * The slide-in animation is transform-driven and unaffected. */
+  /* #359 feedback: the drawer is the phone's chat picker — make it full-bleed
+   * so titles read in full (subtitles may still ellipsize). Trade-off: there
+   * is no outside to tap, so the X (and the scrim's click target, kept for
+   * the slide-in window and robustness) is the exit. The slide-in animation
+   * is transform-driven and unaffected. */
   :root {
-    --sidebar-width: min(88vw, 340px);
+    --sidebar-width: 100vw;
   }
 
   .responsive-table thead {

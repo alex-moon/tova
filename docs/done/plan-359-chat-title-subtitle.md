@@ -73,6 +73,19 @@ will consume later.
   subtitle; no horizontal overflow at 360px; full responsive e2e suite green
   (60/60, mobile + desktop).
 
+## Review-pass changes (owner feedback, riding the PR)
+
+- **Rename affordance on every viewport.** The chat header is phone-only
+  (`md:hidden`), so desktop had no way to rename. The sidebar row gains a
+  pencil with the same inline-edit swap as the confirm-delete card
+  (Enter/blur commits, Escape cancels); the phone header's tap-to-rename
+  stays.
+- **Sidebar width** (owner-tuned live): desktop column 260px → fixed 390px;
+  the phone drawer is full-bleed (`100vw`) so titles read in full
+  (subtitles may still ellipsize). Trade-off accepted: no outside-tap to
+  close on phone — the X is the exit. Slide-in animation unchanged
+  (transform-driven).
+
 ## Follow-ups
 
 - Subtitle edit affordance for users (intent annotation; feeds #355/#357).
