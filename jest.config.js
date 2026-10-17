@@ -25,6 +25,7 @@ module.exports = {
     '^@tova/shared$': '<rootDir>/apps/shared/src/main/index.ts',
     '^@mastra/core/agent$': '<rootDir>/apps/server/src/test/mastraAgentStub.ts',
     '^@mastra/core/tools$': '<rootDir>/apps/server/src/test/mastraToolsStub.ts',
+    '^@mastra/core/processors$': '<rootDir>/apps/server/src/test/mastraToolSearchStub.ts',
     '^@mastra/core/storage$': '<rootDir>/apps/server/src/test/mastraStorageStub.ts',
     '^@mastra/core$': '<rootDir>/apps/server/src/test/mastraCoreStub.ts',
     '^@mastra/observability$': '<rootDir>/apps/server/src/test/observabilityStub.ts',

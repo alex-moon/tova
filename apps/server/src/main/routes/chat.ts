@@ -164,11 +164,13 @@ const toolLabelFrom = (name: string): string =>
             ? 'Created a file'
             : name === 'edit_file'
               ? 'Updated a file'
-              : name || 'Tool run';
+              : name === 'search_tools'
+                ? 'Searched connected tools'
+                : name || 'Tool run';
 
 /* Internal bookkeeping tools: a turn whose only tool was one of these must not synthesize a confirmation. */
-// @see #195
-const NON_CONFIRMING_TOOLS = new Set(['current_datetime']);
+// @see #195 #360
+const NON_CONFIRMING_TOOLS = new Set(['current_datetime', 'search_tools']);
 
 // Completed-tool confirmation: when a turn ran a user-facing tool but produced no text, derive a short sentence; a real answer always wins byte-for-byte.
 // @see #195
@@ -436,10 +438,31 @@ const buildZdrMessages = (
   { role: 'user', content },
 ];
 
-/* User turns get a `[timestamp]` header emitted at prompt-assembly time and never persisted; assistant turns are NOT stamped (the model leaked stamps into replies); docs arrive newest-first. */
-// @see #261 #315
-const messagesFromPersistedHistory = (
-  history: { role: string; content: string; timestamp?: Date }[],
+/* User turns get a `[timestamp]` header emitted at prompt-assembly time and never persisted; assistant turns are NOT stamped (the model leaked stamps into replies); docs arrive newest-first. Assistant turns with persisted tool chips get a factual provenance line so earlier tool use is visible structure in-context, not bare assertions the model can disown. */
+// @see #261 #315 #360
+export const toolProvenanceLine = (
+  tools: { phase?: string; name?: string }[] | undefined,
+): string => {
+  if (!Array.isArray(tools)) return '';
+  const counts = new Map<string, number>();
+  for (const t of tools) {
+    if (t?.phase !== 'result' || typeof t.name !== 'string' || !t.name) continue;
+    counts.set(t.name, (counts.get(t.name) ?? 0) + 1);
+  }
+  if (counts.size === 0) return '';
+  const summary = [...counts.entries()]
+    .map(([name, n]) => (n > 1 ? `${name} ×${n}` : name))
+    .join(', ');
+  return `\n\n[tools used: ${summary}]`;
+};
+
+export const messagesFromPersistedHistory = (
+  history: {
+    role: string;
+    content: string;
+    timestamp?: Date;
+    tools?: { phase?: string; name?: string }[];
+  }[],
   timezone?: string | null,
 ): { role: 'system' | 'user' | 'assistant'; content: string | MessageContentPart[] }[] =>
   history.reverse().map((m, i) => {
@@ -447,11 +470,27 @@ const messagesFromPersistedHistory = (
       m.role === 'user' && m.timestamp
         ? `${timestampHeader(m.timestamp, history[i - 1]?.timestamp, timezone)}\n`
         : '';
+    const provenance = m.role === 'assistant' ? toolProvenanceLine(m.tools) : '';
     return {
       role: m.role as 'user' | 'assistant',
-      content: header + (m.content as string),
+      content: header + (m.content as string) + provenance,
     };
   });
+
+/* History window sized for the roster's 1M-token windows: deep enough that a session keeps its own tool history in view (the #360 failure mode), bounded so prompt size stays far below the provider cap; the 413/failover path catches pathological outliers. Newest kept, oldest dropped first. */
+// @see #360
+export const HISTORY_MAX_MESSAGES = 200;
+export const HISTORY_MAX_CHARS = 400_000;
+export const windowedHistory = <T extends { content?: string | null }>(docs: T[]): T[] => {
+  let used = 0;
+  let count = 0;
+  for (const doc of docs) {
+    used += (doc.content ?? '').length;
+    if (used > HISTORY_MAX_CHARS) break;
+    count += 1;
+  }
+  return docs.slice(0, Math.min(count, HISTORY_MAX_MESSAGES));
+};
 
 // Throwaway chat attachments: the row and its Spaces object go once consumed; cleanup never throws.
 // @see #116
@@ -712,10 +751,12 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
     // @see #115
     const hasImage = turnsWithImage(attachedAsset);
 
-    // Get chat history for context — the window includes the just-saved current turn, reversing to oldest-first for the prompt.
-    const history = await Message.find({ sessionId: session._id })
-      .sort({ timestamp: -1 })
-      .limit(10);
+    // Get chat history for context — the window includes the just-saved current turn, reversing to oldest-first for the prompt; deep window per #360.
+    const history = windowedHistory(
+      await Message.find({ sessionId: session._id })
+        .sort({ timestamp: -1 })
+        .limit(HISTORY_MAX_MESSAGES),
+    );
     // Coarse geolocation: awaited so this turn's prompt can include the country; the service never throws.
     // @see #50
     await ensureUserLocation(userDoc, req.ip);
@@ -734,7 +775,12 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
     );
     const withSystemAndAsset = async (systemContent: string) => {
       const next = messagesFromPersistedHistory(
-        history as { role: string; content: string; timestamp?: Date }[],
+        history as {
+          role: string;
+          content: string;
+          timestamp?: Date;
+          tools?: { phase?: string; name?: string }[];
+        }[],
         userDoc.settings?.timezone,
       );
       next.unshift({ role: 'system', content: systemContent });
@@ -795,6 +841,10 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
       .filter((url) => titles.has(url))
       .map((url) => ({ url, title: titles.get(url) as string }));
 
+    // Reconciled tool chips for the persisted turn, so provenance survives into later prompts (#360).
+    const toolEvents: PersistedToolEvent[] = [];
+    for (const r of toolResults) reconcileToolEvent(toolEvents, toolResultEvent(r));
+
     // Save assistant message
     const assistantMessage = new Message({
       sessionId: session!._id,
@@ -805,6 +855,7 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
       ...(chatCompletion.usage ? { usage: chatCompletion.usage } : {}),
       ...(sources.length > 0 ? { sources } : {}),
       ...(sourceTitles.length > 0 ? { sourceTitles } : {}),
+      ...(toolEvents.length > 0 ? { tools: toolEvents } : {}),
       metrics: await buildMessageMetrics(String(session!._id), assistantContent),
     });
     await assistantMessage.save();
@@ -960,10 +1011,12 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
         attachedAsset,
       );
 
-      // Get chat history — the window includes the just-saved current turn, reversing to oldest-first for the prompt.
-      const history = await Message.find({ sessionId: session!._id })
-        .sort({ timestamp: -1 })
-        .limit(10);
+      // Get chat history — the window includes the just-saved current turn, reversing to oldest-first for the prompt; deep window per #360.
+      const history = windowedHistory(
+        await Message.find({ sessionId: session!._id })
+          .sort({ timestamp: -1 })
+          .limit(HISTORY_MAX_MESSAGES),
+      );
 
       streamWorkspaceBlock = await workspaceBlockFor(content, userId as string, {
         skipWorkspace: hasImage,
@@ -983,7 +1036,12 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
       // @see #115
       routingResult = rosterRoute;
       messages = messagesFromPersistedHistory(
-        history as { role: string; content: string; timestamp?: Date }[],
+        history as {
+          role: string;
+          content: string;
+          timestamp?: Date;
+          tools?: { phase?: string; name?: string }[];
+        }[],
         streamUserDoc.settings?.timezone,
       );
     }

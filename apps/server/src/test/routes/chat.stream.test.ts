@@ -4,8 +4,13 @@ import { Message } from '../../main/models/Message';
 import { Session } from '../../main/models/Session';
 import { User } from '../../main/models/User';
 import {
+  HISTORY_MAX_CHARS,
+  HISTORY_MAX_MESSAGES,
+  messagesFromPersistedHistory,
   paragraphBreakFor,
   reconcileToolEvent,
+  toolProvenanceLine,
+  windowedHistory,
   type PersistedToolEvent,
 } from '../../main/routes/chat';
 
@@ -1420,5 +1425,72 @@ describe('reconcileToolEvent (#196)', () => {
     reconcileToolEvent(list, result('web_search'));
     expect(list).toHaveLength(2);
     expect(list.every((e) => e.phase === 'result')).toBe(true);
+  });
+});
+
+describe('history window + tool provenance (#360)', () => {
+  const doc = (content: string) => ({ content });
+
+  describe('windowedHistory', () => {
+    it('keeps everything under both caps', () => {
+      const docs = [doc('a'), doc('b'), doc('c')];
+      expect(windowedHistory(docs)).toEqual(docs);
+    });
+
+    it('drops oldest-first beyond the char budget (docs arrive newest-first)', () => {
+      const half = doc('x'.repeat(HISTORY_MAX_CHARS / 2));
+      const docs = [half, { content: 'y'.repeat(HISTORY_MAX_CHARS / 2) }, doc('z')];
+      const kept = windowedHistory(docs);
+      expect(kept).toEqual([docs[0], docs[1]]);
+    });
+
+    it('caps the message count', () => {
+      const docs = Array.from({ length: HISTORY_MAX_MESSAGES + 10 }, (_, i) => doc(`m${i}`));
+      expect(windowedHistory(docs)).toHaveLength(HISTORY_MAX_MESSAGES);
+    });
+
+    it('treats missing content as empty, not a stop', () => {
+      const docs = [{ content: null }, doc('kept')];
+      expect(windowedHistory(docs as { content?: string | null }[])).toHaveLength(2);
+    });
+  });
+
+  describe('toolProvenanceLine', () => {
+    it('empty for turns without reconciled tool results', () => {
+      expect(toolProvenanceLine(undefined)).toBe('');
+      expect(toolProvenanceLine([])).toBe('');
+      expect(toolProvenanceLine([{ phase: 'call', name: 'list_files' }])).toBe('');
+    });
+
+    it('renders names with repeat counts', () => {
+      const line = toolProvenanceLine([
+        { phase: 'result', name: 'list_files' },
+        { phase: 'result', name: 'read_file' },
+        { phase: 'result', name: 'read_file' },
+      ]);
+      expect(line).toBe('\n\n[tools used: list_files, read_file ×2]');
+    });
+
+    it('ignores malformed entries rather than failing the turn', () => {
+      expect(toolProvenanceLine([{ phase: 'result' }, null as never])).toBe('');
+    });
+  });
+
+  describe('messagesFromPersistedHistory', () => {
+    it('appends the provenance line to assistant turns with tool chips', () => {
+      const out = messagesFromPersistedHistory(
+        [
+          {
+            role: 'assistant',
+            content: 'Here is what you have.',
+            tools: [{ phase: 'result', name: 'list_files' }],
+          },
+          { role: 'user', content: 'thanks' },
+        ],
+        null,
+      );
+      expect(out[1].content).toBe('Here is what you have.\n\n[tools used: list_files]');
+      expect(out[0].content).toBe('thanks');
+    });
   });
 });
