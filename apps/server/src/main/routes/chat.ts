@@ -438,7 +438,7 @@ const buildZdrMessages = (
   { role: 'user', content },
 ];
 
-/* User turns get a `[timestamp]` header emitted at prompt-assembly time and never persisted; assistant turns are NOT stamped (the model leaked stamps into replies); docs arrive newest-first. Assistant turns with persisted tool chips get a factual provenance line so earlier tool use is visible structure in-context, not bare assertions the model can disown. */
+/* Newest-first docs; prompt-only timestamp header on user turns; provenance line on assistant turns. */
 // @see #261 #315 #360
 export const toolProvenanceLine = (
   tools: { phase?: string; name?: string }[] | undefined,
@@ -477,7 +477,7 @@ export const messagesFromPersistedHistory = (
     };
   });
 
-/* History window sized for the roster's 1M-token windows: deep enough that a session keeps its own tool history in view (the #360 failure mode), bounded so prompt size stays far below the provider cap; the 413/failover path catches pathological outliers. Newest kept, oldest dropped first. */
+/* Newest-kept history window for the 1M-token roster windows; the 413/failover path bounds outliers. */
 // @see #360
 export const HISTORY_MAX_MESSAGES = 200;
 export const HISTORY_MAX_CHARS = 400_000;
@@ -751,7 +751,8 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
     // @see #115
     const hasImage = turnsWithImage(attachedAsset);
 
-    // Get chat history for context — the window includes the just-saved current turn, reversing to oldest-first for the prompt; deep window per #360.
+    // Get chat history for context — the window includes the just-saved current turn, reversing to oldest-first for the prompt.
+    // @see #360
     const history = windowedHistory(
       await Message.find({ sessionId: session._id })
         .sort({ timestamp: -1 })
@@ -841,7 +842,8 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
       .filter((url) => titles.has(url))
       .map((url) => ({ url, title: titles.get(url) as string }));
 
-    // Reconciled tool chips for the persisted turn, so provenance survives into later prompts (#360).
+    // Reconciled tool chips for the persisted turn.
+    // @see #196 #360
     const toolEvents: PersistedToolEvent[] = [];
     for (const r of toolResults) reconcileToolEvent(toolEvents, toolResultEvent(r));
 
@@ -1011,7 +1013,8 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
         attachedAsset,
       );
 
-      // Get chat history — the window includes the just-saved current turn, reversing to oldest-first for the prompt; deep window per #360.
+      // Get chat history — the window includes the just-saved current turn, reversing to oldest-first for the prompt.
+      // @see #360
       const history = windowedHistory(
         await Message.find({ sessionId: session!._id })
           .sort({ timestamp: -1 })

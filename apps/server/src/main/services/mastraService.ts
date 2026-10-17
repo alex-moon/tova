@@ -151,7 +151,7 @@ const modelSettingsFrom = (options: CompletionOptions) => ({
 
 /* Abort/disconnect plumbing plus `maxSteps` semantics: tools-mode (not the Brave key) drives the loop cap — a low cap starves long-document workflows; userId/sessionId/taskId ride the per-call RequestContext so tools scope per user and attribute provenance, while agents are memoised per provider/model/mode. */
 // @see #16 #159 #52 #58 #252 #298
-/* Connector toolsets: platform + personal connectors resolved per call with a short TTL cache; an empty result forwards no extra options at all. The resolved tools are deferred (Anthropic-style deferred loading): a per-call ToolSearchProcessor holds them as its searchable catalog so the agent's primary tools stay in-prompt and connector tools load on demand via `search_tools`. Built as a per-call processor so per-user credentials and loaded state never cross calls. */
+/* Connector toolsets resolve per call (TTL cache) and defer to search via a per-call ToolSearchProcessor; built-ins stay in-prompt. */
 // @see #36 #329 #360
 export const connectorSearchOptionsFrom = async (options: CompletionOptions) => {
   if (!options.userId) return {};
@@ -160,7 +160,7 @@ export const connectorSearchOptionsFrom = async (options: CompletionOptions) => 
   const catalog: Record<string, (typeof toolsets)[string][string]> = {};
   for (const tools of Object.values(toolsets)) {
     for (const [name, tool] of Object.entries(tools)) {
-      // First connector wins on name collisions (matches the old flat toolsets merge); the id is sanitized because the processor indexes by id and function names must be provider-safe.
+      // First connector wins on collisions; sanitized id keeps function names provider-safe.
       if (catalog[name]) continue;
       catalog[name] = createTool({
         id: name.replace(/[^a-zA-Z0-9_-]/g, '_'),

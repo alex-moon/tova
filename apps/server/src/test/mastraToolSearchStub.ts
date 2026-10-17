@@ -1,4 +1,4 @@
-/* Jest-only stub for `@mastra/core/processors` (ESM-only transitive deps); suites assert on the options the service passes to the processor, so the constructor is captured as plain data. */
+/* Jest-only stub for `@mastra/core/processors` (ESM-only transitive deps). */
 // @see #360
 export interface ToolSearchProcessorOptions {
   tools: Record<string, unknown>;

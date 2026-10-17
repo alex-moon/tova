@@ -2,7 +2,7 @@ import { ToolSearchProcessor } from '@mastra/core/processors';
 import { connectorSearchOptionsFrom } from '../../main/services/mastraService';
 import type { CompletionOptions } from '../../main/services/llmTypes';
 
-/* The connector tools must defer to search (per-call ToolSearchProcessor) while the agent's primary tools stay in-prompt; here we pin the option shape the connector builder emits. */
+/* Pins the deferred-connector option shape the connector builder emits. */
 // @see #360
 
 const mockToolsetsFor = jest.fn();
