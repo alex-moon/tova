@@ -23,6 +23,7 @@ import MarkdownContent from './MarkdownContent';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import AssetService, { type AssetSummary } from '@/services/assets';
+import CapabilityService, { type Capabilities } from '@/services/capabilities';
 import TaskCard from './TaskCard';
 // Tolerant context read: standalone renders (tests) have no AuthProvider.
 import { AuthContext } from '../context/AuthContext';
@@ -328,6 +329,98 @@ const SessionHeaderTitle: React.FC<{
   );
 };
 
+// The user-visible source of truth for capability state: built-ins with config status, connected tools that need discovery; never inferred from the agent's prose.
+// @see #366
+const CapabilitiesPanel: React.FC = () => {
+  const [caps, setCaps] = useState<Capabilities | null>(null);
+  const [error, setError] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    CapabilityService.get()
+      .then((data) => {
+        if (!cancelled) setCaps(data);
+      })
+      .catch(() => {
+        if (!cancelled) setError(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  if (error) {
+    return (
+      <p data-testid="capabilities-error" className="px-1 py-2 text-xs text-muted-foreground">
+        Could not load capabilities.
+      </p>
+    );
+  }
+  if (!caps) {
+    return (
+      <p data-testid="capabilities-loading" className="px-1 py-2 text-xs text-muted-foreground">
+        Loading…
+      </p>
+    );
+  }
+  return (
+    <div
+      data-testid="capabilities-panel"
+      className="mb-2 rounded-lg border border-border bg-muted/40 px-3 py-2.5 text-xs"
+    >
+      <div className="mb-1.5 font-medium uppercase tracking-wide text-muted-foreground">
+        Built in
+      </div>
+      <div className="mb-2 flex flex-wrap gap-1.5">
+        {caps.tools.map((tool) => (
+          <span
+            key={tool.name}
+            data-testid={`capability-${tool.name}`}
+            title={
+              tool.status === 'unconfigured' ? 'Needs a search key on this deployment' : undefined
+            }
+            className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 ${
+              tool.status === 'ready'
+                ? 'border-border bg-background text-foreground'
+                : 'border-warning/40 bg-warning/10 text-warning'
+            }`}
+          >
+            {tool.status === 'ready' ? (
+              <Check size={11} aria-hidden className="text-success" />
+            ) : (
+              <TriangleAlert size={11} aria-hidden />
+            )}
+            {tool.label}
+          </span>
+        ))}
+      </div>
+      <div className="mb-1.5 font-medium uppercase tracking-wide text-muted-foreground">
+        Connected tools
+      </div>
+      {caps.connectors.length === 0 ? (
+        <p className="text-muted-foreground">
+          None yet — connect a tool collection in{' '}
+          <a href="/connectors" className="underline hover:text-foreground">
+            /connectors
+          </a>
+          .
+        </p>
+      ) : (
+        <div className="space-y-1.5">
+          {caps.connectors.map((connector) => (
+            <div key={connector.name} data-testid={`capability-connector-${connector.name}`}>
+              <span className="font-medium">{connector.name}</span>
+              <span className="text-muted-foreground">
+                {' '}
+                · {connector.tools.map((t) => t.name).join(', ')} — ask Tova to use one and it will
+                find it (needs a tool search first)
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
 const ChatWindow: React.FC<ChatWindowProps> = ({
   messages,
   onSendMessage,
@@ -370,6 +463,9 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
   // Pinned while at the bottom; scrolling up releases, sending/deltas restore.
   // @see #33
   const pinnedRef = React.useRef(true);
+  // The capabilities panel is a deliberate footer affordance; fetched lazily on first open.
+  // @see #366
+  const [capabilitiesOpen, setCapabilitiesOpen] = useState(false);
   const [pendingFeedbackId, setPendingFeedbackId] = useState<string | null>(null);
   // Raw Markdown copy; one timer ref so a rapid re-copy can't leave a stale timer.
   // @see #200
@@ -981,12 +1077,24 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
             </div>
           </div>
         </form>
-        <p className="mt-2 text-center text-xs text-muted-foreground" data-testid="privacy-note">
-          Your chats and files are never used to train models — by anyone, ever.
-          {!sessionId && incognito
-            ? ' Incognito is on for this chat: nothing sent or attached is stored.'
-            : ''}
-        </p>
+        {capabilitiesOpen && <CapabilitiesPanel />}
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <button
+            type="button"
+            data-testid="capabilities-toggle"
+            aria-expanded={capabilitiesOpen}
+            onClick={() => setCapabilitiesOpen((open) => !open)}
+            className="text-xs text-muted-foreground underline underline-offset-2 transition-colors hover:text-foreground"
+          >
+            What can Tova do?
+          </button>
+          <p className="text-xs text-muted-foreground" data-testid="privacy-note">
+            Your chats and files are never used to train models — by anyone, ever.
+            {!sessionId && incognito
+              ? ' Incognito is on for this chat: nothing sent or attached is stored.'
+              : ''}
+          </p>
+        </div>
       </footer>
     </section>
   );
