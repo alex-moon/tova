@@ -129,6 +129,40 @@ describe('assembleTaskHistory (#254)', () => {
         '[tool web_search (groq pricing)] → {"results":[{"url":"https://groq.com/pricing"}]}',
     });
   });
+
+  it('replays content and the tool exchange together on a narrating tool step (#362)', async () => {
+    const task = await enqueueTask({
+      userId: '000000000000000000000000',
+      instruction: 'gather sources',
+      maxSteps: 5,
+      maxCostUsd: 5,
+    });
+    // #362 shape: narration plus a tool call in one step; both must survive.
+    await TaskEvent.create({
+      taskId: task._id,
+      seq: 1,
+      role: 'assistant',
+      content: "I'll start by finding and reading the draft.",
+      step: 0,
+      tools: [
+        {
+          phase: 'result',
+          name: 'list_files',
+          label: 'Listed your files',
+          status: 'ok',
+          resultCount: 1,
+          result: { files: [{ id: 'f1', filename: 'draft.md' }] },
+        },
+      ],
+    });
+
+    const messages = assembleTaskHistory(await events(task._id));
+    expect(messages[1]).toEqual({
+      role: 'assistant',
+      content:
+        'I\'ll start by finding and reading the draft.\n[tool list_files] → {"files":[{"id":"f1","filename":"draft.md"}]}',
+    });
+  });
 });
 
 describe('parseStepOutcome (#254)', () => {

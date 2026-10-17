@@ -2,6 +2,21 @@
 
 ## Status (current)
 
+#362 tasks-stopping fix (branch `fix/tv/362-task-history-replay`): a task
+settled `done` after two steps having done nothing — step 0 narrated *and*
+called `list_files`, and `assembleTaskHistory` replayed an assistant event as
+content **or** tool replay, never both, so the narration erased the tool
+exchange from the next step's context; the model saw a fresh-looking
+conversation and re-opened as a text-only step, which the processor's settle
+rule (text with no tools = final answer) took as completion. Diagnosed from
+the synced dump (task `6ad27759…`: `done`, `stepCount: 2`, `spentUsd: 0`, junk
+opener as the final text), LangSmith traces (step 1 saw exactly system +
+instruction + opener, no exchange), and empty Loki around the run. The roster
+race is not implicated — both step-1 branches saw the same broken context.
+Fix: replay content and the `renderToolReplay` lines together. Regression test
+pins the narrating-tool-step shape; repro against the dumped event stream
+confirmed the exchange now survives replay; `npm run ci` green.
+
 #358 prod outage fix (on `main`, 2026-10-16): the first image upload since
 #209 shipped OCR killed the backend — `ocr.ts` resolved `TESSDATA_DIR` with a
 fixed five-level upward hop that only matches the tsx layout
