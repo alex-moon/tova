@@ -24,6 +24,7 @@ import type { MessageContentPart, NeutralStreamChunk } from '../services/llmType
 import { classifyAndPersistPromptDimensions, isTriviallyNeutral } from '../services/metricsService';
 import { computeDeterministicMetrics } from '../services/promptMetrics';
 import { generateFollowups } from '../services/followupService';
+import { reviewAssistantTurn } from '../services/honestyGuardService';
 import { zdrHistorySchema } from '../validation';
 import { redactForLog } from '../services/logRedaction';
 import { decideTurn } from '../services/zdrTurn';
@@ -465,26 +466,39 @@ export const stripProvenanceLines = (content: string): string =>
     .join('\n')
     .trimEnd();
 
+/* Turn-boundary self-correction: appended to the current user turn's prompt when the previous assistant message was flagged for fabricated tool results; never persisted or shown. */
+// @see #371
+export const HONESTY_CORRECTION_NOTE =
+  '\n\n[Note: your previous reply described tool results that were never executed — no tools ran in that turn. If this task needs tools, call them for real; otherwise state plainly that you have not run anything.]';
+
 export const messagesFromPersistedHistory = (
   history: {
     role: string;
     content: string;
     timestamp?: Date;
     tools?: { phase?: string; name?: string }[];
+    honesty?: { flagged?: boolean | null } | null;
   }[],
   timezone?: string | null,
-): { role: 'system' | 'user' | 'assistant'; content: string | MessageContentPart[] }[] =>
-  history.reverse().map((m, i) => {
+): { role: 'system' | 'user' | 'assistant'; content: string | MessageContentPart[] }[] => {
+  // Newest assistant message only: older flagged turns already had their correction chance.
+  // @see #371
+  const flaggedNewest = history.find((m) => m.role === 'assistant')?.honesty?.flagged === true;
+  return history.reverse().map((m, i, arr) => {
     const header =
       m.role === 'user' && m.timestamp
         ? `${timestampHeader(m.timestamp, history[i - 1]?.timestamp, timezone)}\n`
         : '';
     const provenance = m.role === 'assistant' ? toolProvenanceLine(m.tools) : '';
+    // The current turn is the newest user message; it is where the correction rides.
+    const correction =
+      flaggedNewest && m.role === 'user' && i === arr.length - 1 ? HONESTY_CORRECTION_NOTE : '';
     return {
       role: m.role as 'user' | 'assistant',
-      content: header + (m.content as string) + provenance,
+      content: header + (m.content as string) + provenance + correction,
     };
   });
+};
 
 /* Newest-kept history window for the 1M-token roster windows; the 413/failover path bounds outliers. */
 // @see #360
@@ -790,6 +804,7 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
           content: string;
           timestamp?: Date;
           tools?: { phase?: string; name?: string }[];
+          honesty?: { flagged?: boolean | null } | null;
         }[],
         userDoc.settings?.timezone,
       );
@@ -873,6 +888,17 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
     });
     await assistantMessage.save();
     void maybeReviseSubtitle(String(session!._id));
+
+    // Honesty guard: fire-and-forget post-turn check — with zero executed tools, a claim-shaped reply gets flagged; the flag lands on a later read.
+    // @see #371
+    if (assistantContent.trim() && toolEvents.length === 0) {
+      void reviewAssistantTurn(
+        String(assistantMessage._id),
+        assistantContent,
+        [],
+        String(session!._id),
+      );
+    }
 
     // The completion notification has landed in the chat stream, so mark the drained tasks notified; a failure is swallowed (at-least-once re-surface next turn).
     // @see #255
@@ -1055,6 +1081,7 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
           content: string;
           timestamp?: Date;
           tools?: { phase?: string; name?: string }[];
+          honesty?: { flagged?: boolean | null } | null;
         }[],
         streamUserDoc.settings?.timezone,
       );
@@ -1289,6 +1316,20 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
       message: assistantMessage,
       ...(sourceTitleList.length > 0 ? { sourceTitles: sourceTitleList } : {}),
     });
+
+    // Honesty guard: the verdict is awaited only after `done`, so the turn's finalization never waits on it; the still-open stream carries the flag live.
+    // @see #371
+    if (assistantContent.trim() && toolEvents.length === 0) {
+      const verdict = await reviewAssistantTurn(
+        String(assistantMessage._id),
+        assistantContent,
+        [],
+        String(session!._id),
+      );
+      if (verdict?.flagged) {
+        sendEvent('honesty', { flagged: true, reason: verdict.reason });
+      }
+    }
     res.end();
   } catch (err) {
     console.error('Chat stream error:', redactForLog(err));

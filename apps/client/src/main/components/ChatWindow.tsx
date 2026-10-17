@@ -15,6 +15,7 @@ import {
   Send,
   ThumbsDown,
   ThumbsUp,
+  TriangleAlert,
   Upload,
   X,
 } from 'lucide-react';
@@ -461,6 +462,20 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
     Promise.resolve(onFeedback(msg._id, next)).finally(() => setPendingFeedbackId(null));
   };
 
+  // Resend the flagged turn's user message verbatim; the server injects the corrective note at the turn boundary.
+  // @see #371
+  const retryForReal = (msg: Message) => {
+    if (isLoading) return;
+    const idx = messages.findIndex((m) => m._id === msg._id);
+    for (let i = idx - 1; i >= 0; i -= 1) {
+      const prior = messages[i];
+      if (prior.role === 'user' && prior.content) {
+        onSendMessage(prior.content);
+        return;
+      }
+    }
+  };
+
   const autoGrow = (el: HTMLTextAreaElement) => {
     el.style.height = 'auto';
     el.style.height = `${Math.min(el.scrollHeight, Math.round(window.innerHeight * 0.4))}px`;
@@ -668,6 +683,27 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
                     <ToolSummary tools={msg.tools ?? []} />
                     <MarkdownContent content={msg.content || EMPTY_RESPONSE_PLACEHOLDER} markdown />
                   </div>
+                  {msg.honesty?.flagged && (
+                    <div
+                      data-testid="honesty-flag"
+                      className="mx-4 mt-1 flex flex-wrap items-center gap-2 md:mx-5"
+                    >
+                      <span className="inline-flex items-center gap-1 rounded-full border border-warning/40 bg-warning/10 px-2 py-0.5 text-xs text-warning">
+                        <TriangleAlert size={12} aria-hidden />
+                        Described actions it didn’t perform
+                      </span>
+                      {!isLoading && (
+                        <button
+                          type="button"
+                          data-testid="honesty-retry"
+                          onClick={() => retryForReal(msg)}
+                          className="text-xs text-warning underline underline-offset-2 hover:text-foreground"
+                        >
+                          Retry for real
+                        </button>
+                      )}
+                    </div>
+                  )}
                   {msg.sources && msg.sources.length > 0 && <SourcesBlock message={msg} />}
                   {(msg.modelName || msg.content) && (
                     <div className="mt-1 flex items-center gap-3 px-4 text-xs text-muted-foreground md:px-5">

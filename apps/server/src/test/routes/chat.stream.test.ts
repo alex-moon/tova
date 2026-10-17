@@ -86,6 +86,11 @@ jest.mock('../../main/services/workspaceTraceFacts', () =>
 const isClassifierCall = (args?: { messages?: { role: string; content: string }[] }) =>
   args?.messages?.[0]?.content.startsWith('Classify the user prompt') ?? false;
 
+// Honesty guard audit calls identify themselves by their system prompt.
+// @see #371
+const isHonestyGuardCall = (args?: { messages?: { role: string; content: string }[] }) =>
+  args?.messages?.[0]?.content.startsWith('You audit assistant replies') ?? false;
+
 const fullStreamFrom = (chunks: string[]) =>
   (async function* () {
     for (const chunk of chunks) {
@@ -1130,6 +1135,121 @@ describe('Chat streaming route', () => {
     expect(persisted?.sources).toBeUndefined();
   });
 
+  describe('honesty guard (#371)', () => {
+    it('flags a claim-shaped reply with zero tools and emits the verdict after done', async () => {
+      mockAgentStream.mockImplementation(async () => ({
+        fullStream: fullStreamFrom(['Read it — genuinely this time: 87 lines, all of it.']),
+      }));
+      mockGenerate.mockImplementation(async (messages?: { role: string; content: string }[]) => {
+        if (isClassifierCall({ messages })) return { text: CLASSIFIER_REPLY };
+        if (isHonestyGuardCall({ messages })) {
+          return {
+            text: '{"claimsToolUse": true, "reason": "claims a file read with no tools executed"}',
+          };
+        }
+        return { text: '[]' };
+      });
+
+      const cookies = await registerUser('stream-honesty-flag@example.com');
+      const app = createApp();
+      const response = await request(app)
+        .post('/api/chat/stream')
+        .set('Cookie', cookies)
+        .send({ content: 'read the file' });
+
+      expect(response.status).toBe(200);
+      const frames = response.text.split('\n\n');
+      const doneIdx = frames.findIndex((part) => part.includes('event: done'));
+      const honestyIdx = frames.findIndex((part) => part.includes('event: honesty'));
+      expect(doneIdx).toBeGreaterThan(-1);
+      expect(honestyIdx).toBeGreaterThan(doneIdx);
+      expect(
+        JSON.parse(
+          frames[honestyIdx]
+            .split('\n')
+            .find((l) => l.startsWith('data: '))!
+            .slice(6),
+        ),
+      ).toEqual({ flagged: true, reason: 'claims a file read with no tools executed' });
+      const persisted = await Message.findOne({ role: 'assistant' });
+      expect(persisted?.honesty?.flagged).toBe(true);
+    });
+
+    it('skips the honesty guard entirely when tools executed', async () => {
+      mockAgentStream.mockImplementation(async () => ({
+        fullStream: (async function* () {
+          yield { type: 'tool-call', payload: { toolName: 'read_file', args: {} } };
+          yield {
+            type: 'tool-result',
+            payload: { toolName: 'read_file', result: { file: { content: 'hi' } } },
+          };
+          yield { type: 'text-delta', payload: { text: 'Read the file.' } };
+        })(),
+      }));
+      mockGenerate.mockImplementation(async (messages?: { role: string; content: string }[]) => {
+        if (isClassifierCall({ messages })) return { text: CLASSIFIER_REPLY };
+        if (isHonestyGuardCall({ messages })) {
+          throw new Error('honesty guard must not run on a tool turn');
+        }
+        return { text: '[]' };
+      });
+
+      const cookies = await registerUser('stream-honesty-tool@example.com');
+      const app = createApp();
+      const response = await request(app)
+        .post('/api/chat/stream')
+        .set('Cookie', cookies)
+        .send({ content: 'read the file' });
+
+      expect(response.status).toBe(200);
+      expect(response.text).not.toContain('event: honesty');
+      const persisted = await Message.findOne({ role: 'assistant' });
+      expect(persisted?.honesty).toBeUndefined();
+    });
+
+    it('injects the corrective note into the next turn when the previous assistant message is flagged', async () => {
+      mockAgentStream.mockImplementation(async () => ({
+        fullStream: fullStreamFrom(['Read it: 87 lines.']),
+      }));
+      mockGenerate.mockImplementation(async (messages?: { role: string; content: string }[]) => {
+        if (isClassifierCall({ messages })) return { text: CLASSIFIER_REPLY };
+        if (isHonestyGuardCall({ messages })) {
+          return { text: '{"claimsToolUse": true, "reason": "fabricated read"}' };
+        }
+        return { text: '[]' };
+      });
+      const cookies = await registerUser('stream-honesty-note@example.com');
+      const app = createApp();
+      const first = await request(app)
+        .post('/api/chat/stream')
+        .set('Cookie', cookies)
+        .send({ content: 'read the file' });
+      const sessionId = JSON.parse(
+        first.text
+          .split('\n\n')
+          .find((part) => part.includes('event: meta'))!
+          .split('\n')
+          .find((l) => l.startsWith('data: '))!
+          .slice(6),
+      ).sessionId as string;
+
+      // The guard resolves before the stream closes, so the flag is already persisted when the response returns.
+      const flagged = await Message.findOne({ role: 'assistant', 'honesty.flagged': true }).lean();
+      expect(flagged).not.toBeNull();
+
+      await request(app)
+        .post('/api/chat/stream')
+        .set('Cookie', cookies)
+        .send({ content: 'can you read that file', sessionId });
+
+      const secondTurnCall = mockAgentStream.mock.calls[
+        mockAgentStream.mock.calls.length - 1
+      ] as unknown as [{ role: string; content: string }[]];
+      const userTurn = secondTurnCall[0].filter((m) => m.role === 'user').at(-1);
+      expect(userTurn?.content).toContain('never executed');
+    });
+  });
+
   describe('per-user system prompt (issue #35)', () => {
     // The connector strips the caller's leading system message(s) and folds them into the per-call `instructions` override, merged after the agent's tool instructions with exactly one blank line — dropping only that separator leaves the caller's content (which may contain blank lines) intact.
     // @see #198
@@ -1510,6 +1630,39 @@ describe('history window + tool provenance (#360)', () => {
       );
       expect(out[1].content).toBe('Here is what you have.\n\n[tools used: list_files]');
       expect(out[0].content).toBe('thanks');
+    });
+
+    it('appends the honesty corrective note to the current user turn when the newest assistant message is flagged (#371)', () => {
+      const out = messagesFromPersistedHistory(
+        [
+          { role: 'user', content: 'and now?' },
+          {
+            role: 'assistant',
+            content: 'Read it — 87 lines.',
+            honesty: { flagged: true },
+          },
+          { role: 'user', content: 'can you read that file' },
+        ],
+        null,
+      );
+      expect(out[0].content).toBe('can you read that file');
+      expect(out[1].content).toBe('Read it — 87 lines.');
+      expect(out[2].content).toContain('never executed');
+      expect(String(out[2].content).startsWith('and now?')).toBe(true);
+    });
+
+    it('ignores an unflagged newest assistant message and older flags', () => {
+      const out = messagesFromPersistedHistory(
+        [
+          { role: 'user', content: 'e' },
+          { role: 'assistant', content: 'd', honesty: { flagged: false } },
+          { role: 'user', content: 'c' },
+          { role: 'assistant', content: 'b', honesty: { flagged: true } },
+          { role: 'user', content: 'a' },
+        ],
+        null,
+      );
+      expect(out.every((m) => !String(m.content).includes('never executed'))).toBe(true);
     });
   });
 });
