@@ -1072,9 +1072,11 @@ describe('Chat streaming route', () => {
         messages?: { role: string; content: string }[],
         options?: { instructions?: string },
       ) => {
-        if (isClassifierCall({ messages })) return { text: CLASSIFIER_REPLY };
+        if (isClassifierCall({ messages })) return structured(CLASSIFIER_REPLY);
         if (String(options?.instructions ?? '').startsWith('Generate 2-3')) {
-          return { text: '["What about pricing?","Show an example"]' };
+          return {
+            object: { suggestions: ['What about pricing?', 'Show an example'] },
+          };
         }
         return { text: 'plain' };
       },
@@ -1141,10 +1143,10 @@ describe('Chat streaming route', () => {
         fullStream: fullStreamFrom(['Read it — genuinely this time: 87 lines, all of it.']),
       }));
       mockGenerate.mockImplementation(async (messages?: { role: string; content: string }[]) => {
-        if (isClassifierCall({ messages })) return { text: CLASSIFIER_REPLY };
+        if (isClassifierCall({ messages })) return structured(CLASSIFIER_REPLY);
         if (isHonestyGuardCall({ messages })) {
           return {
-            text: '{"claimsToolUse": true, "reason": "claims a file read with no tools executed"}',
+            object: { claimsToolUse: true, reason: 'claims a file read with no tools executed' },
           };
         }
         return { text: '[]' };
@@ -1187,7 +1189,7 @@ describe('Chat streaming route', () => {
         })(),
       }));
       mockGenerate.mockImplementation(async (messages?: { role: string; content: string }[]) => {
-        if (isClassifierCall({ messages })) return { text: CLASSIFIER_REPLY };
+        if (isClassifierCall({ messages })) return structured(CLASSIFIER_REPLY);
         if (isHonestyGuardCall({ messages })) {
           throw new Error('honesty guard must not run on a tool turn');
         }
@@ -1212,9 +1214,9 @@ describe('Chat streaming route', () => {
         fullStream: fullStreamFrom(['Read it: 87 lines.']),
       }));
       mockGenerate.mockImplementation(async (messages?: { role: string; content: string }[]) => {
-        if (isClassifierCall({ messages })) return { text: CLASSIFIER_REPLY };
+        if (isClassifierCall({ messages })) return structured(CLASSIFIER_REPLY);
         if (isHonestyGuardCall({ messages })) {
-          return { text: '{"claimsToolUse": true, "reason": "fabricated read"}' };
+          return { object: { claimsToolUse: true, reason: 'fabricated read' } };
         }
         return { text: '[]' };
       });
@@ -1328,6 +1330,10 @@ describe('Chat streaming route', () => {
 const CLASSIFIER_REPLY =
   '{"emotional": true, "technical": false, "abstract": false, "sentiment": "neutral", "openEnded": false}';
 
+// The mocked Agent bypasses Mastra's structured-output parsing, so aux mocks carry the validated object the real connector surfaces.
+// @see #368
+const structured = (text: string) => ({ text, object: JSON.parse(text) });
+
 const flush = async () => {
   for (let i = 0; i < 20; i++) {
     await new Promise((r) => setImmediate(r));
@@ -1348,7 +1354,7 @@ describe('Chat streaming prompt metrics', () => {
     }));
     mockGenerate.mockImplementation(async (messages?: { role: string; content: string }[]) => {
       if (isClassifierCall({ messages })) {
-        return { text: `\`\`\`json\n${CLASSIFIER_REPLY}\n\`\`\`` };
+        return structured(CLASSIFIER_REPLY);
       }
       return { text: 'plain' };
     });

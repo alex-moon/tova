@@ -1,8 +1,4 @@
-import {
-  classifyPromptDimensions,
-  isTriviallyNeutral,
-  parseLlmFlags,
-} from '../../main/services/metricsService';
+import { classifyPromptDimensions, isTriviallyNeutral } from '../../main/services/metricsService';
 
 const mockGenerate = jest.fn();
 
@@ -16,109 +12,30 @@ jest.mock('@mastra/core/agent', () => {
 
 const mockAgentCtor = jest.requireMock('@mastra/core/agent').Agent as jest.Mock;
 
+const NULL_LLM = {
+  emotional: null,
+  technical: null,
+  abstract: null,
+  sentiment: null,
+  openEnded: null,
+};
+
 describe('metricsService', () => {
   beforeEach(() => {
     mockGenerate.mockReset();
   });
 
-  describe('parseLlmFlags', () => {
-    it('parses a clean JSON object', () => {
-      expect(
-        parseLlmFlags(
-          '{"emotional": true, "technical": false, "abstract": false, "sentiment": "negative", "openEnded": true}',
-        ),
-      ).toEqual({
-        emotional: true,
-        technical: false,
-        abstract: false,
-        sentiment: 'negative',
-        openEnded: true,
-      });
-    });
-
-    it('tolerates markdown fences and surrounding prose', () => {
-      expect(
-        parseLlmFlags(
-          'Here you go:\n```json\n{"emotional": false, "technical": true, "abstract": true, "sentiment": "neutral", "openEnded": false}\n```\nDone.',
-        ),
-      ).toEqual({
-        emotional: false,
-        technical: true,
-        abstract: true,
-        sentiment: 'neutral',
-        openEnded: false,
-      });
-    });
-
-    it('degrades each flag independently on unknown values', () => {
-      expect(
-        parseLlmFlags(
-          '{"emotional": "yes", "technical": 1, "sentiment": "angry", "openEnded": null}',
-        ),
-      ).toEqual({
-        emotional: null,
-        technical: null,
-        abstract: null,
-        sentiment: null,
-        openEnded: null,
-      });
-    });
-
-    it('skips a decoy JSON object and recovers the real flags after it', () => {
-      expect(
-        parseLlmFlags(
-          'Use the format {"example": {"x": 1}} when replying. Answer: {"emotional": true, "technical": false, "abstract": true, "sentiment": "neutral", "openEnded": false}',
-        ),
-      ).toEqual({
-        emotional: true,
-        technical: false,
-        abstract: true,
-        sentiment: 'neutral',
-        openEnded: false,
-      });
-    });
-
-    it('does not skip a partially decoy object that carries at least one valid flag', () => {
-      expect(parseLlmFlags('{"x": 1, "emotional": false}')).toEqual({
-        emotional: false,
-        technical: null,
-        abstract: null,
-        sentiment: null,
-        openEnded: null,
-      });
-    });
-
-    it('normalizes sentiment casing and surrounding whitespace', () => {
-      expect(parseLlmFlags('{"emotional": false, "sentiment": "Negative "}')).toMatchObject({
-        sentiment: 'negative',
-      });
-      expect(parseLlmFlags('{"sentiment": "POSITIVE"}')).toMatchObject({
-        sentiment: 'positive',
-      });
-      // Unknown sentiment values still degrade to null
-      expect(parseLlmFlags('{"sentiment": "angry"}')).toMatchObject({ sentiment: null });
-    });
-
-    it('returns the real flags even when a decoy object follows them', () => {
-      expect(
-        parseLlmFlags(
-          'Answer: {"emotional": true, "technical": false, "abstract": false, "sentiment": "neutral", "openEnded": false} (format: {"example": 1})',
-        ),
-      ).toMatchObject({ emotional: true, technical: false });
-    });
-
-    it('returns nulls for non-JSON output', () => {
-      expect(parseLlmFlags('definitely emotional, very technical')).toEqual(parseLlmFlags(null));
-      expect(parseLlmFlags('no braces at all')).toEqual(parseLlmFlags(''));
-      expect(parseLlmFlags(undefined)).toEqual(parseLlmFlags(null));
-      expect(parseLlmFlags('{"emotional": true')).toEqual(parseLlmFlags(null));
-    });
-  });
-
   describe('classifyPromptDimensions', () => {
-    it('parses the model response', async () => {
+    it('surfaces the schema-validated object', async () => {
       mockGenerate.mockResolvedValueOnce({
         text: '{"emotional": true, "technical": false, "abstract": false, "sentiment": "positive", "openEnded": true}',
+        object: {
+          emotional: true,
+          technical: false,
+          abstract: false,
+          sentiment: 'positive',
+          openEnded: true,
+        },
       });
       expect(await classifyPromptDimensions('hello')).toEqual({
         llm: {
@@ -135,7 +52,7 @@ describe('metricsService', () => {
     it('reports skipReason error when the Groq call throws', async () => {
       mockGenerate.mockRejectedValueOnce(new Error('boom'));
       expect(await classifyPromptDimensions('hello')).toEqual({
-        llm: parseLlmFlags(null),
+        llm: NULL_LLM,
         skipReason: 'error',
       });
     });
@@ -151,20 +68,20 @@ describe('metricsService', () => {
       expect(ctorCall.model).toBe('groq/openai/gpt-oss-20b');
     });
 
-    it('reports skipReason parse when the response shape is unexpected', async () => {
-      mockGenerate.mockResolvedValueOnce({});
-      expect(await classifyPromptDimensions('hello')).toEqual({
-        llm: parseLlmFlags(null),
-        skipReason: 'parse',
-      });
+    it('#368: passes the flags schema with fallback and auto injection on the generate options', async () => {
+      mockGenerate.mockResolvedValueOnce({ text: 'x', object: NULL_LLM });
+      await classifyPromptDimensions('hello');
+      const options = mockGenerate.mock.calls[mockGenerate.mock.calls.length - 1][1] as {
+        structuredOutput?: { errorStrategy?: string; jsonPromptInjection?: unknown };
+      };
+      expect(options.structuredOutput?.errorStrategy).toBe('fallback');
+      expect(options.structuredOutput?.jsonPromptInjection).toBe('auto');
     });
 
-    it('reports skipReason parse when the output contains no JSON', async () => {
-      mockGenerate.mockResolvedValueOnce({
-        text: 'definitely emotional, very technical',
-      });
+    it('reports skipReason parse when the object degrades to the all-null fallback', async () => {
+      mockGenerate.mockResolvedValueOnce({});
       expect(await classifyPromptDimensions('hello')).toEqual({
-        llm: parseLlmFlags(null),
+        llm: NULL_LLM,
         skipReason: 'parse',
       });
     });

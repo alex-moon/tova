@@ -1,5 +1,7 @@
 /* Provider-neutral LLM result types shared by every inferenceService consumer; deliberately narrow so provider shapes cannot leak into call sites. */
 
+import type { z } from 'zod';
+
 /* Provider toggle carried on options; un-tagged callers default to groq today. */
 // @see #151 #4
 export type LlmProvider = 'groq' | 'deepinfra' | 'fireworks' | 'typesafe';
@@ -41,6 +43,18 @@ export interface CompletionOptions {
   /* Client-disconnect signal wired by the chat routes. */
   abortSignal?: AbortSignal;
   trace?: TraceContext;
+  /* Schema-enforced output for aux calls; the connector returns the validated object via `object`. */
+  // @see #368
+  structuredOutput?: StructuredOutputConfig<unknown>;
+}
+
+/* Mastra structured-output request: validation failure degrades to `fallbackValue` with `usedFallbackValue: true` on the completion. */
+// @see #368
+export interface StructuredOutputConfig<T> {
+  schema: z.ZodType<T>;
+  fallbackValue: T;
+  jsonPromptInjection?: boolean | 'auto';
+  errorStrategy: 'fallback';
 }
 
 /* Token usage normalised across providers; absent (unknown) is deliberately distinct from 0. */
@@ -65,6 +79,9 @@ export interface NeutralCompletion {
   /** Token usage for the turn; absent when the provider reported nothing. */
   // @see #224
   usage?: TokenUsage;
+  /** Schema-validated structured output when the call requested `structuredOutput`; a validation failure resolves with the configured `fallbackValue` instead of throwing. */
+  // @see #368
+  object?: unknown;
 }
 
 export interface NeutralStreamChunk {
@@ -91,4 +108,9 @@ export interface LlmConnector {
   /** Completion on a tool-free agent regardless of environment, for aux callers whose target model rejects tool-carrying requests. */
   // @see #41
   createToolFreeCompletion(options: CompletionOptions): Promise<NeutralCompletion>;
+  /** Overload: with a `structuredOutput` config the completion carries the validated, typed object (the `fallbackValue` on validation failure). */
+  // @see #368
+  createToolFreeCompletion<T>(
+    options: CompletionOptions & { structuredOutput: StructuredOutputConfig<T> },
+  ): Promise<NeutralCompletion & { object: T }>;
 }

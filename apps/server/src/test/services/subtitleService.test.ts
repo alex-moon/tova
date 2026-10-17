@@ -7,6 +7,7 @@ const mockCreateToolFree = jest.fn();
 jest.mock('../../main/services/inferenceService', () => ({
   inferenceService: {
     createToolFreeCompletion: (...args: unknown[]) => mockCreateToolFree(...args),
+    createStructuredCompletion: (...args: unknown[]) => mockCreateToolFree(...args),
   },
 }));
 
@@ -17,7 +18,7 @@ describe('reviseSessionSubtitle', () => {
 
   it('uses the tool-free path on the aux model with the current subtitle in context', async () => {
     mockCreateToolFree.mockResolvedValueOnce({
-      choices: [{ message: { content: 'Predictive processing reading thread' } }],
+      object: { subtitle: 'Predictive processing reading thread' },
     });
     const next = await reviseSessionSubtitle('Old summary', [
       { role: 'user', content: 'back to the predictive processing thread' },
@@ -35,17 +36,13 @@ describe('reviseSessionSubtitle', () => {
   });
 
   it('marks a first revision when no subtitle exists yet', async () => {
-    mockCreateToolFree.mockResolvedValueOnce({
-      choices: [{ message: { content: 'Move planning' } }],
-    });
+    mockCreateToolFree.mockResolvedValueOnce({ object: { subtitle: 'Move planning' } });
     await reviseSessionSubtitle(null, [{ role: 'user', content: 'let us plan the move' }]);
     expect(mockCreateToolFree.mock.calls[0][0].messages[1].content).toContain('(none yet)');
   });
 
   it('caps a rambling reply at 80 chars with an ellipsis', async () => {
-    mockCreateToolFree.mockResolvedValueOnce({
-      choices: [{ message: { content: 'x'.repeat(120) } }],
-    });
+    mockCreateToolFree.mockResolvedValueOnce({ object: { subtitle: 'x'.repeat(120) } });
     const next = await reviseSessionSubtitle(null, [{ role: 'user', content: 'hello' }]);
     expect(next).toHaveLength(81);
     expect((next as string).endsWith('…')).toBe(true);

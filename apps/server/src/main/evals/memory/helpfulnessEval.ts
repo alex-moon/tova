@@ -11,6 +11,7 @@ import { evalUserId } from '../mongoSource';
 import { MEMORY_SCENARIOS } from './corpus';
 import { clearMemoryCorpus, seedMemoryScenario, type SeedIdMap } from './memorySource';
 import type { MemoryScenario, ScenarioCategory } from './types';
+import { z } from 'zod';
 
 // Stage 3 helpfulness eval: scenarios answered with and without the retrieved block, scored by a blinded, position-swapped LLM judge.
 // @see #289
@@ -31,7 +32,7 @@ export const resolveSwappedOutcome = (first: JudgeVerdict, second: JudgeVerdict)
   return 'tie';
 };
 
-// Judge prompt is blind to arm and pinned to preferring specificity over fluency.
+// Judge prompt is blind to arm and pinned to preferring specificity over fluency; the verdict enum rides the structured-output schema.
 export const buildJudgePrompt = (query: string, answerA: string, answerB: string): string =>
   [
     'You are comparing two assistant answers to the same user question.',
@@ -42,7 +43,6 @@ export const buildJudgePrompt = (query: string, answerA: string, answerB: string
     'specific information the user asked about, even if it is terser. A fluent',
     'answer that does not address the question is not more helpful than a',
     'direct one that does.',
-    'Reply with ONLY one token: A, B, or TIE.',
     '',
     `User question:\n${query}`,
     '',
@@ -50,24 +50,6 @@ export const buildJudgePrompt = (query: string, answerA: string, answerB: string
     '',
     `Answer B:\n${answerB}`,
   ].join('\n');
-
-const verdictFromToken = (token: string): JudgeVerdict => {
-  const upper = token.toUpperCase();
-  if (upper === 'A') return 'A';
-  if (upper === 'B') return 'B';
-  return 'tie';
-};
-
-/** Last standalone A/B/TIE token wins; empty or unparseable is `error`; lowercase `a` is dropped. */
-export const parseJudgeVerdict = (raw: string): JudgeVerdict => {
-  const alone = /^(A|B|TIE)\.?$/i.exec(raw.trim());
-  if (alone) return verdictFromToken(alone[1]);
-  const matches = raw.match(/\b(A|B|TIE)\b/gi);
-  if (!matches?.length) return 'error';
-  const candidates = matches.filter((token) => token !== 'a');
-  const pool = candidates.length ? candidates : matches;
-  return verdictFromToken(pool[pool.length - 1]);
-};
 
 export interface HelpfulnessCaseResult {
   scenarioId: string;
@@ -200,23 +182,33 @@ const defaultRespond = async (query: string, block: string): Promise<RespondResu
   };
 };
 
-// Judge is a reasoning model: chain-of-thought needs headroom before the one-token verdict.
+// Judge is a reasoning model: chain-of-thought needs headroom before the verdict.
 const JUDGE_MAX_TOKENS = 512;
+
+// Schema-enforced verdict; a validation failure resolves with 'error', exactly the unparseable-verdict semantics.
+// @see #368
+const VERDICT_SCHEMA = z.object({ verdict: z.enum(['A', 'B', 'tie']) });
 
 export const defaultJudge = async (
   query: string,
   answerA: string,
   answerB: string,
 ): Promise<JudgeVerdict> => {
-  const completion = await inferenceService.createToolFreeCompletion({
+  const completion = await inferenceService.createStructuredCompletion({
     provider: config.memoryEval.judgeProvider,
     model: config.memoryEval.judgeModel,
     messages: [{ role: 'user', content: buildJudgePrompt(query, answerA, answerB) }],
     temperature: 0,
     max_tokens: JUDGE_MAX_TOKENS,
     trace: { tags: ['memory-eval:helpfulness:judge'] },
+    structuredOutput: {
+      schema: VERDICT_SCHEMA,
+      fallbackValue: { verdict: 'error' as JudgeVerdict },
+      jsonPromptInjection: 'auto',
+      errorStrategy: 'fallback',
+    },
   });
-  return parseJudgeVerdict(completion.choices[0]?.message?.content ?? '');
+  return completion.object.verdict;
 };
 
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
