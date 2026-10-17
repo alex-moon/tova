@@ -9,10 +9,12 @@ const renderSidebar = (
   opts: {
     sessions?: { _id: string; title: string; subtitle?: string | null }[];
     onDeleteSession?: (id: string) => void;
+    onRenameSession?: (id: string, title: string) => void;
   } = {},
 ) => {
   const onClose = vi.fn();
   const onDeleteSession = opts.onDeleteSession ?? vi.fn();
+  const onRenameSession = opts.onRenameSession ?? vi.fn();
   const result = render(
     <AuthContext.Provider
       value={{
@@ -31,11 +33,12 @@ const renderSidebar = (
         onSelectSession={vi.fn()}
         onNewChat={vi.fn()}
         onDeleteSession={onDeleteSession}
+        onRenameSession={onRenameSession}
         onClose={onClose}
       />
     </AuthContext.Provider>,
   );
-  return { onClose, container: result.container, onDeleteSession };
+  return { onClose, container: result.container, onDeleteSession, onRenameSession };
 };
 
 describe('Sidebar footer avatar (issue #35)', () => {
@@ -157,5 +160,53 @@ describe('Sidebar — session subtitle (#359)', () => {
     expect(screen.getByText('Personal journey and life')).toBeInTheDocument();
     const bareRow = screen.getByText('No subtitle chat').parentElement!;
     expect(bareRow.children).toHaveLength(1);
+  });
+});
+
+describe('Sidebar — inline chat rename (#359)', () => {
+  afterEach(cleanup);
+
+  const user: User = {
+    id: '1',
+    email: 'a@b.c',
+    role: 'user',
+    permissions: [],
+  };
+
+  it('swaps the row for an input and commits the trimmed title on Enter', () => {
+    const onRenameSession = vi.fn();
+    renderSidebar(user, {
+      sessions: [{ _id: 's1', title: 'Old name' }],
+      onRenameSession,
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Rename chat: Old name' }));
+    const input = screen.getByTestId('sidebar-rename-input') as HTMLInputElement;
+    expect(input.value).toBe('Old name');
+
+    fireEvent.change(input, { target: { value: '  New name  ' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    expect(onRenameSession).toHaveBeenCalledWith('s1', 'New name');
+    expect(screen.queryByTestId('sidebar-rename-input')).toBeNull();
+  });
+
+  it('treats an empty or unchanged edit as a cancel, and Escape cancels', () => {
+    const onRenameSession = vi.fn();
+    renderSidebar(user, {
+      sessions: [{ _id: 's1', title: 'Old name' }],
+      onRenameSession,
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Rename chat: Old name' }));
+    const input = screen.getByTestId('sidebar-rename-input');
+    fireEvent.change(input, { target: { value: '   ' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    expect(onRenameSession).not.toHaveBeenCalled();
+    expect(screen.queryByTestId('sidebar-rename-input')).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Rename chat: Old name' }));
+    fireEvent.keyDown(screen.getByTestId('sidebar-rename-input'), { key: 'Escape' });
+    expect(onRenameSession).not.toHaveBeenCalled();
+    expect(screen.queryByTestId('sidebar-rename-input')).toBeNull();
   });
 });

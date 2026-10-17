@@ -1,5 +1,5 @@
-import React from 'react';
-import { Files, ListTree, LogOut, Plus, Trash2, X, Plug } from 'lucide-react';
+import React, { useState } from 'react';
+import { Files, ListTree, LogOut, Pencil, Plus, Trash2, X, Plug } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { useAuth } from '../hooks/useAuth';
@@ -29,6 +29,9 @@ interface SidebarProps {
   onSelectSession: (id: string) => void;
   onNewChat: () => void;
   onDeleteSession: (id: string) => void;
+  // #359: the title is user-owned and renamable at any time — the sidebar
+  // row is the affordance on every viewport (the chat header is phone-only).
+  onRenameSession: (id: string, title: string) => void;
   onClose: () => void;
 }
 
@@ -39,10 +42,20 @@ const Sidebar: React.FC<SidebarProps> = ({
   onSelectSession,
   onNewChat,
   onDeleteSession,
+  onRenameSession,
   onClose,
 }) => {
   const { user, logout } = useAuth();
   const { armedId, arm, onYes, onAlways, onNo } = useConfirmDelete('chat', onDeleteSession);
+  // #359: inline rename state — the row swaps to an input, Enter/blur
+  // commits, Escape cancels (same swap pattern as the confirm-delete card).
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [renameDraft, setRenameDraft] = useState('');
+  const commitRename = (id: string, original: string) => {
+    const trimmed = renameDraft.trim();
+    if (trimmed && trimmed !== original) onRenameSession(id, trimmed);
+    setRenamingId(null);
+  };
 
   return (
     <>
@@ -138,6 +151,22 @@ const Sidebar: React.FC<SidebarProps> = ({
                   No
                 </button>
               </div>
+            ) : renamingId === session._id ? (
+              <div key={session._id} className="mb-1 flex items-center px-2 py-1">
+                <input
+                  data-testid="sidebar-rename-input"
+                  autoFocus
+                  value={renameDraft}
+                  aria-label="Chat title"
+                  className="min-w-0 flex-1 rounded-md border border-border bg-background px-2 py-1 text-sm"
+                  onChange={(e) => setRenameDraft(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') commitRename(session._id, session.title);
+                    if (e.key === 'Escape') setRenamingId(null);
+                  }}
+                  onBlur={() => commitRename(session._id, session.title)}
+                />
+              </div>
             ) : (
               <div key={session._id} className="mb-1 flex items-center">
                 <button
@@ -158,6 +187,19 @@ const Sidebar: React.FC<SidebarProps> = ({
                     </span>
                   )}
                 </button>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  title="Rename chat"
+                  aria-label={`Rename chat: ${session.title}`}
+                  onClick={() => {
+                    setRenameDraft(session.title);
+                    setRenamingId(session._id);
+                  }}
+                  className="h-8 w-8 shrink-0 text-muted-foreground hover:text-foreground"
+                >
+                  <Pencil />
+                </Button>
                 <Button
                   variant="ghost"
                   size="icon"

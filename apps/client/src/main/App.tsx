@@ -412,12 +412,11 @@ function App() {
   };
 
   // #359: user-owned title. The server marks the session 'user'-titled; the
-  // sidebar (and header) re-render from the updated row.
-  const handleRenameSession = async (title: string) => {
-    if (!activeSessionId) return;
+  // sidebar (and phone header) re-render from the updated row.
+  const handleRenameSession = async (id: string, title: string) => {
     try {
-      const res = await axios.patch(`/api/chat/sessions/${activeSessionId}`, { title });
-      setSessions((prev) => prev.map((s) => (s._id === activeSessionId ? res.data : s)));
+      const res = await axios.patch(`/api/chat/sessions/${id}`, { title });
+      setSessions((prev) => prev.map((s) => (s._id === id ? res.data : s)));
     } catch (err) {
       console.error('Error renaming session:', err);
       toast.error('Could not rename the chat');
@@ -525,6 +524,7 @@ function App() {
             }}
             onNewChat={handleNewChat}
             onDeleteSession={handleDeleteSession}
+            onRenameSession={handleRenameSession}
             onClose={() => setSidebarOpen(false)}
           />
           <ChatWindow
@@ -538,7 +538,9 @@ function App() {
             sessionId={activeSessionId}
             sessionTitle={activeSession?.title ?? null}
             sessionSubtitle={activeSession?.subtitle ?? null}
-            onRenameSession={handleRenameSession}
+            onRenameSession={(title) => {
+              if (activeSessionId) void handleRenameSession(activeSessionId, title);
+            }}
             incognito={incognitoChoice ?? Boolean(user?.incognitoByDefault ?? user?.zdr)}
             onToggleIncognito={setIncognitoChoice}
           />

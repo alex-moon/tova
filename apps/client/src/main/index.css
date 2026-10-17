@@ -46,7 +46,10 @@
   --wash-strength: 1;
   --edge-glow-strength: 1;
   --header-height: 60px;
-  --sidebar-width: 260px;
+  /* #359 feedback: the sidebar is the rename/browse surface, so titles need
+   * room to read in full (subtitles may still ellipsize). Desktop keeps one
+   * fixed column width; the phone drawer takes most of the viewport. */
+  --sidebar-width: 300px;
 }
 
 :root {
@@ -222,6 +225,13 @@ body {
 }
 
 @media (width < 48rem) {
+  /* #359 feedback: the drawer rides over the chat, so give the text most of
+   * the viewport — titles should read in full (subtitles may ellipsize).
+   * The slide-in animation is transform-driven and unaffected. */
+  :root {
+    --sidebar-width: min(88vw, 340px);
+  }
+
   .responsive-table thead {
     display: none;
   }
