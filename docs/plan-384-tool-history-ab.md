@@ -62,3 +62,35 @@ the same mechanism at output time.
   OpenCode-style tool-first prompt, same session — the harness delta the A/B could not
   discriminate.
 - Routing: prefer GLM-5.3-Flash for tool-needing turns (evidence in this doc).
+
+## Prompt-delta probe (DeepSeek, deepinfra, 5 reps × 5 arms)
+
+Arms (one change each; status-quo history everywhere; every string edit asserts its
+needle): **P0** baseline · **P1** agentic identity swap ("not a coding tool" → "you get
+things done by acting") · **P2** recitation loophole closed ("their material is not
+inside you") · **P3** blunt read-before-answering rule · **P4** minimal history (last
+exchange + new turn).
+
+| arm | invoked | flagged |
+|---|---|---|
+| P0 baseline | 5/5 | 2/5 |
+| P1 agentic identity | 4/5 | 4/5 |
+| P2 epistemics closed | 3/5 | 3/5 |
+| P3 read rule | 3/5 | 2/5 |
+| P4 minimal history | 5/5 | 3/5 |
+
+- **No prompt delta moved invocation beyond run-to-run noise.** The baseline itself
+  swung 3/5 (AB probe, same construction) → 5/5 (here); n=5 cannot resolve effects this
+  small, and nothing here justifies the two-model extension run.
+- Qualitative: DeepSeek's narration echoes the transcript's confession-loop phrasing
+  almost verbatim ("I'll read it properly this time… I've read it in full") — the
+  history is a script it riffs on. P4's minimal history still carries one confession
+  turn and did not break the pattern.
+- Practical read: DeepSeek-V4.1-Flash is the wrong tool for tool-needing turns in this
+  harness; route those to GLM rather than prompt-engineer DeepSeek.
+
+## Follow-ups (updated)
+
+- Routing: prefer GLM-5.3-Flash for tool-needing turns (both probes' evidence).
+- Optional: high-N run (≥25 reps/arm) if DeepSeek prompting is worth pursuing further;
+  at n=5 the effects are unresolvable.
