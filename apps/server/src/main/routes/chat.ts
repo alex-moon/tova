@@ -24,7 +24,11 @@ import type { MessageContentPart, NeutralStreamChunk } from '../services/llmType
 import { classifyAndPersistPromptDimensions, isTriviallyNeutral } from '../services/metricsService';
 import { computeDeterministicMetrics } from '../services/promptMetrics';
 import { generateFollowups } from '../services/followupService';
-import { reviewAssistantTurn } from '../services/honestyGuardService';
+import {
+  classifyAssistantTurn,
+  reviewAssistantTurn,
+  type HonestyVerdict,
+} from '../services/honestyGuardService';
 import { zdrHistorySchema } from '../validation';
 import { redactForLog } from '../services/logRedaction';
 import { decideTurn } from '../services/zdrTurn';
@@ -470,6 +474,25 @@ export const stripProvenanceLines = (content: string): string =>
 // @see #371
 export const HONESTY_CORRECTION_NOTE =
   '\n\n[Note: your previous reply described tool results that were never executed — no tools ran in that turn. If this task needs tools, call them for real; otherwise state plainly that you have not run anything.]';
+
+/* In-request retry note: the flagged attempt is discarded pre-persist, so the model must know the user saw none of it and answer fresh. */
+// @see #381
+export const HONESTY_RETRY_NOTE =
+  '\n\n[Note: an earlier attempt at this reply was discarded before the user saw any of it — it described tool results that were never executed. The user knows nothing about that attempt: do not apologize for it or refer to it. Answer the request fresh — if it needs tools, actually call them; otherwise state plainly that you have not run anything.]';
+
+/* Appends the retry note to the turn's (newest) user message, string or multimodal. */
+// @see #381
+export const appendHonestyRetryNote = (
+  messages: { role: string; content: string | MessageContentPart[] }[],
+): void => {
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const m = messages[i];
+    if (m.role !== 'user') continue;
+    if (typeof m.content === 'string') m.content += HONESTY_RETRY_NOTE;
+    else m.content = [...m.content, { type: 'text', text: HONESTY_RETRY_NOTE }];
+    return;
+  }
+};
 
 export const messagesFromPersistedHistory = (
   history: {
@@ -1137,80 +1160,134 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
       if (!res.writableEnded) abortController.abort();
     });
 
+    // Attempt-scoped state is reset between honesty retries so nothing from a discarded attempt survives.
+    // @see #381
+    const resetAttemptState = () => {
+      assistantContent = '';
+      sources = [];
+      titles.clear();
+      toolResults.length = 0;
+      toolEvents.length = 0;
+      usage = undefined;
+    };
+
+    /* Honesty auto-retry: at most one restart. A flagged first attempt is wiped (never persisted, never `done`) and the turn re-runs with the retry note; only the final attempt's verdict reaches persistence. */
+    // @see #381
+    const HONESTY_MAX_ATTEMPTS = 2;
+    let attempt = 0;
+    let honestyVerdict: HonestyVerdict | null = null;
+
     try {
-      sendEvent('meta', {
-        // ZDR: no sessionId is minted — nothing the replay could point at exists.
-        // @see #116
-        ...(zdr ? {} : { sessionId: session!._id }),
-        routing: routingResult,
-      });
+      while (true) {
+        attempt += 1;
+        if (attempt > 1) {
+          resetAttemptState();
+          sendEvent('honesty', {
+            flagged: true,
+            reason: honestyVerdict?.reason ?? null,
+            retrying: true,
+          });
+          appendHonestyRetryNote(messages);
+        }
+        sendEvent('meta', {
+          // ZDR: no sessionId is minted — nothing the replay could point at exists.
+          // @see #116
+          ...(zdr ? {} : { sessionId: session!._id }),
+          routing: routingResult,
+        });
 
-      /* The flat race fires every live combo and keeps the first token's stream; losers record TTFT and abort; the winner replaces the pre-race pick for persistence. */
-      // @see #232 #316
-      const raced = await routeAndStream({
-        messages,
-        // Budget sized against the picked model's window.
-        // @see #104
-        max_tokens: outputTokensFor(routingResult.contextLength, promptCharsFrom(messages)),
-        userId,
-        abortSignal: abortController.signal,
-        // Attach the chat session to this turn's trace (ZDR turns have no session to join); the workspace retrieval outcome rides the trace metadata.
-        // @see #224 #308
-        ...(zdr
-          ? {}
-          : {
-              trace: {
-                sessionId: String(session!._id),
-                metadata: workspaceTraceMetadata(
-                  workspaceGateFrom(streamWorkspaceBlock, hasImage),
-                  streamWorkspaceBlock,
-                ),
-              },
-            }),
-        // The tool-execution session rides outside the trace guard (ZDR turns have no durable session to attribute to).
-        // @see #252
-        ...(zdr ? {} : { sessionId: String(session!._id) }),
-      });
-      routingResult = raced.routing;
-      const stream = raced.outcome.result.stream;
+        /* The flat race fires every live combo and keeps the first token's stream; losers record TTFT and abort; the winner replaces the pre-race pick for persistence. */
+        // @see #232 #316
+        const raced = await routeAndStream({
+          messages,
+          // Budget sized against the picked model's window.
+          // @see #104
+          max_tokens: outputTokensFor(routingResult.contextLength, promptCharsFrom(messages)),
+          userId,
+          abortSignal: abortController.signal,
+          // Attach the chat session to this turn's trace (ZDR turns have no session to join); the workspace retrieval outcome rides the trace metadata.
+          // @see #224 #308
+          ...(zdr
+            ? {}
+            : {
+                trace: {
+                  sessionId: String(session!._id),
+                  metadata: workspaceTraceMetadata(
+                    workspaceGateFrom(streamWorkspaceBlock, hasImage),
+                    streamWorkspaceBlock,
+                  ),
+                },
+              }),
+          // The tool-execution session rides outside the trace guard (ZDR turns have no durable session to attribute to).
+          // @see #252
+          ...(zdr ? {} : { sessionId: String(session!._id) }),
+        });
+        routingResult = raced.routing;
+        const stream = raced.outcome.result.stream;
 
-      /* A tool use between two text runs must render as a paragraph break: arm on tool-after-text, consume on the next delta. */
-      // @see #262
-      let toolRanSinceText = false;
-      for await (const chunk of stream) {
-        // The connector may emit one trailing usage chunk; capture it without forwarding it as a delta/tool event.
-        // @see #224
-        if (chunk.usage) {
-          usage = chunk.usage;
-          continue;
+        /* A tool use between two text runs must render as a paragraph break: arm on tool-after-text, consume on the next delta. */
+        // @see #262
+        let toolRanSinceText = false;
+        for await (const chunk of stream) {
+          // The connector may emit one trailing usage chunk; capture it without forwarding it as a delta/tool event.
+          // @see #224
+          if (chunk.usage) {
+            usage = chunk.usage;
+            continue;
+          }
+          // Structured tool events replace the single prose status hint.
+          // @see #33
+          if (chunk.toolCall) {
+            const ev = toolCallEvent(chunk.toolCall);
+            reconcileToolEvent(toolEvents, ev);
+            sendEvent('tool', ev);
+          }
+          if (chunk.toolResult) {
+            const ev = toolResultEvent(chunk.toolResult);
+            reconcileToolEvent(toolEvents, ev);
+            sendEvent('tool', ev);
+            collectSourcesInto(sources, chunk.toolResult.result, titles);
+            toolResults.push(chunk.toolResult);
+          }
+          // Arm the break on any tool chunk that follows already-streamed text.
+          if ((chunk.toolCall || chunk.toolResult) && assistantContent.length > 0) {
+            toolRanSinceText = true;
+          }
+          const delta = chunk.delta;
+          if (delta) {
+            // Consume the pending break, topping up to exactly one blank line so the two text runs render as separate paragraphs.
+            // @see #262
+            const emitted = (toolRanSinceText ? paragraphBreakFor(assistantContent) : '') + delta;
+            toolRanSinceText = false;
+            assistantContent += emitted;
+            sendEvent('delta', { content: emitted });
+          }
         }
-        // Structured tool events replace the single prose status hint.
-        // @see #33
-        if (chunk.toolCall) {
-          const ev = toolCallEvent(chunk.toolCall);
-          reconcileToolEvent(toolEvents, ev);
-          sendEvent('tool', ev);
+
+        // A tool-only turn emits a short confirmation as a normal `delta`; an errored turn returned already and is never confirmed.
+        // @see #195
+        if (!assistantContent.trim()) {
+          const confirmation = confirmationForToolResults(toolResults);
+          if (confirmation) {
+            assistantContent = confirmation;
+            sendEvent('delta', { content: confirmation });
+          }
         }
-        if (chunk.toolResult) {
-          const ev = toolResultEvent(chunk.toolResult);
-          reconcileToolEvent(toolEvents, ev);
-          sendEvent('tool', ev);
-          collectSourcesInto(sources, chunk.toolResult.result, titles);
-          toolResults.push(chunk.toolResult);
+        // Provenance markers are scrubbed before persist — already-streamed deltas can't be recalled, but history must not reinforce the pattern.
+        // @see #360
+        assistantContent = stripProvenanceLines(assistantContent);
+
+        if (zdr) break;
+
+        // Honesty guard, pre-persist so a flagged attempt can be restarted before `done` lands. A guard-eligible final attempt records its verdict (clean or flagged); a flagged mid attempt restarts.
+        // @see #371 #381
+        if (assistantContent.trim() && toolEvents.length === 0) {
+          honestyVerdict = await classifyAssistantTurn(assistantContent, [], String(session!._id));
+          if (honestyVerdict?.flagged && attempt < HONESTY_MAX_ATTEMPTS) continue;
+        } else {
+          honestyVerdict = null;
         }
-        // Arm the break on any tool chunk that follows already-streamed text.
-        if ((chunk.toolCall || chunk.toolResult) && assistantContent.length > 0) {
-          toolRanSinceText = true;
-        }
-        const delta = chunk.delta;
-        if (delta) {
-          // Consume the pending break, topping up to exactly one blank line so the two text runs render as separate paragraphs.
-          // @see #262
-          const emitted = (toolRanSinceText ? paragraphBreakFor(assistantContent) : '') + delta;
-          toolRanSinceText = false;
-          assistantContent += emitted;
-          sendEvent('delta', { content: emitted });
-        }
+        break;
       }
     } catch (err) {
       console.error(
@@ -1225,19 +1302,6 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
       res.end();
       return;
     }
-
-    // A tool-only turn emits a short confirmation as a normal `delta`; an errored turn returned already and is never confirmed.
-    // @see #195
-    if (!assistantContent.trim()) {
-      const confirmation = confirmationForToolResults(toolResults);
-      if (confirmation) {
-        assistantContent = confirmation;
-        sendEvent('delta', { content: confirmation });
-      }
-    }
-    // Provenance markers are scrubbed before persist — already-streamed deltas can't be recalled, but history must not reinforce the pattern.
-    // @see #360
-    assistantContent = stripProvenanceLines(assistantContent);
 
     // Save assistant message. An empty stream still persists content: '' (fail-visibility); ZDR turns save nothing.
     // @see #4 #116
@@ -1290,6 +1354,17 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
       // Persist the reconciled tool summaries so chips survive a refresh.
       // @see #196
       ...(toolEvents.length > 0 ? { tools: toolEvents } : {}),
+      // The in-loop guard verdict lands here instead of a post-`done` write, so the persisted turn is complete in one save.
+      // @see #381
+      ...(honestyVerdict
+        ? {
+            honesty: {
+              flagged: honestyVerdict.flagged,
+              reason: honestyVerdict.reason,
+              checkedAt: new Date(),
+            },
+          }
+        : {}),
       metrics: await buildMessageMetrics(String(session!._id), assistantContent),
     });
     await assistantMessage.save();
@@ -1317,18 +1392,10 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
       ...(sourceTitleList.length > 0 ? { sourceTitles: sourceTitleList } : {}),
     });
 
-    // Honesty guard: the verdict is awaited only after `done`, so the turn's finalization never waits on it; the still-open stream carries the flag live.
-    // @see #371
-    if (assistantContent.trim() && toolEvents.length === 0) {
-      const verdict = await reviewAssistantTurn(
-        String(assistantMessage._id),
-        assistantContent,
-        [],
-        String(session!._id),
-      );
-      if (verdict?.flagged) {
-        sendEvent('honesty', { flagged: true, reason: verdict.reason });
-      }
+    // Honesty surface: only an exhausted auto-retry reaches the user as a flag — the badge + manual retry are the last resort.
+    // @see #371 #381
+    if (honestyVerdict?.flagged) {
+      sendEvent('honesty', { flagged: true, reason: honestyVerdict.reason });
     }
     res.end();
   } catch (err) {

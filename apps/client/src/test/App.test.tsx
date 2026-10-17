@@ -232,6 +232,53 @@ describe('App startup chat (issue #96)', () => {
     );
     vi.unstubAllGlobals();
   });
+
+  it('wipes the discarded attempt and keeps only the retried turn on an honesty retry (#381)', async () => {
+    mockStartup('recent');
+    const sse = [
+      'event: delta',
+      'data: {"content":"Read it — 87 lines."}',
+      '',
+      'event: honesty',
+      'data: {"flagged":true,"reason":"claims a file read","retrying":true}',
+      '',
+      'event: delta',
+      'data: {"content":"I cannot read files."}',
+      '',
+      'event: done',
+      'data: {"complete":true,"message":{"_id":"a2","role":"assistant","content":"I cannot read files."}}',
+      '',
+      '',
+    ].join('\n');
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        body: {
+          getReader: () => {
+            let sent = false;
+            return {
+              read: async () => {
+                if (sent) return { done: true, value: undefined };
+                sent = true;
+                return { done: false, value: new TextEncoder().encode(sse) };
+              },
+            };
+          },
+        },
+      }),
+    );
+
+    renderApp();
+    await waitFor(() => expect(axiosGet).toHaveBeenCalledWith('/api/chat/sessions/recent'));
+
+    fireEvent.change(screen.getByTestId('chat-input'), { target: { value: 'read the file' } });
+    fireEvent.click(screen.getByTestId('chat-send'));
+
+    await waitFor(() => expect(screen.getByText('I cannot read files.')).toBeInTheDocument());
+    expect(screen.queryByText(/87 lines/)).not.toBeInTheDocument();
+    vi.unstubAllGlobals();
+  });
 });
 
 // Client mirror of the server reconcile — what stops the live chip from stacking a second entry.

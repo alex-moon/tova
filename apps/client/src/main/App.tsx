@@ -246,6 +246,9 @@ function App() {
       const decoder = new TextDecoder();
       let buffer = '';
       let currentSessionId = activeSessionId;
+      // The persisted id the settled bubble adopted at `done`; post-`done` frames must target it, not the stream placeholder.
+      // @see #381
+      let settledId: string | null = null;
 
       while (true) {
         const { done, value } = await reader.read();
@@ -315,15 +318,28 @@ function App() {
               ),
             );
           } else if (event === 'honesty') {
-            // Post-`done` verdict frame; the badge appears without a refetch.
-            // @see #371
-            const verdict = data as Message['honesty'];
-            setMessages((prev) =>
-              prev.map((m) => (m._id === streamId ? { ...m, honesty: verdict } : m)),
-            );
+            // `retrying` wipes the discarded pre-`done` attempt so the server's restart streams into a clean bubble; post-`done` the frame flags the settled message, whose id `done` already adopted.
+            // @see #371 #381
+            const verdict = data as Message['honesty'] & { retrying?: boolean };
+            if (verdict.retrying) {
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m._id === streamId
+                    ? { ...m, content: '', tools: [], sources: [], sourceTitles: [] }
+                    : m,
+                ),
+              );
+            } else {
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m._id === streamId || m._id === settledId ? { ...m, honesty: verdict } : m,
+                ),
+              );
+            }
           } else if (event === 'done' && data.complete) {
             const saved = data.message as Message | undefined;
             const sourceTitles = data.sourceTitles as SourceTitle[] | undefined;
+            if (saved?._id) settledId = saved._id;
             setMessages((prev) =>
               prev.map((m) =>
                 m._id === streamId && saved

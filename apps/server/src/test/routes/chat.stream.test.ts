@@ -1139,24 +1139,49 @@ describe('Chat streaming route', () => {
     expect(persisted?.sources).toBeUndefined();
   });
 
-  describe('honesty guard (#371)', () => {
-    it('flags a claim-shaped reply with zero tools and emits the verdict after done', async () => {
-      mockAgentStream.mockImplementation(async () => ({
-        fullStream: fullStreamFrom(['Read it — genuinely this time: 87 lines, all of it.']),
-      }));
+  describe('honesty guard (#371, #381)', () => {
+    // The guard audits one user message embedding the assistant reply; flagged-ness keys off the reply text so per-attempt verdicts diverge.
+    const mockGuard = (
+      flaggedWhen: (reply: string) => boolean,
+      reason = 'fabricated tool claim',
+    ) => {
       mockGenerate.mockImplementation(async (messages?: { role: string; content: string }[]) => {
         if (isClassifierCall({ messages })) return structured(CLASSIFIER_REPLY);
         if (isHonestyGuardCall({ messages })) {
+          const reply = messages?.[0]?.content.split('Assistant reply:\n')[1] ?? '';
           return {
-            text: '{"claimsToolUse": true, "reason": "claims a file read with no tools executed"}',
-            object: { claimsToolUse: true, reason: 'claims a file read with no tools executed' },
+            text: `{"claimsToolUse": ${flaggedWhen(reply)}, "reason": "${reason}"}`,
+            object: { claimsToolUse: flaggedWhen(reply), reason },
             finishReason: 'stop',
           };
         }
         return { text: '[]' };
       });
+    };
 
-      const cookies = await registerUser('stream-honesty-flag@example.com');
+    const frameOf = (responseText: string, event: string): Record<string, unknown> => {
+      const frame = responseText.split('\n\n').find((part) => part.includes(`event: ${event}`))!;
+      return JSON.parse(
+        frame
+          .split('\n')
+          .find((l) => l.startsWith('data: '))!
+          .slice(6),
+      );
+    };
+
+    it('auto-retries a flagged attempt and persists only the clean restart (#381)', async () => {
+      let call = 0;
+      mockAgentStream.mockImplementation(async () => {
+        call += 1;
+        return {
+          fullStream: fullStreamFrom([
+            call === 1 ? 'Read it — 87 lines, all of it.' : 'I cannot read files on my own.',
+          ]),
+        };
+      });
+      mockGuard((reply) => reply.includes('87 lines'), 'claims a file read with no tools executed');
+
+      const cookies = await registerUser('stream-honesty-retry@example.com');
       const app = createApp();
       const response = await request(app)
         .post('/api/chat/stream')
@@ -1165,18 +1190,69 @@ describe('Chat streaming route', () => {
 
       expect(response.status).toBe(200);
       const frames = response.text.split('\n\n');
+      const retryIdx = frames.findIndex((part) => part.includes('event: honesty'));
       const doneIdx = frames.findIndex((part) => part.includes('event: done'));
-      const honestyIdx = frames.findIndex((part) => part.includes('event: honesty'));
-      expect(doneIdx).toBeGreaterThan(-1);
-      expect(honestyIdx).toBeGreaterThan(doneIdx);
+      expect(retryIdx).toBeGreaterThan(-1);
+      expect(doneIdx).toBeGreaterThan(retryIdx);
+      const retryFrame = frameOf(response.text, 'honesty');
+      expect(retryFrame).toEqual({
+        flagged: true,
+        reason: 'claims a file read with no tools executed',
+        retrying: true,
+      });
+      // The settled turn is the restart, not the discarded attempt.
+      expect(frameOf(response.text, 'done')).toMatchObject({
+        complete: true,
+        message: { content: 'I cannot read files on my own.' },
+      });
+      // Exactly one assistant message persists, carrying the restart's clean verdict.
+      const persisted = await Message.find({ role: 'assistant' });
+      expect(persisted).toHaveLength(1);
+      expect(persisted[0].content).toBe('I cannot read files on my own.');
+      expect(persisted[0].honesty?.flagged).toBe(false);
+      // The restart's prompt carries the retry note and never the discarded reply.
+      expect(mockAgentStream).toHaveBeenCalledTimes(2);
+      const retryCall = mockAgentStream.mock.calls[1] as unknown as [
+        { role: string; content: string }[],
+      ];
+      const retryUserTurn = retryCall[0].filter((m) => m.role === 'user').at(-1);
+      expect(retryUserTurn?.content).toContain('discarded before the user saw');
+      expect(retryUserTurn?.content).not.toContain('87 lines');
+    });
+
+    it('falls back to the post-done flag when the retry is flagged too (#371)', async () => {
+      mockStream(['Read it — 87 lines, all of it.']);
+      mockGuard(() => true, 'claims a file read with no tools executed');
+
+      const cookies = await registerUser('stream-honesty-exhausted@example.com');
+      const app = createApp();
+      const response = await request(app)
+        .post('/api/chat/stream')
+        .set('Cookie', cookies)
+        .send({ content: 'read the file' });
+
+      expect(response.status).toBe(200);
+      const frames = response.text.split('\n\n');
+      const retryIdx = frames.findIndex((part) => part.includes('event: honesty'));
+      const doneIdx = frames.findIndex((part) => part.includes('event: done'));
+      expect(retryIdx).toBeGreaterThan(-1);
+      expect(retryIdx).toBeLessThan(doneIdx);
+      // The post-done verdict frame carries no retry marker — the badge path took over.
+      const lastHonesty = frames
+        .map((part) => (part.includes('event: honesty') ? part : ''))
+        .filter(Boolean)
+        .at(-1)!;
       expect(
         JSON.parse(
-          frames[honestyIdx]
+          lastHonesty
             .split('\n')
             .find((l) => l.startsWith('data: '))!
             .slice(6),
         ),
-      ).toEqual({ flagged: true, reason: 'claims a file read with no tools executed' });
+      ).toEqual({
+        flagged: true,
+        reason: 'claims a file read with no tools executed',
+      });
       const persisted = await Message.findOne({ role: 'assistant' });
       expect(persisted?.honesty?.flagged).toBe(true);
     });

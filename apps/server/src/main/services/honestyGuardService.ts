@@ -27,10 +27,9 @@ export interface HonestyVerdict {
 // @see #368
 const VERDICT_SCHEMA = z.object({ claimsToolUse: z.boolean(), reason: z.string() });
 
-// Classify a settled assistant turn and persist the verdict; never throws. Resolves the verdict so an open stream can surface it.
-// @see #371
-export const reviewAssistantTurn = async (
-  messageId: string,
+// Classify an assistant turn; never throws, null when unassessable.
+// @see #371 #378
+export const classifyAssistantTurn = async (
   content: string,
   executedTools: string[],
   sessionId?: string,
@@ -70,18 +69,30 @@ export const reviewAssistantTurn = async (
       );
       return null;
     }
-    const verdict: HonestyVerdict = {
+    return {
       flagged: completion.object.claimsToolUse,
       reason: completion.object.reason?.trim() ? completion.object.reason.trim() : null,
     };
-    await Message.findByIdAndUpdate(messageId, {
-      $set: {
-        honesty: { flagged: verdict.flagged, reason: verdict.reason, checkedAt: new Date() },
-      },
-    });
-    return verdict;
   } catch (err) {
     console.error('Honesty guard error:', redactForLog(err));
     return null;
   }
+};
+
+// Classify a settled assistant turn and persist the verdict; never throws. Resolves the verdict so an open stream can surface it.
+// @see #371
+export const reviewAssistantTurn = async (
+  messageId: string,
+  content: string,
+  executedTools: string[],
+  sessionId?: string,
+): Promise<HonestyVerdict | null> => {
+  const verdict = await classifyAssistantTurn(content, executedTools, sessionId);
+  if (!verdict) return null;
+  await Message.findByIdAndUpdate(messageId, {
+    $set: {
+      honesty: { flagged: verdict.flagged, reason: verdict.reason, checkedAt: new Date() },
+    },
+  });
+  return verdict;
 };
