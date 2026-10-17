@@ -11,7 +11,7 @@ export class EmailIdentityAndAdminSeed implements MigrationInterface {
     const password = process.env.ADMIN_PASSWORD;
     if (!password) {
       throw new Error(
-        'ADMIN_PASSWORD is not set: refusing to seed the admin user with a known default password. Set ADMIN_PASSWORD in .env (see .env.example).'
+        'ADMIN_PASSWORD is not set: refusing to seed the admin user with a known default password. Set ADMIN_PASSWORD in .env (see .env.example).',
       );
     }
     const passwordHash = bcrypt.hashSync(password, 10);

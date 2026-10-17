@@ -196,6 +196,16 @@ export const config = {
     },
   },
 
+  // Rerank budget knob; tall enough for cross-encoder latency that shares no floor with the embedding call.
+  // @see #305
+  rerank: {
+    get timeoutMs(): number {
+      const raw = process.env.RERANK_TIMEOUT_MS;
+      const parsed = raw === undefined || raw === '' ? NaN : Number(raw);
+      return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : 3000;
+    },
+  },
+
   // Task sequencer budget knobs; a malformed env degrades to the default rather than a NaN budget.
   // @see #254 #251
   task: {

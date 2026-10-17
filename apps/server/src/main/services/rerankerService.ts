@@ -10,7 +10,7 @@ const RERANK_URL = `${DEEPINFRA_BASE}/inference/${RERANK_MODEL}`;
 export interface RerankOptions {
   // Injectable for tests; defaults to global `fetch`.
   fetchImpl?: typeof fetch;
-  // Overrides `config.embeddings.timeoutMs` for this call.
+  // Overrides `config.rerank.timeoutMs` for this call.
   timeoutMs?: number;
 }
 
@@ -30,7 +30,7 @@ export const rerankQuery = async (
   if (!apiKey) return null;
 
   const doFetch = opts.fetchImpl ?? fetch;
-  const timeoutMs = opts.timeoutMs ?? config.embeddings.timeoutMs;
+  const timeoutMs = opts.timeoutMs ?? config.rerank.timeoutMs;
   try {
     const response = await doFetch(RERANK_URL, {
       method: 'POST',
