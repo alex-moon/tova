@@ -33,7 +33,7 @@ Backing services (MongoDB) run in Docker Compose; the backend and frontend run d
    npm install
    ```
 
-2. **Configure environment** — copy `.env.example` to `.env` in the repo root (it is the canonical list). Required: `GROQ_API_KEY`, `JWT_SECRET`, `MONGODB_URL` (full Mongo connection string; Atlas uses the `mongodb+srv://` scheme) or `MONGODB_PASSWORD` (dev fallback assembled from it), `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_CALLBACK_URL`. Optional per feature: `BRAVE_SEARCH_API_KEY` (web search tool), `DO_SPACES_KEY`/`DO_SPACES_SECRET`/`DO_SPACES_BUCKET`/`DO_SPACES_REGION` (asset library), `MCP_ENCRYPTION_KEY` (connectors with token auth), `LANGSMITH_API_KEY` + `LANGCHAIN_PROJECT` (tracing), `ADMIN_PASSWORD` (default `admin`), `GOOGLE_SAFE_BROWSING_API_KEY` (safe link check for `fetch_url`; `GOOGLE_API_KEY` also accepted).
+2. **Configure environment** — copy `.env.example` to `.env` in the repo root (it is the canonical list). Required: `GROQ_API_KEY`, `JWT_SECRET`, `MONGODB_URL` (full Mongo connection string; Atlas uses the `mongodb+srv://` scheme) or `MONGODB_PASSWORD` (dev fallback assembled from it), `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_CALLBACK_URL`. Optional per feature: `BRAVE_SEARCH_API_KEY` (web search tool), `DO_SPACES_KEY`/`DO_SPACES_SECRET`/`DO_SPACES_BUCKET`/`DO_SPACES_REGION` (asset library), `MCP_ENCRYPTION_KEY` (connectors with token auth), `LANGSMITH_API_KEY` + `LANGCHAIN_PROJECT` (tracing), `ADMIN_PASSWORD` (required by the admin seed migration; migration fails fast if unset), `GOOGLE_SAFE_BROWSING_API_KEY` (safe link check for `fetch_url`; `GOOGLE_API_KEY` also accepted).
 3. **Start the stack** (MongoDB in Docker)
 
    ```bash
@@ -60,10 +60,14 @@ Backing services (MongoDB) run in Docker Compose; the backend and frontend run d
 
 7. **Test end to end**
    - Open http://localhost:5173
-   - Log in with the admin email from step 4. Password: `ADMIN_PASSWORD` from `.env` (default `admin`).
+   - Log in with the admin email from step 4. Password: `ADMIN_PASSWORD` from `.env`.
    - Send a chat message. You get a streamed reply from the routed model.
 
-Admin password comes from `ADMIN_PASSWORD` in `.env` (defaults to `admin` — change it before seeding a shared environment). The seeded user (`formsatz@gmail.com`, hardcoded in migrations) has `role: admin` and the `routing` permission. New users do not have the `routing` permission, so they cannot use the model router until it is granted.
+The admin password comes from `ADMIN_PASSWORD` in `.env` — there is no default: the
+admin seed migration refuses to run and fails loudly if it is unset. The seeded user
+(`formsatz@gmail.com`, hardcoded in migrations) has `role: admin` and the `routing`
+permission. New users do not have the `routing` permission, so they cannot use the
+model router until it is granted.
 
 ### Google sign-in
 
@@ -115,20 +119,14 @@ If the primary fails on every provider, routing falls through to the next roster
 
 Inference runs through Mastra connectors across multiple providers. Chat responses carry `routing` metadata, and the SSE stream emits `meta`, `tool` (call and result), `delta`, `error`, and `done` events. See `docs/overview.md` for the product-level detail.
 
-## Optional Integrations
-
-- **Web search** (`BRAVE_SEARCH_API_KEY`): enables the agent's `web_search` tool. Unset → no search tool at all.
-- **Safe link checking** (`GOOGLE_SAFE_BROWSING_API_KEY`, falls back to `GOOGLE_API_KEY`): screens every URL the agent fetches via `fetch_url` (including redirect targets) against Google Safe Browsing's threatMatches endpoint, with a 24h domain-level cache. Unset → `fetch_url` works unchanged, unchecked (issue #120).
-- **Assets** (`DO_SPACES_*`): DigitalOcean Spaces storage with presigned PUT/GET; objects stay private. Unset → the asset library is disabled.
-- **Connectors** (`MCP_ENCRYPTION_KEY`): users register personal connectors; auth material is encrypted at rest. Unset → connectors with token auth cannot be added.
-- **Tracing** (`LANGSMITH_API_KEY`, `LANGCHAIN_PROJECT`): hierarchical LangSmith traces of every LLM call. Unset → nothing is exported.
-
 ## Implementation Pointers
 
-- Backend entry: `apps/server/src/main.ts`
-- Server app bootstrap: `apps/server/src/index.ts`
-- Routes: `apps/server/src/routes/` (chat, auth, assets, connectors, feedback, profile, admin)
-- Services: `apps/server/src/services/` (roster config + provider racing, Mastra agent + connectors, search/MCP/assets, metrics)
+- Backend entry: `apps/server/src/main/main.ts`
+- Server app bootstrap: `apps/server/src/main/index.ts`
+- Routes: `apps/server/src/main/routes/` (chat, auth, assets, connectors, feedback, profile, admin)
+- Services: `apps/server/src/main/services/` (roster config + provider racing, Mastra agent + connectors, search/MCP/assets, metrics)
+- Tests: `apps/server/src/test/` (kept alongside but parallel to source so PR diffs stay readable)
+- Migrations: `apps/migrations/src/main/` (admin seed, roster seed, index/collection migrations)
 - Frontend app: `apps/client/src/App.tsx`
 - Product overview: `docs/overview.md`
 - Status and delivery log: `docs/progress.md` (static; open work is tracked in GitHub issues)
