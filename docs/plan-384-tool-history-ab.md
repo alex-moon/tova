@@ -89,8 +89,37 @@ exchange + new turn).
 - Practical read: DeepSeek-V4.1-Flash is the wrong tool for tool-needing turns in this
   harness; route those to GLM rather than prompt-engineer DeepSeek.
 
+## Factorial prompt-builder probe (DeepSeek, deepinfra, 32 arms × 6 reps = 192, interleaved)
+
+The 8 paragraphs deduplicated into 5 parts (identity; tool discipline; memory handling;
+voice & care; shape & closure — the anti-fabrication rule appeared three times across
+paras 2/3/4), each with a warm variant (today's text, verbatim — arm 0 reproduces the
+production prompt exactly) and a cold variant (operational/terse rewrite).
+
+**Main effects, pooled n=96 per level (se ≈ ±5pt):**
+
+| part | warm | cold | Δ |
+|---|---|---|---|
+| 1 identity | 67% | 74% | +7 |
+| 2 tool discipline | 68% | 73% | +5 |
+| 3 memory handling | 67% | 74% | +7 |
+| 4 voice & care | 75% | 66% | **−9** |
+| 5 shape & closure | 73% | 68% | −5 |
+
+- **Operational beats abstract, modestly.** Cold variants of the three
+  epistemics/knowledge parts each add ~5-7pt of invocation — the review's instinct
+  ("high level is what DeepSeek does badly with") is directionally right.
+- **The warm voice is load-bearing.** Stripping personality from voice & care and
+  shape *costs* ~5-9pt of invocation. The personality is not the reliability problem;
+  if anything it protects it.
+- Best arm: bits `11100` (cold epistemics + warm voice) — 6/6 invoked. Worst: `00011`
+  (warm epistemics + cold voice) — 1/6. Per-arm n=6 (se ≈ ±20pt), so trust the pooled
+  effects, not single cells.
+- Flag counts remain contaminated by the no-userId design — relative signal only.
+
 ## Follow-ups (updated)
 
 - Routing: prefer GLM-5.3-Flash for tool-needing turns (both probes' evidence).
-- Optional: high-N run (≥25 reps/arm) if DeepSeek prompting is worth pursuing further;
-  at n=5 the effects are unresolvable.
+- Confirm run: bits `11100` vs baseline at higher N (≥20/arm), then extend to GLM.
+- Prompt rewrite, if confirmed: keep paras 5-8's voice verbatim, replace paras 1-4's
+  knowledge parts with the operational cold variants, dedup the anti-fabrication rule.
