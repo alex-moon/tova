@@ -36,7 +36,8 @@ import { webSearch } from './webSearchService';
 import { fetchPage, safeSlice, MAX_FETCH_CHARS, type FetchedPage } from './webFetchService';
 import { firecrawlScrape } from './firecrawlService';
 import { createSystemAsset, createSystemSideAsset, findFreshScrape } from './systemAssetService';
-import { applyAssetEdits, type AssetEdit } from './assetEditService';
+import { sanitizeFilename } from './assetLimits';
+import { applyAssetEdits, writeAssetContent, type AssetEdit } from './assetEditService';
 import { spacesWorkspaceStorage } from './workspaceStorage';
 import { config } from '../config';
 
@@ -488,18 +489,38 @@ export const listFilesTool = createTool({
   },
 });
 
+// Resolve a library row by id (when valid) or sanitized filename (newest wins); null when neither resolves. The agent typically holds the filename, not the id. `units` is `select: false` and needed by the read path.
+// @see #369
+const resolveLibraryAsset = async (
+  userId: string,
+  id?: string,
+  filename?: string,
+): Promise<typeof Asset.prototype | null> => {
+  if (id && mongoose.isValidObjectId(id)) {
+    return Asset.findOne({ _id: id, userId, status: 'ready' }).select('+units');
+  }
+  const safeName = sanitizeFilename((filename ?? '').trim());
+  if (safeName) {
+    return Asset.findOne({ userId, status: 'ready', filename: safeName })
+      .select('+units')
+      .sort({ _id: -1 });
+  }
+  return null;
+};
+
 export const readFileTool = createTool({
   id: 'read_file',
   description:
-    'Read a file from the calling user’s file library by its id (from `list_files`), ' +
-    'returning its metadata (filename, type, size, upload date) and extracted text ' +
-    'content when any exists. Read long documents in slices with `offset` (1-based ' +
-    'start line) and `limit` (number of lines); every result reports `totalLines`, ' +
-    '`totalChars` and whether more remains (`truncated`). To navigate a long ' +
-    'document, call with `unitsOnly: true` first to list its units (pages/sections) ' +
+    'Read a file from the calling user’s file library by its id (from `list_files`) or ' +
+    'by its filename, returning its metadata (filename, type, size, upload date) and ' +
+    'extracted text content when any exists. Read long documents in slices with `offset` ' +
+    '(1-based start line) and `limit` (number of lines); every result reports ' +
+    '`totalLines`, `totalChars` and whether more remains (`truncated`). To navigate a ' +
+    'long document, call with `unitsOnly: true` first to list its units (pages/sections) ' +
     'as a table of contents with each unit’s `startLine`, then read from that line.',
   inputSchema: z.object({
-    id: z.string().min(1),
+    id: z.string().min(1).optional().describe('The file id from `list_files`'),
+    filename: z.string().min(1).optional().describe('The file name, e.g. meeting-notes.md'),
     // Models emit boolean tool args as the string "true" (wire-encoding drift), and a strict boolean schema makes Mastra reject the whole call; execute coerces to an actual boolean.
     // @see #159
     unitsOnly: z.union([z.boolean(), z.enum(['true', 'false', 'True', 'False'])]).optional(),
@@ -544,7 +565,10 @@ export const readFileTool = createTool({
     note: z.string().optional(),
     error: z.string().optional(),
   }),
-  execute: async ({ id, unitsOnly: rawUnitsOnly, offset: rawOffset, limit: rawLimit }, ctx) => {
+  execute: async (
+    { id, filename, unitsOnly: rawUnitsOnly, offset: rawOffset, limit: rawLimit },
+    ctx,
+  ) => {
     // Boolean wire-encoding coercion (see inputSchema note).
     // @see #159
     const unitsOnly =
@@ -555,102 +579,12 @@ export const readFileTool = createTool({
       return { error: degradedToolError('read_file', toolDegradeReason(ctx, 'read_file')) };
     const userId = ctx.requestContext.get('userId') as string | undefined;
     if (!userId) return { error: 'unavailable' };
-    if (!id || !mongoose.isValidObjectId(id)) {
+    if ((!id || !mongoose.isValidObjectId(id)) && !(filename && filename.trim())) {
       return { error: 'not_found' };
     }
     try {
-      const asset = await Asset.findOne({ _id: id, userId, status: 'ready' }).select(
-        'filename contentType size createdAt textExtracted markdownExtracted units',
-      );
-      if (!asset) return { error: 'not_found' };
-      const file = assetFileFrom(asset);
-      // Per-unit text (one unit per PDF page / top-level section), selected explicitly because the field is `select: false`.
-      // @see #159
-      const units = (asset.get('units') ?? []) as { index: number; label: string; text: string }[];
-      // Markdown conversion is the fallback content source when fast extraction produced nothing.
-      // @see #67
-      const text = asset.textExtracted ?? asset.markdownExtracted;
-      // Units are a table of contents — each points at the line where it begins; computed at read time so pre-#350 rows still get start lines.
-      // @see #350
-      const startLineOf = (needle: string): number | undefined => {
-        if (!text || !needle) return undefined;
-        const at = text.indexOf(needle);
-        return at < 0 ? undefined : text.slice(0, at).split('\n').length;
-      };
-      if (unitsOnly) {
-        if (units.length === 0) {
-          return {
-            file,
-            note:
-              'This document has no per-unit text available; read it without ' +
-              '`unitsOnly` to get its full extracted text.',
-          };
-        }
-        return {
-          file,
-          units: units.map((u) => ({
-            index: u.index,
-            label: u.label,
-            startLine: startLineOf(u.text),
-            preview: u.text.slice(0, 120),
-          })),
-        };
-      }
-      if (text == null) {
-        return {
-          file,
-          content: null,
-          hasText: false,
-          note:
-            'No readable text could be extracted from this file (it is likely a ' +
-            'binary type such as an image); use the attach flow to include it in the chat.',
-        };
-      }
-      // Line-range read over the extracted text; numeric args may arrive as digit-only strings, so coerce before validating.
-      // @see #350 #159
-      const coerceLine = (value: unknown): number | null => {
-        if (typeof value === 'number' && Number.isFinite(value)) return Math.trunc(value);
-        if (typeof value === 'string' && /^\s*\d+\s*$/.test(value)) return Number(value.trim());
-        return null;
-      };
-      const lines = text.split('\n');
-      const totalLines = lines.length;
-      const totalChars = text.length;
-      const offset = rawOffset === undefined ? 1 : coerceLine(rawOffset);
-      if (offset === null || offset < 1 || offset > totalLines) {
-        return {
-          file,
-          error: 'invalid',
-          note: `offset must be within 1-${totalLines}`,
-          totalLines,
-          totalChars,
-        };
-      }
-      const limit = rawLimit === undefined ? undefined : coerceLine(rawLimit);
-      if (limit !== undefined && (limit === null || limit < 1)) {
-        return { file, error: 'invalid', note: 'limit must be a positive line count' };
-      }
-      const endLine = limit === undefined ? totalLines : Math.min(offset + limit - 1, totalLines);
-      const joined = lines.slice(offset - 1, endLine).join('\n');
-      const content = truncateForPrompt(joined);
-      const truncated = endLine < totalLines || joined.length > MAX_PROMPT_TEXT_CHARS;
-      return {
-        file,
-        content,
-        hasText: true,
-        offset,
-        endLine,
-        totalLines,
-        totalChars,
-        truncated,
-        ...(truncated
-          ? {
-              note:
-                `Showing lines ${offset}-${endLine} of ${totalLines}. ` +
-                `Call read_file again with offset=${endLine + 1} to continue.`,
-            }
-          : {}),
-      };
+      // `return await`, not `return`: a bare return would leak a resolution rejection past the catch.
+      return await resolveThenRead(userId, id, filename, unitsOnly, rawOffset, rawLimit);
     } catch (error) {
       markToolFailed(ctx, 'read_file', reasonFrom(error));
       return { error: degradedToolError('read_file', reasonFrom(error)) };
@@ -658,14 +592,119 @@ export const readFileTool = createTool({
   },
 });
 
+// The read body after resolution; errors propagate to the caller's catch.
+// @see #369
+const resolveThenRead = async (
+  userId: string,
+  id?: string,
+  filename?: string,
+  unitsOnly?: boolean,
+  rawOffset?: unknown,
+  rawLimit?: unknown,
+) => {
+  const asset = await resolveLibraryAsset(userId, id, filename);
+  if (!asset) return { error: 'not_found' };
+  const file = assetFileFrom(asset);
+  // Per-unit text (one unit per PDF page / top-level section), selected explicitly because the field is `select: false`.
+  // @see #159
+  const units = (asset.get('units') ?? []) as { index: number; label: string; text: string }[];
+  // Markdown conversion is the fallback content source when fast extraction produced nothing.
+  // @see #67
+  const text = asset.textExtracted ?? asset.markdownExtracted;
+  // Units are a table of contents — each points at the line where it begins; computed at read time so pre-#350 rows still get start lines.
+  // @see #350
+  const startLineOf = (needle: string): number | undefined => {
+    if (!text || !needle) return undefined;
+    const at = text.indexOf(needle);
+    return at < 0 ? undefined : text.slice(0, at).split('\n').length;
+  };
+  if (unitsOnly) {
+    if (units.length === 0) {
+      return {
+        file,
+        note:
+          'This document has no per-unit text available; read it without ' +
+          '`unitsOnly` to get its full extracted text.',
+      };
+    }
+    return {
+      file,
+      units: units.map((u) => ({
+        index: u.index,
+        label: u.label,
+        startLine: startLineOf(u.text),
+        preview: u.text.slice(0, 120),
+      })),
+    };
+  }
+  if (text == null) {
+    return {
+      file,
+      content: null,
+      hasText: false,
+      note:
+        'No readable text could be extracted from this file (it is likely a ' +
+        'binary type such as an image); use the attach flow to include it in the chat.',
+    };
+  }
+  // Line-range read over the extracted text; numeric args may arrive as digit-only strings, so coerce before validating.
+  // @see #350 #159
+  const coerceLine = (value: unknown): number | null => {
+    if (typeof value === 'number' && Number.isFinite(value)) return Math.trunc(value);
+    if (typeof value === 'string' && /^\s*\d+\s*$/.test(value)) return Number(value.trim());
+    return null;
+  };
+  const lines = text.split('\n');
+  const totalLines = lines.length;
+  const totalChars = text.length;
+  const offset = rawOffset === undefined ? 1 : coerceLine(rawOffset);
+  if (offset === null || offset < 1 || offset > totalLines) {
+    return {
+      file,
+      error: 'invalid',
+      note: `offset must be within 1-${totalLines}`,
+      totalLines,
+      totalChars,
+    };
+  }
+  const limit = rawLimit === undefined ? undefined : coerceLine(rawLimit);
+  if (limit !== undefined && (limit === null || limit < 1)) {
+    return { file, error: 'invalid', note: 'limit must be a positive line count' };
+  }
+  const endLine = limit === undefined ? totalLines : Math.min(offset + limit - 1, totalLines);
+  const joined = lines.slice(offset - 1, endLine).join('\n');
+  const content = truncateForPrompt(joined);
+  const truncated = endLine < totalLines || joined.length > MAX_PROMPT_TEXT_CHARS;
+  return {
+    file,
+    content,
+    hasText: true,
+    offset,
+    endLine,
+    totalLines,
+    totalChars,
+    truncated,
+    ...(truncated
+      ? {
+          note:
+            `Showing lines ${offset}-${endLine} of ${totalLines}. ` +
+            `Call read_file again with offset=${endLine + 1} to continue.`,
+        }
+      : {}),
+  };
+};
+
 /* generate_file tool: the agent can create a NEW markdown file in the calling user's library from its own output; bytes pushed server-side; errors map to the same typed variants as the other asset tools. */
 // @see #66
 export const generateFileTool = createTool({
   id: 'generate_file',
   description:
-    'Create a NEW markdown file in the calling user’s file library, saved from your ' +
+    'Create a markdown file in the calling user’s file library, saved from your ' +
     'own output (notes, summaries, drafts). Use it when the user asks to save, ' +
-    'generate or create a file/note/document. Content must be markdown text.',
+    'generate or create a file/note/document. Content must be markdown text. If a ' +
+    'file with the same name (one you generated before) already exists, the content ' +
+    'becomes a new version of that file — same id, previous version superseded; old ' +
+    'versions are not visible to you.',
   inputSchema: z.object({
     filename: z.string().min(1).describe('File name for the library, e.g. meeting-notes.md'),
     content: z.string().min(1).describe('Full markdown content of the file'),
@@ -677,6 +716,7 @@ export const generateFileTool = createTool({
         filename: z.string(),
         contentType: z.string(),
         size: z.number(),
+        version: z.number().optional().describe('The version number after this write'),
         createdAt: z.string().describe('Creation time as an ISO 8601 UTC timestamp'),
       })
       .optional(),
@@ -691,7 +731,14 @@ const generateFileExecute = async (
   content: string,
   requestContext: { get: (key: string) => unknown },
 ): Promise<{
-  file?: { id: string; filename: string; contentType: string; size: number; createdAt: string };
+  file?: {
+    id: string;
+    filename: string;
+    contentType: string;
+    size: number;
+    version?: number;
+    createdAt: string;
+  };
   error?: string;
 }> => {
   const userId = requestContext.get('userId') as string | undefined;
@@ -707,6 +754,32 @@ const generateFileExecute = async (
       ? ({ kind: 'chat', sessionId } as const)
       : undefined;
   try {
+    // A repeated generated filename is a new version of the same file, not a duplicate row; non-generated collisions (uploads, cached pages) are never silently superseded.
+    // @see #369
+    const safeName = sanitizeFilename(filename);
+    const existing = safeName
+      ? await Asset.findOne({
+          userId,
+          filename: safeName,
+          origin: 'system-generated',
+          status: 'ready',
+        }).sort({ _id: -1 })
+      : null;
+    if (existing) {
+      const result = await writeAssetContent(existing, content);
+      if (!result.ok) return { error: result.code };
+      const file = result.asset;
+      return {
+        file: {
+          id: String(file._id),
+          filename: file.filename,
+          contentType: file.contentType,
+          size: file.size,
+          version: file.version ?? 1,
+          createdAt: (file.createdAt ?? new Date()).toISOString(),
+        },
+      };
+    }
     const result = await createSystemAsset(
       userId,
       filename,
@@ -736,17 +809,18 @@ export const editFileTool = createTool({
   description:
     'Edit a markdown file that you previously created with `generate_file` in the ' +
     'calling user’s file library. Use it to update, revise or fix an existing file ' +
-    'instead of generating a new one. Provide the file id (from `list_files`) and one ' +
-    'or more search/replace edits: each `oldText` must be a unique block of the ' +
-    'file’s current text and `newText` its replacement. Call `read_file` first to get ' +
-    'the current text when unsure; preserve exact indentation and never include ' +
-    'line-number prefixes in oldText. If there is no exact match, the edit retries ' +
-    'while ignoring typographic quote, dash, and space variants, then trailing ' +
+    'instead of generating a new one. Provide the file id (from `list_files`) or its ' +
+    'filename, plus one or more search/replace edits: each `oldText` must be a unique ' +
+    'block of the file’s current text and `newText` its replacement. Call `read_file` ' +
+    'first to get the current text when unsure; preserve exact indentation and never ' +
+    'include line-number prefixes in oldText. If there is no exact match, the edit ' +
+    'retries while ignoring typographic quote, dash, and space variants, then trailing ' +
     'whitespace on each line — but it still fails if oldText is absent or matches ' +
     'more than one place. The file keeps its id and provenance; every edit is kept ' +
     'as a new version.',
   inputSchema: z.object({
-    id: z.string().min(1).describe('The file id from `list_files`'),
+    id: z.string().min(1).optional().describe('The file id from `list_files`'),
+    filename: z.string().min(1).optional().describe('The file name, e.g. meeting-notes.md'),
     edits: z
       .array(
         z.object({
@@ -778,11 +852,13 @@ export const editFileTool = createTool({
     error: z.string().optional(),
     note: z.string().optional(),
   }),
-  execute: ({ id, edits }, { requestContext }) => editFileExecute(id, edits, requestContext),
+  execute: async ({ id, filename, edits }, { requestContext }) =>
+    editFileExecute(id, filename, edits, requestContext),
 });
 
 const editFileExecute = async (
-  id: string,
+  id: string | undefined,
+  filename: string | undefined,
   edits: AssetEdit[],
   requestContext: { get: (key: string) => unknown },
 ): Promise<{
@@ -801,9 +877,11 @@ const editFileExecute = async (
   const userId = requestContext.get('userId') as string | undefined;
   if (!userId) return { error: 'unavailable' };
   if (!spacesWorkspaceStorage.isConfigured()) return { error: 'unavailable' };
-  if (!id || !mongoose.isValidObjectId(id)) return { error: 'not_found' };
+  if ((!id || !mongoose.isValidObjectId(id)) && !(filename && filename.trim())) {
+    return { error: 'not_found' };
+  }
   try {
-    const asset = await Asset.findOne({ _id: id, userId, status: 'ready' });
+    const asset = await resolveLibraryAsset(userId, id, filename);
     if (!asset) return { error: 'not_found' };
     // Captured before the write: the unified diff of the edit is returned so the change is auditable in the conversation.
     const before = asset.textExtracted ?? '';

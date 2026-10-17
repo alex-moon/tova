@@ -3,7 +3,7 @@
 ## Status (current)
 
 #362 tasks-stopping fix (branch `fix/tv/362-task-history-replay`): a task
-settled `done` after two steps having done nothing — step 0 narrated *and*
+settled `done` after two steps having done nothing — step 0 narrated _and_
 called `list_files`, and `assembleTaskHistory` replayed an assistant event as
 content **or** tool replay, never both, so the narration erased the tool
 exchange from the next step's context; the model saw a fresh-looking
