@@ -97,6 +97,17 @@ const messageSchema = new mongoose.Schema({
       default: null,
     },
   },
+  /** Honesty-guard verdict: flagged turns claimed tool results that never executed; absent = unassessed. */
+  // @see #371
+  honesty: {
+    type: {
+      _id: false,
+      flagged: { type: Boolean, required: true },
+      reason: { type: String, default: null },
+      checkedAt: { type: Date, required: true },
+    },
+    default: undefined,
+  },
   timestamp: {
     type: Date,
     default: Date.now,

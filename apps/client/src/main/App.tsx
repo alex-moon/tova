@@ -58,6 +58,9 @@ export interface Message {
   sourceTitles?: SourceTitle[];
   suggestions?: string[];
   tools?: ToolEvent[];
+  // Honesty-guard verdict; absent = unassessed.
+  // @see #371
+  honesty?: { flagged?: boolean | null; reason?: string | null; checkedAt?: string | null };
   // assetId persists server-side; assetFilename is display-only.
   // @see #34
   assetId?: string;
@@ -311,6 +314,13 @@ function App() {
                   : m,
               ),
             );
+          } else if (event === 'honesty') {
+            // Post-`done` verdict frame; the badge appears without a refetch.
+            // @see #371
+            const verdict = data as Message['honesty'];
+            setMessages((prev) =>
+              prev.map((m) => (m._id === streamId ? { ...m, honesty: verdict } : m)),
+            );
           } else if (event === 'done' && data.complete) {
             const saved = data.message as Message | undefined;
             const sourceTitles = data.sourceTitles as SourceTitle[] | undefined;
@@ -327,6 +337,7 @@ function App() {
                       sources: saved.sources,
                       sourceTitles: saved.sourceTitles ?? sourceTitles,
                       suggestions: saved.suggestions,
+                      honesty: saved.honesty,
                       // Adopt the server-reconciled summaries so the settled turn matches a refresh.
                       // @see #196
                       ...(saved.tools ? { tools: saved.tools } : {}),
