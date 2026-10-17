@@ -8,8 +8,6 @@ const cookieOf = (res: request.Response) => {
   return Array.isArray(cookie) ? cookie : [cookie];
 };
 
-// registers the user, promotes them in Mongo, then re-logs in so the JWT
-// carries the admin role (the guard reads role from the token)
 const registerAdmin = async (app: ReturnType<typeof createApp>, email: string) => {
   await request(app).post('/api/auth/register').send({ email, password: 'password123' });
   await User.updateOne({ email }, { role: 'admin' });
@@ -24,8 +22,8 @@ const registerUser = async (app: ReturnType<typeof createApp>, email: string) =>
   return cookieOf(res);
 };
 
-// #184 route-level coverage: PAT CRUD, the bearer middleware on the admin
-// guard, one-time plaintext, revocation, live-role inheritance and expiry.
+// Route-level coverage: PAT CRUD, the bearer middleware on the admin guard, one-time plaintext, revocation, live-role inheritance and expiry.
+// @see #184
 describe('admin pats (#184)', () => {
   it('guards the endpoints like the rest of admin', async () => {
     const app = createApp();
@@ -151,8 +149,7 @@ describe('admin pats (#184)', () => {
 
     await User.updateOne({ email: 'soon-demoted@example.com' }, { role: 'user' });
 
-    // Bearer auth succeeds (the token is valid) but requireRole now 403s —
-    // the role came from the creator's live document, not the token.
+    // Bearer auth succeeds but requireRole now 403s — the role came from the creator's live document, not the token.
     const after = await request(app)
       .get('/api/admin/users')
       .set('Authorization', `Bearer ${token}`);
@@ -183,8 +180,7 @@ describe('admin pats (#184)', () => {
       .send({ name: 'scoped' });
     const token: string = created.body.pat.token;
 
-    // /api/auth/me uses plain authenticate (cookie-only): a PAT grants no
-    // session there.
+    // /api/auth/me uses plain authenticate (cookie-only): a PAT grants no session there.
     const res = await request(app).get('/api/auth/me').set('Authorization', `Bearer ${token}`);
     expect(res.status).toBe(401);
   });

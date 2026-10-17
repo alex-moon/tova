@@ -2,21 +2,8 @@ import { redactForLog } from './logRedaction';
 
 import { SafeBrowsingCache } from '../models/SafeBrowsingCache';
 
-// Safe Browsing link checker for `fetch_url` (issue #120): every URL the
-// agent fetches (including redirect-hop targets) is screened against
-// Google's threatMatches endpoint before a request is made. Uses the SAME
-// global fetch as everything else, so tests can stub it.
-//
-// Key read order: GOOGLE_SAFE_BROWSING_API_KEY, falling back to generic
-// GOOGLE_API_KEY (which name the user's provisioned key lands under is not
-// yet fixed; supporting both is free). Both absent → checker disabled:
-// fetch_url proceeds unchanged, mirroring the BRAVE_SEARCH_API_KEY
-// precedent (#16).
-//
-// Failure posture: API errors fail OPEN (proceed) but loudly — a checker
-// outage must not brick fetch_url. This is the plan's named, deliberate
-// call; switching to fail-closed is a one-line change if the user prefers
-// strictness.
+// Safe Browsing link checker for `fetch_url`: every fetched URL is screened before the request; API errors fail OPEN but loudly; both Google key env names supported.
+// @see #120 #16
 
 const ENDPOINT = 'https://safebrowsing.googleapis.com/v4/threatMatches:find';
 
@@ -84,8 +71,7 @@ const cacheKey = (url: string): string | null => {
   }
 };
 
-// A cache-read failure is recoverable: fall through to the live API call
-// instead of reporting the URL unchecked.
+// A cache-read failure falls through to the live API call instead of reporting the URL unchecked.
 const readCache = async (host: string): Promise<string | null> => {
   try {
     const entry = await SafeBrowsingCache.findOne({ host }).lean<{ verdict?: string }>();
@@ -108,11 +94,7 @@ const writeCache = async (host: string, verdict: 'safe' | 'unsafe'): Promise<voi
   }
 };
 
-// Screens a URL. Never throws: only API-call errors report safe=true with
-// source='unchecked' (fail-open); a Mongo cache failure is degraded to
-// losing the cache — the authoritative API verdict is still enforced, so a
-// database outage can never green-light a URL Google flagged.
-// Returns { enabled: false } when no key is configured — callers proceed.
+// Screens a URL, never throws: only API errors report safe=true unchecked (fail-open); a cache outage never green-lights a flagged URL.
 export const checkUrl = async (url: string): Promise<SafeLinkVerdict> => {
   const apiKey = safeBrowsingApiKey();
   if (!apiKey) return { enabled: false, safe: true, source: 'disabled' };
@@ -135,8 +117,7 @@ export const checkUrl = async (url: string): Promise<SafeLinkVerdict> => {
   }
 };
 
-// Throws a caller-renderable error when the URL is known-unsafe; a no-op
-// when the checker is disabled or the verdict is safe/unchecked.
+// Throws a caller-renderable error when the URL is known-unsafe; a no-op when disabled or safe/unchecked.
 export const assertSafeUrl = async (url: string): Promise<void> => {
   const verdict = await checkUrl(url);
   if (!verdict.enabled || verdict.safe) return;

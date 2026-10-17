@@ -5,9 +5,7 @@ import TaskService, { isTerminalTask, type TaskSummary } from '@/services/tasks'
 import TaskStatusChip from './TaskStatusChip';
 import { cn } from '@/lib/utils';
 
-// How often the list re-reads while any task is still active (queued/running/
-// paused) — the same poll-while-pending idiom as AssetLibrary, so a task's
-// status chip advances in place without the user re-selecting.
+// Poll-while-pending so a task's status chip advances in place, same idiom as AssetLibrary.
 const POLL_MS = 3000;
 
 const isActive = (task: TaskSummary): boolean => !isTerminalTask(task.status);
@@ -18,8 +16,7 @@ const originLabel = (task: TaskSummary): string | null => {
   return null;
 };
 
-// Short, single-line summary of a task for the list: the instruction's first
-// line, falling back to the origin. Never rendered as markdown here.
+// Short single-line summary for the list: the instruction's first line, falling back to the origin.
 const summaryOf = (task: TaskSummary): string => {
   const first = task.instruction.split('\n')[0]?.trim();
   return first || originLabel(task) || 'Task';
@@ -37,11 +34,7 @@ const TaskLibrary: React.FC<TaskLibraryProps> = ({ selectedId = null, onSelect }
   const [error, setError] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
 
-  // How many pages are loaded (1 for the first page, N after N-1 "Show more"s).
-  // A silent poll must refetch *all* loaded pages: fetching page 1 alone and
-  // replacing the list would wipe every appended page and re-show "Show more"
-  // on each 3s tick while any task is active — the normal case while you watch
-  // a running task. The cursor chain is rebuilt from page 1 forward.
+  // A silent poll must refetch ALL loaded pages, or it would wipe appended pages and re-show "Show more" on each tick.
   const pagesLoaded = useRef(1);
 
   const fetchAll = useCallback(async (): Promise<{

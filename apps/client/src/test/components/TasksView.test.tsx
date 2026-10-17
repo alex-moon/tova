@@ -75,18 +75,14 @@ describe('TasksView (#254 client)', () => {
     fireEvent.click(screen.getByTestId('task-row-t1'));
 
     await waitFor(() => expect(screen.getByText('Let me look.')).toBeInTheDocument());
-    // The #196 tool chip summary renders on the assistant step.
     expect(screen.getByTestId('task-tool-summary-toggle')).toBeInTheDocument();
     // A sequencer system notice renders as a neutral, non-chat row.
     expect(screen.getByTestId('task-system-event')).toHaveTextContent('Step budget reached');
     expect(TaskService.get).toHaveBeenCalledWith('t1');
   });
 
-  // Regression (#254 client): the detail loader must key on the task *id*, not
-  // the loaded header object. A real GET returns a fresh object each time, so a
-  // loader that depended on the header would re-fire on its own response and
-  // loop unbounded. Mock `get` with a fresh object per call (as axios does) and
-  // assert the fetch settles to the initial load + at most one poll.
+  // Regression: the detail loader must key on the task id — a header-keyed loader would re-fire on its own response and loop unbounded.
+  // @see #254
   it('does not re-fetch in a loop when each response is a fresh object', async () => {
     vi.mocked(TaskService.list).mockResolvedValue({ tasks: [task()], nextCursor: null });
     vi.mocked(TaskService.get).mockImplementation(async () => detail());
@@ -106,12 +102,7 @@ describe('TasksView (#254 client)', () => {
     await waitFor(() => expect(screen.getByTestId('task-library-empty')).toBeInTheDocument());
   });
 
-  // The list is cursor-paged server-side (20/page); the client must surface the
-  // "Show more" affordance and append the next page rather than silently
-  // dropping every task past the first page. It must also *keep* the appended
-  // page across the while-active silent poll: a poll that refetched page 1
-  // alone and replaced the list would wipe page 2 and re-show "Show more" every
-  // 3s. The cursor-aware mock reproduces the real server contract.
+  // Cursor-paged list: an appended page must survive the while-active silent poll instead of being wiped.
   it('loads the next page and keeps it across the active poll', async () => {
     vi.useFakeTimers();
     try {
@@ -131,8 +122,6 @@ describe('TasksView (#254 client)', () => {
       await act(async () => {
         await vi.advanceTimersByTimeAsync(0);
       });
-      // The first page is kept alongside the appended second page (no fake
-      // `waitFor` — it polls on timers, which are faked here).
       expect(screen.getByTestId('task-row-p1')).toBeInTheDocument();
       expect(screen.getByTestId('task-row-p2')).toBeInTheDocument();
       expect(TaskService.list).toHaveBeenLastCalledWith('cur-1');
@@ -185,16 +174,13 @@ describe('TasksView (#254 client)', () => {
     fireEvent.click(screen.getByTestId('task-row-t2'));
 
     await waitFor(() => expect(screen.getByText('All done.')).toBeInTheDocument());
-    // Terminal: no cancel affordance, composer disabled.
     expect(screen.queryByTestId('task-cancel')).not.toBeInTheDocument();
     expect(screen.getByTestId('task-instruction-input')).toBeDisabled();
     // The chip appears on both the list row and the detail header.
     expect(screen.getAllByTestId('task-status-done').length).toBeGreaterThan(0);
   });
 
-  // A task that disappears (404) mid-poll must surface the failure and stop
-  // polling. Previously a silent poll swallowed every error, so the UI stayed
-  // frozen on a stale "running" frame and kept hammering a dead endpoint.
+  // A 404 mid-poll must surface the failure and stop polling, not stay frozen on a stale frame.
   it('surfaces a 404 on a silent poll and stops polling', async () => {
     vi.mocked(TaskService.list).mockResolvedValue({ tasks: [task()], nextCursor: null });
     vi.mocked(TaskService.get).mockResolvedValueOnce(detail());
@@ -224,17 +210,13 @@ describe('TasksView (#254 client)', () => {
       await act(async () => {
         await vi.advanceTimersByTimeAsync(9000);
       });
-      // No further polls once the task is known gone.
       expect(vi.mocked(TaskService.get).mock.calls.length).toBe(callsAfterError);
     } finally {
       vi.useRealTimers();
     }
   });
 
-  // A cancel is observed server-side at the next step boundary (D13), so the
-  // cancel response still reports `running`. The button must not flip back to
-  // an enabled "Cancel" and invite a second tap; it shows a pending state until
-  // the poll sees a terminal status.
+  // Cancel is observed server-side at the next step boundary; keep the button pending until terminal.
   it('keeps a pending cancel state until the task is terminal', async () => {
     vi.mocked(TaskService.list).mockResolvedValue({ tasks: [task()], nextCursor: null });
     vi.mocked(TaskService.get).mockResolvedValue(detail());

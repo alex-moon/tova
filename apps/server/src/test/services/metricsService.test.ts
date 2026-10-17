@@ -111,7 +111,6 @@ describe('metricsService', () => {
       expect(parseLlmFlags('definitely emotional, very technical')).toEqual(parseLlmFlags(null));
       expect(parseLlmFlags('no braces at all')).toEqual(parseLlmFlags(''));
       expect(parseLlmFlags(undefined)).toEqual(parseLlmFlags(null));
-      // Unterminated object
       expect(parseLlmFlags('{"emotional": true')).toEqual(parseLlmFlags(null));
     });
   });
@@ -146,7 +145,8 @@ describe('metricsService', () => {
       await classifyPromptDimensions('hello');
       const ctorArgs = mockAgentCtor.mock.calls[mockAgentCtor.mock.calls.length - 1] as unknown[];
       const ctorCall = (ctorArgs?.[0] ?? {}) as { model: string; tools?: unknown };
-      // Tool-rejecting guard models (#41/#77): no `tools` argument at all.
+      // Tool-rejecting guard models: no `tools` argument at all.
+      // @see #41 #77
       expect('tools' in ctorCall).toBe(false);
       expect(ctorCall.model).toBe('groq/openai/gpt-oss-20b');
     });

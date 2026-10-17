@@ -28,9 +28,7 @@ export default defineConfig(({ mode }) => {
     },
     test: {
       environment: 'jsdom',
-      // Silence all console output from tests: suites intentionally exercise
-      // error paths whose expected error logging would otherwise pollute
-      // the test output.
+      // Tests intentionally exercise error paths; silence their console noise.
       silent: true,
       globals: false,
       setupFiles: ['src/test/setup.ts'],

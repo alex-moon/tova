@@ -8,11 +8,8 @@ import { runAssetJobTick } from '../../main/services/assetJobService';
 import { processAssetConversionJob } from '../../main/services/assetJobProcessor';
 import { OCR_MAX_INPUT_BYTES } from '../../main/services/ocr';
 
-// Issue #209: the OCR branch of the asset-job processor. The real tesseract
-// engine is slow (seconds per page), so `recognizeImage` is mocked while every
-// other OCR concern (finalize/cap, isNearEmpty, size guard, page separators,
-// unit derivation) runs for real. The born-digital PDF path must never call
-// the OCR mock.
+// The OCR branch of the asset-job processor: `recognizeImage` is mocked (the real engine takes seconds per page) while every other OCR concern runs for real; the born-digital PDF path must never call the mock.
+// @see #209
 
 const mockGetObjectBuffer = jest.fn();
 const mockPutObject = jest.fn();
@@ -136,8 +133,7 @@ describe('OCR job end-to-end (#209)', () => {
     await runAssetJobTick(processAssetConversionJob);
 
     const stored = await Asset.findById(asset._id);
-    // Thumbnail succeeded despite the OCR failure; markdown is still pending
-    // for retry (attempt 1 of 3), not lost.
+    // Thumbnail succeeded despite the OCR failure; markdown stays pending for retry, not lost.
     expect(stored?.thumbnailStatus).toBe('ready');
     expect(stored?.markdownStatus).toBe('pending');
     expect(mockPutObject).toHaveBeenCalledTimes(1);

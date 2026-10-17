@@ -1,15 +1,7 @@
 #!/bin/bash
 
-# Delivery loop for epic #251. The loop's mechanics live here; docs/plan-251-workspace.md
-# is epic *state* only (invariants, decisions, Done checklist, open questions). Do not
-# move this protocol back into the doc: the loop must not read its own instructions.
-#
-# Each iteration: sync the epic branch, reconcile epic state against git/GitHub, do the
-# next unchecked task, then critically review and record. Every step commits and pushes
-# its own work before handing off, so state is durable if the loop dies mid-iteration —
-# but only if there is work to commit; a step that finds nothing to change commits
-# nothing. The agent judges its own work and the tickets against what is actually in the
-# code and the issues — no per-step checklist here.
+# Delivery loop for the #251 epic: sync the branch, reconcile state, do the next task, review, document.
+# @see #251
 
 set -euo pipefail
 
@@ -19,8 +11,7 @@ while true; do
   git checkout "$EPIC_BRANCH"
   git pull --ff-only origin "$EPIC_BRANCH"
 
-  # Reconcile state only: bring the doc's Done checklist, tickets, PRs, and branches
-  # back in line with reality. This step edits *content*, never the loop protocol.
+  # Reconcile epic-doc state with reality; edits content, never the loop protocol.
   opencode run "Read docs/plan-251-workspace.md plus the open slice plans, tickets, PRs, and branches for #251. Reconcile the doc's Done checklist and open-questions list against the actual git and GitHub state. Fix drifted state in the doc, but do not edit the loop protocol or workspace.sh. If the state already matches reality, change nothing. Commit and push any changes before finishing. Report what is next."
 
   DATE=$(date -Iseconds)

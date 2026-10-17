@@ -1,19 +1,8 @@
 import { groqConnector } from '../../main/services/mastraService';
 import type { CompletionOptions } from '../../main/services/llmTypes';
 
-/*
- * #254 (epic #251) connector seam: the task sequencer pins one roster call to
- * `maxSteps: 1` so a single call is one driver-observable step (spike decision
- * (c), `docs/done/plan-254-task-entity.md`). Two contracts are pinned here:
- *
- * 1. `CompletionOptions.maxSteps` is forwarded verbatim onto Mastra's call
- *    options; absent keeps the existing mode default (12 full / 1 plain), so
- *    every chat call site is byte-identical (no regression).
- * 2. The non-streaming completion surfaces each executed call's `args`
- *    (Mastra's `ToolResultPayload` carries `toolName` + `args`), so the
- *    sequencer can rebuild a step's tool chips and replay its own calls as
- *    history — the args the streaming path already exposes.
- */
+/* Connector seam: maxSteps forwards verbatim (absent keeps the mode default so every chat call site is byte-identical), and the non-streaming completion surfaces each executed call's args so the sequencer can rebuild chips and replay history. */
+// @see #254 #251
 
 const mockGenerate = jest.fn();
 const mockStream = jest.fn();

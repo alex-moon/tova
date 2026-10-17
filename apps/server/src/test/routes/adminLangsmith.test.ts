@@ -7,13 +7,8 @@ import { Message } from '../../main/models/Message';
 import { Session } from '../../main/models/Session';
 import { listTraces, RETRY_WAIT_MS } from '../../main/services/langsmithTracesService';
 
-/*
- * #186 route coverage: admin-guard wiring (cookie + PAT bearer), the
- * unconfigured 503, upstream 502s, and the fetch-level happy paths for
- * list / detail / stats against mocked LangSmith responses (the raw-REST
- * service is exercised through the routes, same approach as
- * tracePurge.test.ts).
- */
+/* Route coverage: admin-guard wiring (cookie + PAT bearer), the unconfigured 503, upstream 502s, and fetch-level happy paths against mocked LangSmith responses. */
+// @see #186
 
 const cookieOf = (res: request.Response) => {
   const cookie = res.headers['set-cookie'];
@@ -127,9 +122,7 @@ describe('langsmithTracesService rate-limit handling (#186)', () => {
     queryStatuses = [429, 429, 429, 429];
 
     const result = listTraces();
-    // Attach the rejection handler up front: the promise rejects while the
-    // fake-timer advances are still flushing, and an unhandled rejection at
-    // that checkpoint would fail the suite before the assertion below.
+    // Attach the rejection handler up front: an unhandled rejection at the fake-timer checkpoint would fail the suite before the assertion below.
     const expectation = expect(result).rejects.toThrow('HTTP 429');
     await jest.advanceTimersByTimeAsync(1000);
     await jest.advanceTimersByTimeAsync(2000);
@@ -201,7 +194,8 @@ describe('admin langsmith (#186)', () => {
           jsonResponse(200, {
             runs: [
               rootRun({
-                // #308: the workspace facts ride the root run's metadata.
+                // The workspace facts ride the root run's metadata.
+                // @see #308
                 extra: {
                   metadata: { tova_workspace_gate: 'yes', tova_workspace_hits: 3 },
                 },
@@ -258,8 +252,8 @@ describe('admin langsmith (#186)', () => {
       error: 'model exploded',
     });
     expect(failed.appPath).toBeUndefined();
-    // A root without the metadata (pre-#308 or a non-chat run) surfaces neither
-    // field, and a garbage value is dropped rather than passed through.
+    // A root without the metadata surfaces neither field; a garbage value is dropped rather than passed through.
+    // @see #308
     expect(failed.workspaceGate).toBeUndefined();
     expect(failed.workspaceHits).toBeUndefined();
   });
@@ -330,9 +324,7 @@ describe('admin langsmith (#186)', () => {
     expect(errorsOnly.status).toBe(200);
 
     expect(rootFilters).toEqual(['and(eq(is_root, true), eq(status, "error"))']);
-    // The model filter cannot push into the root query (model lives on the
-    // child run name); rows are filtered after the join, so the single
-    // matching root survives it.
+    // The model filter cannot push into the root query (the model lives on the child run name); rows are filtered after the join.
     expect(errorsOnly.body.traces).toHaveLength(1);
     expect(errorsOnly.body.traces[0].model).toBe('openai/gpt-oss-20b');
 
@@ -351,8 +343,7 @@ describe('admin langsmith (#186)', () => {
       if (String(url).includes('/api/v1/sessions')) {
         return Promise.resolve(jsonResponse(200, [{ id: 'proj-1', name: 'tova-dev' }]));
       }
-      // The API rejects any per-query limit over 100 (live-verified 400) —
-      // the service must page, never ask for the whole tree at once.
+      // The API rejects any per-query limit over 100 — the service must page, never ask for the whole tree at once.
       const body = JSON.parse(init?.body ?? '{}');
       expect(body.limit).toBeLessThanOrEqual(100);
       runsBodies.push(body);
@@ -503,14 +494,14 @@ describe('admin langsmith (#186)', () => {
     const res = await request(app).get('/api/admin/langsmith/stats?days=7').set('Cookie', cookie);
     expect(res.status).toBe(200);
 
-    // One sweep, windowed by start_time over llm runs only — no children
-    // join, no root paging (the request-count lesson from the live smoke).
+    // One sweep, windowed by start_time over llm runs only — no children join, no root paging (the request-count lesson from the live smoke).
     expect(sweepQueries).toHaveLength(1);
     expect(sweepQueries[0]).toMatchObject({ limit: 100, offset: 0 });
     const filter = (sweepQueries[0] as { filter: string }).filter;
     expect(filter).toContain('eq(run_type, "llm")');
     expect(filter).toContain('gte(start_time,');
-    // #224: the sweep must ask for the input/output split that prices a model.
+    // The sweep must ask for the input/output split that prices a model.
+    // @see #224
     expect((sweepQueries[0] as { select: string[] }).select).toEqual(
       expect.arrayContaining(['prompt_tokens', 'completion_tokens']),
     );
@@ -564,8 +555,7 @@ describe('admin langsmith (#186)', () => {
       return Promise.resolve(
         jsonResponse(200, {
           runs: [
-            // Winner on deepinfra: TTFT 1000ms - 100ms start = ... well, a
-            // start/first_token gap of 700ms, duration 2000ms.
+            // Winner on deepinfra: a start/first_token gap of 700ms, duration 2000ms.
             {
               name: "llm: 'deepseek-ai/DeepSeek-V4.1-Flash'",
               run_type: 'llm',
@@ -578,8 +568,8 @@ describe('admin langsmith (#186)', () => {
               completion_tokens: 30,
               extra: { metadata: { ls_provider: 'deepinfra' } },
             },
-            // The aborted loser on fireworks: an errored run cancelled mid-race.
-            // It must not appear at all (not a call, not an error).
+            // The aborted loser on fireworks: an errored run cancelled mid-race; it must not appear at all.
+            // @see #237
             {
               name: "llm: 'deepseek-ai/DeepSeek-V4.1-Flash'",
               run_type: 'llm',
@@ -597,10 +587,8 @@ describe('admin langsmith (#186)', () => {
 
     const res = await request(app).get('/api/admin/langsmith/stats?days=7').set('Cookie', cookie);
     expect(res.status).toBe(200);
-    // One row: the fireworks loser is dropped, so only the deepinfra winner
-    // remains. The cost is now priced from the ROW'S provider (#237), not the
-    // model-only fallback: DeepSeek's deepinfra entry is 0.2/0.6 =>
-    // 70/1e6*0.2 + 30/1e6*0.6 = 0.000032 (the fireworks entry is 0.3/1.2).
+    // One row: the fireworks loser is dropped, so only the deepinfra winner remains; cost is priced from the ROW'S provider, not the model-only fallback.
+    // @see #237
     expect(res.body.models).toEqual([
       {
         model: 'deepseek-ai/DeepSeek-V4.1-Flash',
@@ -658,8 +646,7 @@ describe('admin langsmith (#186)', () => {
       return Promise.resolve(
         jsonResponse(200, {
           runs: [
-            // A newer/older run shape with no split at all: total must still
-            // count, the split contributes 0 (never NaN/undefined).
+            // A run shape with no split at all: the total must still count and the split contributes 0 (never NaN/undefined).
             {
               name: "llm: 'openai/gpt-oss-20b'",
               run_type: 'llm',

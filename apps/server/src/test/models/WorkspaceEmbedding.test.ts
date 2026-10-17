@@ -1,11 +1,8 @@
 import mongoose from 'mongoose';
 import { WorkspaceEmbedding } from '../../main/models/WorkspaceEmbedding';
 
-/*
- * #294: the vector store. The collection name is explicit (a Mongoose default
- * would be `workspaceembeddings`), the unique key is what makes the backfill
- * idempotent, and `model` lets multi-model rows coexist.
- */
+/* The vector store: explicit collection name, the unique key that makes the backfill idempotent, and `model` for multi-model coexistence. */
+// @see #294
 
 const base = (overrides: Record<string, unknown> = {}) => ({
   userId: new mongoose.Types.ObjectId(),

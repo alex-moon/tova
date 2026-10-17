@@ -3,11 +3,8 @@ import { spacesWorkspaceStorage } from './workspaceStorage';
 import { ALLOWED_CONTENT_TYPES, MAX_ASSET_SIZE, sanitizeFilename } from './assetLimits';
 import { safeAsset } from './assetViews';
 
-// Core of POST /presign (and, per #68, of the bulk presign per-item loop):
-// policy checks (type allowlist, size cap), then mint a pending Asset row and
-// presign its direct-to-Spaces PUT URL. Returns a typed rejection instead of
-// throwing so bulk can map one bad file to a per-item row without blocking
-// its siblings; the single route maps the same shape to a status code.
+/* Core of POST /presign and the bulk per-item loop: policy checks, then mint a pending Asset row and presign its direct PUT; typed rejection so bulk maps per-item outcomes. */
+// @see #68
 type PresignItem = { filename: string; contentType: string; size: number };
 type PresignResult =
   | { status: 'ok'; uploadUrl: string; asset: ReturnType<typeof safeAsset> }
@@ -32,13 +29,11 @@ const presignItemForUser = async (
     contentType,
     size,
     status: 'pending',
-    // #252: every upload is `kind: 'upload'`. Chat-composer uploads are
-    // deliberately the same: presign runs before the session may exist (#144),
-    // so there is no truthful session id to record — inventing one would break
-    // the absence policy (absent = unknown, never faked).
+    // Every upload is `kind: 'upload'`: presign runs before a session may exist, so there is no truthful session id to record (absent = unknown, never faked).
+    // @see #252 #144
     provenance: { kind: 'upload' },
-    // ZDR chat attachments (#116): an ephemeral row is deleted together with
-    // its Spaces object once the turn that consumes it completes.
+    // An ephemeral row is deleted with its Spaces object once the consuming turn completes.
+    // @see #116
     ...(opts.ephemeral ? { ephemeral: true } : {}),
   });
 

@@ -36,9 +36,7 @@ const Inner: React.FC<{ target: 'chat' | 'file'; deleteFn: (id: string) => void 
   deleteFn,
 }) => {
   const { armedId, arm, onYes, onAlways, onNo } = useConfirmDelete(target, deleteFn);
-  // Container mirrors the real armed card's data-testid so the hook's
-  // pointerdown `closest('[data-testid^="confirm-delete-"]')` guard is
-  // exercised through the same path the components use.
+  // The container mirrors the real armed card's data-testid so the hook's pointerdown guard is exercised.
   return (
     <div data-testid={armedId ? `confirm-delete-${target}-${armedId}` : 'unarmed'}>
       <div data-testid="armed">{armedId ?? 'none'}</div>

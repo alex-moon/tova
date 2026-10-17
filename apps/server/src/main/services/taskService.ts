@@ -2,25 +2,12 @@ import { Task, type TaskDocument } from '../models/Task';
 import { TaskEvent } from '../models/TaskEvent';
 import { appendTaskEvent } from './taskProcessor';
 
-// Task sequencer runtime (#254, epic #251), generalised from `assetJobService`:
-// enqueue, an atomic oldest-first claim (`queued -> running` + attempts bump),
-// a single-consumer poll tick with retry-to-cap, and a stale-`running`
-// requeue-on-boot sweep. In-process is accepted for v1 — "offline" means no
-// user connection required, not a separate process.
-//
-// OQ2 resolution: the claim/retry/sweep pattern is *mirrored* here rather than
-// extracted into a shared helper. `assetJobService` is a non-slice subsystem
-// with asset-specific terminal-failure side effects (flipping `markdownStatus`/
-// `thumbnailStatus`); a generic `claimNext(collection)` would either leak that
-// coupling or need a callback indirection that complicates the asset path for
-// no benefit at two call sites. The task service owns its own status vocabulary
-// and failure semantics.
+/* Task sequencer runtime, generalised from assetJobService: enqueue, atomic oldest-first claim, single-consumer poll tick with retry-to-cap, and a stale-`running` requeue-on-boot sweep. The claim/retry pattern is mirrored, not extracted — the asset path owns asset-specific terminal side effects. */
+// @see #254 #251
 
 export const MAX_TASK_ATTEMPTS = 3;
 
-// Terminal statuses are never reopened: cancel leaves them alone (D14) and a
-// steering instruction is refused against them. One shared predicate so the
-// steer/cancel guards cannot drift from the model enum.
+// Terminal statuses are never reopened; one shared predicate so the steer/cancel guards cannot drift from the model enum.
 const TERMINAL_TASK_STATUSES = ['done', 'failed', 'cancelled'] as const;
 const isTerminalTaskStatus = (status: string): boolean =>
   (TERMINAL_TASK_STATUSES as readonly string[]).includes(status);
@@ -29,8 +16,7 @@ const POLL_INTERVAL_MS = 5000;
 
 const MAX_STORED_ERROR_CHARS = 500;
 
-// The work a claim runs: the sequencer loop for one task. Injectable so tests
-// (and the later sequencer slice) supply the real driver.
+// The work a claim runs: the sequencer loop for one task; injectable so tests supply the driver.
 export type TaskProcessor = (task: TaskDocument) => Promise<void>;
 
 const clampError = (err: unknown): string => {
@@ -38,12 +24,7 @@ const clampError = (err: unknown): string => {
   return message.slice(0, MAX_STORED_ERROR_CHARS);
 };
 
-// Create a queued task. `budget` is snapshotted at creation (D6) so a mid-task
-// env change cannot move the goalposts; the caller supplies the config values.
-// The initial instruction is *also* written as the task stream's first `user`
-// event (D1: the stream is the source of truth; `instruction` is the listing
-// seed). A direct-origin task with no instruction starts with an empty stream
-// and marks step 0 as a `system` row only when the loop runs.
+// Create a queued task; the budget is snapshotted at creation so a mid-task env change cannot move the goalposts; the instruction is also the stream's first `user` event (the stream is the source of truth).
 export const enqueueTask = async (input: {
   userId: string;
   instruction?: string;
@@ -70,9 +51,7 @@ export const enqueueTask = async (input: {
   return task;
 };
 
-// Atomic claim: status + attempts bump in one findOneAndUpdate, oldest-queued
-// first. Single consumer in-process; multiple server processes would still not
-// double-claim the same row.
+// Atomic claim: status + attempts bump in one findOneAndUpdate, oldest-queued first; multiple processes cannot double-claim.
 export const claimNextTask = async (): Promise<TaskDocument | null> =>
   Task.findOneAndUpdate(
     { status: 'queued' },
@@ -80,25 +59,18 @@ export const claimNextTask = async (): Promise<TaskDocument | null> =>
     { sort: { createdAt: 1 }, new: true },
   );
 
-// One poll tick: claim a task, run the processor, and settle the outcome. A
-// processor failure retries until MAX_TASK_ATTEMPTS, then terminal-fails the
-// task with the stored error (mirrors `runAssetJobTick`).
+// One poll tick: claim, run, settle; a failure retries to cap, then terminal-fails with the stored error. Only a task the processor left `running` is settled either way, so a paused/done/failed outcome is never clobbered.
 export const runTaskTick = async (processor: TaskProcessor): Promise<void> => {
   const task = await claimNextTask();
   if (!task) return;
   try {
     await processor(task);
-    // The processor may have moved the task to paused/done/failed itself; only
-    // settle it to `done` if it is still running.
+    // The processor may have moved the task to paused/done/failed itself; only settle a still-`running` task to `done`.
     await Task.updateOne({ _id: task._id, status: 'running' }, { $set: { status: 'done' } });
   } catch (err) {
     const message = clampError(err);
     const exhausted = task.attempts >= MAX_TASK_ATTEMPTS;
-    // Symmetric with the success path: only settle a task the processor left
-    // `running`. A processor that moved it to paused/done/failed (and recorded
-    // its own reason) before throwing must not be clobbered — that is the same
-    // guard the `done` branch applies, and the paused-breaking case (D6) is
-    // exactly when it matters.
+    // Symmetric with the success path: only settle a task the processor left `running` — one that already recorded its own outcome must not be clobbered.
     await Task.updateOne(
       { _id: task._id, status: 'running' },
       {
@@ -115,11 +87,7 @@ let timer: ReturnType<typeof setInterval> | null = null;
 
 let busy = false;
 
-// A server crash mid-run leaves a `running` task stranded. At poller start such
-// tasks older than STALE_PROCESSING_MS are requeued as `queued` so a restart
-// self-heals; updatedAt is the staleness clock. Attempts are not incremented —
-// the sweep does not count against the retry cap (the processor never observed
-// the loss), mirroring `requeueStaleAssetJobs`.
+// A server crash mid-run strands a `running` task; the start sweep requeues stale ones (attempts not incremented — the processor never observed the loss).
 export const STALE_RUNNING_MS = 5 * 60 * 1000;
 
 export const requeueStaleTasks = async (maxAgeMs: number = STALE_RUNNING_MS): Promise<number> => {
@@ -137,8 +105,7 @@ export const startTaskPoller = (
   if (timer) return timer;
   void requeueStaleTasks().catch(() => undefined);
   timer = setInterval(() => {
-    // One task per tick; skip ticks while the previous run is in flight so a
-    // long sequencer run does not stack up.
+    // One task per tick; skip while the previous run is in flight so a long sequencer run does not stack up.
     if (busy) return;
     busy = true;
     void runTaskTick(processor).finally(() => {
@@ -158,32 +125,18 @@ export const stopTaskPoller = (): void => {
 
 export const isTaskPollerRunning = (): boolean => timer !== null;
 
-/*
- * Read/steer/cancel surface for the API (#254 routes slice, D14/D15).
- *
- * The API is a *second writer* on the task stream (steering `user` events,
- * D12) but only a reader of everything else. Steering appends through
- * `appendTaskEvent`, which retries the `{taskId, seq}` collision the second
- * writer can cause. Cancel is a header write, not a stream write; the
- * processor observes it at the next step boundary (D13).
- */
+/* Read/steer/cancel surface for the API: a second writer for steering `user` events (via the collision-retrying appendTaskEvent), a header-writer for cancel observed at the next step boundary. */
+// @see #254
 
-// The outcome of appending a steering turn: accepted (`queued`, whether it was
-// already active or resumed from `paused`), or refused because the stream is
-// terminal. Not-found is the route's concern (an ownerless id never reaches
-// here).
+// The outcome of appending a steering turn: accepted (queued, active or resumed), or refused because the stream is terminal.
 export type SteeringResult = { status: 'queued' } | { status: 'refused' };
 
-// Append a steering `user` event to an owned task and, from `paused`, re-queue
-// it. Ownership is the caller's job (the route scopes the lookup by userId);
-// this helper takes the already-owned document.
+// Append a steering `user` event to an owned task and, from `paused`, re-queue it; ownership is the caller's job.
 export const steerTask = async (
   task: TaskDocument,
   instruction: string,
 ): Promise<SteeringResult> => {
-  // Re-read the live status: the caller's document was read by the route and
-  // the poller may have settled or cancelled the task in between. A terminal
-  // task is refused against the *current* status, not the caller's snapshot.
+  // Re-read the live status: the poller may have settled or cancelled the task since the route's read; a terminal task is refused against the current status.
   const current = await Task.findById(task._id);
   if (!current || isTerminalTaskStatus(current.status)) {
     return { status: 'refused' };
@@ -195,26 +148,16 @@ export const steerTask = async (
     step: current.stepCount,
   });
 
-  // From `paused` the instruction is the resume: move the header back to the
-  // queue so the poller re-claims it. The update is *guarded* on `paused` so a
-  // concurrent settle (a cancel or a completion landing between the read above
-  // and here) is never resurrected — an unconditional `{_id}` write could flip
-  // a just-`cancelled` task back to `queued` (the cancel-clobber race). From
-  // `queued`/`running` the status is already live; the event alone steers.
+  // From `paused` the instruction is the resume; the update is guarded on `paused` so a concurrent settle is never resurrected (the cancel-clobber race).
   if (current.status === 'paused') {
     await Task.updateOne({ _id: current._id, status: 'paused' }, { $set: { status: 'queued' } });
   }
   return { status: 'queued' };
 };
 
-// Cancel an owned task. Terminal states are left as-is (idempotent); a
-// `running` task's processor observes the status change at its next step
-// boundary (D13) and returns without settling it back to `done`.
+// Cancel an owned task; terminal states left as-is (idempotent); a `running` processor observes the change at its next step boundary.
 export const cancelTask = async (task: TaskDocument): Promise<void> => {
-  // The write is *guarded* on non-terminal status: a `running` task may settle
-  // itself to `done` between the route's read and here, and an unconditional
-  // `{_id}` write would clobber that completion to `cancelled`. The `$nin`
-  // makes the transition idempotent and race-safe without a pre-read.
+  // The write is guarded on non-terminal status: a task may settle itself to `done` between the route's read and here, and an unconditional write would clobber that completion; the `$nin` makes it idempotent and race-safe.
   await Task.updateOne(
     { _id: task._id, status: { $nin: ['done', 'failed', 'cancelled'] } },
     { $set: { status: 'cancelled' } },

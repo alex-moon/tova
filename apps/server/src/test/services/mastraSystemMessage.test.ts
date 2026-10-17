@@ -2,25 +2,8 @@ import { groqConnector, deepinfraConnector } from '../../main/services/mastraSer
 import { runModelComparison } from '../../main/services/modelCompare';
 import type { CompletionOptions } from '../../main/services/llmTypes';
 
-/*
- * #198: Qwen3.5 on DeepInfra (and other strict OpenAI-compatible servers)
- * reject any `role: 'system'` message that is not at index 0, including a
- * second one sitting at index 1. Tova was sending two leading system messages
- * on the full-tools path: Mastra injected the agent's `TOOL_INSTRUCTIONS` at
- * index 0, and the caller's `buildSystemContent(...)` rode in at index 1, so a
- * Qwen3.5-routed turn 400'd with "System message must be at the beginning.".
- *
- * The fix (mastraService.ts) collapses the caller's leading system message(s)
- * into a per-call `instructions` override, merged with the agent's tool
- * instructions, and passes the remaining messages with no system message. The
- * effective provider payload therefore has exactly one leading system message.
- *
- * These tests pin the **connector-level** contract (not the route-level
- * array, which legitimately still starts with a system message — see
- * chat.test.ts / chat.stream.test.ts). The agent module is mocked the way the
- * other suites do, recording the exact `instructions` override and `messages`
- * the connector hands to Mastra.
- */
+/* Strict OpenAI-compatible servers reject a system message not at index 0, so the connector collapses the caller's leading system message(s) into a per-call instructions override; these tests pin the connector-level contract with the agent module mocked. */
+// @see #198
 
 const mockGenerate = jest.fn();
 const mockStream = jest.fn();
@@ -123,12 +106,8 @@ describe('mastraService single leading system message (#198)', () => {
     expect(mockGenerate).not.toHaveBeenCalled();
   });
 
-  /*
-   * T3 (#198): the admin Compare tab / CLI eval (`runModelComparison`) passes
-   * an explicit system message to `createCompletion`. It needs no separate
-   * change — the shared connector path collapses it — so this pins that the
-   * compare caller also lands on exactly one leading system message.
-   */
+  /* The compare/eval caller passes an explicit system message and needs no separate change — the shared connector path collapses it. */
+  // @see #198
   it('collapses the model-compare path through the shared connector', async () => {
     await runModelComparison('compare this', [
       { provider: 'deepinfra', model: 'Qwen/Qwen3.5-397B-A17B' },
@@ -139,12 +118,8 @@ describe('mastraService single leading system message (#198)', () => {
     expect(messages).toEqual([{ role: 'user', content: 'compare this' }]);
   });
 
-  /*
-   * T4 (#198): `rest` (the messages left after pulling the leading system
-   * out) must still flow through `mastraMessagesFor`'s image mapping
-   * unchanged, and a leading system message carried as content *parts* (not a
-   * bare string) must collapse just the same.
-   */
+  /* `rest` must still flow through the image mapping unchanged, and a leading system message carried as content parts must collapse just the same. */
+  // @see #198
   it('collapses part-array system content and preserves image mapping in rest', async () => {
     await deepinfraConnector.createCompletion(
       fullToolsOptions([
@@ -168,7 +143,8 @@ describe('mastraService single leading system message (#198)', () => {
     expect(messages.filter((m) => m.role === 'system')).toHaveLength(0);
     expect(instructions as string).toContain('System part one.');
     expect(instructions as string).toContain('System part two.');
-    // The image part still maps to AI-SDK `image` (issue #115).
+    // The image part still maps to AI-SDK `image`.
+    // @see #115
     const user = messages.find((m) => m.role === 'user') as { content: unknown[] };
     expect(user.content).toEqual([
       { type: 'text', text: 'what is in this image?' },

@@ -2,18 +2,8 @@ import { config } from '../config';
 import { assertSafeUrl } from './safeLinkService';
 import { assertPublicHost, type FetchedPage } from './webFetchService';
 
-// #340: Firecrawl fallback for the `fetch_url` tool. A plain fetch (issue
-// #113) cannot run JavaScript or present a full browser fingerprint, so
-// JS-rendered pages and WAF/anti-bot challenges (Cloudflare, HTTP 419) reject
-// it. Firecrawl's hosted scraper handles both and returns clean markdown.
-// Key-gated like web_search: with no key the tool stays native-only.
-//
-// Trust boundary: Firecrawl fetches server-side and resolves DNS itself, so
-// Tova's SSRF guard cannot bind it the way it binds the native fetch. We still
-// run the same scheme check, `assertPublicHost` (DNS/private-IP refusal) and
-// `assertSafeUrl` (Safe Browsing) before handing the URL over — that screens
-// the obvious cases but is weaker than the native guard (documented, not
-// silently accepted).
+/* Firecrawl fallback for `fetch_url`: handles JS-rendered/anti-bot pages the plain fetch rejects; key-gated; the SSRF guard is weaker than the native one (documented) since Firecrawl resolves DNS itself. */
+// @see #340 #113
 
 const FIRECRAWL_ENDPOINT = 'https://api.firecrawl.dev/v2/scrape';
 const FIRECRAWL_TIMEOUT_MS = 30_000;
@@ -26,9 +16,8 @@ interface FirecrawlResponse {
   };
 }
 
-// Scrape a URL to full markdown. Throws on bad scheme, SSRF/safe-link refusal,
-// provider/network error, non-2xx, or empty markdown, so the tool wrapper owns
-// graceful degradation (#82). Returns null when no key is configured.
+// Scrape a URL to full markdown; throws so the tool wrapper owns graceful degradation; null when no key is configured.
+// @see #82
 export const firecrawlScrape = async (url: string): Promise<FetchedPage | null> => {
   const apiKey = config.firecrawl.apiKey;
   if (!apiKey) return null;

@@ -44,12 +44,8 @@ export const requireRole =
     next();
   };
 
-// PAT bearer auth for admin routes (#184). An Authorization header opts in
-// to token auth and must carry a valid, unexpired, unrevoked PAT; without
-// one the cookie session flow applies unchanged. The creator's role is
-// loaded live on every request (never baked into the token), so demoting a
-// user demotes their PATs immediately. Every failure mode answers with the
-// same 401 message — no oracle for whether a hash exists.
+// PAT bearer auth: an Authorization header opts into token auth, else cookie session; role loaded live.
+// @see #184
 export const authenticateBearerOrSession = async (
   req: AuthRequest,
   res: Response,
@@ -71,8 +67,7 @@ export const authenticateBearerOrSession = async (
     if (!creator) return reject();
 
     req.user = { id: creator._id.toString(), email: creator.email, role: creator.role };
-    // Usage stamp for the Access tab: diagnostics only, never worth
-    // failing or slowing a request over.
+    // Usage stamp for the Access tab: diagnostics only, never worth failing a request over.
     pat.updateOne({ lastUsedAt: new Date() }).catch(() => {});
     next();
   } catch (_err) {

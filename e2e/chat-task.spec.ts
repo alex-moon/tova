@@ -1,12 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 
-/*
- * Chat-task integration (issue #255, epic #251). The chat surface gains two
- * things: an embedded card for the tasks a chat started, and a "send to worker"
- * composer control. Both APIs are mocked at the page level, so this exercises
- * the client contract without a running sequencer or seeded tasks. Runs in both
- * the mobile (375x667) and desktop projects (per the standing client rules).
- */
+// Chat task card and send-to-worker, page-mocked (no sequencer or seeded tasks).
+// @see #255 #251
 
 const email = process.env.E2E_EMAIL ?? 'formsatz@gmail.com';
 const sessionId = 'e2e-session-1';

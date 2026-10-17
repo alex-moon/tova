@@ -77,9 +77,8 @@ describe('Sidebar footer avatar (issue #35)', () => {
     expect(screen.queryByTestId('profile-modal')).not.toBeInTheDocument();
   });
 
-  // Issue #197: the old in-app Files overlay is gone — the sidebar links to
-  // the standalone /files view instead (it must not be /assets, which nginx
-  // serves ahead of the SPA fallback).
+  // Links to the standalone /files view; /assets would be shadowed by nginx ahead of the SPA fallback.
+  // @see #197
   it('links the files view at /files and renders no files modal (issue #197)', () => {
     renderSidebar(user);
     const link = screen.getByRole('link', { name: 'Files' });
@@ -107,8 +106,7 @@ describe('Sidebar — inline chat delete confirm (issue #59)', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Delete chat: Chores' }));
     expect(screen.getByText('Sure? Irreversible.')).toBeInTheDocument();
     expect(onDeleteSession).not.toHaveBeenCalled();
-    // Focus moves to Yes so keyboard/screen-reader users stay oriented when
-    // the row swaps to the armed card (focus would otherwise drop to <body>).
+    // Focus moves to Yes so keyboard/screen-reader users stay oriented.
     expect(screen.getByTestId('confirm-yes')).toHaveFocus();
     fireEvent.click(screen.getByTestId('confirm-yes'));
     expect(onDeleteSession).toHaveBeenCalledWith('s1');

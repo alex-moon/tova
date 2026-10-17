@@ -1,15 +1,5 @@
-// Mongo connection string assembly, shared by the server, migrations, and the
-// host-side scripts (#257 follow-up): the migration runner used to reach into
-// the server tree for this, which forced its image to carry the whole server
-// runtime just to build a URI.
-//
-// Two connection paths (issue #138): MONGODB_URL takes precedence when set and
-// is returned verbatim — never re-parsed or reassembled — so a spec-accurate
-// Atlas `mongodb+srv://...` URL (or any full URL, credential and options
-// included) passes through untouched; the dbName argument does not apply to
-// it, since the URL carries its own database. When MONGODB_URL is unset,
-// the dev fallback assembles a URI from MONGODB_HOST/MONGODB_PASSWORD for the
-// plain-Mongo docker compose stack (authSource=admin against the local image).
+// Mongo connection string assembly shared by server, migrations, and scripts: MONGODB_URL passes through verbatim; the dev fallback assembles from host/password.
+// @see #257 #138
 export const buildMongoUri = (
   dbName?: string,
   host = process.env.MONGODB_HOST ?? 'localhost',

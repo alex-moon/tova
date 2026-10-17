@@ -1,22 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 
-/*
- * Responsive overflow smoke (issue #220). Loads each top-level route at phone
- * width and asserts the document itself does not overflow horizontally. This is
- * the mechanical backstop for the AGENTS.md "mobile-first" policy: a route that
- * runs content off the right edge with no affordance regresses this spec.
- *
- * Auth and the admin payloads are page-mocked (same isolation pattern as
- * assets.spec.ts) so the smoke never touches seeded state and stays outside the
- * db:password failure set. The user is given the admin role and the Users/Models
- * fixtures are supplied so /admin renders its real tables rather than an empty
- * 401 state.
- *
- * It runs in both the `mobile` (375x667) and `desktop` projects; the document
- * and clipped-content assertions are meaningful at every width. The admin
- * table-integrity assertion is phone-only, because the `.responsive-table` card
- * layout it protects only applies below `md`.
- */
+// Overflow smoke: every top-level route, page-mocked, must not overflow horizontally at any width.
+// @see #220
 
 const email = process.env.E2E_EMAIL ?? 'formsatz@gmail.com';
 
@@ -39,15 +24,8 @@ const mockAuth = async (page: Page) => {
   );
 };
 
-/*
- * #220: the /admin smoke is only meaningful if the admin tables actually
- * render. Auth alone leaves every admin endpoint at 401, so the scroller shows
- * an empty error state and the "no overflow" assertion is vacuous on the route
- * the ticket was filed about. These fixtures seed the Users and Models sections
- * (loaded on mount) with wide, realistic rows so the table integrity check
- * below has something to test. The values are deliberately long (a full email,
- * a provider-qualified model id) to stress the card wrap.
- */
+// Seeds admin Users/Models fixtures so the /admin checks hit real rows, not a 401 empty state.
+// @see #220
 const mockAdminData = async (page: Page) => {
   const now = new Date().toISOString();
   const users = Array.from({ length: 4 }, (_, i) => ({
@@ -104,18 +82,8 @@ const mockAdminData = async (page: Page) => {
   );
 };
 
-/*
- * The document-level check cannot see the headline #220 defect: a dense admin
- * table sits in an `overflow-x-auto` wrapper, so a fixed-width table scrolls
- * *inside* the wrapper and the document never overflows (375 == 375) even
- * though every trailing column is off-screen. This check targets that wrapper
- * directly: on a phone surface the table must fit its container, which is what
- * the `.responsive-table` card layout guarantees below `md`. Reverting the
- * cards (removing the class) makes the wrapper scroll and this fails.
- *
- * Only meaningful at phone width; at `md`+ the normal table layout is expected
- * to use the available width, so callers gate it on the viewport.
- */
+// Catches tables scrolling inside an overflow-x-auto wrapper, which the document check misses.
+// @see #220
 const adminTableOverflows = (page: Page) =>
   page.evaluate(() =>
     Array.from(
@@ -133,23 +101,7 @@ const adminTableOverflows = (page: Page) =>
 const documentOverflows = (page: Page) =>
   page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth);
 
-/*
- * A "clipped" element is one whose content extends past the viewport's right
- * edge and is not reachable by scrolling. This is the "unaffordable overflow"
- * the ticket describes: unlike the document-level assertion above, it is not
- * masked by an inner `overflow-x-auto` wrapper, so it catches the case where
- * content is cut off with no way to scroll to it.
- *
- * Reachability is decided by the *nearest* ancestor that establishes a
- * horizontal clipping/scroll context (computed `overflow-x` in
- * auto/scroll/hidden/clip). Only that boundary governs whether the overflow is
- * reachable: if it is `auto`/`scroll` the content can be scrolled into view; if
- * it is `hidden`/`clip` the content is cut off and a scrollable ancestor
- * *above* the clip cannot recover it. Ancestors are walked until the first such
- * boundary, so an `overflow:hidden` child inside a scrollable parent is
- * correctly reported as unreachable (the earlier "any scrollable ancestor
- * anywhere above" rule missed exactly that case).
- */
+// Elements past the right edge whose nearest clipping ancestor hides rather than scrolls them.
 const clippedElements = (page: Page) =>
   page.evaluate(() => {
     const viewport = document.documentElement.clientWidth;
@@ -164,8 +116,6 @@ const clippedElements = (page: Page) =>
       const rect = el.getBoundingClientRect();
       if (rect.width === 0 || rect.height === 0) continue;
       if (rect.right <= viewport + 1) continue;
-      // The nearest clipping/scroll boundary decides reachability. Walking from
-      // the element outward, the first boundary found is the one that clips it.
       let reachable = false;
       for (let p = el.parentElement; p; p = p.parentElement) {
         const ctx = clippingContext(p);
@@ -184,14 +134,8 @@ const clippedElements = (page: Page) =>
     return offenders;
   });
 
-/*
- * The /tasks route (#254) renders an empty list state when the API is
- * unmocked (401), which makes the "no overflow" assertion vacuous. Seed one
- * task with a realistically long instruction so the list row and its wrapping
- * are actually exercised at phone width — and stub the detail endpoint so the
- * test can open the *detail* pane (the actual new surface: the read-only
- * stream, tool chips, budget line and the flex composer), not just the list.
- */
+// Seeds a task and stubs its detail so the list and detail pane are exercised, not a 401 state.
+// @see #254
 const mockTasks = async (page: Page) => {
   const task = {
     id: 'e2e-task-1',
@@ -235,8 +179,8 @@ const mockTasks = async (page: Page) => {
   });
 };
 
-// #331: the connectors grid renders its catalog statically; only the
-// connected-rows fetch needs mocking.
+// The connectors catalog is static; only the connected-rows fetch needs mocking.
+// @see #331
 const mockConnectors = async (page: Page) => {
   await page.route('**/api/connectors', (route) =>
     route.fulfill({
@@ -268,10 +212,8 @@ for (const { path, ready } of routes) {
     expect(await documentOverflows(page)).toBe(false);
     expect(await clippedElements(page)).toEqual([]);
 
-    // #254: open the task detail so the *detail* pane (stream rows, tool
-    // chips, budget line, flex composer) is the surface checked for overflow,
-    // not just the list. Its flex/grid layout is where a phone-width regression
-    // would land, so checking only the list would be vacuous.
+    // Check the task detail pane too, not just the list; that is where phone-width regressions land.
+    // @see #254
     if (path === '/tasks') {
       await page.locator('[data-testid="task-row-e2e-task-1"]').click();
       await expect(page.locator('[data-testid="task-tool-summary-toggle"]')).toBeVisible();
@@ -279,9 +221,8 @@ for (const { path, ready } of routes) {
       expect(await clippedElements(page)).toEqual([]);
     }
 
-    // #220 headline: on a phone the admin tables must fit, not scroll inside
-    // their wrapper. Prove the table actually rendered first, so the check
-    // cannot pass on an empty/401 admin page.
+    // On a phone the admin tables must fit, not scroll in their wrapper; assert rows rendered first.
+    // @see #220
     if (path === '/admin' && (page.viewportSize()?.width ?? 1280) < 768) {
       await expect(
         page.locator('[data-testid="admin-users-section"] table tbody tr').first(),

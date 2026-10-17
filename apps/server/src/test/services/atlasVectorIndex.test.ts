@@ -6,12 +6,8 @@ import {
   type SearchIndexManager,
 } from '../../main/services/atlasVectorIndex';
 
-/*
- * #294: the Atlas index definition + URL guard + existence-check. The driver's
- * `$vectorSearch`/`createSearchIndex` calls are Atlas-only, so the ANN query
- * itself is exercised live, not here.
- */
-
+/* The Atlas index definition + URL guard + existence check; the ANN query itself is Atlas-only and exercised live, not here. */
+// @see #294
 describe('vectorIndexDefinition (#294)', () => {
   it('declares a cosine vector field at the configured dimension plus model/userId filters', () => {
     expect(vectorIndexDefinition(768)).toEqual({

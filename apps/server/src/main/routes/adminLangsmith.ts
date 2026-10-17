@@ -13,17 +13,14 @@ import { sessionCostBreakdown } from '../services/sessionCostService';
 
 const router = express.Router();
 
-// Same guard as the other admin surfaces: cookie sessions for the browser
-// flow, PAT bearer for the agent/CLI path (#184).
+// Cookie sessions for the browser flow, PAT bearer for the agent/CLI path.
+// @see #184
 const adminGuard = [authenticateBearerOrSession, requireRole('admin')];
 
-// LangSmith trace ids are uuid-shaped; the regex keeps filter injection out
-// of the query string (the id is interpolated into a filter expression).
+// Trace ids are uuid-shaped; the regex keeps filter injection out of the query string.
 const TRACE_ID_PATTERN = /^[A-Za-z0-9-]+$/;
 
-// Unconfigured tracing and upstream failures read differently in the tab:
-// 503 = this deployment never exports traces, 502 = LangSmith itself
-// refused/failed. Everything else is a bad request.
+// 503 = tracing unconfigured, 502 = LangSmith upstream refused/failed.
 router.get('/langsmith/traces', ...adminGuard, async (req, res) => {
   const errorsOnly = req.query.errorsOnly === 'true';
   const model =
@@ -64,10 +61,8 @@ router.get('/langsmith/stats', ...adminGuard, async (req, res) => {
   const rawDays = Number(req.query.days);
   const days = Number.isInteger(rawDays) ? Math.min(30, Math.max(1, rawDays)) : 7;
 
-  // #224: only the poller's default window is cached; any other window is a
-  // live sweep (the summary is the expensive part, so keep the cached path the
-  // common one). The route can therefore serve the cache with no LangSmith
-  // round trip on a warm window.
+  // Only the poller's default window is cached; other windows are a live sweep.
+  // @see #224
   if (days === TRACE_STATS_WINDOW_DAYS) {
     try {
       const cached = await TraceStatsCache.findOne({ windowKey: windowKeyFor(days) }).lean<{
@@ -119,9 +114,8 @@ router.get('/langsmith/stats', ...adminGuard, async (req, res) => {
   }
 });
 
-// #224: per-session cost breakdown from our own Message rows. Unlike /stats
-// this never touches LangSmith — the data is in Mongo — so it needs no cache
-// and no poller. `days` (clamped 1–30) bounds the message window.
+// Per-session cost breakdown from our own Message rows; no LangSmith, no cache needed.
+// @see #224
 router.get('/langsmith/sessions', ...adminGuard, async (req, res) => {
   const rawDays = Number(req.query.days);
   const days = Number.isInteger(rawDays) ? Math.min(30, Math.max(1, rawDays)) : 7;

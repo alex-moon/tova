@@ -1,11 +1,7 @@
 import mongoose from 'mongoose';
 
-// Task entity (#254, epic #251): a task is a first-class stream — a twin of a
-// chat, not a chat's child. This document is the task's *header* (status,
-// origin reference, step/budget accounting); the ordered work — every user,
-// assistant, and tool event — lives in the separate `TaskEvent` collection.
-// Hard invariant of the slice: no `taskId` ever reaches `Message`, and no task
-// message is ever written into `messages` (single writer per stream).
+// A task is a first-class stream, a twin of a chat: this doc is the header, events live in `TaskEvent`.
+// @see #254 #251
 const taskSchema = new mongoose.Schema(
   {
     userId: {
@@ -13,16 +9,13 @@ const taskSchema = new mongoose.Schema(
       ref: 'User',
       required: true,
     },
-    // queued -> running on claim; paused is a budget breach (D6), resumable by
-    // appending a steering instruction; done/failed/cancelled are terminal.
+    // queued -> running on claim; paused is a resumable budget breach; done/failed/cancelled terminal.
     status: {
       type: String,
       enum: ['queued', 'running', 'paused', 'done', 'failed', 'cancelled'],
       default: 'queued',
     },
-    // Thin origin reference (D1): a task started from a chat carries the
-    // session id, a direct-origin task (no chat) carries none. Never a Message
-    // FK. Absent means "direct/unknown", never faked.
+    // Thin origin reference: chat-origin tasks carry the session id; never a Message FK.
     origin: {
       required: false,
       type: new mongoose.Schema(
@@ -37,21 +30,17 @@ const taskSchema = new mongoose.Schema(
         { _id: false },
       ),
     },
-    // Seed text for listing/summary. The stream event is the source of truth
-    // for the instruction; this scalar is a convenience copy, not the record.
+    // Seed text for listing/summary; the stream event is the source of truth.
     instruction: {
       type: String,
       default: '',
     },
-    // Monotonic count of completed steps; the resume clock (D4). A crash-
-    // recovery requeue continues from here.
+    // Monotonic count of completed steps; the resume clock a crash-recovery requeue continues from.
     stepCount: {
       type: Number,
       default: 0,
     },
-    // D6: budget accounting. `maxSteps`/`maxCostUsd` are snapshotted from
-    // config at creation so a mid-task env change cannot move the goalposts;
-    // `spentUsd` is the running meter (persisted, updated as steps settle).
+    // Budgets snapshotted from config at creation so a mid-task env change cannot move the goalposts.
     budget: {
       type: new mongoose.Schema(
         {
@@ -63,8 +52,7 @@ const taskSchema = new mongoose.Schema(
       ),
       required: true,
     },
-    // Incremented on every claim; reaching MAX_TASK_ATTEMPTS terminal-fails the
-    // task (mirrors `AssetJob.attempts`). Distinct from the step cap (OQ7).
+    // Incremented on every claim; MAX_TASK_ATTEMPTS terminal-fails the task. Distinct from the step cap.
     attempts: {
       type: Number,
       default: 0,
@@ -73,14 +61,8 @@ const taskSchema = new mongoose.Schema(
       type: String,
       default: null,
     },
-    // #255 (F4): the chat route's drain marker for the completion notification.
-    // The task worker never writes the chat stream (single writer per stream);
-    // on completion it leaves this null. The chat route — the chat stream's only
-    // writer — surfaces a completed origin task on the next turn and sets this
-    // here, so a notification is delivered exactly once and never mid-turn.
-    // Null on every task with no origin session (direct-origin tasks are never
-    // notified). Not a `Message` link: the task->session join stays one-way and
-    // thin (`origin.sessionId`), and `Message` never gains a `taskId` (F1).
+    // The chat route's drain marker for the completion notification; delivered exactly once, never mid-turn.
+    // @see #255
     notifiedAt: {
       type: Date,
       default: null,
@@ -96,8 +78,8 @@ taskSchema.index({ status: 1, createdAt: 1 });
 
 export type TaskDocument = mongoose.HydratedDocument<mongoose.InferSchemaType<typeof taskSchema>>;
 
-// The origin vocabulary, re-exported so callers share exactly one shape.
-// Optional fields are omitted, never faked (same absence policy as #252).
+// Origin vocabulary, re-exported so callers share one shape; absent means unknown, never faked.
+// @see #252
 export interface TaskOrigin {
   kind: 'chat' | 'direct';
   sessionId?: string;

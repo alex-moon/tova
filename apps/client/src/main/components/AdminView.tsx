@@ -23,14 +23,12 @@ const KNOWN_PERMISSIONS = ['routing'];
 
 const LOG_LEVELS = ['all', 'info', 'warn', 'error'] as const;
 
-// #179: retained logs are a 24h window, not a live tail — refresh slowly.
+// Retained logs are a 24h window, not a live tail — refresh slowly.
+// @see #179
 const LOGS_REFRESH_MS = 30000;
 
-/*
- * #168 cool-off badge: approximate remaining hours, computed client-side —
- * expiry itself stays server-authoritative (lazy, on read). Returns null
- * when the model is not cooling off, so callers render nothing.
- */
+// Approximate client-side cool-off hours; null when not cooling off. Expiry stays server-authoritative.
+// @see #168
 const coolOffHoursLeft = (disabledUntil: string | null): number | null => {
   if (!disabledUntil) return null;
   const ms = new Date(disabledUntil).getTime() - Date.now();
@@ -38,11 +36,8 @@ const coolOffHoursLeft = (disabledUntil: string | null): number | null => {
   return Math.max(1, Math.ceil(ms / 3_600_000));
 };
 
-/*
- * #234: format a provider's rolling TTFT. `pickPrimary` scores on exactly
- * this figure (unknown → neutral default), so operators see what the router
- * sees rather than a client-side recomputation.
- */
+// The exact TTFT figure the router scores on, so operators see what the router sees.
+// @see #234
 const formatTtft = (ms: number | undefined, samples: number | undefined): string => {
   if (ms === undefined) return '—';
   const mean = `${Math.round(ms)} ms`;
@@ -52,34 +47,31 @@ const formatTtft = (ms: number | undefined, samples: number | undefined): string
 const AdminView = () => {
   const [users, setUsers] = useState<AdminUser[] | null>(null);
   const [models, setModels] = useState<AdminModel[] | null>(null);
-  // #168 diagnostics: per-model error shapes, rendered as their own table
-  // under the models inventory.
+  // @see #168
   const [modelErrors, setModelErrors] = useState<AdminModelError[]>([]);
-  // #219: long error messages are collapsed by default so rows stay a single
-  // line; the key is provider/model/status/category.
+  // Long error messages collapsed by default; the expand key is provider/model/status/category.
+  // @see #219
   const [expandedErrors, setExpandedErrors] = useState<Set<string>>(new Set());
   const [logLevel, setLogLevel] = useState<(typeof LOG_LEVELS)[number]>('all');
   const [logQuery, setLogQuery] = useState('');
   const [logs, setLogs] = useState<AdminLogEntry[]>([]);
-  // #179: retained logs come from Grafana Cloud Loki; `configured`/`error`
-  // describe graceful degradation (Loki env absent or unreachable).
+  // `configured`/`error` describe graceful degradation (Loki env absent or unreachable).
+  // @see #179
   const [logsConfigured, setLogsConfigured] = useState(true);
   const [logsError, setLogsError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [activeSection, setActiveSection] = useState<
     'users' | 'models' | 'logs' | 'compare' | 'traces' | 'evals' | 'access'
   >('users');
-  // PATs (#184): Access-tab rows, the generate form, and the one-time
-  // plaintext shown right after creation (cleared on reload/navigation —
-  // it is never recoverable afterwards).
+  // PAT rows plus the one-time plaintext shown right after creation; cleared on reload/navigation, never recoverable.
+  // @see #184
   const [pats, setPats] = useState<AdminPat[] | null>(null);
   const [patName, setPatName] = useState('');
   const [newPatToken, setNewPatToken] = useState<string | null>(null);
   const [patCopied, setPatCopied] = useState(false);
 
-  // #179: retained logs are one time-window page from Loki (default last
-  // 24h), newest first. A filter change re-queries the window; there is no
-  // incremental cursor (Loki is queried by time, not id).
+  // A filter change re-queries the time window; there is no incremental cursor (Loki is queried by time, not id).
+  // @see #179
   const loadLogs = useCallback(
     async (params: { level?: 'info' | 'warn' | 'error'; q?: string }) => {
       try {
@@ -88,8 +80,7 @@ const AdminView = () => {
         setLogsConfigured(res.configured);
         setLogsError(res.error ?? null);
       } catch (err) {
-        // A failed fetch is non-fatal for the rest of the view, but surface it
-        // inline so the admin knows the log pane is stale rather than empty.
+        // Surface the failure inline so the admin knows the log pane is stale rather than empty.
         setLogs([]);
         setLogsError(err instanceof Error ? err.message : 'Failed to load logs.');
       }
@@ -108,12 +99,9 @@ const AdminView = () => {
     }
   }, []);
 
-  // Direct model comparison (issue #129, roster-shaped in #234): pick
-  // provider entries (a roster model's two backends are separate entries), type
-  // a prompt, and run it through the existing agent on each selection side by
-  // side. Server-mirrored cap on selections (MAX_COMPARE_MODELS = 6).
+  // Direct model comparison: pick provider entries, type a prompt, run each side by side; cap mirrored server-side.
+  // @see #129 #234
   const [comparePrompt, setComparePrompt] = useState('');
-  // Selection is keyed `provider|modelId` — the exact pair the roster races.
   const [selectedCompareKeys, setSelectedCompareKeys] = useState<Set<string>>(new Set());
   const [comparison, setComparison] = useState<ModelComparisonRun | null>(null);
   const [comparing, setComparing] = useState(false);
@@ -121,8 +109,7 @@ const AdminView = () => {
 
   const compareKey = (provider: string, modelId: string) => `${provider}|${modelId}`;
 
-  // One checkbox per provider entry, so a 3-model roster offers its up-to-six
-  // raced backends (OQ6).
+  // One checkbox per provider entry, so a roster's raced backends are individually selectable.
   const compareEntries = (models ?? []).flatMap((m) =>
     m.providers.map((p) => ({
       key: compareKey(p.provider, p.modelId),
@@ -155,9 +142,7 @@ const AdminView = () => {
           ...(e.contextLength !== undefined ? { contextLength: e.contextLength } : {}),
         })),
       );
-      // Selection order in the view is the checkbox order in the table; the
-      // response preserves the server's sequential execution order, so render
-      // directly from it.
+      // The response preserves the server's sequential execution order, so render directly from it.
       setComparison(run);
     } catch (err) {
       setCompareError(err instanceof AdminError ? err.message : 'Something went wrong.');
@@ -166,23 +151,17 @@ const AdminView = () => {
     }
   };
 
-  // Add-a-model flow (#217, roster-shaped in #234): the provider catalogs
-  // supply context/prices/capabilities, so there is no manual stats form. The
-  // admin types a modelId, searches, reviews the summary and adds. The search
-  // resolves BOTH roster providers (OQ2): DeepInfra supplies context/prices/
-  // vision, Fireworks supplies context/vision/tools. Whichever providers
-  // resolve become the model's `providers[]`.
+  // Add-a-model flow: provider catalogs supply context/prices/capabilities — no manual stats form; both providers resolve into `providers[]`.
+  // @see #217 #234
   const [lookupModelName, setLookupModelName] = useState('');
   const [lookupDeepinfra, setLookupDeepinfra] = useState<AdminModelLookup | null>(null);
   const [lookupFireworks, setLookupFireworks] = useState<AdminModelLookup | null>(null);
   const [looking, setLooking] = useState(false);
   const [lookupError, setLookupError] = useState<string | null>(null);
-  // #217: which row's Refresh is in flight, so its button can show a throbber.
+  // @see #217
   const [refreshingId, setRefreshingId] = useState<string | null>(null);
 
-  // The detail summary shown under the form is DeepInfra-first (it is the only
-  // catalog with prices); Fireworks fills in tools/context when DeepInfra is
-  // absent. `found` on either provider offers the Add button.
+  // Summary is DeepInfra-first (the only catalog with prices); Fireworks fills in when DeepInfra is absent.
   const lookupFound = (lookupDeepinfra?.found ?? false) || (lookupFireworks?.found ?? false);
   const lookupSummary = lookupDeepinfra?.found ? lookupDeepinfra : lookupFireworks;
 
@@ -197,11 +176,7 @@ const AdminView = () => {
     if (!name) return;
     setLooking(true);
     resetLookup();
-    // Resolve both providers in parallel. A provider that does not host the
-    // model answers `found: false`; a transport failure throws. Each is caught
-    // independently so a failure on one provider cannot hide a hit on the
-    // other. If NEITHER provider could be reached, the error is surfaced
-    // instead of a misleading "not found".
+    // Each provider is settled independently so one failure cannot hide a hit; both failing surfaces the error, not "not found".
     const settle = (p: Promise<AdminModelLookup>) =>
       p.then(
         (result) => ({ result, error: null as string | null }),
@@ -230,8 +205,7 @@ const AdminView = () => {
     if (!lookupFound) return;
     const name = lookupModelName.trim();
     const providers: { provider: string; modelId: string }[] = [];
-    // DeepInfra keys the roster modelId directly; Fireworks stores its own
-    // `accounts/fireworks/models/...` id (the lookup echoes the id it matched).
+    // DeepInfra keys the roster modelId directly; Fireworks stores its own accounts/fireworks/models/... id.
     if (lookupDeepinfra?.found) providers.push({ provider: 'deepinfra', modelId: name });
     if (lookupFireworks?.found) {
       providers.push({ provider: 'fireworks', modelId: lookupFireworks.model ?? name });
@@ -243,8 +217,7 @@ const AdminView = () => {
       ...(lookupSummary?.contextLength !== undefined
         ? { contextLength: lookupSummary.contextLength }
         : {}),
-      // Only DeepInfra publishes prices (OQ2); Fireworks leaves them unknown,
-      // which the weighted score treats as neutral (never free).
+      // Only DeepInfra publishes prices; Fireworks leaves them unknown, which the weighted score treats as neutral.
       ...(lookupDeepinfra?.inputPrice !== undefined
         ? { inputPrice: lookupDeepinfra.inputPrice }
         : {}),
@@ -263,11 +236,8 @@ const AdminView = () => {
     }
   };
 
-  // #217: Refresh re-pulls the provider's current values for an existing model
-  // and updates it in place. Only provider-owned model-level fields are
-  // overwritten — providers/eligible/label are left alone. Vision is only ever
-  // set to true (a catalog that omits the tag must not clobber an admin
-  // correction). DeepInfra is preferred for the model-level context/prices.
+  // Refresh overwrites only provider-owned model-level fields; vision is only ever set true so it cannot clobber an admin correction.
+  // @see #217
   const refreshModel = async (m: AdminModel) => {
     setRefreshingId(m.id);
     try {
@@ -299,9 +269,8 @@ const AdminView = () => {
     }
   };
 
-  // #234 OQ5: each provider can be taken out of the race independently. Send
-  // the full provider list with just the toggled entry flipped, so the server
-  // merges it (and preserves the system-owned TTFT/cool-off).
+  // Send the full provider list with just the toggled entry flipped, so the server merges and preserves system-owned fields.
+  // @see #234
   const toggleProviderEnabled = async (m: AdminModel, providerId: string) => {
     try {
       await AdminModelsService.updateModel(m.id, {
@@ -370,9 +339,8 @@ const AdminView = () => {
     loadModels();
   }, [loadUsers, loadModels]);
 
-  // #179: retained logs fetch only while the Logs section is visible (issue
-  // #91). A 30s refresh keeps the window current without hammering Loki with
-  // an incremental 3s poll — the window is 24h, not a live tail.
+  // Retained logs fetch only while the Logs section is visible; the 30s window refresh avoids a live-tail poll.
+  // @see #179 #91
   useEffect(() => {
     if (activeSection !== 'logs') return;
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -387,9 +355,8 @@ const AdminView = () => {
     return () => clearInterval(timer);
   }, [loadLogs, logLevel, logQuery, activeSection]);
 
-  // PATs (#184): load-on-demand, only while the Access section is visible.
-  // The one-time token box is cleared on leaving the tab (in the nav click
-  // below) — the effect stays side-effect-only so nothing cascades.
+  // PATs load on demand, only while the Access section is visible.
+  // @see #184
   const loadPats = useCallback(async () => {
     try {
       const res = await AdminPatsService.listPats();
@@ -472,13 +439,8 @@ const AdminView = () => {
         )}
       </div>
       <div className="flex min-h-0 flex-1 flex-col gap-4 px-6 py-6 lg:flex-row">
-        {/*
-          #220: the tab strip is a horizontal scroller on phones. Without an
-          affordance the last tabs look clipped mid-word ("Compare" -> "pare"),
-          so a right-edge fade sits over the scroller (pointer-events-none) to
-          signal there is more to scroll to. At lg+ the nav stacks vertically
-          and the fade is hidden.
-        */}
+        {/* A right-edge fade signals the phone tab strip scrolls; hidden at lg+ where the nav stacks. */}
+        {/* @see #220 */}
         <div className="relative shrink-0 lg:contents">
           <nav
             data-testid="admin-nav"
@@ -490,8 +452,7 @@ const AdminView = () => {
                 key={section.id}
                 data-testid={`admin-tab-${section.id}`}
                 onClick={() => {
-                  // Leaving Access hides the one-time token box for good —
-                  // the plaintext is unrecoverable after this point.
+                  // Leaving Access clears the one-time token box for good — the plaintext is unrecoverable.
                   if (activeSection === 'access' && section.id !== 'access') {
                     setNewPatToken(null);
                     setPatCopied(false);
@@ -875,9 +836,8 @@ const AdminView = () => {
                       </thead>
                       <tbody>
                         {modelErrors.map((e) => {
-                          // #234: the error tally is keyed provider+modelId; a
-                          // row is currently cooling off when that provider
-                          // entry's cool-off is in the future.
+                          // The error tally is keyed provider+modelId; a row is cooling off when that entry's cool-off is in the future.
+                          // @see #234
                           const cooling = (models ?? []).some((m) =>
                             m.providers.some(
                               (p) =>

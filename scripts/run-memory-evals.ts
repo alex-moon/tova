@@ -1,20 +1,5 @@
-/*
- * #289 memory-eval runner. Seeds the corpus into the reserved eval user's
- * workspace, scores the deterministic retrieval stage (hit-rate by slice ID),
- * retrieval hit-rate by slice ID), prints the metrics, and — when
- * LANGSMITH_API_KEY is present — loads the corpus into the `tova-memory-evals`
- * dataset (best-effort). Not part of CI.
- *
- *   npx tsx scripts/run-memory-evals.ts
- *   npx tsx scripts/run-memory-evals.ts --helpfulness
- *   npx tsx scripts/run-memory-evals.ts --preflight-judge
- *   npx tsx scripts/run-memory-evals.ts --validate-judge
- *   npm run evals:memory
- *
- * Needs: local MongoDB (fixtures); the retrieval stage is Mongo-only. Stage 3
- * (helpfulness) runs only with `--helpfulness` and needs the responder + judge
- * providers. See docs/plan-289-gate-evals.md.
- */
+/* Memory-eval runner: seeds the corpus, scores retrieval hit-rate, optional helpfulness stage and LangSmith export; not part of CI. */
+// @see #289
 import 'dotenv/config';
 import mongoose from 'mongoose';
 import { buildMongoUri } from '../apps/shared/src/main/mongoUri';
@@ -39,30 +24,13 @@ import { config } from '../apps/server/src/main/config';
 const pct = (value: number | null): string =>
   value === null ? 'n/a' : `${(value * 100).toFixed(1)}%`;
 
-/*
- * Stage 3 makes live responder + judge calls (Groq for the judge), so it is
- * manual-only: it runs when `--helpfulness` is passed, never on the default
- * deterministic path. The ticket leaves the unattended schedule as an open
- * question (OQ6).
- */
+/* Stage 3 makes live responder + judge calls, so it is manual-only via --helpfulness. */
 const wantsHelpfulness = (): boolean => process.argv.slice(2).includes('--helpfulness');
 
-/*
- * `--preflight-judge` (T14d) issues one judge call in both orders and requires a
- * parseable verdict, so a truncated/unavailable judge fails loudly here rather
- * than silently degrading every stage-3 verdict. It needs no Mongo, so it runs
- * before the connection.
- */
+/* --preflight-judge issues one judge call in both orders and requires a parseable verdict; fails loudly before the Mongo connection. */
 const wantsPreflight = (): boolean => process.argv.slice(2).includes('--preflight-judge');
 
-/*
- * `--validate-judge` (T5) scores the judge against the constructed set (always)
- * and the checked-in hand-labelled seed, printing accuracy and Cohen's kappa with
- * each set's provenance. The constructed number is a smoke test (the judge is
- * callable and not position-biased), not evidence; the hand number is the
- * non-circular one, and is `agent-authored` until the owner confirms it (OQ1).
- * It needs no Mongo, so it runs before the connection.
- */
+/* --validate-judge scores the judge against the constructed set (smoke) and the hand-labelled seed (non-circular evidence), printing accuracy and kappa. */
 const wantsValidateJudge = (): boolean => process.argv.slice(2).includes('--validate-judge');
 
 const printAgreement = async (
@@ -108,7 +76,8 @@ const main = async (): Promise<void> => {
   const langsmithClient = await langsmithClientFromEnv(process.env.LANGSMITH_API_KEY);
   await mongoose.connect(buildMongoUri());
   try {
-    // #310: the gate stage is retired — retrieval is the only deterministic stage.
+    // The gate stage is retired — retrieval is the only deterministic stage.
+    // @see #310
     const { retrieval } = await runMemoryEvals();
     if (!retrieval) throw new Error('memory eval did not run the retrieval stage');
 

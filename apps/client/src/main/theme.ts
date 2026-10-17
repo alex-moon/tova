@@ -3,10 +3,7 @@ export type Theme = 'light' | 'dark';
 export const STORAGE_KEY = 'tova-theme';
 export const COOKIE_NAME = 'tova-theme';
 
-/**
- * Standalone twin: apps/client/index.html carries a verbatim inline copy of
- * this logic that runs before the bundle loads (keep in sync).
- */
+/** Standalone twin: apps/client/index.html carries a verbatim inline copy of this logic (keep in sync). */
 const readLocalStorage = (): string | null => {
   try {
     return localStorage.getItem(STORAGE_KEY);
@@ -52,15 +49,8 @@ export function readStoredTheme(): Theme | undefined {
   return stored === 'light' || stored === 'dark' ? stored : undefined;
 }
 
-/**
- * Apply an explicit per-user theme preference (issue #53) once the profile
- * is known. The user record is the source of truth once logged in: it wins
- * over device storage, and it is mirrored back into both stores so the
- * inline-script fast path (cookie → localStorage → system → light) paints
- * the account's theme on the next load without waiting for the profile
- * fetch. No saved preference keeps the device behaviour: the resolved
- * device theme is applied. A value outside the wire enum does nothing.
- */
+/** The user record wins over device storage once known and mirrors into both stores; no saved preference keeps the device behaviour. */
+// @see #53
 export function applyUserTheme(userTheme: string | undefined | null): void {
   if (userTheme === 'light' || userTheme === 'dark') {
     persistTheme(userTheme);

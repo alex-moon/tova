@@ -1,18 +1,11 @@
 import { useEffect, useState } from 'react';
 import ConnectorService, { ConnectorError } from '../services/connectors';
 
-/*
- * OAuth consent landing page (#327). The provider redirects the browser here
- * with ?code=&state= (same-origin app in dev and prod); the page relays them
- * to POST /api/connectors/oauth/callback, which completes the exchange and
- * creates/updates the connector. Slice-1 minimal surface: the real
- * connectors view (#331) will own this flow's UX.
- */
+// OAuth consent landing: relays ?code=&state= to the server callback, which completes the exchange and creates/updates the connector.
+// @see #327 #331
 
 const ConnectorOAuthCallback = () => {
-  // The redirect's query is fixed for the page's lifetime, and the page
-  // remounts per redirect: read it once at mount, no memo, no
-  // setState-in-effect.
+  // The redirect's query is fixed for the page's lifetime, and the page remounts per redirect: read once at mount.
   const params = new URLSearchParams(window.location.search);
   const redirectError = params.get('error');
   const redirectCode = params.get('code');

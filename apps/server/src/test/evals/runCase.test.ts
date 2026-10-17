@@ -34,8 +34,7 @@ describe('runCase (#158 finalText capture)', () => {
     );
     expect(run.finalText).toBe('I found no sources available. Sorry.');
     expect(run.toolCalls.map((c) => c.name)).toEqual(['web_search']);
-    // Tool-call chunks must not leak into the text (their potential .delta
-    // payload, if any, is a separate concern; here there is none).
+    // Tool-call chunks must not leak into the text.
   });
 
   it('handles runs with tool calls but no text (no finalText key at all)', async () => {

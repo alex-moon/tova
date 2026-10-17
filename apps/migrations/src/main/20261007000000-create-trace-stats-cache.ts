@@ -1,12 +1,7 @@
 import { MigrationInterface, Db } from 'mongo-migrate-ts';
 
-/*
- * #224: cache for the admin Traces per-model summary. A background poller
- * upserts one document per stats window; the read route serves it instead of
- * a live LangSmith sweep. The migration pre-creates the collection and the
- * windowKey unique index so deployed instances have them before first write
- * and the poller's upsert cannot lazy-create index flakiness.
- */
+// Pre-creates the tracestatscaches collection and the windowKey unique index so the poller's upsert cannot race a lazy-create.
+// @see #224
 export class CreateTraceStatsCache implements MigrationInterface {
   async up(db: Db): Promise<void> {
     for (const name of await db.listCollections().toArray()) {

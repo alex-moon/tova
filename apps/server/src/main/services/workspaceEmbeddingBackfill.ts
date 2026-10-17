@@ -1,15 +1,7 @@
 import { embeddingTextHash, truncateForEmbedding, withEmbedTitle } from './workspaceEmbeddingText';
 
-/*
- * #294: pure planning for the embedding backfill. The script
- * (`scripts/backfill-embeddings.ts`) owns the Mongo reads/writes and the
- * provider calls; this module owns the decision of *what* to embed, so the
- * idempotency rule is unit-testable without a database.
- *
- * The row key mirrors the model's unique index (`{ kind, sourceId, model }`).
- * A slice is re-embedded only when its `textHash` differs from the stored one,
- * so re-running over an unchanged corpus is a no-op.
- */
+/* Pure planning for the embedding backfill: the script owns Mongo/provider calls, this owns WHAT to embed so the idempotency rule (re-embed only when textHash differs) is unit-testable. */
+// @see #294
 
 export type EmbeddableKind = 'chat' | 'file' | 'task';
 
@@ -17,10 +9,8 @@ export interface EmbeddableSlice {
   kind: EmbeddableKind;
   id: string;
   text: string;
-  // #309: the slice title (a file's filename), folded into the embed text for
-  // file slices through `withEmbedTitle` — the same fold the ingest path
-  // applies, so the hashed text stays byte-identical between the two paths.
-  // Absent passes through unchanged.
+  // The slice title, folded into the embed text through `withEmbedTitle` — the same fold the ingest path applies, so hashed text stays byte-identical between the paths.
+  // @see #309
   title?: string;
 }
 
@@ -50,14 +40,8 @@ export interface ExistingEmbeddingRow {
   textHash: string;
 }
 
-/*
- * Build the `embeddingKey -> textHash` map the skip rule consults. `model`
- * defaults to the run's model: a row projection that omits `model` (the field
- * is redundant with the `find({ model })` filter that produced the rows) must
- * still key correctly, or the lookup falls through and the backfill re-embeds
- * every slice on every run. Keeping this here — not inline in the script —
- * makes that idempotency invariant unit-testable.
- */
+/* Build the `embeddingKey -> textHash` map the skip rule consults; `model` defaults per-row so a projection omitting the redundant field still keys correctly. */
+// @see #294
 export const existingEmbeddingHashes = (
   rows: ExistingEmbeddingRow[],
   model: string,
@@ -69,11 +53,7 @@ export const existingEmbeddingHashes = (
     ]),
   );
 
-/*
- * Decide which slices need a (re-)embed. `existingHashes` is keyed by
- * `embeddingKey`; a slice is skipped when its current hash already matches.
- * Slices with no embeddable text are counted separately and never embedded.
- */
+/* Decide which slices need a (re-)embed: skipped when the current hash matches; text-less slices counted separately, never embedded. */
 export const planEmbeddingWrites = (
   slices: EmbeddableSlice[],
   existingHashes: ReadonlyMap<string, string>,
@@ -85,14 +65,8 @@ export const planEmbeddingWrites = (
   let truncated = 0;
 
   for (const slice of slices) {
-    // `collectWorkspaceSlices` returns chat/task text untrimmed (it only
-    // checks `.trim()` to skip blanks); the shared ingest helper
-    // (`workspaceSliceText`) trims. Normalise here so both paths hash and embed
-    // byte-identical text — otherwise the skip rule re-embeds every slice the
-    // ingest path already wrote (and vice versa). Trimming the *collected*
-    // text reproduces the helper exactly for all three kinds, which only ever
-    // trim the final string. #309: file slices fold their title (the filename)
-    // in first, through the same shared helper the ingest path uses.
+    // Normalise so both paths hash and embed byte-identical text (otherwise the skip rule re-embeds everything the ingest path wrote); file slices fold their title in first via the same shared helper.
+    // @see #309
     const { text, truncated: wasTruncated } = truncateForEmbedding(
       withEmbedTitle(slice.title, slice.text.trim()),
     );

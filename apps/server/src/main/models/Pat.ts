@@ -1,10 +1,7 @@
 import mongoose from 'mongoose';
 
-// Personal access tokens (#184): agent/CLI credentials generated in the
-// admin view. Only the sha256 digest is stored — the plaintext token is
-// returned exactly once, at creation. Role is never baked in: the auth
-// middleware loads the creator's live role on every request, so demoting a
-// user demotes their PATs immediately.
+// Personal access tokens: only the sha256 digest stored; the creator's live role is loaded per request.
+// @see #184
 const patSchema = new mongoose.Schema({
   name: {
     type: String,
@@ -29,8 +26,7 @@ const patSchema = new mongoose.Schema({
   lastUsedAt: {
     type: Date,
   },
-  // Blank = non-expiring: the .env-paste workflow wants long-lived tokens,
-  // so expiry is opt-in rather than a default.
+  // Blank = non-expiring: expiry is opt-in rather than a default.
   expiresAt: {
     type: Date,
   },

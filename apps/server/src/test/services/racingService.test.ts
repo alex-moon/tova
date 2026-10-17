@@ -11,17 +11,10 @@ import type {
   NeutralStreamChunk,
 } from '../../main/services/llmTypes';
 
-/*
- * #316 racing runtime: flat race across every live (model, provider) combo,
- * first token wins, losers record their TTFT and abort themselves.
- *
- * Every dependency is injected (roster, stream factory, clock, cool-off
- * writer), so no Mongo or real provider is touched and TTFT is deterministic.
- * `recordTtft`/`disableRosterProvider` live in `rosterConfig`; the module is
- * mocked so their fire-and-forget writes can be asserted.
- */
-
+/* The racing runtime: a flat race across every live (model, provider) combo, first token wins, losers record TTFT and abort; every dependency injected so no Mongo/real provider is touched. */
+// @see #316
 const mockRecordTtft = jest.fn(async () => {});
+
 jest.mock('../../main/services/rosterConfig', () => {
   const actual = jest.requireActual('../../main/services/rosterConfig');
   return {
@@ -44,9 +37,7 @@ const model = (overrides: Partial<RosterModel> = {}): RosterModel => ({
   ...overrides,
 });
 
-// A stream that yields each chunk, tracking abort calls. `signal` is the
-// combined signal passed by the race; the generator notices aborts between
-// yields so a loser stops cleanly.
+// A stream that yields each chunk, tracking abort calls; the generator notices aborts between yields so a loser stops cleanly.
 const streamOf = (
   chunks: NeutralStreamChunk[],
   onAbort?: () => void,
@@ -103,16 +94,14 @@ describe('racingService (#316 flat race)', () => {
   });
 
   it('keeps the fastest combo even when it is not the first model', async () => {
-    // Mutable clock: advanced by the slow providers' first-token arrival so
-    // the fast (fireworks) provider wins with the smaller TTFT.
+    // Mutable clock: advanced by the slow providers' first-token arrival so the fast provider wins with the smaller TTFT.
     let clockMs = 0;
     const deps: RaceDeps = {
       roster: [model()],
       now: () => clockMs,
       startStream: async (options: CompletionOptions) => {
         if (options.provider === 'deepinfra') {
-          // Slow: resolves after a macrotask during which the fast provider
-          // has already produced our simulated clock advance.
+          // Slow: resolves after a macrotask during which the fast provider has already produced the simulated clock advance.
           return (async function* () {
             await new Promise((r) => setTimeout(r, 5));
             clockMs = 40;
@@ -156,8 +145,7 @@ describe('racingService (#316 flat race)', () => {
           return streamOf([{ delta: 'win' }]);
         }
         loserSignal = options.abortSignal;
-        // The loser: held mid-prefill until the test releases it, so its
-        // first chunk arrives AFTER the winner claimed the race.
+        // The loser: held mid-prefill until the test releases it, so its first chunk arrives AFTER the winner claimed the race.
         return (async function* () {
           await loserGate;
           clockMs = 40;
@@ -170,8 +158,7 @@ describe('racingService (#316 flat race)', () => {
     releaseLoser();
     await flush();
 
-    // The loser's observation landed (input was fully billed regardless) and
-    // it aborted itself — nobody consumes its stream.
+    // The loser's observation landed (input was fully billed) and it aborted itself — nobody consumes its stream.
     expect(mockRecordTtft).toHaveBeenCalledWith('m-primary', 'fireworks', 40);
     expect(loserSignal?.aborted).toBe(true);
 
@@ -278,8 +265,7 @@ describe('racingService (#316 flat race)', () => {
     };
     const outcome = await raceRoster({ messages: [] }, deps);
     expect(outcome.result.model.modelId).toBe('m-second');
-    // Provider-fault failures cool off both combos of the dead model; the
-    // winning model is untouched.
+    // Provider-fault failures cool off both combos of the dead model; the winning model is untouched.
     expect(disabled).toEqual(
       expect.arrayContaining([
         { model: 'm-primary', provider: 'deepinfra', ttl: undefined },
@@ -415,8 +401,7 @@ describe('racingService non-streaming (#232)', () => {
       modelId: 'm-second',
       label: 'Second',
       tools: true,
-      // Priced higher than the primary so the weighted pick still tries
-      // `m-primary` first and exercises the fall-through.
+      // Priced higher than the primary so the weighted pick still tries the primary first and exercises the fall-through.
       inputPrice: 1,
       outputPrice: 1,
       providers: [{ provider: 'deepinfra', modelId: 'di-second' }],

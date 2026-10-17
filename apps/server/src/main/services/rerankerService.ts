@@ -1,25 +1,7 @@
 import { config } from '../config';
 
-/*
- * #305: cross-encoder reranker client for workspace-memory retrieval via
- * DeepInfra — no new secret or vendor (the key is already configured for
- * embeddings). Same thin-fetch stance as `embeddingService.ts`: a single POST,
- * no runtime dependency.
- *
- * Model note: #305 named `BAAI/bge-reranker-v2-m3`, but DeepInfra no longer
- * serves it (404 "Model is not available"; their catalog hosts no reranker).
- * The Qwen3-Reranker family is served with the same `{queries, documents} ->
- * {scores}` contract; the 0.6B showed the crispest absolute separation in the
- * #305 calibration probe (relevant ≈ 0.98, irrelevant ≈ 0.0002) at the lowest
- * price and latency.
- *
- * Scores are relevance probabilities in [0, 1] per the docs — an absolute,
- * corpus-independent quality bar a cut threshold can actually sit under.
- *
- * Never throws: every failure (missing key, transport, HTTP, malformed shape)
- * degrades to `null`, which the caller treats as "no rerank" — retrieval falls
- * back to the unfused/un-cut ranking, never an error on a chat turn.
- */
+/* Cross-encoder reranker via DeepInfra; scores are relevance probabilities in [0,1]; never throws — every failure degrades to null (no rerank). */
+// @see #305
 
 const DEEPINFRA_BASE = 'https://api.deepinfra.com/v1';
 export const RERANK_MODEL = 'Qwen/Qwen3-Reranker-0.6B';
@@ -36,11 +18,7 @@ interface RerankBody {
   scores?: unknown;
 }
 
-/*
- * Grade one query against a batch of documents. Returns one relevance
- * probability per document, in input order — or `null` when the stage cannot
- * run or fails (the caller's degrade-to-current-behaviour signal).
- */
+/* Grade one query against a batch of documents; returns one relevance probability per document, or null when the stage cannot run. */
 export const rerankQuery = async (
   query: string,
   documents: string[],

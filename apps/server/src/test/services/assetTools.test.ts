@@ -15,8 +15,7 @@ import { truncateForPrompt } from '../../main/services/textExtraction';
 jest.mock('../../main/services/storageService', () => ({
   isStorageConfigured: jest.fn(),
   putObject: jest.fn(),
-  // list_files/read_file never touch storageService; keep the mock surface
-  // complete so unrelated import-time references resolve.
+  // list_files/read_file never touch storageService; keep the mock surface complete so unrelated import-time references resolve.
   presignPutUrl: jest.fn(),
   presignGetUrl: jest.fn(),
 }));
@@ -26,13 +25,8 @@ const storageMocks = jest.requireMock('../../main/services/storageService') as {
   putObject: jest.Mock;
 };
 
-/*
- * Tool-level tests for the #58 asset-library tools. The jest module mappers
- * replace `@mastra/core/tools`' createTool with the identity function, so
- * `execute` is invoked directly with a constructed request context — the
- * runtime contract (context rides in as the second execute argument) is
- * pinned by mastraRequestContext.test.ts.
- */
+/* Tool-level tests for the asset-library tools: the module mapper replaces createTool with the identity function, so `execute` is invoked directly with a constructed request context. */
+// @see #58
 
 const asCtx = (userId?: string) => {
   const requestContext = new RequestContext();
@@ -40,7 +34,8 @@ const asCtx = (userId?: string) => {
   return { requestContext };
 };
 
-// #252: a context carrying a session id, to exercise provenance attribution.
+// A context carrying a session id, to exercise provenance attribution.
+// @see #252
 const asCtxWithSession = (userId: string, sessionId: string) => {
   const requestContext = new RequestContext();
   requestContext.set('userId', userId);
@@ -48,7 +43,8 @@ const asCtxWithSession = (userId: string, sessionId: string) => {
   return { requestContext };
 };
 
-// #298: a context carrying a task id (no session), to exercise task provenance.
+// A context carrying a task id (no session), to exercise task provenance.
+// @see #298
 const asCtxWithTask = (userId: string, taskId: string) => {
   const requestContext = new RequestContext();
   requestContext.set('userId', userId);
@@ -56,8 +52,7 @@ const asCtxWithTask = (userId: string, taskId: string) => {
   return { requestContext };
 };
 
-// `createTool` is the identity stub, so the tools keep their plain config
-// shape; pick the execute off it explicitly for direct invocation.
+// `createTool` is the identity stub, so the tools keep their plain config shape; pick the execute off it for direct invocation.
 const listExecute = (
   listFilesTool as unknown as { execute: (args: unknown[], ctx: unknown) => Promise<unknown> }
 ).execute;
@@ -150,8 +145,8 @@ describe('generate_file tool (#66)', () => {
       origin: 'system-generated',
       textExtracted: good.content,
     });
-    // Round-trip: the just-generated file is immediately listable and
-    // readable by the same tools (#66 plan risk note).
+    // Round-trip: the just-generated file is immediately listable and readable by the same tools.
+    // @see #66
     const listed = (await listExecute([], asCtx(user.id))) as { files: { id: string }[] };
     expect(listed.files.map((f) => f.id)).toContain(out.file?.id);
     const read = (await readExecute({ id: out.file?.id }, asCtx(user.id))) as {
@@ -599,7 +594,8 @@ describe('read_file line paging (#350)', () => {
 
   it('keeps line reads working for documents without units (item 3)', async () => {
     const user = await createUser('units-legacy@example.com');
-    // No units set — an asset ingested before #159.
+    // No units set — an asset ingested before the units feature.
+    // @see #159
     const asset = await createAsset(user.id, 'report.pdf', {
       textExtracted: null,
       markdownExtracted: 'line one\nline two\nline three',

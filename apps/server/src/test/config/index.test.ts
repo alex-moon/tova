@@ -177,9 +177,7 @@ describe('config/index', () => {
     });
 
     it('floors the step cap and defaults a value that floors to zero (#254)', () => {
-      // `0.5` is positive but floors to a zero-step budget; it must degrade to
-      // the default rather than become 0. A fractional cost is legitimate, so
-      // the two getters deliberately differ here.
+      // `0.5` floors to a zero-step budget: degrade to the default rather than 0; a fractional cost is legitimate so the getters deliberately differ.
       process.env.TASK_MAX_STEPS = '0.5';
       process.env.TASK_MAX_COST_USD = '0.5';
       expect(config.task.maxSteps).toBe(25);
@@ -194,12 +192,11 @@ describe('config/index', () => {
     });
 
     it('memory-eval judge defaults are pinned; responder overrides stay undefined (#289)', () => {
-      // Judge pin: owner judge-probe sweep 2026-10-14 (100%/100% validation,
-      // non-overlapping family vs gate and responder, cheapest finalist).
+      // Judge pin: owner judge-probe sweep 2026-10-14.
+      // @see #289
       expect(config.memoryEval.judgeModel).toBe('Qwen/Qwen3-235B-A22B-Instruct-2507');
       expect(config.memoryEval.judgeProvider).toBe('deepinfra');
-      // Unset responder overrides fall through to the roster default in the
-      // runner (T14c), so the getters must return undefined, not a pin.
+      // Unset responder overrides fall through to the roster default in the runner, so the getters must return undefined, not a pin.
       expect(config.memoryEval.responderModel).toBeUndefined();
       expect(config.memoryEval.responderProvider).toBeUndefined();
       expect(config.memoryEval.responderTemperature).toBe(0);

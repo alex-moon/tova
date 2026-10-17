@@ -8,11 +8,8 @@
   --font-heading: 'Raleway Variable', 'Raleway', ui-sans-serif, system-ui, sans-serif;
   --font-mono: 'JetBrains Mono Variable', ui-monospace, monospace;
 
-  /* Every --color-* token resolves through theme-level primitives defined in
-   * :root/.dark below (issue #33): @theme itself carries no palette
-   * literals, so the dark palette can flip the complete surface, not just
-   * bg/text.
-   */
+  /* Tokens resolve through :root/.dark primitives; @theme carries no palette literals so dark can flip the whole surface. */
+  /* @see #33 */
   --color-background: var(--c-bg);
   --color-foreground: var(--c-text);
   --color-card: var(--c-bg);
@@ -39,16 +36,13 @@
   --radius-default: 8px;
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
   --shadow-md: 0 4px 6px rgba(0, 0, 0, 0.1);
-  /* Atmospheric depth knobs (issue #191): 0 = off, 1 = normal, >1 = turned up.
-   * Tuned subtle: the sidebar solidity (--c-panel-surface) is the reference
-   * weight, so the column wash and edge glows sit just under it. Raise these
-   * to make the effect more pronounced. */
+  /* Depth knobs: 0 = off, 1 = normal, >1 = turned up. */
+  /* @see #191 */
   --wash-strength: 1;
   --edge-glow-strength: 1;
   --header-height: 60px;
-  /* #359 feedback: the sidebar is the rename/browse surface, so titles need
-   * room to read in full (subtitles may still ellipsize). Desktop keeps one
-   * fixed column width (owner-tuned: 390px); the phone drawer is full-bleed. */
+  /* Titles need room to read in full; desktop keeps one fixed width, the phone drawer is full-bleed. */
+  /* @see #359 */
   --sidebar-width: 390px;
 }
 
@@ -73,14 +67,8 @@
   --c-info: #3378a8;
   --c-msg-user: var(--c-accent);
   --c-msg-assistant: var(--c-bg);
-  /* Atmospheric depth (issue #191) — LIGHT theme (calibration anchor for the
-   * ratio pass; light is the constrained case, so its values gate dark).
-   * Luminance hierarchy (owner steer): the chat column is the *brightest*
-   * surface — the luminous "space" where the action is — while the chrome
-   * (sidebar, composer) recedes as darker, solid furniture around it. So the
-   * column is lightened toward white and carries a faint warm bloom; the panels
-   * are shaded *down* from the page background. Recession is reinforced by
-   * .recessed-frame's inset shadow at the seams. */
+  /* Light: the chat column is the brightest surface; chrome recedes as darker furniture shaded down from the page. */
+  /* @see #191 */
   --c-wash:
     radial-gradient(
       ellipse 80% 60% at 50% 38%,
@@ -97,14 +85,11 @@
     var(--c-primary) calc(35% * var(--edge-glow-strength)),
     transparent
   );
-  /* Seam shadow (issue #191): the inner shadow where the *bright* column tucks
-   * under the darker chrome. Light uses a soft warm shadow. */
+  /* Inner shadow where the bright column tucks under the darker chrome; light uses a soft warm shadow. */
+  /* @see #191 */
   --c-recess: rgba(44, 36, 32, 0.16);
-  /* Solidity gradient for interactive panels (issue #191): a shallow
-   * linear top-lit → bottom-shaded wash of the panel's *own* surface colour,
-   * so sidebars/composer read as physical slabs you could tap. In light they
-   * tint *toward the Tova primary* (warm branded furniture) and shade down from
-   * the page background, i.e. sit darker than the luminous column. */
+  /* Top-lit → bottom-shaded wash of the panel's own colour so panels read as physical slabs; light tints toward the primary. */
+  /* @see #191 */
   --c-panel-surface: linear-gradient(
     180deg,
     color-mix(in srgb, var(--c-sidebar-bg) 88%, var(--c-primary) 4%) 0%,
@@ -135,11 +120,8 @@
   --c-info: #5b9cc9;
   --c-msg-user: var(--c-accent);
   --c-msg-assistant: var(--c-bg);
-  /* Atmospheric depth (issue #191): same model as :root — the chat column is
-   * the *recessive* plane, the chrome (sidebar, composer) is the solid
-   * furniture around it. In dark, recessing means shading the column *down*
-   * from the page background (darker), while the panels sit lighter than it.
-   * The warm primary bloom stays: it reads as ambient light, not luminance. */
+  /* Dark mirrors :root: the column shades down, the panels sit lighter; the warm bloom reads as ambient light. */
+  /* @see #191 */
   --c-wash:
     radial-gradient(
       ellipse 90% 65% at 50% 35%,
@@ -156,13 +138,11 @@
     var(--c-primary) calc(55% * var(--edge-glow-strength)),
     transparent
   );
-  /* Seam shadow (issue #191): deep and neutral on the dark canvas. */
+  /* Deep and neutral on the dark canvas. */
+  /* @see #191 */
   --c-recess: rgba(0, 0, 0, 0.6);
-  /* Solidity gradient for interactive panels (issue #191): the mirror of :root.
-   * In light the panels shade *down* from the page background; in dark they
-   * shade *up* — warm-tinted and lifted slightly toward the background/white —
-   * so the chrome reads as solid furniture sitting *in front of* the darker,
-   * recessed column. */
+  /* Dark mirrors :root: panels shade up, warm-tinted, so chrome reads as solid furniture in front of the recessed column. */
+  /* @see #191 */
   --c-panel-surface: linear-gradient(
     180deg,
     color-mix(in srgb, var(--c-sidebar-bg) 100%, white 8%) 0%,
@@ -171,11 +151,8 @@
   color-scheme: dark;
 }
 
-/* No prefers-color-scheme fallback here: default order (issue #53) is resolved
- * in the inline <head> script in apps/client/index.html (twin of theme.ts),
- * which always sets exactly one class — explicit preference beats system
- * preference, and the default is light.
- */
+/* No prefers-color-scheme fallback: theme resolution lives in the inline <head> script in apps/client/index.html. */
+/* @see #53 */
 
 body {
   font-family: 'Roboto Variable', 'Roboto', ui-sans-serif, system-ui, sans-serif;
@@ -184,21 +161,20 @@ body {
   background-color: var(--c-bg);
 }
 
-/* Atmospheric depth utilities (issue #191): broad wash + tight border glow.
- * Element borders are preserved — the glow is additive on top of them. */
+/* Broad wash + tight border glow; the glow is additive on top of element borders. */
+/* @see #191 */
 .ambient-wash {
   background-image: var(--c-wash);
 }
 
-/* Interactive chrome reads as a solid slab (issue #191): a shallow top-lit →
- * bottom-shaded gradient of the panel's own surface colour. */
+/* Interactive chrome reads as a solid slab. */
+/* @see #191 */
 .panel-surface {
   background-image: var(--c-panel-surface);
 }
 
-/* Recessed frame: the chat column sits *behind* the interactive chrome. An
- * inset shadow along the top and bottom seams makes it read as sunk beneath
- * the composer (below) and header (above), rather than floating forward. */
+/* The chat column reads as sunk beneath the composer and header rather than floating forward. */
+/* @see #191 */
 .recessed-frame {
   box-shadow:
     inset 0 20px 26px -22px var(--c-recess),
@@ -209,27 +185,20 @@ body {
   box-shadow: 0 0 0 1px var(--c-edge-glow);
 }
 
-/* Subtler sibling for secondary interactive elements (Admin / New Chat), so
- * they share the lit-edge family without competing with the composer. */
+/* Subtler sibling for secondary interactive elements, sharing the lit-edge family without competing. */
 .edge-glow-subtle {
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--c-edge-glow) 55%, transparent);
 }
 
-/* Responsive table (#220): below the md breakpoint dense admin tables are
- * illegible behind the horizontal scroller, so each row renders as a stacked
- * label/value card. The header row is dropped and each cell shows its
- * `data-label` as a small muted caption via the ::before pseudo-element.
- * At md and up the normal table layout is restored untouched. */
+/* Below md each row renders as a stacked label/value card; at md and up the normal table layout is restored. */
+/* @see #220 */
 .responsive-table {
   width: 100%;
 }
 
 @media (width < 48rem) {
-  /* #359 feedback: the drawer is the phone's chat picker — make it full-bleed
-   * so titles read in full (subtitles may still ellipsize). Trade-off: there
-   * is no outside to tap, so the X (and the scrim's click target, kept for
-   * the slide-in window and robustness) is the exit. The slide-in animation
-   * is transform-driven and unaffected. */
+  /* Full-bleed drawer: no outside to tap, so the X (and scrim target) is the exit. */
+  /* @see #359 */
   :root {
     --sidebar-width: 100vw;
   }
@@ -285,8 +254,7 @@ body {
     content: none;
   }
 
-  /* Full-width message row (e.g. "No models configured") has no cells to
-     label, so keep it as a simple block. */
+  /* Full-width message rows (e.g. "No models configured") have no cells to label. */
   .responsive-table td[colspan] {
     display: block;
     text-align: left;

@@ -1,20 +1,8 @@
-// Attachment envelope (issue #34, PR #47 review): structured delimiters for
-// attaching user files to a turn. Modeled on the "<user_content>" pattern
-// Gemini recommends: an explicit untrusted-data rule plus a per-item <file>
-// element with metadata attributes. Two hardenings ship here:
-//
-// 1. Closing-tag escaping — file *content* that itself contains literal
-//    closing tags gets a backslash escape, so a forged "</user_content>"
-//    inside a file cannot pop the envelope early.
-// 2. The untrusted-data rule is emitted BEFORE the data, in the same
-//    message.
-//
-// Kept additive: turns without an attachment produce an empty string, so
-// the prompt is byte-identical to the text-only path.
+/* Attachment envelope: an untrusted-data rule plus per-item <file> elements; closing tags in file content are escaped so a forged tag cannot pop the envelope; turns without an attachment produce '' (byte-identical prompt). */
+// @see #34 #47
 
-// Tag names that must not be popped early from inside an envelope. The last
-// alternative covers issue #35's per-namespace <user:...> envelopes
-// (preferred_name, full_name, custom_instructions) without listing each one.
+// Tag names that must not be popped early; the last alternative covers the per-namespace <user:...> envelopes.
+// @see #35
 const CLEAR_TAG_NAMES = 'user_content|file|content|instructions|user:[a-z_]+';
 
 export const escapeEnvelopeBreakers = (text: string): string =>
@@ -58,9 +46,7 @@ const fileElement = (item: AttachmentItem): string => {
   ].join('\n');
 };
 
-// Builds the full block appended to the user turn when an asset is
-// attached: rule first, then the data envelope. Returns '' when there is
-// no attachment, keeping the text-only prompt byte-identical.
+// Builds the full block appended to the user turn when an asset is attached: rule first, then the data envelope; '' when there is no attachment.
 export const buildAttachmentEnvelope = (item: AttachmentItem | null): string => {
   if (!item) return '';
   return [
@@ -74,11 +60,8 @@ export const buildAttachmentEnvelope = (item: AttachmentItem | null): string => 
   ].join('\n');
 };
 
-// Generic user-data envelope (issue #35, PR #46 review): wraps user-controlled
-// strings — preferred name, full name, custom instructions — in namespace-tagged
-// delimiters so the model can tell system-level instruction from user-supplied
-// data. Same escaping hardening as attachments:' content that contains a
-// literal closing tag cannot pop the envelope early.
+/* Generic user-data envelope wrapping user-controlled strings in namespace-tagged delimiters, with the same escaping hardening as attachments. */
+// @see #35 #46
 export interface UserEnvelopeItem {
   tagName: string;
   intro: string;

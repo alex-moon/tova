@@ -1,30 +1,7 @@
 import { config } from '../config';
 
-/*
- * Best-effort LangSmith trace deletion (issue #143, factory reset scope).
- *
- * Every persisted chat turn is traced into the configured LangSmith project
- * with `metadata.session_id = <chat session id>` (set via withLangsmithMetadata
- * in mastraService, attached by routes/chat.ts since #224), so traces belonging
- * to a chat are deletable by that id. ZDR turns are not traced with a session
- * id (nothing durable exists to join):
- *
- *  - resolve the project's LangSmith id from its name (GET /api/v1/sessions)
- *  - query the run ids (POST /api/v1/runs/query, which returns
- *    `{ runs, ... }`, filter on metadata_key/metadata_value — the documented
- *    compliance pattern)
- *  - batch-delete the trace ids (POST /api/v1/runs/delete)
- *
- * Known limitations, all deliberate: the delete endpoint is asynchronous
- * (LangSmith returns 202 "queued" and does not confirm that any run matched,
- * so we cannot verify a deletion succeeded); it may be rate-limited or
- * disallowed by org policy; a run exported between our Mongo sweep and this
- * query can be missed. Consequently the whole service is failure-tolerant —
- * it logs and returns, never throwing, so a trace problem can never abort the
- * rest of the factory reset. Without an API key the exporter never ran
- * (mastraService gates on the same env), so the purge is a silent no-op —
- * dev/stub parity.
- */
+/* Best-effort LangSmith trace deletion by session id: resolve project, query run ids, batch-delete. Deliberately failure-tolerant — logs, never throws; a silent no-op without an API key. */
+// @see #143 #224
 
 const BASE_URL = 'https://api.smith.langchain.com';
 const PAGE_SIZE = 100;
@@ -55,10 +32,7 @@ const purgeSessionTraces = async (
     if (!queryRes.ok) {
       throw new Error(`run query failed: HTTP ${queryRes.status}`);
     }
-    // The endpoint answers an object (`{ runs, cursors, ... }`), not an array.
-    // Keep the array guard as a shape assertion on `runs`: a missing or
-    // malformed key must throw into the best-effort catch, not read as an
-    // empty page.
+    // The endpoint answers an object, not an array; the array guard must throw into the best-effort catch, not read as an empty page.
     const body = (await queryRes.json()) as { runs?: { trace_id?: string }[] };
     const runs = body.runs;
     if (!Array.isArray(runs)) throw new Error('unexpected run query response shape');
@@ -99,8 +73,7 @@ export const purgeUserTraces = async (sessionIds: string[]): Promise<void> => {
       throw new Error(`project lookup failed: HTTP ${res.status}`);
     }
     const sessions = (await res.json()) as { id?: string; name?: string }[];
-    // Name-match only: falling back to the first session returned would risk
-    // issuing deletes against a project the config never named.
+    // Name-match only: falling back to the first session returned could delete against an unnamed project.
     const projectId = sessions.find((s) => s.name === project)?.id;
     if (!projectId) {
       throw new Error(`project "${project}" not found`);
@@ -110,9 +83,7 @@ export const purgeUserTraces = async (sessionIds: string[]): Promise<void> => {
       try {
         await purgeSessionTraces(sessionId, headers, projectId);
       } catch (err) {
-        // One session failing (rate limit, HTTP error) must not give up on the
-        // remaining ones — each session's traces are a separate best-effort
-        // chunk, so continue and let the failure be logged.
+        // One session failing must not give up on the remaining ones.
         console.error('trace purge (best-effort) failed for a session:', String(err));
       }
     }

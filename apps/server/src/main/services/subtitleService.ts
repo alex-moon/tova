@@ -2,10 +2,8 @@ import { redactForLog } from './logRedaction';
 import { inferenceService } from './inferenceService';
 import { config } from '../config';
 
-// #359: the subtitle is a soft, revisable scope signal, so model choice is
-// low-stakes — compression on a short context is what the aux model
-// (`openai/gpt-oss-20b`) does well. Escalate only with specific bad subtitles
-// to point at.
+// The subtitle is a soft, revisable scope signal, so the aux model is low-stakes here.
+// @see #359
 const subtitleModel = (): string => config.aux.model;
 
 const SUBTITLE_PROMPT =
@@ -42,15 +40,13 @@ export const reviseSessionSubtitle = async (
         },
       ],
       temperature: 0.3,
-      // Reasoning models spend hidden reasoning tokens from this budget
-      // before any subtitle text (same headroom rationale as titleService).
+      // Reasoning models spend hidden reasoning tokens from this budget before any subtitle text.
       max_tokens: 512,
     });
     const subtitle = completion.choices[0]?.message?.content
       ?.trim()
       .replace(/^["'“”]+|["'“”]+$/g, '');
-    // A failed/empty revision keeps the current subtitle (or null) — the
-    // next cadence turn retries. The signal is revisable by design.
+    // A failed/empty revision keeps the current subtitle; the next cadence turn retries.
     if (!subtitle) return current;
     return subtitle.length > MAX_SUBTITLE_LENGTH
       ? `${subtitle.slice(0, MAX_SUBTITLE_LENGTH)}…`

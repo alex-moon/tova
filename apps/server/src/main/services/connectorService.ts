@@ -17,24 +17,14 @@ import {
   toolIsFailed,
 } from './toolDegrade';
 
-/*
- * Connector service (#329, epic #328) — the DB-facing layer over the MCP
- * wire code. Resolves platform + personal connectors, dispatches auth per
- * connector type (`authFor`), and wraps each MCP tool as a Mastra tool that
- * proxies `callTool` server-side. The MCP protocol internals below
- * (handshake, list/call, transports) are unchanged from the mcpService era:
- * the wire still speaks MCP; only ownership moved to the connector concept.
- * Stdio transports are deliberately out of scope (#36): no child processes.
- */
+/* The DB-facing layer over the MCP wire code: resolves platform + personal connectors, dispatches auth per type, and wraps each MCP tool as a server-side-proxied Mastra tool; stdio transports are out of scope. */
+// @see #329 #328 #36
 
 const CONNECT_TIMEOUT_MS = 5000;
 const CALL_TIMEOUT_MS = 30000;
-// How long a cached DB snapshot of a user's connectors is trusted. Chat
-// turns stay cheap: one query per window, not per message.
+// How long a cached DB snapshot of a user's connectors is trusted: one query per window, not per message.
 const CONNECTORS_CACHE_TTL_MS = 2000;
-// A cached connection is reused until a call proves it dead; the next access
-// reconnects lazily. (Handshake-on-failure keeps the primitive simple: no
-// background prober, no stale-clock.)
+// A cached connection is reused until a call proves it dead; the next access reconnects lazily (no background prober, no stale-clock).
 
 interface McpToolInfo {
   name: string;
@@ -71,11 +61,8 @@ const patAuthHeaders = (connector: ConnectorDocument): Record<string, string> | 
   }
 };
 
-// Type-dispatch seam (#329, #327): per-type stored auth → wire headers for
-// the MCP client. mcp.oauth refreshes proactively here (and marks
-// needs-reauth on a dead grant). Unknown types authenticate anonymously
-// rather than throwing — a connector whose type predates its auth support
-// still lists tools.
+/* Type-dispatch seam: per-type stored auth → wire headers; unknown types authenticate anonymously rather than throw. */
+// @see #329 #327
 const authFor = async (
   connector: ConnectorDocument,
 ): Promise<Record<string, string> | undefined> => {
@@ -89,13 +76,7 @@ const authFor = async (
   }
 };
 
-/*
- * JSON Schema -> zod for MCP tool inputs. MCP tools declare JSON Schema;
- * Mastra tools declare zod. Supported shapes: primitives, arrays, buffers of
- * nested objects. Anything unsupported degrades to `z.any()` so a tool can
- * never fail to register. Field descriptions ride into the model-visible
- * schema wherever they appear.
- */
+/* JSON Schema → zod for MCP tool inputs; unsupported shapes degrade to z.any() so a tool can never fail to register. */
 export const zodFromJsonSchema = (schema: unknown): z.ZodTypeAny => {
   if (!schema || typeof schema !== 'object') return z.any();
   const s = schema as Record<string, unknown>;
@@ -198,21 +179,15 @@ export const listMcpTools = async (
   return tools;
 };
 
-/*
- * Call an MCP tool through a (possibly cached) client. One failed call
- * triggers a single fresh handshake + retry; persistent failure degrades to
- * a descriptive `error` result (#82, issue wording) so a dead endpoint can
- * never hang or fail a turn, and the model is told the tool was tried and
- * failed — not left to guess between "unavailable tool" and "empty result".
- */
+/* Call an MCP tool through a (possibly cached) client; one failed call triggers one fresh handshake + retry; persistent failure degrades to a descriptive error result so a dead endpoint can never hang or fail a turn. */
+// @see #82
 export const callMcpTool = async (
   url: string,
   headers: Record<string, string> | undefined,
   toolName: string,
   args: unknown,
-  // #82: display name used in the model-facing degraded text. The toolset
-  // wrapper (the only production caller) passes the qualified tool id so a
-  // degraded retry-short-circuit and a degraded live failure read identically.
+  // Display name used in the model-facing degraded text — the qualified tool id, so short-circuits and live failures read identically.
+  // @see #82
   displayName?: string,
 ): Promise<unknown> => {
   let lastError: unknown;
@@ -246,12 +221,11 @@ export const callMcpTool = async (
         { timeout: CALL_TIMEOUT_MS },
       );
     } catch (error) {
-      lastError = error; // fall through to retry / degraded result
+      lastError = error;
     }
   }
-  // The `reason` field (also #82) carries the original failure reason so the
-  // toolset wrapper can remember it for short-circuited retries; `error`
-  // stays the complete model-facing degraded text.
+  // The `reason` field carries the original failure so short-circuited retries remember it; `error` is the complete model-facing degraded text.
+  // @see #82
   return {
     error: degradedToolError(displayName || toolName, reasonFrom(lastError)),
     reason: reasonFrom(lastError),
@@ -261,13 +235,7 @@ export const callMcpTool = async (
 const sanitizeToolsetKey = (name: string): string =>
   `mcp_${name.replace(/[^a-zA-Z0-9_]+/g, '_').slice(0, 40)}`;
 
-/*
- * Per-user toolset resolution: platform connectors plus the calling user's
- * own. Connections happen in parallel with a bounded connect timeout so a
- * first chat after adding N connectors stays within that bound, never N× it.
- * Any unreachable connector is dropped from the set (its tools stop being
- * offered) — chat proceeds degraded, not stalled.
- */
+/* Per-user toolset resolution: platform + the caller's own connectors, connected in parallel with a bounded timeout; unreachable connectors are dropped so chat proceeds degraded, not stalled. */
 export const connectorToolsetsForUser = async (
   userId?: string,
 ): Promise<Record<string, Record<string, ReturnType<typeof createTool>>>> => {
@@ -277,9 +245,7 @@ export const connectorToolsetsForUser = async (
   if (cached && cached.expiresAt > now) return cached.promise;
 
   const promise = (async () => {
-    // userId is a session-string elsewhere in the app, but the Mongo owner
-    // field is a real ObjectId: a non-parseable id simply matches no
-    // user-scope rows (platform connectors still resolve) instead of throwing.
+    // The Mongo owner field is a real ObjectId; a non-parseable session id simply matches no user-scope rows (platform rows still resolve) instead of throwing.
     const ownerId =
       userId && mongoose.Types.ObjectId.isValid(userId)
         ? new mongoose.Types.ObjectId(userId)
@@ -310,10 +276,8 @@ export const connectorToolsetsForUser = async (
           id: `${setKey}/${toolInfo.name}`,
           description: toolInfo.description || `Tool ${toolInfo.name} from an MCP server`,
           inputSchema: zodFromJsonSchema(toolInfo.inputSchema),
-          // #82: the wrapper short-circuits when this same tool already
-          // failed earlier in the completion (no second handshake), and
-          // marks it failed when callMcpTool itself degrades — a retried
-          // dead tool then skips both handshakes on the next step.
+          // The wrapper short-circuits when this tool already failed earlier in the completion, and marks it failed on a degraded live call — a retried dead tool skips both handshakes.
+          // @see #82
           execute: async (inputData, ctx) => {
             const toolId = `${setKey}/${toolInfo.name}`;
             if (toolIsFailed(ctx, toolId))
@@ -336,10 +300,7 @@ export const connectorToolsetsForUser = async (
     return toolsets;
   })();
 
-  // Cache hygiene: a rejection must not outlive the TTL it was stored for.
-  // The no-op catch keeps an unawaited cached promise silent; dropping the
-  // entry on failure makes the next turn rebuild instead of re-serving a
-  // poisoned entry until it expires.
+  // Cache hygiene: a rejection must not outlive its TTL — drop the entry on failure so the next turn rebuilds instead of re-serving a poisoned entry.
   toolsetsCache.set(cacheKey, { expiresAt: now + CONNECTORS_CACHE_TTL_MS, promise });
   promise.catch(() => undefined);
   try {

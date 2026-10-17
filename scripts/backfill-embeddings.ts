@@ -1,19 +1,5 @@
-/*
- * #294: embed the existing workspace corpus into `workspace_embeddings`.
- *
- *   npx tsx scripts/backfill-embeddings.ts [--user <id>] [--dry-run]
- *   npm run db:backfill-embeddings
- *
- * Idempotent: a slice is (re-)embedded only when its `textHash` differs from
- * the stored row, so re-running over an unchanged corpus is a no-op. The
- * decision logic lives in `workspaceEmbeddingBackfill.ts` and the embed/upsert
- * core in `workspaceEmbeddingIngest.ts` (shared with the #289 eval runner), so
- * this script is just argument parsing and per-user reporting.
- *
- * Needs: a reachable Mongo (`MONGODB_URL`) and `DEEPINFRA_API_KEY`. Run
- * `npm run db:vector-index` once against Atlas before retrieval can use these
- * rows (the local stack has no `$vectorSearch`).
- */
+/* Embed the existing workspace corpus into `workspace_embeddings`; idempotent by textHash. */
+// @see #294 #289
 import 'dotenv/config';
 import mongoose from 'mongoose';
 import { buildMongoUri } from '../apps/shared/src/main/mongoUri';
@@ -21,8 +7,7 @@ import { config } from '../apps/server/src/main/config';
 import { User } from '../apps/server/src/main/models/User';
 import { embedWorkspaceUser } from '../apps/server/src/main/services/workspaceEmbeddingIngest';
 
-// Rough public pricing for a bge-base-class embedding (~$0.067 per 1M input
-// tokens); reported as an order-of-magnitude cost bound, not a bill.
+// Rough public embedding pricing; an order-of-magnitude cost bound, not a bill.
 const USD_PER_MILLION_TOKENS = 0.067;
 const CHARS_PER_TOKEN = 4;
 

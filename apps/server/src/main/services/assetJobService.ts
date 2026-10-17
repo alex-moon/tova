@@ -2,11 +2,8 @@ import type { Types } from 'mongoose';
 import { Asset } from '../models/Asset';
 import { AssetJob, type AssetJobDocument } from '../models/AssetJob';
 
-// Mongo-backed conversion queue (issue #67): enqueue is idempotent per
-// "live" job, the poller claims one pending job atomically per tick, and
-// failures retry up to MAX_JOB_ATTEMPTS before terminal-failing the job and
-// the asset's markdown status. The processor is injectable so tests (and a
-// later iteration's conversion service) can supply the real converter.
+/* Mongo-backed conversion queue: idempotent enqueue, atomic claim per tick, retries up to MAX_JOB_ATTEMPTS before terminal-failing job and markdown status; processor is injectable. */
+// @see #67
 
 export const MAX_JOB_ATTEMPTS = 3;
 
@@ -21,9 +18,7 @@ const clampError = (err: unknown): string => {
   return message.slice(0, MAX_STORED_ERROR_CHARS);
 };
 
-// Idempotent enqueue: a pending/processing/done job for the asset is reused
-// (enqueue only matters while the asset's markdownStatus is 'pending');
-// a previously failed chain gets a fresh job.
+// Idempotent enqueue: a live-status job for the asset is reused; a previously failed chain gets a fresh job.
 export const enqueueAssetJob = async (
   assetId: Types.ObjectId | string,
 ): Promise<AssetJobDocument> => {
@@ -35,9 +30,7 @@ export const enqueueAssetJob = async (
   return AssetJob.create({ assetId });
 };
 
-// Atomic claim: status + attempts bump in one findOneAndUpdate, sorted
-// oldest-pending-first. Single consumer in-process; multiple server
-// processes would still not double-claim the same row.
+// Atomic claim: status + attempts bump in one findOneAndUpdate, oldest-pending-first; multiple server processes cannot double-claim.
 export const claimNextAssetJob = async (): Promise<AssetJobDocument | null> =>
   AssetJob.findOneAndUpdate(
     { status: 'pending' },
@@ -45,11 +38,7 @@ export const claimNextAssetJob = async (): Promise<AssetJobDocument | null> =>
     { sort: { createdAt: 1 }, new: true },
   );
 
-// One poll tick: claim a job, run the processor, and settle the outcome.
-// Processor failures retry until MAX_JOB_ATTEMPTS attempts have been made,
-// at which point the job terminal-fails and whichever asset lifecycles are
-// still pending flip to 'failed' (the asset itself stays 'ready' — the
-// original binary is fine). A job may cover conversion, thumbnail, or both.
+// One poll tick: claim, run, settle; on exhaustion terminal-fail the job and the still-pending lifecycles (the asset stays 'ready' — the binary is fine).
 export const runAssetJobTick = async (processor: AssetJobProcessor): Promise<void> => {
   const job = await claimNextAssetJob();
   if (!job) return;
@@ -70,9 +59,7 @@ export const runAssetJobTick = async (processor: AssetJobProcessor): Promise<voi
       },
     );
     if (exhausted) {
-      // Fail only the lifecycles the processor did not finish; a job that was
-      // conversion-only must not clobber a ready thumbnail status, and vice
-      // versa.
+      // Fail only the lifecycles the processor did not finish; a conversion-only job must not clobber a ready thumbnail.
       await Asset.updateOne(
         { _id: job.assetId, markdownStatus: 'pending' },
         { $set: { markdownStatus: 'failed', markdownFailureReason: message } },
@@ -89,12 +76,7 @@ let timer: ReturnType<typeof setInterval> | null = null;
 
 let busy = false;
 
-// A server crash mid-job leaves a `processing` row stranded forever, which
-// also blocks enqueueAssetJob (a live-status job is reused). At poller start
-// such jobs older than STALE_PROCESSING_MS are requeued as `pending` so a
-// restart self-heals; updatedAt (bumped by the claim and by timestamps) is
-// the staleness clock. Attempts are not incremented — the sweep does not
-// count against the retry cap because the processor never observed the loss.
+// A crash mid-job strands a `processing` row and blocks enqueue; the start sweep requeues stale ones (attempts not incremented — the processor never observed the loss).
 export const STALE_PROCESSING_MS = 5 * 60 * 1000;
 
 export const requeueStaleAssetJobs = async (
@@ -114,8 +96,7 @@ export const startAssetJobPoller = (
   if (timer) return timer;
   void requeueStaleAssetJobs().catch(() => undefined);
   timer = setInterval(() => {
-    // One job per tick; skip ticks while the previous processor run is still
-    // in flight so slow conversions don't stack up queries.
+    // One job per tick; skip while the previous run is still in flight so slow conversions don't stack queries.
     if (busy) return;
     busy = true;
     void runAssetJobTick(processor).finally(() => {

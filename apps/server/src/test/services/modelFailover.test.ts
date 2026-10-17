@@ -5,13 +5,8 @@ import {
   isRateLimitError,
 } from '../../main/services/modelFailover';
 
-/*
- * #233: the tier-era serial failover loop (`withModelFailover`) is deleted with
- * the tier router. What remains — and what these tests pin — is the error
- * classification the racing runtime reuses to decide abort vs. cool-off vs.
- * loud failure.
- */
-
+/* Error classification the racing runtime reuses to decide abort vs cool-off vs loud failure. */
+// @see #233
 describe('provider error classification (#168/#213)', () => {
   it('isClientAbort matches AbortError and CanceledError only', () => {
     expect(isClientAbort(Object.assign(new Error('Request aborted'), { name: 'AbortError' }))).toBe(
@@ -30,9 +25,8 @@ describe('provider error classification (#168/#213)', () => {
     expect(isPromptSizeError(Object.assign(new Error('quota'), { statusCode: 429 }))).toBe(false);
   });
 
-  // #168: the rate-limit matcher must stay as broad as the 429 discrimination
-  // in `streamingErrorMessage` (routes/chat.ts) — a Groq-style TPM/RPM body
-  // rethrown without a status code must not disable.
+  // The rate-limit matcher must stay as broad as the 429 discrimination in streamingErrorMessage — a TPM/RPM body rethrown without a status code must not disable.
+  // @see #168
   it('a rate-limit message without a status code is matched in all message shapes', () => {
     for (const message of [
       'Rate limit exceeded',
@@ -52,8 +46,8 @@ describe('provider error classification (#168/#213)', () => {
     );
   });
 
-  // #213: endpoint overload (`engine_overloaded`, HTTP 429) is a per-endpoint
-  // transient, distinct from a genuine account rate limit.
+  // Endpoint overload (`engine_overloaded`, HTTP 429) is a per-endpoint transient, distinct from a genuine account rate limit.
+  // @see #213
   it('isOverloadError distinguishes overload from a genuine rate limit', () => {
     expect(
       isOverloadError(

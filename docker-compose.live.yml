@@ -1,9 +1,6 @@
 services:
-  # #257: one-shot migration runner on the compose network. Same .env as the
-  # backend, so it connects to exactly the same DB (Atlas MONGODB_URL or the
-  # compose mongo), runs `up`, and exits. The backend waits for
-  # service_completed_successfully, replacing the old host-side
-  # migrate-then-restart-backend dance in scripts/deploy.sh.
+  # One-shot migration runner on the compose network; the backend waits for it via service_completed_successfully.
+  # @see #257
   migrations:
     build:
       context: .
@@ -17,9 +14,8 @@ services:
       context: .
       dockerfile: Dockerfile
     command: npm start
-    # #358: an uncaught-exception crash (tesseract/tessdata, Oct 16) left the
-    # backend dead until the next deploy — compose's default restart policy is
-    # "no". Keep the container up across crashes and host reboots.
+    # Keep the container up across crashes and host reboots (compose default is "no").
+    # @see #358
     restart: unless-stopped
     ports:
       - '15000:5000'
@@ -43,9 +39,8 @@ services:
     depends_on:
       - backend
 
-  # #179: logs ship to Grafana Cloud (hosted Loki). Alloy tails the compose
-  # containers and pushes over the Loki push API; LOKI_URL / LOKI_USERNAME /
-  # LOKI_PASSWORD (Grafana Cloud Loki basic auth) come from .env.
+  # Alloy tails the compose containers and pushes to Grafana Cloud Loki; credentials come from .env.
+  # @see #179
   alloy:
     image: grafana/alloy:v1.19.2
     restart: unless-stopped

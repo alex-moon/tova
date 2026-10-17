@@ -1,10 +1,7 @@
 import { commands, formatSeconds, formatRosterRow, ROSTER_HEADER } from '../main/manageCommands';
 
-/*
- * #322: registry shape and the pure formatting helpers behind the `roster`
- * readout. The commands themselves are thin live-infra wrappers (driver reads
- * and wire probes) and are exercised by running them, not by unit tests.
- */
+/* Registry shape and the pure formatting helpers behind the roster readout; the commands themselves are thin live-infra wrappers exercised by running them. */
+// @see #322
 
 describe('manage command registry (#322)', () => {
   it('exposes the roster and image-tool probe commands with descriptions', () => {
@@ -31,8 +28,7 @@ describe('formatSeconds', () => {
 
 describe('formatRosterRow', () => {
   it('renders one line per provider entry with eligibility, TTFT and cool-off', () => {
-    // Relative to now: the fixture once hardcoded a date that aged into the
-    // past, and the formatter (correctly) drops expired cool-offs.
+    // Relative to now: a hardcoded fixture date aged into the past and the formatter (correctly) drops expired cool-offs.
     const coolOff = new Date(Date.now() + 60 * 60 * 1000);
     const lines = formatRosterRow({
       modelId: 'zai-org/GLM-5.3-Flash',

@@ -10,11 +10,8 @@ import {
   resolveScheduledModels,
 } from '../../main/services/evalRunService';
 
-/*
- * #225 route coverage: admin-guard wiring, list ordering + limit clamp, the
- * detail 404 for a missing/garbage id, and the manual-run 202/409/5xx paths
- * (the service is mocked so no suite executes).
- */
+/* Route coverage: admin-guard wiring, list ordering + limit clamp, detail 404s, manual-run 202/409/5xx paths (service mocked). */
+// @see #225
 jest.mock('../../main/services/evalRunService', () => {
   const actual = jest.requireActual('../../main/services/evalRunService');
   return {

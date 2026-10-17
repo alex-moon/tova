@@ -1,11 +1,7 @@
 import { MigrationInterface, Db } from 'mongo-migrate-ts';
 
-/*
- * #175: per-provider-route error tally. modelErrorTallyService upserts one
- * row per (provider, model, status, category) — the migration pre-creates
- * the collection and the unique key index so the tally pattern cannot race
- * a lazy-create on first use.
- */
+// Pre-creates the modelrouteerrors collection and its unique tally key index so the tally cannot race a lazy-create.
+// @see #175
 export class CreateModelRouteErrors implements MigrationInterface {
   async up(db: Db): Promise<void> {
     for (const name of await db.listCollections().toArray()) {

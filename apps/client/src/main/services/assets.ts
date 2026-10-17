@@ -1,9 +1,7 @@
 import axios from 'axios';
 
-// Issue #252 (epic #251): where the file came from. Mirrors the server's
-// AssetProvenance. `kind` is the only required field; the ids are optional and
-// absent means unknown (never faked). Server serialises absent provenance as
-// explicit null so the client can distinguish "unknown" from a missing field.
+// Where the file came from; absent ids mean unknown (never faked); absent provenance serialises as explicit null.
+// @see #252 #251
 export interface AssetProvenance {
   kind: 'upload' | 'chat' | 'task';
   sessionId?: string;
@@ -11,32 +9,33 @@ export interface AssetProvenance {
   messageId?: string;
 }
 
-// Issue #34: file bytes go direct-to-Spaces with a presigned PUT; this service
-// only talks to our own API for presign/confirm/list/url/delete and performs
-// the direct PUT with XHR so upload progress can be reported.
+// File bytes go direct-to-Spaces with a presigned PUT; XHR so upload progress can be reported.
+// @see #34
 export interface AssetSummary {
   id: string;
   filename: string;
   contentType: string;
   size: number;
   status: string;
-  // Issue #340/#356: which audience the file is for — 'user-upload' |
-  // 'system-generated' | 'system-side' (agent-only working material, e.g. a
-  // scraped page: no Spaces object, so download affordances must hide).
+  // 'system-side' is agent-only working material (no Spaces object, so download affordances must hide).
+  // @see #340 #356
   origin?: 'user-upload' | 'system-generated' | 'system-side';
   // No extracted text server-side — Tova can read the filename only.
   hasText: boolean;
-  // Issue #67: markdown conversion lifecycle ('none'|'pending'|'ready'|'failed');
-  // the markdown text itself stays server-side.
+  // Markdown conversion lifecycle; the markdown text itself stays server-side.
+  // @see #67
   markdownStatus?: string;
-  // Issue #83: worker's last failure reason for the failed-card tooltip.
+  // Worker's last failure reason for the failed-card tooltip.
+  // @see #83
   markdownFailureReason?: string | null;
-  // Issue #208: derived-thumbnail lifecycle ('none'|'pending'|'ready'|'failed');
-  // the viewer waits for 'ready' before rendering an image preview.
+  // Derived-thumbnail lifecycle; the viewer waits for 'ready' before rendering an image preview.
+  // @see #208
   thumbnailStatus?: string;
-  // Issue #252: provenance, or null when unknown (legacy rows / untracked).
+  // Provenance, or null when unknown (legacy rows / untracked).
+  // @see #252
   provenance?: AssetProvenance | null;
-  // Issue #325: current content version; > 1 means the file has edit history.
+  // Current content version; > 1 means the file has edit history.
+  // @see #325
   version?: number;
   createdAt: string;
 }
@@ -46,9 +45,8 @@ export interface AssetListPage {
   nextCursor: string | null;
 }
 
-// Issue #197: the in-app viewer payload — the extracted body, which the list
-// payload deliberately never carries. `content` is null when nothing could be
-// extracted; `format` says whether to render it as markdown or as plain text.
+// The in-app viewer payload: the extracted body, which the list payload deliberately never carries.
+// @see #197
 export interface AssetContent {
   id: string;
   filename: string;
@@ -60,21 +58,21 @@ export interface AssetContent {
   markdownStatus?: string;
   markdownFailureReason?: string | null;
   thumbnailStatus?: string;
-  // Issue #252: provenance, or null when unknown.
+  // @see #252
   provenance?: AssetProvenance | null;
-  // Issue #325: current content version.
+  // @see #325
   version?: number;
   createdAt: string;
 }
 
-// Issue #325: one row of an assistant-generated file's content history.
+// @see #325
 export interface AssetVersionInfo {
   version: number;
   size: number;
   createdAt: string;
 }
 
-// Issue #325: the body of a single past version, for the read-only preview.
+// @see #325
 export interface AssetVersionContent {
   version: number;
   size: number;
@@ -83,9 +81,8 @@ export interface AssetVersionContent {
   createdAt: string;
 }
 
-// Issue #208: the derived-thumbnail state for an image asset. `url` is null
-// until the worker has produced the thumbnail; `status` mirrors the server
-// lifecycle so the viewer can keep polling while it is 'pending'.
+// `url` is null until the worker produces the thumbnail; `status` lets the viewer keep polling while pending.
+// @see #208
 export interface AssetThumbnail {
   url: string | null;
   status: string;
@@ -98,8 +95,8 @@ export class AssetError extends Error {
   }
 }
 
-// Mirrors the server's asset size policy and #68's bulk batch caps. Exported
-// so the library UI reuses the same numbers instead of duplicating them.
+// Mirrors the server's asset size policy and bulk batch caps; exported so the UI reuses the same numbers.
+// @see #68
 export const MAX_ASSET_SIZE = 15 * 1024 * 1024;
 export const BULK_BATCH_SIZE = 20;
 const BULK_PUT_CONCURRENCY = 3;
@@ -148,11 +145,7 @@ const putUpload = (
 
 const contentTypeOf = (file: File) => file.type || 'application/octet-stream';
 
-// One chunk of `uploadMany`: one bulk-presign, a pool of direct PUTs, then
-// one bulk-confirm covering only the files whose PUT succeeded. Per-file
-// failures land in `results[index].error`; only a route-level failure of the
-// batch calls degrades every file of this chunk to an error row — nothing
-// ever throws (partial success stays visible even when a whole chunk fails).
+// One bulk-presign, a pool of direct PUTs, then one bulk-confirm for the PUT-succeeded files; nothing ever throws.
 const uploadBatch = async (
   batch: number[],
   files: File[],
@@ -194,9 +187,7 @@ const uploadBatch = async (
     return;
   }
 
-  // Worker pool of 3 over an index queue: bounded parallelism for the direct
-  // Spaces PUTs. Progress uses the caller's global file index so the UI can
-  // map callbacks to rows without batch knowledge.
+  // Bounded parallelism for the direct PUTs; progress uses the caller's global file index.
   const queue = [...okItems];
   const putSucceeded: typeof okItems = [];
   const worker = async () => {
@@ -216,9 +207,7 @@ const uploadBatch = async (
   };
   await Promise.all(Array.from({ length: Math.min(BULK_PUT_CONCURRENCY, queue.length) }, worker));
 
-  // One bulk-confirm per batch for only the PUT-succeeded files — PUT-failed
-  // files are never confirmed (their rows are already errors). Results are
-  // matched back by assetId, not row order.
+  // PUT-failed files are never confirmed; results are matched back by assetId, not row order.
   if (!putSucceeded.length) return;
 
   try {
@@ -252,10 +241,8 @@ const uploadBatch = async (
 };
 
 const AssetService = {
-  // Issue #356: `origin` narrows the list to one audience — 'system-side'
-  // fetches ONLY agent-facing files (pages fetch_url saved); omitted keeps
-  // the server default (uploads + generated, agent-side excluded), which the
-  // chat attach picker also relies on.
+  // 'system-side' fetches ONLY agent-facing files; omitted keeps the server default, which the chat attach picker relies on.
+  // @see #356
   async list(cursor?: string | null, origin?: 'system-side'): Promise<AssetListPage> {
     const res = await axios.get<AssetListPage>('/api/assets', {
       params: { ...(cursor ? { cursor } : {}), ...(origin ? { origin } : {}) },
@@ -263,7 +250,8 @@ const AssetService = {
     return res.data;
   },
 
-  // Issue #197: fetch the extracted body for the in-app preview.
+  // Fetch the extracted body for the in-app preview.
+  // @see #197
   async content(assetId: string): Promise<AssetContent> {
     try {
       const res = await axios.get<{ asset: AssetContent }>(`/api/assets/${assetId}/content`);
@@ -278,7 +266,8 @@ const AssetService = {
     return res.data.url;
   },
 
-  // Issue #325: content history of an assistant-generated file, newest first.
+  // Content history of an assistant-generated file, newest first.
+  // @see #325
   async versions(assetId: string): Promise<AssetVersionInfo[]> {
     try {
       const res = await axios.get<{ versions: AssetVersionInfo[] }>(
@@ -290,7 +279,8 @@ const AssetService = {
     }
   },
 
-  // Issue #325: read one past version's body for the read-only preview.
+  // Read one past version's body for the read-only preview.
+  // @see #325
   async versionContent(assetId: string, version: number): Promise<AssetVersionContent> {
     try {
       const res = await axios.get<{ version: AssetVersionContent }>(
@@ -302,7 +292,8 @@ const AssetService = {
     }
   },
 
-  // Issue #325: restore a past version as a new current version.
+  // Restores the past version as a new current version.
+  // @see #325
   async restore(assetId: string, version: number): Promise<AssetSummary> {
     try {
       const res = await axios.post<{ asset: AssetSummary }>(`/api/assets/${assetId}/restore`, {
@@ -314,9 +305,8 @@ const AssetService = {
     }
   },
 
-  // Issue #208: presigned URL for the derived image thumbnail, plus the
-  // current lifecycle status. `url` is null while the thumbnail is still
-  // pending or if it failed.
+  // Presigned URL for the derived thumbnail plus lifecycle status; `url` is null while pending or failed.
+  // @see #208
   async thumbnailUrl(assetId: string): Promise<AssetThumbnail> {
     try {
       const res = await axios.get<AssetThumbnail>(`/api/assets/${assetId}/thumbnail-url`);
@@ -326,9 +316,8 @@ const AssetService = {
     }
   },
 
-  // Issue #69: bulk download is a plain GET with a repeatable `id` query
-  // param; the browser grabs the streamed zip (cookies ride along), so no
-  // axios call is needed — just the URL for an anchor download.
+  // Plain GET with a repeatable `id` query param; the browser grabs the streamed zip, so just the URL for an anchor download.
+  // @see #69
   bulkDownloadUrl(assetIds: string[]): string {
     return `/api/assets/bulk-download?${assetIds
       .map((id) => `id=${encodeURIComponent(id)}`)
@@ -354,12 +343,8 @@ const AssetService = {
     }
   },
 
-  // `scope` (issue #116): the chat composer tags its uploads as 'chat' so the
-  // server can keep an incognito chat's attachments out of durable storage.
-  // Assets-page uploads omit it and remain durable by default.
-  // `chatId`/`zdr` (:144) tell the server which per-chat incognito decision
-  // applies — an existing chat's stored flag, or a new chat's composer
-  // toggle (an upload must precede that chat's session creation).
+  // `scope: 'chat'` lets the server keep an incognito chat's attachments out of durable storage; `chatId`/`zdr` say which per-chat incognito decision applies.
+  // @see #116 #144
   async upload(
     file: File,
     onProgress?: (pct: number) => void,
@@ -400,14 +385,8 @@ const AssetService = {
     }
   },
 
-  // Bulk upload (issue #68): many files via N normal singleton uploads — one
-  // bulk-presign and one bulk-confirm per chunk of at most BULK_BATCH_SIZE
-  // files, direct PUTs to Spaces in between with a worker pool of 3. Maps
-  // `FileList` → `File[]`, rejects oversized files locally (no API call),
-  // and resolves with one result row per file: `asset` for success, `error`
-  // otherwise. Per-file failures never throw; nothing here sends or accepts
-  // any archive container — bulk is just many normal uploads, and uploads are
-  // never zips.
+  // Bulk upload: one presign/confirm per chunk, direct PUTs in between; one result row per file, failures never throw, no archive container.
+  // @see #68
   async uploadMany(
     files: File[] | FileList,
     onFileProgress?: (fileIndex: number, pct: number) => void,
@@ -425,8 +404,7 @@ const AssetService = {
       }
     }
 
-    // Chunks are processed sequentially: the server cap (MAX_BULK_FILES) is
-    // a pure-number change away, and our UI never exceeds it.
+    // Chunks are sequential; the server cap is a pure-number change away and the UI never exceeds it.
     for (let start = 0; start < pending.length; start += BULK_BATCH_SIZE) {
       await uploadBatch(
         pending.slice(start, start + BULK_BATCH_SIZE),

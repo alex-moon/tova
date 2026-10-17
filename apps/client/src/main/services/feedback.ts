@@ -1,7 +1,6 @@
 import axios from 'axios';
 
-// Connector separating views from axios. Feedback POST/DELETE go through
-// this module; views should not import axios directly (PR #27 review).
+// Connector separating views from axios; feedback POST/DELETE go through this module.
 const FeedbackService = {
   async record(messageId: string, value: 'up' | 'down'): Promise<void> {
     await axios.post(`/api/messages/${messageId}/feedback`, { value });

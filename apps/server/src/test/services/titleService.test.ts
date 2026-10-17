@@ -1,12 +1,7 @@
 import { generateChatTitle } from '../../main/services/titleService';
 import { muteConsoleError } from '../muteConsole';
-/*
- * Issues #41 and #117: title generation is a tool-free aux call. It must go
- * through `createToolFreeCompletion` (never the tool-attached streaming path
- * that carries the built-in toolset / tool-use instructions), and it must
- * degrade to the truncated fallback when the call fails or returns nothing.
- */
-
+/* Title generation is a tool-free aux call: never the tool-attached streaming path, and it must degrade to the truncated fallback on failure. */
+// @see #41 #117
 const mockCreateToolFree = jest.fn();
 const mockCreateCompletion = jest.fn();
 
@@ -33,7 +28,8 @@ describe('generateChatTitle', () => {
     const options = mockCreateToolFree.mock.calls[0][0];
     expect(options.provider).toBe('groq');
     expect(options.model).toBe(process.env.AUX_MODEL || 'openai/gpt-oss-20b');
-    // No tool payload of any kind on an aux call (#117 operator confirmation).
+    // No tool payload of any kind on an aux call (operator confirmation).
+    // @see #117
     expect(options.messages?.map((m: { role: string }) => m.role)).toEqual(['system', 'user']);
     expect(JSON.stringify(options)).not.toMatch(/web_search|tools|tool_choice/);
   });

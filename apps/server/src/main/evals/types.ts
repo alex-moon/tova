@@ -1,9 +1,5 @@
-/**
- * Types for the #112 deterministic eval framework. Graders are code, not
- * LLM-judges: each eval case declares assertions over an observed run
- * (tool-call records, assembled prompt, produced content) and a deterministic
- * aggregator maps assertion results to pass/partial/fail.
- */
+/** Types for the deterministic eval framework: code graders, not LLM judges. */
+// @see #112
 
 /** One observed tool call, shaped after FullOutput.toolResults plus stream args. */
 export interface ToolCallRecord {
@@ -22,18 +18,14 @@ export interface EvalRun {
   prompt: string;
   /** Content extracted from generated files (README case), if any. */
   generatedContent?: string;
-  /**
-   * The assistant's final answer text, accumulated from `chunk.delta` while
-   * streaming (#158). Regex assertions over this are the deterministic slice
-   * of the refusal/hallucination checks.
-   */
+  /** The assistant's final answer text, accumulated from `chunk.delta` while streaming. */
+  // @see #158
   finalText?: string;
-  /**
-   * The assistant's final answer text (#159), concatenated text deltas;
-   * lets retrieval cases grade the answer itself, not just tool use.
-   */
+  /** The assistant's final answer text, letting retrieval cases grade the answer itself. */
+  // @see #159
   answer?: string;
-  /** Every generated file emitted by the run (#159), in call order. */
+  /** Every generated file emitted by the run, in call order. */
+  // @see #159
   generatedFiles?: Array<{ filename: string; content: string }>;
 }
 
@@ -41,37 +33,28 @@ export type Assertion =
   | { type: 'tool_called'; tool: string; argsSubset?: Record<string, unknown> }
   | {
       type: 'tool_matching';
-      /** Substring match, for fuzzy MCP tool names (#112). */ nameContains: string;
+      /** Substring match, for fuzzy MCP tool names. */
+      // @see #112
+      nameContains: string;
     }
   | { type: 'tool_not_called'; tool: string }
   | { type: 'tool_sequence'; tools: string[] }
   | { type: 'content_equals'; expected: string }
   | { type: 'prompt_contains'; text: string }
-  /**
-   * #158: the final answer must match the (case-insensitive-by-default)
-   * regex — e.g. the explicit "no sources available" refusal wording.
-   */
+  /** The final answer must match the regex (case-insensitive by default). */
+  // @see #158
   | { type: 'text_matches'; pattern: string; flags?: string }
-  /**
-   * #158 hallucination guard: the final answer must NOT claim a search
-   * happened unless a `web_search` call is actually present in the run.
-   * The search-claim regex set lives in `graders.ts` (`SEARCH_CLAIMS`).
-   */
+  /** The final answer must not claim a search happened without a `web_search` call in the run. */
+  // @see #158
   | { type: 'text_not_claiming_search' }
-  /**
-   * #158 OQ2 (pinned in the issue): a sourced answer must carry sources that
-   * are referenced inline as literal links in the final text. Deterministic
-   * form: finalText (or generatedContent fallback) must contain at least one
-   * http(s) URL — a bare link or a markdown link both count. Whether the
-   * source actually supports the statement stays out of regex reach.
-   */
+  /** A sourced answer must reference its sources inline as literal links in the final text. */
+  // @see #158
   | { type: 'text_inline_sources' }
-  /** Substring (case/whitespace-normalised) match on the assistant's final answer (#159). */
+  /** Substring (case/whitespace-normalised) match on the assistant's final answer. */
+  // @see #159
   | { type: 'answer_contains'; text: string }
-  /**
-   * A generated file's content contains `text` (#159): `filename` must match
-   * a `generate_file` call exactly, and its content must contain `text`.
-   */
+  /** A generated file's content contains `text` with `filename` matched exactly. */
+  // @see #159
   | { type: 'file_content_contains'; filename: string; text: string };
 
 export interface AssertionResult {

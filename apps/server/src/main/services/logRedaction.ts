@@ -1,21 +1,7 @@
-// Issue #145: shared redaction for log emission. Chat-route errors and
-// extraction/classification failures can embed prompt content or extracted
-// user text (e.g. a provider error echoing the request body). There is no
-// central choke point — logService.attachConsoleCapture() mirrors console.*
-// verbatim into the admin buffer — so call sites must redact before they
-// pass anything risky to console.*.
-
-// Policy note: this is the conservative heuristic (option b, plan-145).
-// It targets long/high-entropy segments, quoted request bodies, and JSON
-// blocks; short message tokens (status codes, errno classes) and quoted
-// filesystem paths survive. Paths are code-controlled (fs error messages
-// quote the exact file), and the #358 diagnosis was slowed by redacting
-// them, so the quoted-string rules carve them out — narrowly: POSIX-safe
-// charset, no scheme, short extension-terminated final segment. URLs and
-// token-ish runs still redact, and any 64+-char run is re-caught by the
-// long-run rules regardless. Whether the result is sufficient for short
-// personal content is an open audit question — see
-// docs/done/plan-145-log-redaction.md.
+// Shared redaction for log emission: there is no central choke point, so call sites must redact before passing anything risky to console.*.
+// @see #145
+// Conservative heuristic: targets long/high-entropy segments, quoted request bodies and JSON blocks; quoted code-controlled paths survive narrowly; URLs and token-ish runs still redact.
+// @see #145 #358
 
 export const REDACTED = '[redacted]';
 
@@ -30,19 +16,7 @@ interface NonError {
 
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null;
 
-// A filesystem path as quoted in fs error messages (`open '/app/x/y.gz'`,
-// `readFile 'dist/main.js'`) and code-controlled logs. Deliberately narrow —
-// this is an allowlist inside an over-redaction-first heuristic:
-// - POSIX-safe charset only (no spaces, quotes, shell metacharacters);
-// - no scheme separator, so URLs (which can embed tokens or user text) never
-//   match;
-// - the final segment must carry a short (1-16 char) file extension, so
-//   opaque runs like `/reset/<token>` or `/p/<id>` still redact. Real paths
-//   virtually always end in a file; extension-less directory paths stay
-//   redacted (conservative miss, accepted);
-// - bounded at 64 chars, aligned with the long-run backstop rules below:
-//   pathological "paths" longer than that stay redacted (plan-145
-//   conservative direction). Real fs error paths are well under this.
+// A filesystem path as quoted in fs error messages; a deliberately narrow allowlist: POSIX-safe charset, no scheme, short extension-terminated final segment, bounded at 64 chars so opaque token runs still redact.
 const PATH_SAFE_CHARS = /^[\w./@+~-]+$/;
 const FILE_EXTENSION_END = /\.[A-Za-z0-9]{1,16}$/;
 const PATH_MAX_CHARS = 64;
@@ -54,21 +28,12 @@ const isPathShaped = (text: string): boolean =>
   PATH_SAFE_CHARS.test(text) &&
   FILE_EXTENSION_END.test(text);
 
-// Extraction for the carve-out: a quoted segment (either quote style; the
-// apostrophe-pair risk is neutralised by isPathShaped's strictness — prose
-// between two apostrophes never looks like a path) whose content is
-// path-shaped is swapped for a placeholder that survives every rule below,
-// then restored verbatim at the end. #358: without this, the final catch-all
-// redacts the ENTIRE fs error message once the path is kept (the message is
-// one long line), which is worse than redacting just the path.
+// Extraction for the carve-out: a quoted path-shaped segment is swapped for a placeholder and restored verbatim at the end; without it the catch-all would redact the ENTIRE fs error message.
+// @see #358
 const QUOTED_SEGMENT = /'((?:\\.|[^']){1,300})'|"((?:\\.|[^"]){1,300})"/g;
 const PATH_PLACEHOLDER = (i: number): string => `\u0000${i}\u0000`;
 
-/**
- * Redact user-shaped content from a single string: quoted strings that are
- * long enough to be payload text, JSON-esque blocks, and long token
- * sequences without spaces (high-entropy fragments, embedded bodies).
- */
+/** Redact user-shaped content from a single string: long quoted strings, JSON-esque blocks, and long whitespace-free token runs. */
 export const redactString = (text: string): string => {
   if (!text) return text;
   const paths: string[] = [];
@@ -80,27 +45,20 @@ export const redactString = (text: string): string => {
       return PATH_PLACEHOLDER(paths.length - 1);
     },
   );
-  // JSON-ish objects/arrays spanning >= 40 chars (includes quoted request
-  // bodies embedded by provider errors via stringify)
+  // JSON-ish objects/arrays spanning >= 40 chars (includes embedded request bodies).
   out = out.replace(/[{[][\s\S]{40,}[}\]]/g, REDACTED);
-  // Double-quoted payload text (>= 16 chars) — covers embedded prompt
-  // fragments in single-line provider messages
+  // Double-quoted payload text (>= 16 chars) — embedded prompt fragments in provider messages.
   out = out.replace(/"((?:\\.|[^"]){16,})"/g, `"${REDACTED}"`);
-  // Single-quoted payload text, but only when the opening quote is not a
-  // word-internal apostrophe: contractions/possessives ("doesn't", "user's")
-  // would otherwise be matched as pairs and corrupt ordinary prose.
+  // Single-quoted payload text, but not word-internal apostrophes (contractions would corrupt ordinary prose).
   out = out.replace(/(?<![\w'])'((?:\\.|[^']){16,})'/g, `'${REDACTED}'`);
-  // Secret-shaped assignments (apikey=..., bearer token=...) — short values
-  // survive the whitespace-free threshold, so they need a dedicated rule.
+  // Secret-shaped assignments — short values survive the whitespace-free threshold, so they need a dedicated rule.
   out = out.replace(
     /((?:api[_-]?key|token|secret|password|authorization|bearer)["'\s:=]+\s*)(["']?)[\w./+-]{8,}\2/gi,
     `$1$2${REDACTED}$2`,
   );
-  // Long whitespace-free runs — UUIDs/b64/keys/system dumps
+  // Long whitespace-free runs — UUIDs/b64/keys/system dumps.
   out = out.replace(/[^\s'"{}[\]]{64,}/g, REDACTED);
-  // Catch-all: any remaining single-line run of >= 64 chars is treated as
-  // embedded prose (provider echo of prompt text). Deliberately aggressive:
-  // the conservative direction is over-redaction (plan-145 open question).
+  // Catch-all: any remaining >= 64-char single-line run is treated as embedded prose; over-redaction is the conservative direction.
   out = out.replace(/[^\n\r]{64,}/g, REDACTED);
   // eslint-disable-next-line no-control-regex -- the \x00 sentinel is the point
   return out.replace(/\u0000(\d+)\u0000/g, (_, i: string) => {
@@ -128,10 +86,7 @@ const redactErrorBody = (body: NonError): string => {
     parts.push(redactString(serialize(body.message)));
   }
   if (typeof body.stack === 'string') {
-    // Stack frames are code-controlled (paths + line numbers); keep
-    // verbatim except for the mirrored message already redacted above.
-    // Clip the whole path anyway: raw stack text can embed message text
-    // in the first line, which the message-level pass may have missed.
+    // Stack frames are code-controlled; keep verbatim except the mirrored message, clipped anyway since raw stack text can embed message text.
     const firstNewline = body.stack.indexOf('\n');
     if (firstNewline !== -1) {
       const frames = body.stack
@@ -145,11 +100,7 @@ const redactErrorBody = (body: NonError): string => {
   return parts.join(': ');
 };
 
-/**
- * Format an unknown argued-to-console value into a string safe for
- * console.error: message text redacted, error shape (name, frames, short
- * status/class tokens) kept.
- */
+/** Format an unknown value into a string safe for console.error: message text redacted, error shape kept. */
 export const redactForLog = (value: unknown): string => {
   if (value === null || value === undefined) return String(value);
   if (typeof value === 'string') return redactString(value);

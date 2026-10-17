@@ -1,15 +1,7 @@
 import { extensionOf } from './markdownConversion';
 
-// Document units (issue #159): long documents are stored as a sequence of
-// units — one per PDF page, one per top-level section for md/html — so the
-// agent can walk through the extracted text unit by unit (e.g. "which page
-// is the support phone number on?") instead of seeing only the head slice
-// of the whole conversion. Units are additive to `markdownExtracted` and
-// invisible to the user; they are derived by slicing the already-capped
-// conversion output, so total stored size does not grow.
-//
-// Extraction is pure string work — the guideline lives in the agent-facing
-// tool, not here.
+// Document units: long documents stored as a sequence of units (PDF page / top-level section) so the agent can walk the text unit by unit; additive, derived by slicing the already-capped conversion.
+// @see #159
 
 export interface AssetUnit {
   // User-visible position (1-based).
@@ -27,9 +19,7 @@ const isPdf = (filename: string): boolean => extensionOf(filename) === 'pdf';
 const isHeaded = (filename: string): boolean =>
   ['md', 'html', 'htm'].includes(extensionOf(filename));
 
-// PDFs: split on the `-- n of n --` separator lines pdf-parse appends after
-// each page's text, so page n is the text between separators n-1 and n.
-// PDFs that yield no separators fall back to a single whole-doc unit.
+// PDFs: split on the `-- n of n --` separator lines pdf-parse appends; no separators fall back to a whole-doc unit.
 const pdfUnits = (markdown: string): AssetUnit[] => {
   const matches = [...markdown.matchAll(PDF_PAGE_LINE)];
   if (matches.length === 0) return wholeDocUnit(markdown);
@@ -51,9 +41,7 @@ const pdfUnits = (markdown: string): AssetUnit[] => {
       text: markdown.slice(start, current.index ?? start).trim(),
     });
   }
-  // Text after the final separator has no page label of its own (pdf-parse
-  // ends each page with its separator): keep it as an extra page rather than
-  // dropping it.
+  // Text after the final separator has no page label of its own: keep it as an extra page rather than dropping it.
   const last = matches[matches.length - 1]!;
   const tail = markdown.slice((last.index ?? 0) + last[0].length).trim();
   if (tail.length > 0) {
@@ -67,19 +55,10 @@ const headingOf = (line: string): { level: number; title: string } | null => {
   return match ? { level: match[1]!.length, title: match[2]!.trim() } : null;
 };
 
-// ``` / ~~~~ fence lines toggle an open fence (the closing fence only ends it
-// if it uses the same run of characters). Headings inside fenced code blocks
-// are examples, not document structure, and must not drive the split — a
-// doctored `# comment` inside a fence would otherwise become the shallowest
-// heading level and collapse the whole document to a single unit.
+// Fence lines toggle an open fence; headings inside fenced code blocks are examples, not document structure, and must not drive the split.
 const isFenceLine = (line: string): boolean => /^(`{3,}|~{3,})/.test(line);
 
-// md/html arrive as markdown (turndown for html): split on ATX headings at
-// the shallowest level present (H1 if any, otherwise the shallowest used),
-// so each unit is a top-level section titled by its heading. Anything
-// before the first such heading — usually nothing — becomes an untitled
-// leading unit. A document with no (or a single) split-level heading stays
-// whole.
+// md/html arrive as markdown: split on ATX headings at the shallowest level present; a document with no (or a single) split-level heading stays whole.
 const headingUnits = (markdown: string): AssetUnit[] => {
   const lines = markdown.split('\n');
   const headings: { lineNo: number; level: number; title: string }[] = [];

@@ -11,20 +11,13 @@ import AssetService, {
   type AssetVersionInfo,
 } from '@/services/assets';
 
-// Issue #197: the files view moves out of the chat modal to its own URL
-// (/files), mirroring /profile and /admin. It is a master/detail: the
-// existing library list on the left, a rendered preview of the selected file
-// on the right. Text/markdown renders via MarkdownContent; images render a
-// derived thumbnail (#208) so the original is never pulled into the pane;
-// everything else falls back to its extracted text or the empty state.
-// Issue #325: an assistant-generated file with edit history (version > 1)
-// gains a History toggle — a version list, a read-only preview of any past
-// version, and a restore action.
+// Master/detail files view: library list plus a rendered preview (thumbnail for images, extracted text otherwise) with a version-history toggle.
+// @see #197 #208 #325
 const isImageAsset = (asset: AssetSummary | null): boolean =>
   Boolean(asset?.contentType?.startsWith('image/'));
 
-// How long between re-reads while the selected asset's worker job is in
-// flight (#208 thumbnails, #67 conversions).
+// Re-read interval while the selected asset's worker job (thumbnail, conversion) is in flight.
+// @see #208 #67
 const PENDING_POLL_MS = 3000;
 
 const formatSize = (bytes: number): string => {
@@ -42,14 +35,13 @@ const AssetsView: React.FC = () => {
   const [image, setImage] = useState<ImagePreview>({ state: 'loading' });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  // Issue #325: content history state. `versions === null` means not fetched;
-  // `viewingVersion` non-null shows that version read-only instead of current.
+  // `versions === null` means not fetched; `viewingVersion` non-null shows that version read-only.
+  // @see #325
   const [historyOpen, setHistoryOpen] = useState(false);
   const [versions, setVersions] = useState<AssetVersionInfo[] | null>(null);
   const [viewingVersion, setViewingVersion] = useState<number | null>(null);
   const [versionContent, setVersionContent] = useState<AssetVersionContent | null>(null);
   const [restoring, setRestoring] = useState(false);
-  // Interval handle for re-reading while a worker job is still in flight.
   const pollTimer = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const loadContent = useCallback(async (asset: AssetSummary) => {
@@ -58,9 +50,7 @@ const AssetsView: React.FC = () => {
     setContent(null);
     try {
       if (isImageAsset(asset)) {
-        // Images have no extracted body to preview; the derived thumbnail is
-        // the preview. The endpoint reports the lifecycle so a pending
-        // thumbnail can be polled rather than read as a failure.
+        // The derived thumbnail is the preview; the endpoint reports lifecycle so pending can be polled, not read as failure.
         const thumb = await AssetService.thumbnailUrl(asset.id);
         setImage(
           thumb.url
@@ -84,7 +74,8 @@ const AssetsView: React.FC = () => {
     if (!selected) return;
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setImage({ state: 'loading' });
-    // A new selection resets any history/version view (#325).
+    // A new selection resets any history/version view.
+    // @see #325
     setHistoryOpen(false);
     setVersions(null);
     setViewingVersion(null);
@@ -93,9 +84,8 @@ const AssetsView: React.FC = () => {
     void loadContent(selected);
   }, [selected, loadContent]);
 
-  // Re-read while the selected asset is still settling: an image thumbnail
-  // (#208) or converted markdown (#67) appears in place without the user
-  // re-selecting. Suspended while a past version is being previewed (#325).
+  // Poll while the asset is settling (thumbnail or conversion); suspended while a past version is previewed.
+  // @see #208 #67 #325
   useEffect(() => {
     const pending =
       image.state === 'pending' ||
@@ -157,8 +147,7 @@ const AssetsView: React.FC = () => {
     setRestoring(true);
     try {
       const restored = await AssetService.restore(selected.id, viewingVersion);
-      // Selecting the restored asset re-runs the selection effect, which
-      // reloads the content and closes the history view.
+      // Selecting the restored asset re-runs the selection effect, which reloads the content and closes the history view.
       setSelected(restored);
       toast.success('Version restored');
     } catch (err) {
@@ -194,8 +183,7 @@ const AssetsView: React.FC = () => {
     <p className="text-sm text-muted-foreground">(no extracted text)</p>
   );
 
-  // Issue #325: the body has three modes — the version list, a read-only past
-  // version, or the current content (the pre-#325 behaviour).
+  // @see #325
   const body = historyOpen ? (
     <div data-testid="assets-history-list">
       <p className="mb-2 text-xs text-muted-foreground">Version history</p>

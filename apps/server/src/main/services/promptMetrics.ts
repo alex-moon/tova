@@ -1,12 +1,4 @@
-/**
- * Pure per-message prompt metrics. No deps, no I/O, no LLM.
- *
- * These are cheap deterministic proxies collected so routing decisions and
- * future feedback can be correlated with prompt characteristics. The
- * heuristics (syllable vowel-cluster estimate, English stopword list,
- * imperative first word) are English-only by design; the syllable estimate
- * in particular is meaningless for CJK and other scripts.
- */
+/** Pure per-message prompt metrics: cheap deterministic proxies for correlating routing/feedback with prompt characteristics; heuristics are English-only by design. */
 
 export interface CodeIndicators {
   fences: number;

@@ -17,14 +17,14 @@ import type { AdminModelLookup } from '@tova/shared';
 
 const router = express.Router();
 
-// Bearer PATs (#184) and cookie sessions both pass through the first leg.
+// Bearer PATs and cookie sessions both pass through the first leg.
+// @see #184
 const adminGuard = [authenticateBearerOrSession, requireRole('admin')];
 
 const KNOWN_PERMISSIONS = ['routing'] as const;
 
-// Owner-protected account: cannot be demoted at all (issue #15, owner
-// decision 2026-09-11). Module-level constant so a future env/config
-// move is a one-line change.
+// Owner-protected account: cannot be demoted at all; module-level so a config move is one line.
+// @see #15
 export const PROTECTED_OWNER_EMAIL = 'formsatz@gmail.com';
 
 const toPublicUser = (user: UserDocument): AdminUser => ({
@@ -59,17 +59,13 @@ router.get('/users', ...adminGuard, async (_req, res) => {
   }
 });
 
-/*
- * Model inventory with CRUD (issue #104, reworked onto the roster in #234).
- * Each row is ONE `modelrosters` document: a model registered once with a
- * paired `providers[]` list (two serverless backends). Read errors degrade to
- * empty lists; the view shows a 'no data' state.
- */
-// #232: the racing path only talks to the two roster providers. `typesafe`
-// rides along in compare (#151) but is not a roster provider.
+/* Model inventory CRUD: each row is ONE modelrosters document with a paired providers[] list; read errors degrade to empty lists. */
+// @see #104 #234
+// The racing path only talks to the two roster providers; `typesafe` rides along in compare only.
+// @see #232 #151
 const ROSTER_PROVIDER_SET = ['deepinfra', 'fireworks'] as const;
-// Compare still accepts the legacy provider set so historic rows remain
-// runnable (#151 keeps `typesafe` reachable ahead of its connector).
+// Compare still accepts the legacy provider set so historic rows remain runnable.
+// @see #151
 const PROVIDER_SET = ['groq', 'deepinfra', 'fireworks', 'typesafe'] as const;
 type CompareProvider = (typeof PROVIDER_SET)[number];
 
@@ -120,11 +116,7 @@ const isProvided = (v: unknown): boolean =>
 const isRosterProvider = (value: unknown): value is (typeof ROSTER_PROVIDER_SET)[number] =>
   typeof value === 'string' && (ROSTER_PROVIDER_SET as readonly string[]).includes(value);
 
-/*
- * Validate a provider entry (`{provider, modelId, enabled?}`). Returns the
- * whitelisted entry or an error string. `enabled` is optional (defaults true
- * on create); it is a boolean when present.
- */
+/* Validate a provider entry ({provider, modelId, enabled?}); returns the whitelisted entry or an error string. */
 const validateProviderEntry = (value: unknown): ProviderMutation | { error: string } => {
   if (!value || typeof value !== 'object') return { error: 'Invalid provider entry' };
   const p = value as Record<string, unknown>;
@@ -144,11 +136,7 @@ const validateProviderEntry = (value: unknown): ProviderMutation | { error: stri
   };
 };
 
-/*
- * Validates a create/update payload against the ModelRoster schema and
- * returns just the whitelisted fields, or a 400 message. `forUpdate` only
- * rejects fields in the payload; omitted fields mean "leave unchanged".
- */
+/* Validate a create/update payload against the ModelRoster schema; omitted fields mean "leave unchanged". */
 const validateModelMutation = (
   body: unknown,
   forUpdate: boolean,
@@ -168,8 +156,7 @@ const validateModelMutation = (
     if (typeof b.label !== 'string' || !b.label.trim()) return { error: 'Invalid label' };
     out.label = b.label.trim();
   } else if (!forUpdate) {
-    // A label is required by the schema; default it to the model id so an
-    // operator adding the seed models by hand is not forced to name them.
+    // A label is required by the schema; default it to the model id so an operator adding seed models by hand need not name them.
     out.label = (b.modelId as string | undefined)?.trim() ?? '';
   }
   if (b.eligible !== undefined) {
@@ -187,16 +174,11 @@ const validateModelMutation = (
     if (!Number.isInteger(n) || n <= 0) return { error: 'Invalid contextLength' };
     out.contextLength = n;
   } else if (forUpdate && (b.contextLength === '' || b.contextLength === null)) {
-    // `null` (not `undefined`) so mongoose passes the clear through: update
-    // casting silently drops undefined keys.
+    // `null` (not `undefined`) so mongoose passes the clear through; update casting silently drops undefined keys.
     out.contextLength = null;
   }
-  /*
-   * #199 prices: USD per 1M tokens, non-negative finite numbers (not
-   * integers — sub-cent rates like $0.085 are legal). `''`/`null` clears the
-   * field back to "unknown", mirroring the contextLength branch. Price is now
-   * a soft weighted-score input (#234 OQ4), not a hard cap.
-   */
+  /* Prices: USD per 1M tokens, non-negative finite; ''/null clears back to unknown; a soft score input, not a cap. */
+  // @see #199 #234
   for (const field of ['inputPrice', 'outputPrice'] as const) {
     if (b[field] !== undefined && isProvided(b[field])) {
       const n = Number(b[field]);
@@ -217,8 +199,7 @@ const validateModelMutation = (
     for (const entry of b.providers) {
       const parsed = validateProviderEntry(entry);
       if ('error' in parsed) return { error: parsed.error };
-      // A duplicate provider would make the per-provider TTFT update target two
-      // entries; reject so the roster stays one entry per provider.
+      // A duplicate provider would make the per-provider TTFT update target two entries; keep one entry per provider.
       if (seen.has(parsed.provider)) {
         return { error: `Duplicate provider entry: ${parsed.provider}` };
       }
@@ -256,20 +237,21 @@ const toAdminModel = (row: RosterRow) => ({
   tools: row.tools !== false,
   vision: row.vision === true,
   contextLength: row.contextLength,
-  // #199 pricing (USD per 1M tokens); undefined on unpriced models, which
-  // JSON drops so the client only sees the key when a price is known.
+  // Pricing (USD per 1M tokens); undefined on unpriced models so the client only sees the key when a price is known.
+  // @see #199
   inputPrice: row.inputPrice,
   outputPrice: row.outputPrice,
   providers: (row.providers ?? []).map((p) => ({
     provider: p.provider,
     modelId: p.modelId,
     enabled: p.enabled !== false,
-    // OQ3: exactly the rolling figure the router scores on — no client-side
-    // recomputation, so operators see what `pickPrimary` sees.
+    // Exactly the rolling figure the router scores on — no client-side recomputation.
+    // @see #232
     ttftMs: p.ttftMs,
     ttftSamples: p.ttftSamples,
     ttftUpdatedAt: p.ttftUpdatedAt ? new Date(p.ttftUpdatedAt).toISOString() : undefined,
-    // #168: system-owned per-provider cool-off; absent/null = not cooling off.
+    // System-owned per-provider cool-off; absent/null = not cooling off.
+    // @see #168
     disabledUntil: p.disabledUntil ? new Date(p.disabledUntil).toISOString() : null,
   })),
 });
@@ -279,19 +261,18 @@ const duplicateModelError = (err: unknown): boolean =>
 
 router.get('/models', ...adminGuard, async (_req, res) => {
   try {
-    // #234: the admin table reads the roster (one row per model) + the #175
-    // error tally. The tier-era feedback tallies are gone with the router.
+    // The admin table reads the roster plus the error tally.
+    // @see #234 #175
     const [roster, routeErrors] = await Promise.all([
       ModelRoster.find({}).lean(),
-      // #168 diagnostics, consolidated onto the #175 tally (OQ-7, decision
-      // 2026-09-26): inferenceService records every completion failure into
-      // `modelrouteerrors`, so the admin table reads that single mechanism —
-      // most recent shapes first.
+      // inferenceService records every completion failure into `modelrouteerrors`; the admin table reads that single mechanism.
+      // @see #168 #175
       ModelRouteError.find({}).sort({ lastSeenAt: -1 }).lean(),
     ]);
     res.json({
       models: ((roster ?? []) as unknown as RosterRow[]).map(toAdminModel),
-      // #168 diagnostics, keyed provider+model.
+      // Diagnostics keyed provider+model.
+      // @see #168
       errors: (
         (routeErrors ?? []) as unknown as {
           provider: string;
@@ -317,14 +298,8 @@ router.get('/models', ...adminGuard, async (_req, res) => {
   }
 });
 
-/*
- * #217/#234: resolve a model's provider-owned details from the provider
- * catalog so the admin can add a model without hand-entering context/prices.
- * DeepInfra reports context/prices/vision; Fireworks reports context/vision
- * but no prices. `found: false` with HTTP 200 is a normal answer; a
- * provider/network failure is a 502 so the client can tell "not hosted" from
- * "could not check".
- */
+/* Resolve a model's provider-owned details from the catalog; `found: false` with 200 is a normal miss, a provider failure is a 502. */
+// @see #217 #234
 const LOOKUP_PROVIDERS = ['deepinfra', 'fireworks'] as const;
 
 const isLookupProvider = (value: string): value is LookupProvider =>
@@ -397,12 +372,7 @@ router.put('/models/:id', ...adminGuard, async (req, res) => {
     return res.status(400).json({ message: payload.error });
   }
   try {
-    /*
-     * Providers are edited by merging on the provider key: an incoming entry
-     * replaces `modelId`/`enabled` for that backend but preserves its rolling
-     * TTFT and cool-off (operator edits must not wipe system-owned metrics).
-     * A provider not named in the payload is left untouched.
-     */
+    /* Providers merge on the provider key: an incoming entry replaces modelId/enabled but preserves rolling TTFT and cool-off. */
     const set: Record<string, unknown> = {};
     for (const field of [
       'modelId',
@@ -459,10 +429,8 @@ router.delete('/models/:id', ...adminGuard, async (req, res) => {
   }
 });
 
-// Issue #129: direct model comparison — one prompt through the existing
-// agent on chosen routing rows. Shares `runModelComparison` with the
-// one-off CLI (`scripts/eval-model-compare.ts`) so both lanes exercise the
-// identical agent path; see services/modelCompare.ts.
+// Direct model comparison: one prompt through the existing agent on chosen rows; shares runModelComparison with the CLI.
+// @see #129
 router.post('/model-compare', ...adminGuard, async (req, res) => {
   const b = req.body as { prompt?: unknown; models?: unknown };
   if (typeof b?.prompt !== 'string' || !b.prompt.trim()) {
@@ -503,9 +471,8 @@ router.post('/model-compare', ...adminGuard, async (req, res) => {
   }
 });
 
-// #179: retained logs from Grafana Cloud (hosted Loki), replacing the old
-// in-memory buffer tail. One time-window page, newest first; filters are
-// applied server-side after fetch (see services/lokiLogs.ts).
+// Retained logs from Grafana Cloud Loki; one time-window page, newest first, filters applied server-side.
+// @see #179
 router.get('/logs', ...adminGuard, async (req, res) => {
   const level = req.query.level as LogLevel | undefined;
   if (level !== undefined && !['info', 'warn', 'error'].includes(level)) {

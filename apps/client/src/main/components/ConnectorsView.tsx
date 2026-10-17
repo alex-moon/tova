@@ -11,27 +11,14 @@ import { Input } from '@/components/ui/input';
 import ConnectorService, { ConnectorError } from '../services/connectors';
 import ConnectorLogo from './ConnectorLogo';
 
-/*
- * The connectors view (#331, epic #328): a curated grid of catalog cards
- * (market-share ordered, #326), a per-connector connect modal, and an
- * "add anything else" custom affordance for power users. Mobile-first:
- * single-column grid and a bottom-sheet modal at phone width.
- *
- * Connected/not is a url-join — catalog definitions have fixed endpoints,
- * so a personal connector row with the same url means connected (trailing
- * slashes normalized — real rows carry them, e.g. the Copilot MCP url).
- * Custom rows (no matching definition) render in their own list.
- */
+// Curated catalog grid with a connect modal and a custom-URL affordance; connected/not is a trailing-slash-insensitive url-join.
+// @see #331 #328 #326
 
-// Trailing-slash-insensitive url identity for the catalog join — the one
-// place this normalization lives, so cards, modal, and custom list agree.
+// The one place this normalization lives, so cards, modal, and custom list agree.
 const normUrl = (url: string): string => url.replace(/\/+$/, '');
 
-// The grid renders live entries only (#333): the watchlist rides in the
-// catalog as data and re-appears by flipping state, but the view shows the
-// verified set — no "coming soon" cards. Watchlisted providers' rows (connected
-// via the custom affordance before a flip) still surface under "Added by you",
-// so CATALOG_ENDPOINTS covers the whole catalog while the GRID uses live only.
+// Grid shows live entries only; CATALOG_ENDPOINTS still covers the whole catalog so watchlisted custom rows surface under "Added by you".
+// @see #333
 const LIVE_CATALOG = CONNECTOR_CATALOG.filter((d) => d.state === 'live');
 const CATALOG_ENDPOINTS = new Set(CONNECTOR_CATALOG.map((d) => normUrl(d.endpoint)));
 
@@ -41,8 +28,8 @@ const findRowByUrl = (rows: ConnectorInfo[], url: string): ConnectorInfo | undef
 type ModalTarget =
   { kind: 'catalog'; entry: CatalogEntry } | { kind: 'custom'; connector: ConnectorInfo } | null;
 
-// Renders one render path for provider instruction content (#332): real
-// steps when the ref resolves, generic honest copy when the entry has none.
+// Real steps when the ref resolves, generic honest copy when the entry has none.
+// @see #332
 const InstructionSteps = ({ instructions }: { instructions: ConnectorInstructions }) => (
   <div
     data-testid="connector-modal-instructions"
@@ -101,7 +88,6 @@ const ConnectorsView = () => {
     };
   }, []);
 
-  // Custom rows: personal connectors whose url matches no catalog endpoint.
   const customRows = (connectors ?? []).filter(
     (c) => c.scope === 'user' && !CATALOG_ENDPOINTS.has(normUrl(c.url)),
   );
@@ -430,8 +416,7 @@ const ConnectorModal = ({
   };
 
   const navigateToConsent = (authorizationUrl: string): boolean => {
-    // Defense in depth with the server's https-only discovery guard: never
-    // navigate to anything that is not a https consent screen.
+    // Defense in depth with the server's https-only guard: never navigate to a non-https consent screen.
     if (!authorizationUrl.startsWith('https://')) {
       setError('The sign-in URL is not secure — this provider cannot be connected right now.');
       return false;
@@ -499,9 +484,7 @@ const ConnectorModal = ({
   const needsReauth = row?.authState === 'needs-reauth';
   const watchlisted = entry?.state === 'watchlisted';
   const entryInstructions = entry ? instructionsFor(entry) : undefined;
-  // Catalog PAT entries connect by token, and a tokenless row is a dead end
-  // (no update path) — the token is required up front. OAuth connects with
-  // browser consent only.
+  // A tokenless PAT row is a dead end (no update path), so the token is required up front.
   const connectDisabled = pending || !entry || (entry.authType === 'mcp.pat' && !authToken.trim());
 
   return (

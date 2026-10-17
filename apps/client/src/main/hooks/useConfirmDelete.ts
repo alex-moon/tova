@@ -12,10 +12,8 @@ type ConfirmState = {
   onNo: () => void;
 };
 
-// Inline destructive-confirmation plumbing (issue #59). One instance per
-// surface (Sidebar chat rows / AssetLibrary asset cards): the surfaces are
-// disjoint, so a single armed id per surface is enough. Arm state resets on
-// Escape; only one row is armed at a time.
+// Inline destructive-confirmation plumbing; one instance per surface, a single armed id per surface, Escape resets.
+// @see #59
 export const useConfirmDelete = (
   target: DeleteTarget,
   deleteFn: (id: string) => void,
@@ -49,10 +47,7 @@ export const useConfirmDelete = (
     runDelete(armedId);
   }, [armedId, runDelete]);
 
-  // "Always" persists the granular preference (confirm off for this target),
-  // mirrors it into auth state, then deletes. If the preference PATCH fails
-  // (offline blip), fall back to a plain delete so the row cannot strand in
-  // confirm state.
+  // "Always" persists the granular preference, mirrors it into auth state, then deletes; a failed PATCH falls back to a plain delete.
   const onAlways = useCallback(async () => {
     if (armedId === null) return;
     const id = armedId;
@@ -70,10 +65,7 @@ export const useConfirmDelete = (
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') setArmedId(null);
     };
-    // Clicking anywhere outside the armed card (plan: "clicking elsewhere
-    // restores the row") resets it without touching data. Another row's
-    // trash click first lands here (reset), then arms the new row — so the
-    // single-armed invariant holds.
+    // Outside clicks reset the armed row without touching data; another row's trash click resets here, then arms the new row.
     const onPointerDown = (e: PointerEvent) => {
       if (!(e.target instanceof Element)) return;
       const element = e.target.closest('[data-testid^="confirm-delete-"]');

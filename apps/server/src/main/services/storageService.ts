@@ -10,12 +10,8 @@ import {
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { config } from '../config';
 
-// DigitalOcean Spaces is S3-compatible; AWS SDK v3 against a Spaces endpoint
-// is the standard integration (issue #34). Feature-gated like
-// webSearchService: when the env vars are absent, isStorageConfigured()
-// returns false and callers degrade gracefully instead of crashing.
-// Read lazily (not as module constants): env may be loaded after module
-// import in some entrypoints, and tests mutate env directly.
+// DigitalOcean Spaces via the AWS SDK; feature-gated on env vars so callers degrade gracefully. Read lazily: env may load after module import.
+// @see #34
 const bucket = (): string => config.storage.bucket;
 
 let client: S3Client | null = null;
@@ -29,9 +25,7 @@ const getClient = (): S3Client => {
   }
   if (!client) {
     client = new S3Client({
-      // Region confirmed lon1 against a real ListObjectsV2 call (open
-      // question 3 in the plan is resolved; env override kept for the live
-      // host to be decisive).
+      // Region confirmed lon1 against a real ListObjectsV2 call; env override kept for the live host.
       endpoint: `https://${config.storage.region}.digitaloceanspaces.com`,
       region: config.storage.region,
       credentials: {
@@ -54,9 +48,7 @@ export const presignPutUrl = async (
     { expiresIn },
   );
 
-// Direct server-side PUT (issue #66): system-generated files are written by
-// the server itself, so no presigned-URL round-trip is needed. Throws on
-// failure like the other direct commands.
+// Direct server-side PUT for system-generated files; no presigned round-trip.
 export const putObject = async (key: string, body: Buffer, contentType?: string): Promise<void> => {
   await getClient().send(
     new PutObjectCommand({ Bucket: bucket(), Key: key, ContentType: contentType, Body: body }),
@@ -76,18 +68,15 @@ export const headObject = async (key: string): Promise<HeadObjectInfo> => {
   return { size: result.ContentLength ?? 0, contentType: result.ContentType };
 };
 
-// Streams an object back for server-side piping (e.g. #69 bulk zip
-// download). Unlike getObjectBuffer there is no size cap: callers decide
-// what is safe to stream. Returns the raw Body stream.
+// Streams an object back for server-side piping; no size cap — callers decide what is safe to stream.
+// @see #69
 export const getObjectStream = async (key: string): Promise<Readable | null> => {
   const result = await getClient().send(new GetObjectCommand({ Bucket: bucket(), Key: key }));
   return (result.Body ?? null) as Readable | null;
 };
 
-// Buffers an object for light text extraction at confirm time (issue #34).
-// Objects larger than maxBytes are not downloaded (extraction stays light);
-// null means "either too big to pull or no body" and callers treat it as no
-// text extracted rather than an error.
+// Buffers an object for light text extraction at confirm time; null means too big or no body, not an error.
+// @see #34
 export const getObjectBuffer = async (
   key: string,
   maxBytes = 1_000_000,
@@ -101,8 +90,7 @@ export const getObjectBuffer = async (
   return bytes ? Buffer.from(bytes) : null;
 };
 
-// Returns true on success (NoSuchKey / NotFound converge to true); deletes
-// are idempotent from callers' perspective.
+// Returns true on success; NoSuchKey/NotFound converge to true so deletes are idempotent.
 export const deleteObject = async (key: string): Promise<boolean> => {
   try {
     await getClient().send(new DeleteObjectCommand({ Bucket: bucket(), Key: key }));
@@ -114,10 +102,8 @@ export const deleteObject = async (key: string): Promise<boolean> => {
   }
 };
 
-// All keys under one prefix (issue #143: prefix sweeps for the factory
-// reset). Paginates with ListObjectsV2 continuation tokens; up to 1000 keys
-// per page. Listing is only possible with real credentials, so callers gate
-// on isStorageConfigured() first.
+// All keys under one prefix, paginated; callers gate on isStorageConfigured() first.
+// @see #143
 export const listObjectKeys = async (prefix: string): Promise<string[]> => {
   const keys: string[] = [];
   let continuation: string | undefined;

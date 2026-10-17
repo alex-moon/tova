@@ -1,11 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 
-/*
- * Authentication flow against the real local endpoints (login → session →
- * logout). Read-only with respect to the admin account: it only logs in and
- * out, so it cannot poison the persisted user state for other specs
- * (see the isolation note in plan-148).
- */
+// Real-endpoint auth flow; read-only with respect to the persisted admin account.
 
 const email = process.env.E2E_EMAIL ?? 'formsatz@gmail.com';
 const password = process.env.E2E_PASSWORD ?? 'password';

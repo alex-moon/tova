@@ -5,12 +5,8 @@ import {
   sweepModels,
 } from '../../main/services/modelConfigService';
 
-/*
- * #233: the tier machinery this suite used to cover (listByTier, the price cap,
- * capability matching, seeding) is deleted with the tier router. What remains
- * is the tier-free provider plumbing plus the roster-backed eval sweep bridge.
- */
-
+/* Tier-free provider plumbing plus the roster-backed eval sweep bridge. */
+// @see #233
 describe('modelConfigService survivors (#233)', () => {
   it('exposes the end-user all-disabled message through the error', () => {
     const err = new AllModelsDisabledError();

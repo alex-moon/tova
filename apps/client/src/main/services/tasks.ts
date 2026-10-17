@@ -1,10 +1,8 @@
 import axios from 'axios';
 import type { ToolEvent } from '../App';
 
-// Task API client (#254, epic #251). A task is a first-class stream — a twin
-// of a chat, not a chat's child — so this mirrors `/api/tasks` (D15) rather
-// than reusing the chat service. The shape here must track the server's
-// `serializeTask`/`serializeEvent` in `apps/server/src/routes/tasks.ts`.
+// Task API client: a task is a first-class stream (a twin of a chat, not a child); shapes must track the server serializers.
+// @see #254 #251
 
 export type TaskStatus = 'queued' | 'running' | 'paused' | 'done' | 'failed' | 'cancelled';
 
@@ -19,8 +17,7 @@ export interface TaskBudget {
   spentUsd: number;
 }
 
-// The task header without its stream (the list payload). Mirrors
-// `serializeTask`.
+// The task header without its stream (the list payload); mirrors `serializeTask`.
 export interface TaskSummary {
   id: string;
   status: TaskStatus;
@@ -32,9 +29,7 @@ export interface TaskSummary {
   updatedAt: string;
 }
 
-// One stream event, in the shape a chat turn already has (role/content/tools/
-// usage/model/provider) plus the task stream's `seq`/`step`. `system` rows
-// (e.g. a budget-breach notice, D6) carry no model.
+// One stream event: the chat turn shape plus the task stream's `seq`/`step`; `system` rows carry no model.
 export interface TaskStreamEvent {
   seq: number;
   role: 'user' | 'assistant' | 'tool' | 'system';
@@ -58,8 +53,7 @@ export interface TaskDetail {
 }
 
 export class TaskError extends Error {
-  // The HTTP status, when the failure came from a response. Lets callers treat
-  // a 404 (the task is gone) differently from a transient/5xx failure.
+  // The HTTP status when the failure came from a response; lets callers treat a 404 differently.
   readonly status?: number;
 
   constructor(
@@ -88,9 +82,7 @@ const toTaskError = (err: unknown): TaskError => {
 export const isTaskNotFound = (err: unknown): err is TaskError =>
   err instanceof TaskError && err.status === 404;
 
-// A status is "active" while the worker can still make progress; terminal
-// states (done/failed/cancelled, D14) close the stream, and `paused` is a
-// budget breach that waits for a steering instruction to resume (D6/D14).
+// A status is "active" while the worker can still make progress; `paused` waits for a steering instruction.
 export const TERMINAL_TASK_STATUSES: readonly TaskStatus[] = ['done', 'failed', 'cancelled'];
 export const isTerminalTask = (status: TaskStatus): boolean =>
   TERMINAL_TASK_STATUSES.includes(status);
@@ -103,8 +95,8 @@ const TaskService = {
     return res.data;
   },
 
-  // #255: the tasks a given chat started — the embedded card's data. The join
-  // is the thin `origin.sessionId` reference (F1), filtered server-side.
+  // The tasks a given chat started — the embedded card's data, filtered server-side.
+  // @see #255
   async listForSession(sessionId: string): Promise<TaskSummary[]> {
     const res = await axios.get<TaskListPage>('/api/tasks', {
       params: { originSessionId: sessionId },
@@ -112,8 +104,8 @@ const TaskService = {
     return res.data.tasks;
   },
 
-  // #255 (F7): the manual "send to worker" path — create a task from the
-  // composer with this chat as its origin, instead of sending a chat turn.
+  // The manual "send to worker" path: create a task from the composer with this chat as origin.
+  // @see #255
   async create(instruction: string, origin?: TaskOrigin): Promise<TaskSummary> {
     try {
       const res = await axios.post<{ task: TaskSummary }>('/api/tasks', {
@@ -135,8 +127,7 @@ const TaskService = {
     }
   },
 
-  // Queue a steering turn (or resume a `paused` task, D14). A terminal task is
-  // refused server-side with a 409 whose message surfaces verbatim.
+  // Queue a steering turn (or resume a paused task); a terminal task is refused with a 409 surfacing verbatim.
   async instruct(taskId: string, instruction: string): Promise<TaskSummary> {
     try {
       const res = await axios.post<{ task: TaskSummary }>(`/api/tasks/${taskId}/instruction`, {

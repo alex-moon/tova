@@ -4,10 +4,8 @@ import { claimNextTask, enqueueTask } from '../../main/services/taskService';
 import { makeTaskProcessor, type TaskStepRunner } from '../../main/services/taskProcessor';
 import type { TaskStepOutcome } from '../../main/services/taskSequencer';
 
-// #254 sequencer loop: the worker-driven turn loop over the task stream, tested
-// with an injected step runner so no provider, roster, or clock is needed. The
-// real step runner (`runTaskStep`) is unit-pinned in `taskSequencer.test.ts`.
-
+// The worker-driven turn loop, tested with an injected step runner so no provider, roster or clock is needed; the real runner is unit-pinned in taskSequencer.test.ts.
+// @see #254
 const blankStep = (overrides: Partial<TaskStepOutcome> = {}): TaskStepOutcome => ({
   model: 'deepseek-ai/DeepSeek-V4.1-Flash',
   provider: 'deepinfra',
@@ -183,9 +181,7 @@ describe('processTaskJob sequencer loop (#254)', () => {
     let calls = 0;
     const runStep: TaskStepRunner = jest.fn().mockImplementation(async () => {
       calls += 1;
-      // A cancel lands while the first step is in flight (the API's header
-      // write). The loop must observe it before issuing step 1 and return
-      // without settling the task back to `done`.
+      // A cancel lands while the first step is in flight (the API's header write); the loop must observe it before issuing step 1 and return without settling the task to `done`.
       if (calls === 1) await Task.updateOne({ _id: task._id }, { $set: { status: 'cancelled' } });
       return blankStep({
         tools: [{ phase: 'result', name: 'read_file', label: 'r', status: 'ok' }],
@@ -202,10 +198,7 @@ describe('processTaskJob sequencer loop (#254)', () => {
     const task = await enqueue();
     const claimed = await claimNextTask();
     const runStep: TaskStepRunner = jest.fn().mockImplementation(async () => {
-      // The cancel arrives while the *final* (text-only) step is in flight, so
-      // the loop never gets another top-of-loop re-read to observe it. The
-      // completion branch must settle-and-announce guardedly, not append a
-      // "Task completed." onto a task that was cancelled.
+      // The cancel arrives while the final (text-only) step is in flight, so the loop never gets a top-of-loop re-read to observe it; the completion branch must settle-and-announce guardedly, not append "Task completed." onto a cancelled task.
       await Task.updateOne({ _id: task._id }, { $set: { status: 'cancelled' } });
       return blankStep({ text: 'finished anyway' });
     });
@@ -233,10 +226,7 @@ describe('appendTaskEvent seq allocation (#254)', () => {
     const { appendTaskEvent } = await import('../../main/services/taskProcessor');
     // The pre-existing event the "other writer" landed at seq 0.
     await TaskEvent.create({ taskId: task._id, seq: 0, role: 'user', content: 'other' });
-    // A concurrent writer already took the next seq, so the first insert here
-    // collides with the unique index. Force it deterministically: the first
-    // `create` throws the 11000 a real collision raises, then delegates to the
-    // real implementation. The retry must re-read max-seq and land at 1.
+    // A concurrent writer already took the next seq, so the first insert collides with the unique index: the first `create` throws the 11000, then delegates to the real implementation; the retry must re-read max-seq and land at 1.
     const realCreate = TaskEvent.create.bind(TaskEvent);
     let thrown = false;
     const spy = jest.spyOn(TaskEvent, 'create').mockImplementation((async (doc: unknown) => {

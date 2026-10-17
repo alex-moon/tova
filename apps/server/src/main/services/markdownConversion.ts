@@ -2,30 +2,23 @@ import mammoth from 'mammoth';
 import turndown from 'turndown';
 import { PDFParse } from 'pdf-parse';
 
-// Markdown conversion (issue #67): JS-native toolchain (mammoth for docx,
-// pdf-parse — pdf.js — for PDF, turndown for HTML) instead of a markitdown
-// Python subprocess: no new runtime, sidecar or queue infra. Conversion is
-// deterministic-failfile: unknown extensions and empty results throw so the
-// job loop retries/fails with a reason. Extension decided from the filename
-// like textExtraction (#34), not the client-provided contentType.
+// Markdown conversion: JS-native toolchain (mammoth, pdf-parse, turndown) instead of a Python subprocess; unknown extensions and empty results throw so the job loop can retry/fail with a reason.
+// @see #67 #34
 
 export const CONVERTIBLE_EXTENSIONS = new Set(['pdf', 'docx', 'html', 'htm']);
 
-// Storage cap on the persisted markdown (issue #67): conversion output is
-// trimmed at store time; the 12k prompt cap applies at use time, so a large
-// document still contributes its head to search/attach.
+// Storage cap on the persisted markdown: trimmed at store time; the 12k prompt cap applies at use time.
+// @see #67
 export const MAX_MARKDOWN_CHARS = 200_000;
 
-// Hard ceiling per conversion attempt: a hung parser must not wedge the
-// poller; the job loop treats the timeout as any other failure.
+// Hard ceiling per conversion attempt: a hung parser must not wedge the poller.
 export const CONVERSION_TIMEOUT_MS = 30_000;
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const turndownInstance = new (turndown as any)({ headingStyle: 'atx', bulletListMarker: '-' });
 
-// HTML→markdown conversion used both by asset ingestion (rawConvert below)
-// and by the `fetch_url` page fetcher (issue #113): one turndown instance,
-// owned by this module.
+// Shared by asset ingestion and the `fetch_url` page fetcher: one owned turndown instance.
+// @see #113
 export const htmlToMarkdown = (html: string): string => turndownInstance.turndown(html);
 
 export const extensionOf = (filename: string): string => {
@@ -46,11 +39,8 @@ export const withTimeout = <T>(promise: Promise<T>, ms = CONVERSION_TIMEOUT_MS):
     }),
   ]);
 
-// Store-time normalisation shared by every producer of `markdownExtracted`
-// (issue #67 conversion, issue #209 OCR): normalise line endings, unify the
-// curly apostrophe, trim, and enforce the storage cap. Exported so the OCR
-// stage — which does not go through `convertToMarkdown` for images — applies
-// exactly the same cap rather than duplicating it.
+// Store-time normalisation shared by every producer of `markdownExtracted` (conversion, OCR), so the OCR stage applies exactly the same cap rather than duplicating it.
+// @see #67 #209
 export const finalizeMarkdown = (raw: string): string =>
   raw
     .replace(/\r\n/g, '\n')
@@ -58,8 +48,7 @@ export const finalizeMarkdown = (raw: string): string =>
     .trim()
     .slice(0, MAX_MARKDOWN_CHARS);
 
-// Convert a document buffer to markdown. Throws on unsupported extension,
-// converter error, or empty conversion output.
+// Convert a document buffer to markdown; throws on unsupported extension, converter error, or empty output.
 export const convertToMarkdown = async (
   filename: string,
   buffer: Buffer,
@@ -84,8 +73,7 @@ export const convertToMarkdown = async (
 const rawConvert = async (ext: string, buffer: Buffer): Promise<string | null | undefined> => {
   switch (ext) {
     case 'pdf': {
-      // PDF text comes out in reading order with plain page separators
-      // (`-- n of n --`); keep it verbatim rather than re-styling it.
+      // PDF text comes out in reading order with plain page separators; keep it verbatim.
       const parser = new PDFParse({ data: new Uint8Array(buffer) });
       try {
         const result = await parser.getText();
@@ -95,7 +83,6 @@ const rawConvert = async (ext: string, buffer: Buffer): Promise<string | null | 
       }
     }
     case 'docx': {
-      // mammoth's bundled typings miss the 'convertToMarkdown' helper.
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const converter = mammoth as any as {
         convertToMarkdown: (input: { buffer: Buffer }) => Promise<{ value: string }>;

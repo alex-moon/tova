@@ -10,22 +10,12 @@ import { config } from '../config';
 
 const router = express.Router();
 
-/*
- * Task API (#254 routes slice, epic #251; D15). A task is a first-class stream
- * — a twin of a chat — so this is its own surface, not a chat sub-route. Every
- * route is `authenticate`d and scoped by `userId`: a foreign task id is a 404,
- * never a 403 oracle. No route ever writes a `Message`; the task stream is
- * `TaskEvent` (D1).
- *
- * Reads are read-only for the map (the ZDR carve-out is moot here — a ZDR user
- * cannot create a task at all, D7). The instruction route is the only stream
- * write, and it goes through `steerTask`/`appendTaskEvent` (D12's seq retry).
- */
+/* Task API: a task is a first-class stream (a twin of a chat), its own surface; every route is authenticated and user-scoped — a foreign id is a 404, never a 403 oracle; no route ever writes a Message. */
+// @see #254 #251
 
 const LIST_PAGE_SIZE = 20;
 
-// A list/summary view of a task — the header without its whole stream. Mirrors
-// how the asset list returns a bounded `safeAsset` rather than the document.
+// A list/summary view of a task — the header without its whole stream.
 const serializeTask = (task: TaskDocument) => ({
   id: String(task._id),
   status: task.status,
@@ -46,16 +36,8 @@ const serializeTask = (task: TaskDocument) => ({
   updatedAt: task.updatedAt,
 });
 
-// One stream event, in the shape the chat client already renders for a turn
-// (role/content/tools/usage/model/provider), plus the task stream's `seq`/`step`.
-//
-// The persisted tool chip carries the executed call's raw `result` — the resume
-// payload the *sequencer* replays from the stream (D10), not something the
-// browser ever renders. Strip it here by rebuilding only the #196 chip summary
-// fields (a mongoose subdoc must be converted to a plain object first; spreading
-// a subdoc leaks its internals instead of its fields). Shipping raw tool output
-// on every polled detail GET would balloon the response and leak tool internals
-// into the page.
+// One stream event in the chat-turn shape plus `seq`/`step`; the raw tool `result` (sequencer replay payload) is stripped to the #196 chip fields.
+// @see #196
 const serializeToolEvent = (tool: unknown) => {
   const plain = (
     typeof (tool as { toObject?: unknown }).toObject === 'function'
@@ -88,19 +70,14 @@ const serializeEvent = (event: TaskEventDocument) => ({
   timestamp: event.timestamp,
 });
 
-// Ownership-scoped lookup: a task the caller does not own is indistinguishable
-// from one that does not exist. A malformed id (not an ObjectId) is treated the
-// same way — a 404, not a Mongoose cast error surfacing as a 500 (D15: unknown
-// id → 404, no oracle).
+// Ownership-scoped lookup: an unowned or malformed id is a 404 — no oracle, no cast-error 500.
 const ownedTask = (req: AuthRequest): Promise<TaskDocument | null> =>
   isValidObjectId(req.params.id)
     ? Task.findOne({ _id: req.params.id, userId: req.user?.id })
     : Promise.resolve(null);
 
-// POST /api/tasks — create a task. ZDR refusal (D7): tasks are durable by
-// definition, so an account with `settings.zdr` (or its `incognitoByDefault`
-// alias, the same storage slot) may not create one. Checked at creation only
-// (OQ8 v1), mirroring how the chat routes read the flag per turn.
+// Create a task; refused for ZDR accounts (tasks are durable by definition), checked at creation only.
+// @see #254
 router.post('/', authenticate, async (req: AuthRequest, res) => {
   try {
     const parsed = taskCreateSchema.safeParse(req.body ?? {});
@@ -121,8 +98,7 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
       userId: req.user?.id as string,
       ...(parsed.data.instruction ? { instruction: parsed.data.instruction } : {}),
       ...(parsed.data.origin ? { origin: parsed.data.origin } : {}),
-      // Budget is snapshotted at creation (D6) from the same config the poller
-      // reads, so a mid-task env change cannot move the goalposts.
+      // Budget is snapshotted at creation from the same config the poller reads, so a mid-task env change cannot move the goalposts.
       maxSteps: config.task.maxSteps,
       maxCostUsd: config.task.maxCostUsd,
     });
@@ -133,11 +109,8 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
   }
 });
 
-// GET /api/tasks — cursor-paged, strictly scoped to the caller (mirrors
-// `GET /api/assets`: newest first, `_id` descending as the cursor). An optional
-// `originSessionId` scopes to the tasks a chat started (#255's embedded card):
-// the join is the thin `origin.sessionId` reference, never a reverse pointer on
-// the session.
+// Cursor-paged, strictly scoped to the caller; an optional `originSessionId` scopes to the tasks a chat started (the thin origin reference, never a reverse pointer).
+// @see #255
 router.get('/', authenticate, async (req: AuthRequest, res) => {
   try {
     const query: Record<string, unknown> = { userId: req.user?.id };
@@ -165,8 +138,7 @@ router.get('/', authenticate, async (req: AuthRequest, res) => {
   }
 });
 
-// GET /api/tasks/:id — the owned task plus its ordered stream. This is the
-// detail view's data (D2: a chat view with queued turn-taking).
+// The owned task plus its ordered stream — the detail view's data.
 router.get('/:id', authenticate, async (req: AuthRequest, res) => {
   try {
     const task = await ownedTask(req);
@@ -181,9 +153,7 @@ router.get('/:id', authenticate, async (req: AuthRequest, res) => {
   }
 });
 
-// POST /api/tasks/:id/instruction — queue a steering turn (or resume a
-// `paused` task). Terminal tasks are refused (409, D14); the append and the
-// possible `paused -> queued` re-queue are `steerTask` (D12/D6).
+// Queue a steering turn (or resume a paused task); terminal tasks are refused with 409.
 router.post('/:id/instruction', authenticate, async (req: AuthRequest, res) => {
   try {
     const parsed = taskInstructionSchema.safeParse(req.body ?? {});
@@ -207,9 +177,7 @@ router.post('/:id/instruction', authenticate, async (req: AuthRequest, res) => {
   }
 });
 
-// POST /api/tasks/:id/cancel — stop an active task. A running task's processor
-// observes the status at its next step boundary (D13); terminal tasks are left
-// untouched (idempotent).
+// Stop an active task; a running processor observes the status at its next step boundary; terminal tasks untouched (idempotent).
 router.post('/:id/cancel', authenticate, async (req: AuthRequest, res) => {
   try {
     const task = await ownedTask(req);

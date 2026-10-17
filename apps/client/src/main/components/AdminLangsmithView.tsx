@@ -11,13 +11,8 @@ import type {
   AdminTracesPayload,
 } from '../types/admin';
 
-/*
- * Admin "Traces" tab (#186): the two LangSmith tools the routing loop
- * needs, both read-only — a recent-traces browser with a drill-down run
- * tree, and a per-model stats strip. Extracted from AdminView (which
- * holds every other tab inline) to keep that file navigable; mounting is
- * conditional on the tab being active, same as the other sections.
- */
+// Admin "Traces" tab: read-only recent-traces browser with a run tree and a per-model stats strip.
+// @see #186
 
 const formatDuration = (ms: number | null): string =>
   ms === null ? '—' : ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${Math.round(ms)}ms`;
@@ -25,13 +20,13 @@ const formatDuration = (ms: number | null): string =>
 const formatTokens = (tokens: number | null): string =>
   tokens === null ? '—' : tokens.toLocaleString();
 
-// #237: a stats row is per (model, provider); the provider is null on a
-// legacy no-provider rollup.
+// A stats row is per (model, provider); provider is null on a legacy no-provider rollup.
+// @see #237
 const modelLabel = (row: AdminLangsmithModelStats): string =>
   row.provider ? `${row.model} · ${row.provider}` : row.model;
 
-// Estimated cost is null when a price is unknown (#199 unknown ≠ free), so
-// render `—` rather than $0. Sub-cent spend keeps more precision than 2dp.
+// Unknown price renders `—`, not $0 (unknown ≠ free); sub-cent spend keeps extra precision.
+// @see #199
 const formatCost = (usd: number | null): string => {
   if (usd === null) return '—';
   if (usd === 0) return '$0.00';
@@ -44,9 +39,8 @@ const formatTime = (iso: string): string => {
   return Number.isNaN(date.getTime()) ? iso : date.toLocaleString();
 };
 
-// #308: the workspace-memory facts, terse for the table cell — the guard
-// outcome plus (when the guard fired) how many slices the block carried.
-// Undefined on traces from before the metadata existed.
+// Terse workspace-memory facts for the table cell; undefined on pre-metadata traces.
+// @see #308
 const memoryLabel = (trace: AdminTraceRow): string => {
   if (!trace.workspaceGate) return '—';
   const hits =
@@ -65,8 +59,7 @@ const prettyJson = (value: unknown): string => {
   }
 };
 
-// Indentation depth from the parentId chain; orphaned ids (server dropped
-// a parent) degrade to depth 0 rather than breaking the render.
+// Orphaned parent ids degrade to depth 0 rather than breaking the render.
 const depthOf = (run: AdminTraceRun, byId: Map<string, AdminTraceRun>): number => {
   let depth = 0;
   let current: AdminTraceRun | undefined = run;
@@ -123,10 +116,8 @@ const RunBlock = ({ run, depth }: { run: AdminTraceRun; depth: number }) => (
   </div>
 );
 
-// One model's stats: a primary row (traffic + latency + tokens) and a paired
-// cost-breakdown row with the in/out split and the estimated spend (#224).
-// Rendered as two sibling <tr> inside a fragment so the table body stays a
-// real table; the cost row is muted and visually bound to its model.
+// Two sibling <tr> in a fragment: a stats row plus a muted cost-breakdown row, keeping a real table body.
+// @see #224
 const ModelStatsRow = ({ row }: { row: AdminLangsmithModelStats }) => (
   <>
     <tr
@@ -156,12 +147,8 @@ const ModelStatsRow = ({ row }: { row: AdminLangsmithModelStats }) => (
   </>
 );
 
-/*
- * Per-session cost breakdown (#224). Message counts and token/cost totals are
- * deliberately separate columns: only assistant turns logged after #224 carry
- * usage, so a session's counts can be non-zero while its tokens/cost are `—`
- * until usage builds up. Keeping them side by side makes that skew legible.
- */
+// Message counts and token/cost totals deliberately skew: only turns logged after #224 carry usage.
+// @see #224
 const SessionCostRow = ({ row }: { row: AdminSessionCostRow }) => (
   <tr
     data-testid={`langsmith-session-${row.sessionId}`}
@@ -204,8 +191,7 @@ const AdminLangsmithView = () => {
     }
   }, []);
 
-  // First load: traces and the stats rollup in parallel; a stats failure is
-  // non-fatal for the list (the banner covers it, refresh retries both).
+  // A stats/cost failure is non-fatal for the list; the banner covers it and refresh retries both.
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     load({});

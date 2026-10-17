@@ -11,22 +11,15 @@ const sessionSchema = new mongoose.Schema(
       type: String,
       default: 'New Chat',
     },
-    /*
-     * #359: who owns the title. 'system' = derived from the opening message;
-     * 'user' = renamed by the user, and no system process may overwrite it
-     * after that. Existing documents predate the field and are 'system'.
-     */
+    /** Who owns the title: a 'user' rename may never be overwritten by a system process. */
+    // @see #359
     titleSource: {
       type: String,
       enum: ['system', 'user'],
       default: 'system',
     },
-    /*
-     * #359: the system-maintained one-line summary of what the chat is about
-     * (a soft scope signal for retrieval, and the better library label).
-     * Generated/revised fire-and-forget on a turn cadence; null until the
-     * first revision lands. Never user-editable today.
-     */
+    /** System-maintained one-line summary; a soft retrieval scope signal, never user-editable. */
+    // @see #359
     subtitle: {
       type: String,
       default: null,
@@ -35,24 +28,14 @@ const sessionSchema = new mongoose.Schema(
       type: Date,
       default: null,
     },
-    /*
-     * Per-chat incognito flag (#144): fixed at session creation from the
-     * client's new-chat intent or the profile's 'incognito by default'.
-     * Incognito sessions themselves are never persisted under today's
-     * write-nothing semantics, so persisted documents are always false;
-     * the default keeps old documents truthful.
-     */
+    /** Fixed at creation; incognito sessions are never persisted, so stored rows are always false. */
+    // @see #144
     incognito: {
       type: Boolean,
       default: false,
     },
-    /*
-     * #226: timestamp of the session's most recent persisted message. Bumped
-     * on each persisted user turn in saveUserMessageWithMetrics. Drives the
-     * sidebar order (and therefore "open the most recent chat on load").
-     * Defaults to null for sessions that predate #226; the listing sort
-     * places nulls last. No index here — the migration owns it.
-     */
+    /** Timestamp of the most recent persisted message; drives the sidebar order. */
+    // @see #226
     lastMessageAt: {
       type: Date,
       default: null,

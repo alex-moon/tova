@@ -8,9 +8,8 @@ import { ExternalLink } from 'lucide-react';
 const isExternalHttp = (href?: string): href is string =>
   typeof href === 'string' && /^https?:\/\//i.test(href);
 
-// Outgoing link override (issue #33): https/email targets open in a new tab
-// with noopener; the schema stays the default rehype-sanitize one because
-// the override runs post-sanitize.
+// Outgoing link override: https/email targets open in a new tab with noopener; the override runs post-sanitize.
+// @see #33
 const MarkdownLink = ({ href, children }: { href?: string; children?: React.ReactNode }) => {
   if (!isExternalHttp(href)) return <a href={href}>{children}</a>;
   return (
@@ -26,17 +25,15 @@ const MarkdownLink = ({ href, children }: { href?: string; children?: React.Reac
   );
 };
 
-// Wide GFM tables must scroll on their own, not widen the chat column. A
-// wrapper carries the horizontal overflow; the table keeps its own styling.
+// Wide GFM tables scroll on their own rather than widening the chat column.
 const MarkdownTable = ({ children }: { children?: React.ReactNode }) => (
   <div className="max-w-full overflow-x-auto">
     <table>{children}</table>
   </div>
 );
 
-// Shared markdown renderer: assistant messages in the chat and the in-app
-// asset preview (issue #197) must render identically. Stored markdown can
-// contain raw HTML, so rehype-raw is paired with rehype-sanitize.
+// Shared renderer for chat and asset preview; rehype-raw paired with rehype-sanitize because stored markdown can contain raw HTML.
+// @see #197
 const MarkdownContent: React.FC<{ content: string; markdown: boolean }> = ({
   content,
   markdown,

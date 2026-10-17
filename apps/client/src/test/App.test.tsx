@@ -194,8 +194,7 @@ describe('App startup chat (issue #96)', () => {
 
   it('refetches the session list after a turn completes (#226)', async () => {
     mockStartup('recent');
-    // Minimal SSE stream: a single done event, then EOF. Enough to drive
-    // handleSendMessage to its `finally` block where the refetch lives.
+    // Minimal SSE stream: a single done event, then EOF.
     const sse = [
       'event: done',
       'data: {"complete":true,"message":{"_id":"a1","role":"assistant","content":"ok"}}',
@@ -235,8 +234,8 @@ describe('App startup chat (issue #96)', () => {
   });
 });
 
-// Client mirror of the server reconcile (#196, D2) — this is what stops the
-// live chip from stacking a second entry and leaving the throbber stuck.
+// Client mirror of the server reconcile — what stops the live chip from stacking a second entry.
+// @see #196
 describe('reconcileToolEvents (#196)', () => {
   const call = (name: string, query?: string): ToolEvent => ({
     phase: 'call',

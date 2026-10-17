@@ -1,33 +1,24 @@
 import mongoose from 'mongoose';
 
-// Issue #224: cached LangSmith per-model rollup. The admin Traces summary is
-// expensive to compute (a paged live sweep of up to 500 llm runs against a
-// burstily rate-limited API), so a background poller computes it every ~120s
-// and upserts one document per window here. The stats route reads this
-// document instead of hitting LangSmith on the happy path.
-//
-// One row per `windowKey` (e.g. `days=7`) so windows can diverge later; today
-// only the default 7-day window is written. The token split is stored, cost is
-// NOT: prices are joined at read time so a price correction shows up without
-// waiting for the next poll (#224 decision 4).
+// Cached LangSmith per-model rollup computed by the background poller; cost is joined at read time.
+// @see #224
 const modelStatSchema = new mongoose.Schema(
   {
     model: { type: String, required: true },
-    // #237: the provider this row covers. Absent on rows written before the
-    // provider rollup; read back as null (model-only fallback).
+    // Absent on rows written before the provider rollup; read back as null (model-only fallback).
+    // @see #237
     provider: { type: String, default: null },
     calls: { type: Number, required: true },
     errors: { type: Number, required: true },
     avgDurationMs: { type: Number, default: null },
-    // #237: mean TTFT across the row's streamed calls.
+    // Mean TTFT across the row's streamed calls.
+    // @see #237
     avgTtftMs: { type: Number, default: null },
     totalTokens: { type: Number, required: true },
     inputTokens: { type: Number, required: true },
     outputTokens: { type: Number, required: true },
   },
-  // `errors` collides with a Mongoose reserved pathname; the name matches the
-  // wire contract (`AdminLangsmithModelStats`) so keep it and opt out of the
-  // warning rather than map a rename.
+  // `errors` collides with a Mongoose reserved pathname; keep the wire name, suppress the warning.
   { _id: false, suppressReservedKeysWarning: true },
 );
 

@@ -3,10 +3,8 @@ import axios from 'axios';
 import AssetService from '../../main/services/assets';
 import type { AssetSummary, BulkUploadFileResult } from '../../main/services/assets';
 
-// First service-level test harness in the client suite (plan #68, item 4):
-// a minimal axios mock plus a stubbed XMLHttpRequest that only captures
-// open/send/setRequestHeader and exposes the onload/onprogress slots the
-// service drives — no full XHR semantics emulation.
+// Minimal axios mock plus a stubbed XHR exposing only the onload/onprogress slots the service drives.
+// @see #68
 vi.mock('axios', () => ({
   default: {
     get: vi.fn(),
@@ -52,9 +50,7 @@ class FakeXHR {
 
 const tick = () => new Promise((r) => setTimeout(r, 0));
 
-// Drive every in-flight PUT: under the worker pool, resolving one PUT lets
-// the next file shift + send, so keep draining until no new XHRs appear.
-// `statusFor(xhr, i)` decides each PUT's outcome (i = send order).
+// Drain all in-flight PUTs until no new XHRs appear; statusFor decides each PUT's outcome by send order.
 const flushPuts = async (statusFor: (xhr: FakeXHR, i: number) => number = () => 200) => {
   let handled = 0;
   while (FakeXHR.sent.length > handled) {
@@ -77,10 +73,7 @@ const assetRow = (id: string): AssetSummary => ({
   createdAt: new Date().toISOString(),
 });
 
-// Per-test plan read by the axios mock: presign rejects items whose filename
-// is listed; presignFail fails the whole presign route call; batchFail makes
-// the route call reject with an axios-like error; confirmRejectPositions
-// rejects confirm rows by payload position.
+// Per-test plan read by the axios mock to force presign/confirm rejections by filename, position, or batch.
 const plan = {
   presignRejectFilenames: new Set<string>(),
   presignFail: false,
@@ -167,8 +160,7 @@ const stubXhr = () => {
   vi.stubGlobal('XMLHttpRequest', FakeXHR);
 };
 
-// Start `uploadMany`, let the presign round-trip settle, then drain all PUTs
-// and return the awaited result. `statusFor` optionally fails PUTs.
+// Start uploadMany, settle the presign round-trip, drain all PUTs, return the awaited result.
 const run = async (
   files: File[],
   statusFor?: (xhr: FakeXHR, i: number) => number,
@@ -234,8 +226,7 @@ describe('AssetService.uploadMany', () => {
     const files = Array.from({ length: 6 }, (_, i) => mk(`f${i}.txt`));
     const pending = AssetService.uploadMany(files);
 
-    // Pool sends its first 3 and holds; resolving one slot starts exactly
-    // one queued file.
+    // Pool sends its first 3 and holds; resolving one slot starts exactly one queued file.
     await tick();
     expect(FakeXHR.sent.length).toBe(3);
     FakeXHR.sent[0].respond();
@@ -255,7 +246,6 @@ describe('AssetService.uploadMany', () => {
     ]);
 
     await tick();
-    // First PUT off the queue fails at the storage side.
     FakeXHR.sent[0].respond(500);
     await tick();
     await flushPuts();

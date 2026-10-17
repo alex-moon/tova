@@ -1,28 +1,5 @@
 #!/usr/bin/env bash
-#
-# Iteration loop over GitHub issues for this repo.
-#
-# Usage:
-#   scripts/iteration.sh [--once] [priority-issue-number]
-#
-#   --once        run a single pass and exit (old cron-style behaviour).
-#   priority      a GitHub issue number to prioritise, e.g. scripts/iteration.sh 34.
-#                 Triage PREFERs that issue; it may still pick a different issue
-#                 when that issue directly supports the priority one (unblocks it
-#                 or delivers a piece the priority ticket depends on) - in that
-#                 case the supporting issue's number is chosen as usual.
-#
-# By default the script IS the loop: passes run until the loop-decision sub-agent
-# ends it, choosing DECISION:END only when all open issues are meaningfully done
-# or blocked. Its reason is recorded in .iteration/loop-state.json; from then on,
-# later passes performs only a limited GH check that looks for NEW information in
-# the issues since the decision (new comments/answers, new issues, new PRs). A
-# check with no new information is one strike; after $STRIKE_LIMIT strikes the
-# loop exits for good. Any new information clears the decision and work resumes.
-# A pass whose triage returns ISSUE:NONE also counts as a strike directly.
-#
-# Env: STRIKE_LIMIT (default 3), PASS_INTERVAL (seconds between passes, default 900).
-# Requires: gh (authenticated), git, opencode on PATH.
+# Iteration loop over GitHub issues: triage, work, review, PR decision; ends via the loop-decision agent or strikes (env: STRIKE_LIMIT, PASS_INTERVAL).
 
 set -euo pipefail
 
@@ -47,13 +24,7 @@ repo_due() {
   git fetch origin main --quiet || { log "git fetch failed (auth/network)"; exit 1; }
 }
 
-# ---- Loop state -------------------------------------------------------------
-# .iteration/loop-state.json: {strikes, decidedAt, reason, mode}
-#   mode "decision": the loop-decision agent ended the loop; later passes run
-#                    only the limited shutdown check until strikes exhaust.
-#   mode "strikes":  triage keeps finding nothing to do; strikes accumulate
-#                    across passes and trip the same limit. This is NOT the
-#                    limited-check mode.
+# loop-state.json: mode "decision" = loop ended, later passes run only the limited shutdown check until strikes exhaust; mode "strikes" = triage finds nothing, strikes accumulate to the same limit.
 
 state_get() { node -p "JSON.parse(require('fs').readFileSync('$STATE_FILE','utf8')).$1 || ''" 2>/dev/null || echo ""; }
 
@@ -86,9 +57,7 @@ clear_shutdown() {
   log "Decision overturned - new information in GitHub issues; resuming full work"
 }
 
-# Limited check for new information since the recorded shutdown decision.
-# Exit 0: resume full work. Exit 2: strike, skip work phases but keep looping.
-# Exit 1: strikes exhausted; stop the loop.
+# Limited check for new information since the recorded shutdown decision; exit 0 resume, 2 strike but keep looping, 1 stop.
 check_shutdown() {
   local decidedAt verdict
   decidedAt=$(state_get decidedAt)
@@ -129,8 +98,6 @@ NONE"
   return 1
 }
 
-# ---- Loop-decision agent: runs after a productive pass -----------------------
-
 decide_loop() {
   local decision
   decision=$(agent "loop-decision" "You have just completed an iteration pass on the GitHub
@@ -155,8 +122,6 @@ DECISION:END - <one short reason the loop is stopping>" | tail -n 1)
   log "loop-decision: continue"
   return 0
 }
-
-# ---- Pass body --------------------------------------------------------------
 
 run_pass() {
   ISSUE_WORKED=""
@@ -223,8 +188,6 @@ priority issue is DONE or BLOCKED, classify it exactly as you would any other ti
   log "Selected issue #$ISSUE"
   ISSUE_WORKED=1
 
-  # ---- Branch ----
-
   BRANCH=$(git branch -a --format='%(refname:short)' | grep -m1 -E "tv/${ISSUE}-" | sed 's|^origin/||' || true)
   if [ -n "$BRANCH" ]; then
     git checkout "$BRANCH" >/dev/null
@@ -241,8 +204,6 @@ lowercase hyphenated summary of the issue's subject. No other text."
     git checkout -b "$BRANCH" origin/main >/dev/null
     log "Created branch $BRANCH"
   fi
-
-  # ---- Shared helpers ----
 
   commit_and_push() {
     local msg="$1"
@@ -277,8 +238,6 @@ confirm from the repo's own state (not just issue comments) that this ticket is 
 already done nor blocked on the user: if it is, make sure the blocking reason is posted
 as a gh issue comment on #$ISSUE and stop immediately without doing any work."
 
-  # ---- Phase 1: write plan ----
-
   if [ -z "$PLAN_FILE" ]; then
     agent "plan-write" "$CONTEXT
 Write a plan at docs/plan-$ISSUE-<summary>.md (summary matches the branch name). It must be:
@@ -289,8 +248,6 @@ Avoid planning work that depends on an open question. Commit nothing; leave the 
     PLAN_FILE=$(ls docs/plan-"$ISSUE"-*.md 2>/dev/null | head -n 1 || true)
     commit_plan
   fi
-
-  # ---- Phase 2: review/harden plan ----
 
   if [ -n "$PLAN_FILE" ]; then
     agent "plan-review" "$CONTEXT
@@ -305,8 +262,6 @@ Commit nothing."
   else
     log "No plan file; skipping hardening"
   fi
-
-  # ---- Phase 3: deliver work ----
 
   PLAN_REF="${PLAN_FILE:-no plan doc exists - work directly from the issue}"
   REQ_PLAN="${PLAN_FILE:+The plan is at $PLAN_FILE.}"
@@ -324,8 +279,6 @@ Commit nothing."
   fi
   commit_and_push "feat: implement a deliverable for #$ISSUE"
 
-  # ---- Phase 4: critic ----
-
   agent "critic" "$CONTEXT
 $REQ_PLAN Aggressively criticise the work delivered on this branch
 (git log/diff vs origin/main). Try to break it: run the relevant tests and npm run ci,
@@ -337,13 +290,8 @@ look for bugs, edge cases, missed requirements, and plan drift. Then:
 Commit nothing."
   commit_and_push "test/hardening: critic pass for #$ISSUE"
 
-  # ---- Phase 4.5: address PR review comments ----
-
-  # Per owner request (issue #15, 2026-09-11): when a ticket already has an open
-  # PR, review comments on that PR are part of the ticket's remaining work and
-  # must be rectified before shipping. Note review comments left PENDING are not
-  # visible to the REST issue/pr comment endpoints; read them via GraphQL
-  # (pullRequest.reviews(states: PENDING) { comments { body path line } }).
+  # PR review comments are part of the ticket's work; PENDING reviews are only readable via GraphQL.
+  # @see #15
 
   prnum=$(gh pr list --repo alex-moon/tova --head "$BRANCH" --state open \
     --json number -q '.[0].number' 2>/dev/null || true)
@@ -363,8 +311,6 @@ with the relevant tests/npm run ci. Commit nothing."
     commit_and_push "fix: address PR review comments for #$prnum"
   fi
 
-  # ---- PR decision ----
-
   agent "pr-decision" "$CONTEXT
 $REQ_PLAN Decide whether this ticket is meaningfully done:
 a real deliverable exists, verification passes, and remaining gaps are honest follow-ups
@@ -377,8 +323,6 @@ post any missing open questions as a gh issue comment on #$ISSUE."
   git checkout main --quiet
   return 0
 }
-
-# ---- Main loop ---------------------------------------------------------------
 
 PRIORITY=""
 ONCE=""
@@ -405,9 +349,9 @@ while true; do
   if [ -f "$STATE_FILE" ] && [ "$(state_get mode)" = "decision" ]; then
     check_shutdown
     case $? in
-      1) exit 0 ;;        # strikes exhausted - loop is over
-      2) STALE=1 ;;       # strike registered; limited check again next pass
-      0) : ;;             # new information - resume full work
+      1) exit 0 ;;
+      2) STALE=1 ;;
+      0) : ;;
       *) continue ;;
     esac
   fi

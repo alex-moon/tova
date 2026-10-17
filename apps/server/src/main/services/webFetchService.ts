@@ -4,14 +4,11 @@ import { isPrivateIp } from './geoLocationService';
 import { htmlToMarkdown } from './markdownConversion';
 import { assertSafeUrl } from './safeLinkService';
 
-// Direct URL fetching for the `fetch_url` tool (issue #113): a parseable URL
-// the user pasted is a direct link, not a search query, so the agent should
-// read the actual page. Like webSearchService, failures throw so the tool
-// wrapper owns graceful degradation (#82 pattern).
+// Direct URL fetching for the `fetch_url` tool: a parseable URL is a direct link, not a search query; failures throw so the tool wrapper owns graceful degradation.
+// @see #113 #82
 
 export interface FetchedPage {
-  // The URL the page was actually fetched from (after redirects), so tool
-  // consumers can attribute the content and surface provenance.
+  // The URL the page was actually fetched from (after redirects), so consumers can attribute the content.
   url: string;
   title: string;
   content: string;
@@ -19,21 +16,16 @@ export interface FetchedPage {
 
 const FETCH_TIMEOUT_MS = 12_000;
 
-// Cap on the raw response body we are willing to buffer before conversion
-// (~2MB): stops giant pages from blowing memory just to get a truncated head.
+// Cap on the raw response body buffered before conversion: stops giant pages blowing memory just to get a truncated head.
 const MAX_BODY_CHARS = 2_000_000;
 
-// How much fetched page text the model actually sees: fixed character budget
-// applied at service level; tuning this later is cost-free.
+// How much fetched page text the model actually sees: a fixed budget applied at service level.
 export const MAX_FETCH_CHARS = 8_000;
 
 const BROWSER_UA =
   'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0 Safari/537.36';
 
-// isPrivateIp handles ::ffff:1.2.3.4 but URL normalizes IPv6 literals to
-// hex form (::ffff:1:2), which its checks miss. Expand to 8 groups and
-// evaluate the private ranges directly. Unparsable input is refused
-// (treated as private) — conservative is the right default for SSRF.
+// isPrivateIp misses URL-normalized hex IPv6 (::ffff:1:2), so expand to 8 groups and evaluate the private ranges directly; unparsable input is refused (conservative is right for SSRF).
 const expandIpv6 = (addr: string): number[] | null => {
   const [left, right, ...extra] = addr.split('::');
   if (extra.length > 0) return null;
@@ -63,11 +55,9 @@ const privateIpv6 = (addr: string): boolean => {
   if (nums[0] === 0x2002) return true; // 6to4 ::2002:0.0.0.0 relay capsules
   return false;
 };
-// literals and any resolved private address are refused. DNS rebinding and
-// redirects to private hosts are consciously deferred and flagged in the PR.
+// SSRF guard: an IP literal or any resolved private address is refused; DNS rebinding and redirects to private hosts are consciously deferred.
 export const assertPublicHost = async (rawHostname: string): Promise<void> => {
-  // WHATWG URL hostnames keep brackets around IPv6 literals; net.isIP and
-  // isPrivateIp both expect the bare address.
+  // WHATWG URL hostnames keep brackets around IPv6 literals; net.isIP and isPrivateIp both expect the bare address.
   const hostname = rawHostname.replace(/^\[|\]$/g, '');
   if (net.isIP(hostname) === 6) {
     if (privateIpv6(hostname)) {
@@ -100,14 +90,11 @@ export const assertPublicHost = async (rawHostname: string): Promise<void> => {
   }
 };
 
-// Truncate without splitting a surrogate pair (emoji, CJK), which would
-// corrupt the tail of the prompt text.
+// Truncate without splitting a surrogate pair, which would corrupt the tail of the prompt text.
 export const safeSlice = (text: string, max: number): string =>
   /[\uD800-\uDBFF]/.test(text.slice(max - 1, max)) ? text.slice(0, max - 1) : text.slice(0, max);
 
-// Stream the body to a real cap: response.text() would buffer an
-// arbitrarily large page before we could slice it, so read the stream and
-// stop as soon as the budget is exceeded.
+// Stream the body to a real cap: response.text() would buffer an arbitrarily large page before we could slice it.
 const readBodyCapped = async (response: Response): Promise<string> => {
   const declared = Number(response.headers.get('content-length') ?? 0);
   if (declared > MAX_BODY_CHARS) {
@@ -136,8 +123,7 @@ const readBodyCapped = async (response: Response): Promise<string> => {
   return text;
 };
 
-// Each hop is re-checked against the SSRF guard (the plan's fallback rule),
-// so a redirect to a private host is refused instead of followed.
+// Each hop is re-checked against the SSRF guard, so a redirect to a private host is refused instead of followed.
 const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
 const MAX_REDIRECTS = 5;
 
@@ -148,10 +134,8 @@ const titleOf = (html: string, fallback: string): string => {
   return title ? title.slice(0, 300) : fallback;
 };
 
-// Fetch a page and return its title + truncated text content. Throws on
-// bad scheme, SSRF refusal, network/timeout, non-2xx, and unsupported
-// content types; returns null when the body is fetchable but has no
-// readable text representation. The tool wrapper degrades on both.
+// Fetch a page and return its title + truncated text; throws on bad scheme, SSRF refusal, network failure, non-2xx and unsupported content types; null when there is no readable text.
+// @see #113
 export const fetchPage = async (url: string): Promise<FetchedPage | null> => {
   let parsed: URL;
   try {

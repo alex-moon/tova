@@ -1,31 +1,5 @@
-/*
- * #112 deterministic eval runner: seeds the temporary Mongo source, drives
- * the real agent (streaming connector) over the golden cases, grades every
- * run deterministically for pass/partial/fail, and — when a
- * LANGSMITH_API_KEY is present — pushes the cases and graded runs into the
- * `tova-evals` dataset in LangSmith so scores and debugging traces are
- * visible over time. Tracing of the underlying agent calls rides on the
- * Mastra LangSmithExporter (#5) via `trace.sessionId`.
- *
- * #225: the grading core lives in `apps/server/src/services/evalRunService.ts`,
- * shared with the scheduled admin path; this script keeps CLI parsing,
- * Mongo connect/disconnect, and stdout printing.
- *
- * Not part of CI (same stance as the other one-off scripts):
- *   npx tsx scripts/run-evals.ts [--keep-fixtures]
- *   npx tsx scripts/run-evals.ts --models all
- *   npx tsx scripts/run-evals.ts --models "deepinfra:zai-org/GLM-5.3-Flash"
- * Needs: DEEPINFRA_API_KEY (agent; completions are DeepInfra, #94), local
- * MongoDB (fixtures), optional LANGSMITH_API_KEY (export), BRAVE_API_KEY
- * (web_search case). Model: TOVA_EVAL_MODEL (+TOVA_EVAL_PROVIDER
- * groq|deepinfra), default GLM 5.3 Flash on deepinfra (#236: the cheapest
- * roster model). `--models` sweeps every listed model through all
- * cases; `--models all` enumerates the fixed roster on the wired providers
- * (deepinfra/fireworks — matched to connectors here; groq stays wired for the
- * single-run default). Bare entries in the csv default to provider
- * `deepinfra`. A `tova-evals-<model>` run over all models builds a per-model
- * evidence base in LangSmith (#158).
- */
+/* Deterministic eval runner: seeds Mongo fixtures, drives the real agent over golden cases, grades pass/partial/fail, exports to LangSmith; not part of CI. */
+// @see #112 #5 #225 #94 #236 #158
 import 'dotenv/config';
 import mongoose from 'mongoose';
 import { buildMongoUri } from '../apps/shared/src/main/mongoUri';
@@ -73,8 +47,8 @@ const printSweepTable = (results: EvalResult[]): void => {
 };
 
 const main = async (): Promise<void> => {
-  // #236: default to a roster model (cheapest = GLM 5.3 Flash on DeepInfra);
-  // the retired guard model `openai/gpt-oss-20b` has no roster home.
+  // Default to the cheapest roster model; the retired guard model has no roster home.
+  // @see #236
   const fallback = resolveScheduledModels({});
   const model = process.env.TOVA_EVAL_MODEL ?? fallback[0].model;
   const provider = (

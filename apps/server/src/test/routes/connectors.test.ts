@@ -13,9 +13,7 @@ jest.mock('../../main/services/connectorService', () => ({
   clearConnectorCachesForTests: jest.fn(),
 }));
 
-// OAuth engine mocked at the module boundary; the pure helpers
-// (ConnectorOAuthError, hasVaultedAuth, redirectOriginFrom, readConnectorVault)
-// stay real so the routes' use of them is exercised.
+// OAuth engine mocked at the module boundary; the pure helpers stay real so the routes' use of them is exercised.
 jest.mock('../../main/services/oauthConnectors', () => ({
   ...jest.requireActual('../../main/services/oauthConnectors'),
   startConnectorOAuth: jest.fn(),
@@ -30,8 +28,7 @@ const mockCompleteConnectorOAuth = jest.requireMock('../../main/services/oauthCo
 const mockProbeConnectorOAuth = jest.requireMock('../../main/services/oauthConnectors')
   .probeConnectorOAuth as jest.Mock;
 
-// The mocked module registry, resolved lazily (after jest.mock hoisting), so
-// the shared jest.fn instances are read from the mock, not typed imports.
+// The mocked module registry is resolved lazily (after jest.mock hoisting), so the shared jest.fn instances are read from the mock, not typed imports.
 const mockListMcpTools = jest.requireMock('../../main/services/connectorService')
   .listMcpTools as jest.Mock;
 
@@ -57,8 +54,8 @@ beforeEach(() => {
     authorizationUrl: 'https://as.example.com/authorize?client_id=dcr',
   });
   mockCompleteConnectorOAuth.mockReset();
-  // Add-time OAuth probe (#333): default to "no OAuth advertised" — the
-  // generic unreachable copy. Individual tests override per case.
+  // Add-time OAuth probe: default to "no OAuth advertised" — the generic unreachable copy; individual tests override per case.
+  // @see #333
   mockProbeConnectorOAuth.mockReset().mockResolvedValue(null);
 });
 
@@ -66,7 +63,8 @@ describe('POST /api/connectors (issues #36, #329)', () => {
   it('requires and validates the connector type', async () => {
     const { app, cookie } = await registerUser('conn-type@example.com');
 
-    // Missing type (#329): rejected.
+    // Missing type: rejected.
+    // @see #329
     const missing = await request(app)
       .post('/api/connectors')
       .set('Cookie', cookie)
@@ -74,7 +72,8 @@ describe('POST /api/connectors (issues #36, #329)', () => {
     expect(missing.status).toBe(400);
     expect(missing.body.message).toMatch(/type is required/u);
 
-    // Unknown type (#329): rejected before any handshake.
+    // Unknown type: rejected before any handshake.
+    // @see #329
     const unknown = await request(app)
       .post('/api/connectors')
       .set('Cookie', cookie)
@@ -82,8 +81,8 @@ describe('POST /api/connectors (issues #36, #329)', () => {
     expect(unknown.status).toBe(400);
     expect(unknown.body.message).toMatch(/unknown connector type/iu);
 
-    // Reserved-but-known types (#329): a clear not-supported-yet message,
-    // distinct from the unknown-type rejection.
+    // Reserved-but-known types: a clear not-supported-yet message, distinct from the unknown-type rejection.
+    // @see #329
     for (const type of ['api', 'sdk']) {
       const reserved = await request(app)
         .post('/api/connectors')
@@ -93,7 +92,8 @@ describe('POST /api/connectors (issues #36, #329)', () => {
       expect(reserved.body.message).toMatch(/not supported yet/u);
     }
 
-    // mcp.oauth (#327): a flow-specific pointer, not a token-form rejection.
+    // mcp.oauth: a flow-specific pointer, not a token-form rejection.
+    // @see #327
     const oauth = await request(app)
       .post('/api/connectors')
       .set('Cookie', cookie)
@@ -181,8 +181,8 @@ describe('POST /api/connectors (issues #36, #329)', () => {
       .send({ type: 'mcp.pat', name: 'x', url: 'http://mcp.example.com/mcp' });
     expect(httpRes.status).toBe(400);
 
-    // issue #80: 'authHeader' payloads are no longer a valid key — a raw
-    // token must be submitted as 'authToken' instead.
+    // 'authHeader' payloads are not a valid key — a raw token must be submitted as 'authToken'.
+    // @see #80
     const headerRes = await request(app).post('/api/connectors').set('Cookie', cookie).send({
       type: 'mcp.pat',
       name: 'x',
@@ -206,7 +206,7 @@ describe('POST /api/connectors (issues #36, #329)', () => {
       type: 'mcp.pat',
       name: 'enc',
       url: 'https://enc.example.com/mcp',
-      // tokens may legally contain colons; the schema no longer splits on one
+      // tokens may legally contain colons; the schema must not split on one
       authToken: 'hunter2:extra',
     });
     expect(res.status).toBe(201);
@@ -256,8 +256,8 @@ describe('GET /api/connectors (issues #36, #329)', () => {
     expect(names).toContain('platform-tools');
     expect(names).toContain('mine');
     expect(names).not.toContain('theirs');
-    // #329: every row reports the generic authConfigured wire field, and the
-    // legacy headersConfigured name is gone from the wire.
+    // Every row reports the generic authConfigured wire field; the legacy headersConfigured name is gone from the wire.
+    // @see #329
     for (const row of res.body.connectors as Array<Record<string, unknown>>) {
       expect(row).toHaveProperty('authConfigured');
       expect(row).not.toHaveProperty('headersConfigured');
@@ -366,8 +366,7 @@ describe('POST /api/connectors/oauth/start (#327)', () => {
       name: 'mine',
       url: 'https://dup-oauth.example.com/mcp',
     });
-    // The duplicate check keys on the caller; create via the API so the
-    // owner matches the cookie.
+    // The duplicate check keys on the caller; create via the API so the owner matches the cookie.
     await mockListMcpTools.mockResolvedValue([{ name: 'w', description: '', inputSchema: {} }]);
     await request(app)
       .post('/api/connectors')
@@ -520,8 +519,8 @@ describe('POST /api/connectors/:id/reauth (#327)', () => {
       .set('Cookie', cookie);
     expect(patRes.status).toBe(404);
 
-    // An mcp.oauth row goes through the flow with its id; owned by the
-    // caller (the route re-checks ownership, so the row must match the cookie).
+    // An mcp.oauth row goes through the flow with its id; owned by the caller (the route re-checks ownership).
+    // @see #327
     const caller = await User.findOne({ email: 'oauth-reauth@example.com' });
     const doc = await Connector.create({
       type: 'mcp.oauth',

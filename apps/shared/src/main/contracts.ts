@@ -1,14 +1,6 @@
-// Shared API wire contracts (single source of truth for HTTP JSON bodies).
-//
-// Rules for this file:
-// - Types/interfaces only. No runtime imports, no dependencies — the same
-//   file must typecheck under the server config (module: commonjs) and the
-//   client config (module: esnext + verbatimModuleSyntax).
-// - Shapes are HTTP wire types, not Mongo documents: e.g. `Date` fields
-//   appear as ISO strings after res.json() / JSON.parse.
+// Shared API wire contracts: types/interfaces only (must typecheck under both server and client configs); shapes are HTTP wire types, not Mongo documents.
 
-// Public shape of an admin-visible user record, as returned by
-// GET /api/admin/users (server projection in apps/server/src/routes/admin.ts).
+// Public shape of an admin-visible user record from GET /api/admin/users.
 export interface AdminUser {
   id: string;
   email: string;
@@ -19,14 +11,8 @@ export interface AdminUser {
   updatedAt: string;
 }
 
-// Model inventory row, GET /api/admin/models (#234). Each entry is one
-// `modelrosters` document: the fixed-roster era registers a MODEL once with a
-// paired `providers[]` list, so `id` is the roster _id and `modelId` is the
-// stable model key. #115 capability fields: `tools` is schema-defaulted to
-// true; `vision` is only ever true when the model explicitly claims it;
-// `contextLength` is the advertised limit (omitted when none is known).
-// #199 pricing: `inputPrice`/`outputPrice` are USD per 1M tokens, omitted when
-// unknown; price is now a soft weighted-score input, not a hard cap.
+// Model inventory row: one roster document with its paired providers[]; capability and pricing fields omitted when unknown.
+// @see #234 #115 #199
 export interface AdminModel {
   id: string;
   modelId: string;
@@ -40,12 +26,8 @@ export interface AdminModel {
   providers: AdminModelProvider[];
 }
 
-// One backend of a roster model. `disabledUntil` is the system-owned per-
-// provider cool-off expiry (#168/#213), an ISO wire string or null when not
-// cooling off. `ttftMs`/`ttftSamples` are the rolling mean first-token latency
-// and its observation count (OQ3: the exact figure `pickPrimary` scores on);
-// both omitted when the provider has never won a race. `enabled` lets an
-// operator take one backend out of the race without removing the model (OQ5).
+// One backend of a roster model: system-owned cool-off expiry, rolling TTFT, and an operator enable switch.
+// @see #168 #213
 export interface AdminModelProvider {
   provider: string;
   modelId: string;
@@ -56,13 +38,8 @@ export interface AdminModelProvider {
   disabledUntil: string | null;
 }
 
-// #168 per-model endpoint-error diagnostics (Alex, 2026-09-26): every
-// completion failure is tallied at the inferenceService choke point into the
-// #175 `modelrouteerrors` collection, so real connector error shapes
-// accumulate in Mongo and survive deploys. One row per
-// (provider, model, status, category) cell; `status` is null when the
-// failure carried no HTTP status; `lastMessage` is a redacted, capped
-// excerpt of the most recent failure.
+// Per-model endpoint-error diagnostics: failures tallied at the inference choke point, one row per (provider, model, status, category).
+// @see #168 #175
 export interface AdminModelError {
   provider: string;
   model: string;
@@ -79,13 +56,8 @@ export interface AdminModelsPayload {
   errors: AdminModelError[];
 }
 
-// #217/#234: provider catalog lookup, GET /api/admin/model-lookup. `found:
-// false` is a successful "the provider does not host this model" answer; a
-// thrown provider/network failure surfaces as a non-200 instead.
-// `contextLength` and prices are omitted when the provider does not report them
-// (prices are USD per 1M tokens, matching AdminModel); `vision` is present only
-// when the catalog tags the model multimodal. DeepInfra reports context,
-// prices and vision; Fireworks reports context/vision/tools but no prices.
+// Provider catalog lookup; `found:false` is a successful answer, provider failures surface as non-200.
+// @see #217 #234
 export interface AdminModelLookup {
   found: boolean;
   provider?: string;
@@ -97,10 +69,8 @@ export interface AdminModelLookup {
   description?: string;
 }
 
-// One retained log row, GET /api/admin/logs (#179). Sourced from Grafana Cloud
-// Loki (which survives deploys) rather than the old in-memory ring buffer.
-// `level` is a best-effort classification of the raw line; `id` is derived from
-// the line's nanosecond timestamp so React keys stay stable.
+// One retained log row from Grafana Cloud Loki; `id` derives from the line's nanosecond timestamp for stable React keys.
+// @see #179
 export interface AdminLogEntry {
   id: string;
   ts: string;
@@ -108,9 +78,8 @@ export interface AdminLogEntry {
   msg: string;
 }
 
-// Admin PATs (#184): agent/CLI credentials managed in the Access tab.
-// `AdminPat` is the list shape — metadata only, no token (the plaintext is
-// returned exactly once, in AdminPatCreated at creation).
+// Admin PATs: metadata-only list shape (plaintext token returned exactly once at creation).
+// @see #184
 export interface AdminPat {
   id: string;
   name: string;
@@ -131,9 +100,8 @@ export interface AdminPatsPayload {
   pats: AdminPat[];
 }
 
-// Direct model comparison (issue #129): one prompt run against the existing
-// agent on chosen routing rows. `answer` is null with `error` set when that
-// model's completion failed; `latencyMs` covers the full agent call.
+// Direct model comparison: one prompt against chosen routing rows; `answer` null with `error` set on failure.
+// @see #129
 export interface ModelComparisonResult {
   provider: string;
   model: string;
@@ -147,41 +115,32 @@ export interface ModelComparisonRun {
   results: ModelComparisonResult[];
 }
 
-// Response of GET /api/admin/logs (#179): one time-window page of retained
-// logs, newest first. No cursor — the view re-queries the window instead of
-// polling incrementally. `configured` is false when Loki env vars are absent;
-// `error` carries a human message when the Loki query itself failed.
+// One time-window page of retained logs, newest first; no cursor — the view re-queries the window.
+// @see #179
 export interface AdminLogsPayload {
   logs: AdminLogEntry[];
   configured: boolean;
   error?: string;
 }
 
-// Admin LangSmith read view (#186): wire types for the Traces tab. Rows and
-// runs are trimmed server-side projections of LangSmith run documents.
-// `model` is the trace's llm child model (e.g. 'openai/gpt-oss-20b') — null
-// when the trace has no llm child (e.g. it errored before the model call);
-// chat turns are traced without session metadata today, so the server
-// resolves it from the child run name. `appPath`, when present, deep-links
-// the run in the LangSmith UI.
+// Admin LangSmith read view: trimmed server-side projections of LangSmith run documents.
+// @see #186
 export interface AdminTraceRow {
   id: string;
   traceId: string;
   name: string;
   status: string;
   model: string | null;
-  // #237: the provider that served the trace's llm run, from the run's
-  // `ls_provider` span metadata (mapped to the app name, e.g. `fireworks`).
-  // Null when the trace has no llm child or predates provider export.
+  // The provider that served the trace's llm run, from `ls_provider` metadata; null when absent.
+  // @see #237
   provider: string | null;
   startedAt: string;
   durationMs: number | null;
   totalTokens: number | null;
   error: string | null;
   appPath?: string;
-  // #308: workspace-memory facts for the turn, read from the root run's
-  // metadata (the enrichment guard outcome and the rendered block's slice
-  // count). Absent on traces from before the metadata existed.
+  // Workspace-memory facts from the root run's metadata; absent on older traces.
+  // @see #308
   workspaceGate?: 'yes' | 'no' | 'timeout' | 'off';
   workspaceHits?: number;
 }
@@ -191,11 +150,7 @@ export interface AdminTracesPayload {
   traces: AdminTraceRow[];
 }
 
-// One node of a trace detail tree. `parentId` is null on the trace's root;
-// the client renders depth from the chain. `inputs`/`outputs` are the raw
-// LangSmith payloads (JSON values — the tab renders them as formatted JSON),
-// included because reading prompts/outputs is the point of the tool; the
-// admin route serves the same trust audience as the LangSmith UI itself.
+// One node of a trace detail tree; inputs/outputs are the raw LangSmith payloads.
 export interface AdminTraceRun {
   id: string;
   parentId: string | null;
@@ -203,14 +158,14 @@ export interface AdminTraceRun {
   runType: string;
   status: string;
   model: string | null;
-  // #237: provider that served this llm run (`ls_provider` metadata), null on
-  // non-llm runs or a trace exported before provider export.
+  // Provider that served this llm run (`ls_provider` metadata), null on non-llm runs.
+  // @see #237
   provider: string | null;
   startedAt: string;
   endedAt: string | null;
   durationMs: number | null;
-  // #237: time-to-first-token (`first_token_time - start_time`), null when the
-  // run is non-streaming or carries no first-token instant.
+  // Time-to-first-token, null when the run is non-streaming.
+  // @see #237
   ttftMs: number | null;
   totalTokens: number | null;
   error: string | null;
@@ -223,38 +178,24 @@ export interface AdminTraceDetail {
   runs: AdminTraceRun[];
 }
 
-// Per-model rollup of llm runs in the stats window (#186), aggregated from
-// the llm runs directly (model + tokens live there, and a root-based rollup
-// would multiply API calls against LangSmith's rate limits). `calls` counts
-// llm requests — a tool-using turn makes several to the same model;
-// `errors` are llm-level failures; `avgDurationMs` is the mean end-start of
-// the calls (null when none finished); `totalTokens` sums the runs' token
-// counts. Turns that failed before any llm call do not appear here — the
-// traces list's errors-only filter covers turn-level failures.
-// `inputTokens`/`outputTokens` are the prompt/completion split (#224) used to
-// price a model; a run that reported no split contributes 0 to both, while
-// `totalTokens` still holds whatever the run itself reported.
+// Per-model rollup of llm runs in the stats window; input/output split prices a model (0 when the run reported no split).
+// @see #186 #224
 export interface AdminLangsmithModelStats {
   model: string;
-  // #237: the provider this row covers, from the run's `ls_provider` metadata;
-  // null for a legacy run with no provider. Under racing a model has one row
-  // per provider, so the row is keyed by `(model, provider)`.
+  // The provider this row covers (`ls_provider` metadata); rows are keyed by (model, provider).
+  // @see #237
   provider: string | null;
   calls: number;
   errors: number;
   avgDurationMs: number | null;
-  // #237: mean time-to-first-token (`first_token_time - start_time`) across
-  // the row's streamed calls; null when none carried a first-token instant.
+  // Mean time-to-first-token across the row's streamed calls; null when none.
+  // @see #237
   avgTtftMs: number | null;
   totalTokens: number;
   inputTokens: number;
   outputTokens: number;
-  // #224/#235: estimated USD spend for this (model, provider), joined from the
-  // roster's per-provider price at read time (`null` = either side's price is
-  // unknown, distinct from $0 — #199 semantics). With the provider on the row
-  // (#237) a dual-priced model prices from the winning provider's entry; a
-  // legacy no-provider row keeps the deterministic model-only fallback.
-  // The UI renders null as `—`.
+  // Estimated USD spend joined from the roster price at read time; null (unknown) is distinct from $0.
+  // @see #224 #235 #199 #237
   estimatedCostUsd: number | null;
 }
 
@@ -267,24 +208,17 @@ export interface AdminLangsmithStatsPayload {
     totalTokens: number;
     inputTokens: number;
     outputTokens: number;
-    // Sum of the priced models' costs; null when no model in the window has a
-    // known price.
+    // Sum of the priced models' costs; null when no model has a known price.
     estimatedCostUsd: number | null;
   };
-  // When the rollup was computed. Present on a cache hit; absent on a live
-  // fallback (which is freshly computed).
+  // When the rollup was computed; absent on a live fallback.
   computedAt?: string;
-  // True when the payload came from a live sweep (no cache yet, or the cache
-  // is older than the staleness threshold).
+  // True when the payload came from a live sweep rather than the cache.
   stale?: boolean;
 }
 
-// Per-session cost breakdown for the admin Traces tab (#224). Unlike the model
-// rollup (which comes from LangSmith llm runs), this is computed from our own
-// `Message` rows: message-in = `role:'user'`, message-out = `role:'assistant'`.
-// Token totals and cost cover only assistant messages that carry `usage`
-// (logged from #224 onward), so the counts and the token/cost totals describe
-// different rows for a while — the UI labels this as a known skew.
+// Per-session cost breakdown computed from our own Message rows; usage covers only turns logged after #224.
+// @see #224
 export interface AdminSessionCostRow {
   sessionId: string;
   title: string;
@@ -292,12 +226,8 @@ export interface AdminSessionCostRow {
   messagesOut: number;
   inputTokens: number;
   outputTokens: number;
-  // Estimated USD spend for the session (#235), priced per turn by the
-  // `(model, provider)` that actually served it — a dual-priced model bills
-  // each turn at its winning provider's rate. The figure is blended across the
-  // session's providers (no provider dimension on the row by choice: a session
-  // may race either backend). `null` when no assistant message in the session
-  // has a known price (distinct from $0 — #199). UI renders `—`.
+  // Estimated USD spend priced per turn by the serving (model, provider); null when no known price (distinct from $0).
+  // @see #235 #199
   estimatedCostUsd: number | null;
   // Latest message timestamp in the session, used for ordering/display.
   lastActivityAt: string;
@@ -316,10 +246,8 @@ export interface AdminSessionsCostPayload {
   };
 }
 
-// #225: admin Evals view. One `AdminEvalRunSummary` per suite execution
-// (newest first in the list), with per-score counts so the tab renders a row
-// without fetching the per-case breakdown. `status` mirrors the rollup's
-// `running|done|error`; `total` is the number of graded cases.
+// Admin Evals view: one summary per suite execution with per-score counts.
+// @see #225
 export interface AdminEvalScoreCounts {
   pass: number;
   partial: number;
@@ -327,10 +255,8 @@ export interface AdminEvalScoreCounts {
   error: number;
 }
 
-// #289: a run is either the tool-use golden suite or the workspace-memory eval.
-// Memory runs reuse the same `evalruns` collection (D9) with a `kind` badge and
-// a continuous `metrics` rollup that does not fit the per-case `pass|partial|
-// fail|error` scores.
+// A run is either the tool-use golden suite or the workspace-memory eval, sharing the evalruns collection.
+// @see #289
 export type AdminEvalRunKind = 'tool-use' | 'memory';
 
 export interface AdminEvalRunSummary {
@@ -349,9 +275,7 @@ export interface AdminEvalRunsPayload {
   runs: AdminEvalRunSummary[];
 }
 
-// One graded case row in a run's breakdown. `score` is stringly typed as the
-// runner always produced it: `error` is a run-level crash recorded in sweep
-// mode, distinct from a genuine graded `fail`.
+// One graded case row; `error` is a run-level crash, distinct from a graded `fail`.
 export interface AdminEvalCaseResult {
   caseId: string;
   model: string;
@@ -360,10 +284,8 @@ export interface AdminEvalCaseResult {
   report: string;
 }
 
-// #289 memory-eval rollup. Precision/recall@k/win-rate are continuous, so they
-// live here rather than in the per-case `results` rows (which carry a
-// drill-down score). Every stage field is optional: a scheduled retrieval-only
-// run writes no `gate`/`helpfulness`.
+// Memory-eval rollup: continuous metrics live here rather than per-case rows; stage fields optional.
+// @see #289
 export interface AdminEvalSubtypeRecall {
   total: number;
   truePos: number;
@@ -392,7 +314,8 @@ export interface AdminEvalRetrievalMetrics {
   expectedMet: number;
   expectedMetRate: number;
   surfacedRate: number;
-  /** #305: retrieval cases that ended empty-after-cut (graceful refusal). */
+  /** Retrieval cases that ended empty-after-cut (graceful refusal). */
+  // @see #305
   cutEmpty?: number;
   byCategory: Record<string, { total: number; surfaced: number; expectedMet: number }>;
 }
@@ -416,8 +339,8 @@ export interface AdminEvalMemoryMetrics {
   stages: string[];
   /** SHA-256 over the canonical corpus (D15), so a corpus change is visible. */
   corpusHash: string;
-  /** #310: the gate is retired — these are absent on runs after it, and read
-   * only from historical rollups. */
+  /** The gate is retired; these are absent on runs after it. */
+  // @see #310
   gateModel?: string;
   gateProvider?: string;
   /** Responder/judge identities (D15/OQ29); absent on a retrieval-only run. */
@@ -436,17 +359,14 @@ export interface AdminEvalRunDetail extends AdminEvalRunSummary {
   metrics?: AdminEvalMemoryMetrics | null;
 }
 
-// `location` is the coarse country-level geolocation (issue #50): only the
-// country name and 2-letter code are exposed, and only once resolved.
+// Coarse country-level geolocation: only the country name and 2-letter code.
+// @see #50
 export interface AuthUserLocation {
   country: string;
   countryCode: string;
 }
 
-// User payload returned by GET /api/auth/me (includes permissions).
-// `name`/`avatarUrl`/`customInstructions` are optional: omitted from the wire
-// payload until set. `name` is the Google-owned full name; `preferredName`
-// is user-owned; `customInstructions` is the user's per-chat prompt override.
+// User payload from GET /api/auth/me; optional fields omitted from the wire until set.
 export interface AuthUser {
   id: string;
   email: string;
@@ -458,23 +378,21 @@ export interface AuthUser {
   customInstructions?: string;
   theme?: 'light' | 'dark';
   startupChat?: 'recent' | 'new';
-  // Zero-data-retention opt-in (issue #116): omitted until the user enabled
-  // it, so the client only branches on the flag once it is explicitly true.
+  // Zero-data-retention opt-in: omitted until enabled.
+  // @see #116
   zdr?: boolean;
-  // 'Incognito by default' (#144) alias: the same flag as `zdr`, exposed in
-  // lockstep once truthy. New chats start incognito when either is set.
+  // 'Incognito by default' alias of `zdr`; new chats start incognito when either is set.
+  // @see #144
   incognitoByDefault?: boolean;
   confirmDeletes?: { chat: boolean; file: boolean };
   location?: AuthUserLocation;
-  // IANA timezone from the browser (#261): omitted until captured, so the
-  // prompt falls back to UTC for users who have never reported one.
+  // IANA timezone from the browser; omitted until captured.
+  // @see #261
   timezone?: string;
 }
 
-// User payload returned by POST /api/auth/login and /register.
-// NOTE: narrower than AuthUser — these routes omit `permissions`. The
-// client's AuthContext currently types a wider User than these routes
-// return (drift documented on issue #20; two-type default until resolved).
+// Login/register payload: narrower than AuthUser (no permissions); drift tracked on the issue.
+// @see #20
 export interface LoginUserPayload {
   id: string;
   email: string;

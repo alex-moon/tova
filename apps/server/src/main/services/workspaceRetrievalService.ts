@@ -11,36 +11,11 @@ import { embedTexts } from './embeddingService';
 import { rerankQuery } from './rerankerService';
 import { withTimeout } from './markdownConversion';
 
-/*
- * #253: workspace memory — retrieval over the user's past work.
- *
- * The epic's unit of memory is a *piece of work*, not an extracted concept
- * (that was #138, superseded). The v1 corpus is addressable *views* over what
- * already exists — `Message` rows joined to their `Session` title, `Asset`
- * rows' extracted text, and (since #298) a task's `TaskEvent` stream — read at
- * retrieval time; nothing is copied into a new store (the ticket's "no eager
- * copies into library-shaped docs").
- *
- * Retrieval is personal-scale and lexical (#251: no vector infra in v1): since
- * #293 it ranks the user's whole non-deleted chat corpus with BM25, over one
- * candidate set assembled at read time (see `collectWorkspaceSlices`). A slice
- * with zero query-term overlap scores zero, so recency alone cannot drag an
- * unrelated slice into the block.
- *
- * The gate (does a turn deserve retrieval at all?) lives in
- * `enrichmentService.ts`; this module is pure retrieval + layout so scoring
- * is unit-testable without Mongo.
- */
+/* Workspace memory — retrieval over the user's past work: addressable views over existing rows (no eager copies), BM25-ranked at personal scale over one read-time candidate set; pure retrieval + layout, no gate. */
+// @see #253 #138 #251 #298 #293
 
-/*
- * Keyword tokeniser for lexical scoring (moved here from the retired
- * `entityRetrievalService`, #256). Lowercase, split on non-word characters,
- * drop single characters and stopwords that carry no linking signal — "the
- * hotel" still matches a slice mentioning "hotel" via `hotel`, but 'the'
- * alone must not surface unrelated slices. Returns terms **with multiplicity**
- * so BM25 can measure document term frequency; `promptWords` wraps it in a
- * `Set` for the callers that only need membership.
- */
+/* Keyword tokeniser for lexical scoring: lowercase, split on non-word chars, drop single characters and stopwords; returns terms with multiplicity for BM25. */
+// @see #256
 const WORD_PATTERN = /[a-z0-9']+/g;
 
 const STOPWORDS = new Set([
@@ -75,13 +50,11 @@ export const tokenize = (text: string): string[] => {
 
 export const promptWords = (prompt: string): Set<string> => new Set(tokenize(prompt));
 
-// #251/decision: kill switch. Default OFF — a wrong injection pollutes every
-// turn, so the block ships opt-in until the gate evals exist (see
-// docs/done/plan-253-workspace-memory.md).
+// Kill switch, default OFF: a wrong injection pollutes every turn, so the block ships opt-in until the gate evals exist.
+// @see #251
 export const isWorkspaceMemoryEnabled = (): boolean => config.workspaceMemory.enabled;
 
-// Injection budget (chars), sized so the block leaves room for the library
-// index in the same prompt budget (plan decision 4).
+// Injection budget (chars), sized so the block leaves room for the library index in the same prompt budget.
 export const BLOCK_CAP = 1200;
 
 // Asset/task candidate pools: still bounded (see the corpus-read comment).
@@ -97,36 +70,16 @@ export type WorkspaceSlice = {
   at: Date;
 };
 
-/*
- * #293: BM25 ranking, replacing the naive overlap score. Parameters are
- * standard defaults, exported so a future tuning change is a visible diff.
- *
- * score(q, d) = Σ_{t ∈ distinct(q)} idf(t) · (tf(t,d) · (k1 + 1))
- *               / (tf(t,d) + k1 · (1 - b + b · |d| / avgdl))
- * idf(t) = ln(1 + (N - df(t) + 0.5) / (df(t) + 0.5))   (non-negative form)
- *
- * `df` counts documents containing a term (set membership); query term
- * frequency is fixed at 1. A query term absent from every document contributes
- * nothing, and a slice with no query term at all scores 0 — so the
- * "recency alone cannot surface an unrelated slice" invariant is preserved.
- * BM25 is corpus-relative (IDF, `avgdl`), so there is no single-document
- * `scoreSlice`; the ranker is pure (no Mongo, no `Date.now()`).
- */
+/* BM25 ranking, replacing the naive overlap score; standard parameters exported so a tuning change is a visible diff; corpus-relative and pure (no Mongo, no Date.now()). */
+// @see #293
 export const BM25_K1 = 1.2;
 export const BM25_B = 0.75;
 
-/*
- * #309: how many extra occurrences each title token contributes to a slice's
- * document stream. The title (a file's filename, a task's instruction line, a
- * chat's session title) carries terms the content cannot supply — "that AGI
- * file" must match `agi-final.md` even when "AGI" appears nowhere in the text.
- * Boost of 2 means a title-only term matches (tf 2) and a term also present in
- * the content is pulled toward the title. Exported/diffable like K1/B.
- */
+/* Extra occurrences each title token contributes to a slice's document stream — the title carries terms the content cannot supply; exported/diffable like K1/B. */
+// @see #309
 export const BM25_TITLE_BOOST = 2;
 
-// The doc token stream for one slice: the content plus the title tokens
-// repeated `BM25_TITLE_BOOST` times, so tf and length derive from one stream.
+// The doc token stream for one slice: content plus title tokens repeated `BM25_TITLE_BOOST` times, so tf and length derive from one stream.
 const sliceTokens = (slice: WorkspaceSlice): string[] => {
   const titleTokens = tokenize(slice.title);
   return [
@@ -145,10 +98,7 @@ export const pickTopSlices = (
   const queryTerms = [...promptWords(prompt)];
   if (queryTerms.length === 0) return [];
 
-  // Tokenise each document once into a term-frequency map plus its token
-  // count. Building the maps up front means `df` is a `has` lookup per term
-  // (O(total tokens + Q·D)) rather than a re-scan of every document per query
-  // term — the full-corpus read makes that difference matter.
+  // Tokenise each document once into a term-frequency map plus its token count, so `df` is a `has` lookup per term rather than a re-scan per query term.
   const docs = slices.map((slice) => {
     const tf = new Map<string, number>();
     let length = 0;
@@ -159,8 +109,7 @@ export const pickTopSlices = (
     return { tf, length };
   });
   const avgdl = docs.reduce((sum, doc) => sum + doc.length, 0) / N;
-  // Every document tokenises to nothing (avgdl 0): IDF/length maths divides by
-  // zero and no term can overlap, so nothing is rankable.
+  // Every document tokenises to nothing (avgdl 0): the maths divides by zero and no term can overlap.
   if (avgdl === 0) return [];
 
   const df = new Map<string, number>();
@@ -186,8 +135,7 @@ export const pickTopSlices = (
         return { slice, score };
       })
       .filter(({ score }) => score > 0)
-      // Total order: BM25 desc, then recency (`at` desc), then id asc, so the
-      // ranking is deterministic regardless of the engine's sort stability.
+      // Total order: BM25 desc, then recency, then id asc — deterministic regardless of sort stability.
       .sort(
         (a, b) =>
           b.score - a.score ||
@@ -198,14 +146,7 @@ export const pickTopSlices = (
   );
 };
 
-/*
- * A bounded snippet centred on where the prompt actually matched, so the model
- * sees the region that caused the retrieval rather than the head of the source
- * (a lease's pets clause may sit thousands of characters into the document; the
- * head-160 window would show the title page and nothing that supports the
- * answer). Falls back to the head when the match is at the very start, and is
- * always `<= cap` characters so the block-cap accounting below stays exact.
- */
+/* A bounded snippet centred on where the prompt actually matched, so the model sees the region that caused the retrieval, not the head of the source; always <= cap so block accounting stays exact. */
 export const matchSnippet = (text: string, prompt: string, cap = 160): string => {
   const line = text.replace(/\s+/g, ' ').trim();
   if (line.length <= cap) return line;
@@ -225,11 +166,7 @@ export const matchSnippet = (text: string, prompt: string, cap = 160): string =>
   return `${head}${line.slice(start, start + body)}${tail}`;
 };
 
-/*
- * Slice title for a task: the first line of its instruction, collapsed and
- * capped, falling back to a stable placeholder when the instruction is empty
- * (a task whose header seed is blank but whose stream still carries work).
- */
+/* Slice title for a task: the first instruction line, collapsed and capped, with a stable placeholder when empty. */
 export const TASK_TITLE_CAP = 60;
 export const taskTitle = (instruction: string): string => {
   const line = instruction.replace(/\s+/g, ' ').trim();
@@ -237,12 +174,7 @@ export const taskTitle = (instruction: string): string => {
   return line.length <= TASK_TITLE_CAP ? line : `${line.slice(0, TASK_TITLE_CAP - 1)}…`;
 };
 
-/*
- * Layout: one bullet per slice, hard character cap, empty-on-nothing so an
- * empty block never shifts an otherwise identical prompt. Chat slices carry
- * their session title + date; file slices carry their filename; task slices
- * carry a title derived from the task instruction.
- */
+/* Layout: one bullet per slice under a hard character cap, empty-on-nothing so an empty block never shifts an otherwise identical prompt. */
 export const renderBlock = (
   prompt: string,
   picked: { slice: WorkspaceSlice }[],
@@ -260,8 +192,7 @@ export const renderBlock = (
           ? `task "${slice.title}"`
           : `file "${slice.title}"`;
     const line = `- ${label} (${date}) — ${matchSnippet(slice.text, prompt)}`;
-    // Count the joining newline too, so the rendered block stays within `cap`
-    // rather than exceeding it by up to n-1 separators.
+    // Count the joining newline too, so the rendered block stays within `cap`.
     const cost = line.length + (lines.length > 0 ? 1 : 0);
     if (used + cost > cap) break;
     lines.push(line);
@@ -270,11 +201,8 @@ export const renderBlock = (
   return lines.join('\n');
 };
 
-/*
- * The BM25-only layout wrapper the existing tests and pure callers use. The
- * retrieval read (#294) ranks through `retrieveRankedSlices` instead so it can
- * fuse the vector ranking, then renders with `renderBlock` directly.
- */
+/* The BM25-only layout wrapper for pure callers; the retrieval read ranks through retrieveRankedSlices instead so it can fuse the vector ranking. */
+// @see #294
 export const buildWorkspaceBlock = (
   prompt: string,
   slices: WorkspaceSlice[],
@@ -282,50 +210,8 @@ export const buildWorkspaceBlock = (
   cap = BLOCK_CAP,
 ): string => renderBlock(prompt, pickTopSlices(prompt, slices, n), cap);
 
-/*
- * The corpus read: the user's whole non-deleted chat history (joined to session
- * titles), extracted-asset text, and task streams, assembled into
- * prompt-independent `WorkspaceSlice[]`. Pure data — scoring and layout happen
- * in the callers, so the #289 hit-rate eval can match on slice IDs while the
- * chat path only ever wants the rendered block.
- *
- * #293: the chat corpus is no longer a recency-bounded pool. A bounded window
- * made an old relevant chat unreachable by construction — no amount of scoring
- * fixes a candidate that was never fetched — so all of the user's non-deleted
- * sessions and their `role:'user'` messages are read. The bound is now the
- * user's own corpus (personal scale), not recency; the message read no longer
- * sorts, because BM25 ignores insertion order and the read is bounded by the
- * corpus. Assets and tasks keep explicit caps (their "old item unreachable"
- * defect is tracked separately, not this ticket's stated failure).
- *
- * Ownership is resolved session-first: `messages` is keyed by `sessionId`, not
- * by `userId`, so the user's sessions are the join key. Fetching the sessions
- * first (indexed by `{ userId, deletedAt, lastMessageAt }`) then filtering
- * messages by `sessionId` keeps the corpus owned by construction — a global
- * `Message.find({ role: 'user' })` would be dominated by other users' recent
- * turns and could starve this user's own history out.
- * Tasks are owned directly (`Task.userId`) and read the same pool-first way.
- *
- * `excludeMessageId` drops the just-saved current turn (the routes run
- * retrieval after persisting it) so the turn is never retrieved and injected
- * back as its own "past work". `excludeAssetId` does the same for the file
- * attached to the current turn: an attachment under discussion is not past
- * work, and its contents already ride the `<user_content>` envelope (or the
- * file-library index), so re-listing it as a retrieved slice would only
- * duplicate it.
- *
- * Ephemeral assets (ZDR chat-composer uploads, `ephemeral: true`) are filtered
- * out of the corpus entirely, matching decision 6 / the epic invariant that
- * incognito artifacts never become workspace items — the durable-library reads
- * (the assets page) exclude them for the same reason. Tasks need no such
- * filter: ZDR users get no tasks (D7).
- *
- * #298: a task contributes one slice whose text is its `user`/`assistant`
- * `TaskEvent` content in `seq` order (`system` notices are visible-only, never
- * model context, and are skipped). The header `instruction` names the slice but
- * is not folded into the text — it is also the first `user` event, so including
- * it would duplicate it.
- */
+/* The corpus read: the user's whole non-deleted chat history (joined to session titles), asset text and task streams, as prompt-independent slices; pure data so scoring/layout happen in callers. The chat corpus is NOT recency-bounded (a bounded window made old relevant chats unreachable by construction); ownership is resolved session-first so other users' turns cannot starve this user's history. Excludes the current turn/attachment and ephemeral assets; tasks contribute one slice per stream in seq order (system notices skipped; the instruction header is not folded — it duplicates the first event). */
+// @see #293 #298
 export const collectWorkspaceSlices = async (
   userId: string,
   excludeMessageId?: string,
@@ -338,8 +224,7 @@ export const collectWorkspaceSlices = async (
   const sessionIds = sessions.map((s) => s._id as mongoose.Types.ObjectId);
 
   const [messages, assets, tasks] = await Promise.all([
-    // An empty `$in` yields no rows, so a user with files but no chats still
-    // gets file retrieval (the asset read does not depend on sessions).
+    // An empty `$in` yields no rows, so a user with files but no chats still gets file retrieval.
     Message.find({
       role: 'user',
       sessionId: { $in: sessionIds },
@@ -423,11 +308,8 @@ export const collectWorkspaceSlices = async (
   return slices;
 };
 
-/*
- * The top-ranked slices for a prompt, with their IDs (#289: hit-rate matches on
- * the slice ID, which the rendered block does not carry). Never throws — an eval
- * or a chat turn must degrade to "nothing", not an error.
- */
+/* The top-ranked slices for a prompt, with their IDs (hit-rate matches on the slice ID); never throws — an eval or chat turn degrades to "nothing", not an error. */
+// @see #289
 export const retrieveWorkspaceSlices = async (
   prompt: string,
   userId: string,
@@ -445,10 +327,7 @@ export const retrieveWorkspaceSlices = async (
   }
 };
 
-/*
- * The rendered `<user:workspace>` block for a prompt. Empty when nothing
- * overlaps. Never throws — memory must not degrade a chat turn.
- */
+/* The rendered `<user:workspace>` block for a prompt; empty when nothing overlaps; never throws. */
 export const retrieveWorkspaceBlock = async (
   prompt: string,
   userId: string,
@@ -470,18 +349,8 @@ export const retrieveWorkspaceBlock = async (
   }
 };
 
-/*
- * #294, task 8: the semantic half of retrieval. Embed the query, then ask
- * Atlas Vector Search for the nearest stored vectors over the same corpus BM25
- * searches. This is the one stage that cannot run in CI: `$vectorSearch` does
- * not exist on local `mongod`/`mongodb-memory-server`, so the driver path is
- * exercised only against Atlas (the #289 live run). Everything around it is
- * injectable, so the degradation contract is unit-tested with fakes.
- *
- * It never throws. A missing key, an unavailable index, a provider error, a
- * timeout, or a malformed response all degrade to `[]` — retrieval then falls
- * back to the BM25 result, never an error on a chat turn.
- */
+/* The semantic half of retrieval: embed the query, then Atlas Vector Search over the same corpus BM25 searches; Atlas-only stage, everything injectable; never throws — every failure degrades to [] and BM25. */
+// @see #294 #289
 
 export interface VectorHit {
   sourceId: string;
@@ -497,19 +366,14 @@ export interface VectorSearchParams {
 }
 
 export interface VectorSearchDeps {
-  // Injectable for tests; default embeds the query against DeepInfra.
+  // Injectable for tests.
   embed?: (texts: string[]) => Promise<number[][]>;
   // Injectable for tests; default runs the Atlas `$vectorSearch` aggregate.
   search?: (params: VectorSearchParams) => Promise<VectorHit[]>;
   timeoutMs?: number;
 }
 
-/*
- * Candidate headroom: the vector hits are intersected with the collected slice
- * set downstream (task 10), and orphaned rows (their source deleted) still
- * occupy this window, so over-fetch before filtering. `numCandidates` must be
- * >= `limit` for `$vectorSearch`; both scale together.
- */
+/* Candidate headroom: vector hits are intersected with the collected set downstream, and orphaned rows still occupy the window — over-fetch before filtering; numCandidates must be >= limit. */
 export const VECTOR_CANDIDATE_MULTIPLIER = 4;
 export const VECTOR_CANDIDATE_FLOOR = 100;
 
@@ -522,9 +386,7 @@ const defaultVectorSearch = async (params: VectorSearchParams): Promise<VectorHi
         queryVector: params.queryVector,
         numCandidates: params.numCandidates,
         limit: params.limit,
-        // `userId` is stored as an ObjectId and `$vectorSearch` filters compare
-        // exactly, so it must be passed as one (a string would silently match
-        // nothing). `model` is a plain string.
+        // `userId` is an ObjectId and `$vectorSearch` filters compare exactly, so a string would silently match nothing.
         filter: { userId: new mongoose.Types.ObjectId(params.userId), model: params.model },
       },
     },
@@ -545,11 +407,8 @@ export const vectorCandidates = async (
   try {
     const embed = deps.embed ?? ((texts: string[]) => embedTexts(texts, { kind: 'query' }));
     const search = deps.search ?? defaultVectorSearch;
-    // One deadline over the whole stage (embed + ANN query): `embedTexts` sets
-    // its own `AbortSignal` at the same `timeoutMs`, so the two fire together
-    // and the effective bound is ~`timeoutMs`, not twice it. `withTimeout`
-    // rejects the caller but cannot cancel the in-flight work, which is fine —
-    // the late result is discarded and retrieval has already degraded to BM25.
+    // One deadline over the whole stage (embed + ANN query): both set their own `AbortSignal` at the same `timeoutMs`, so the effective bound is ~`timeoutMs`, not twice it; the late result is discarded.
+    // @see #294
     const run = async (): Promise<VectorHit[]> => {
       const [queryVector] = await embed([query]);
       if (!queryVector || queryVector.length === 0) return [];
@@ -562,18 +421,8 @@ export const vectorCandidates = async (
   }
 };
 
-/*
- * #294, task 9: reciprocal rank fusion (RRF) of the BM25 and vector rankings.
- *
- * score(d) = w_bm25 / (k + rank_bm25(d)) + w_vec / (k + rank_vec(d))
- *
- * Rank-based, so no score normalisation between BM25 and cosine distance is
- * needed. A document absent from a ranking contributes 0 (no penalty). Only
- * slices present in `slices` are eligible, so a vector hit whose `sourceId` is
- * not in the collected set (an orphaned row) is dropped — the intersection is
- * the correctness invariant that keeps deleted/ephemeral/out-of-pool slices
- * from being surfaced. Pure: no Mongo, no `Date.now()`.
- */
+/* Reciprocal rank fusion of the BM25 and vector rankings; rank-based so no score normalisation is needed; the intersection with the collected set is the correctness invariant (orphans dropped); pure. */
+// @see #294
 export const RRF_K = 60;
 export const RRF_BM25_WEIGHT = 1;
 export const RRF_VECTOR_WEIGHT = 1;
@@ -614,19 +463,8 @@ export const rrfFuse = (
     .map((entry) => entry.slice);
 };
 
-/*
- * #294, task 10: the retrieval pipeline. Pure BM25 ranking (#293) fused with
- * the semantic ranking (#294) through `rrfFuse`, intersected with the collected
- * slice set so a vector hit whose source is gone (or was never in the read) is
- * dropped. The vector stage is injectable so the fusion wiring is unit-tested
- * without Mongo or a provider.
- *
- * The vector stage shares the workspace-memory kill switch: with the flag off
- * the result is the #293 BM25 ranking exactly and no embedding call is made
- * ("no behaviour change when off"). With the flag on but no key, index, or
- * provider reachable, `vectorCandidates` degrades to `[]` and the result is
- * again the BM25 ranking — never an error.
- */
+/* The retrieval pipeline: BM25 fused with the semantic ranking through rrfFuse, intersected with the collected set; the vector stage shares the kill switch — flag off means exactly the BM25 ranking and no embedding call; degradation always falls back to BM25, never an error. */
+// @see #294 #293
 export interface RetrievalDeps {
   vectorCandidates?: (
     query: string,
@@ -636,31 +474,17 @@ export interface RetrievalDeps {
     deps?: VectorSearchDeps,
   ) => Promise<VectorHit[]>;
   weights?: RrfWeights;
-  // #305: injectable rerank; defaults to the DeepInfra cross-encoder. One score
-  // per candidate in input order, or null when the stage cannot run — null
-  // degrades to the un-cut fused ranking (exactly the pre-#305 behaviour).
+  // Injectable rerank; defaults to the DeepInfra cross-encoder; null degrades to the un-cut fused ranking.
+  // @see #305
   rerank?: (query: string, documents: string[]) => Promise<number[] | null>;
 }
 
-/*
- * #305: the post-retrieval relevance bar. The reranker grades each fused
- * candidate against the query and returns a relevance probability in [0, 1];
- * candidates below `RERANK_CUT` are dropped — including *all* of them, which
- * is the graceful refusal path (an empty block renders as no block).
- *
- * The threshold is calibrated, not intuited (probe over the #289 corpus,
- * 2026-10-15): relevant pairs median 0.9985, true-irrelevant pairs <= 0.0009,
- * and the bare-deixis prompts the plan-306 product rule wants quiet max out at
- * 0.0036 — so 0.005 sits a clear decade above "irrelevant" while keeping every
- * pair the reranker grades confidently relevant (>= 0.0087 in the probe). The
- * known trade-off: paraphrase pairs ("What does my partner do?" vs "She is a
- * doctor...") grade weakly because the slice alone cannot resolve the
- * referent — one locally-surfaced paraphrase case falls below the bar.
- */
+/* The post-retrieval relevance bar: candidates below the calibrated threshold are dropped — including all of them, which is the graceful refusal path (a paraphrase referent may fall below the bar; known trade-off). */
+// @see #305 #289
 export const RERANK_CUT = 0.005;
 
-// The text a candidate is graded on: the title (the filename — #309's
-// metadata matters for reranking too) above the content.
+// The text a candidate is graded on: the title (the filename matters for reranking too) above the content.
+// @see #309
 const rerankDocText = (slice: WorkspaceSlice): string =>
   slice.title ? `${slice.title}\n${slice.text}` : slice.text;
 
@@ -673,6 +497,7 @@ export const rerankAndCut = async (
   const rerank = deps.rerank ?? rerankQuery;
   const scores = await rerank(prompt, fused.map(rerankDocText));
   // Degradation: a failed/unavailable reranker behaves exactly as pre-#305.
+  // @see #305
   if (!scores) return fused;
   return fused
     .map((slice, i) => ({ slice, score: scores[i] ?? 0 }))
@@ -702,8 +527,8 @@ export const rankWorkspaceSlicesWithCut = async (
     ? await (deps.vectorCandidates ?? vectorCandidates)(prompt, userId, config.embeddings.model, n)
     : [];
   const fused = rrfFuse(slices, bm25, vector, deps.weights);
-  // #305: the rerank stage shares the kill switch — with the flag off the
-  // result is the pre-#305 fused ranking exactly and no reranker call is made.
+  // The rerank stage shares the kill switch — flag off means exactly the pre-#305 fused ranking and no reranker call.
+  // @see #305
   if (!isWorkspaceMemoryEnabled()) {
     const ranked = fused.slice(0, n);
     return { ranked, candidateCount: 0, cutCount: 0 };

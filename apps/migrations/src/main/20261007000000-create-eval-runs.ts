@@ -1,11 +1,7 @@
 import { MigrationInterface, Db } from 'mongo-migrate-ts';
 
-/*
- * #225: eval rollup collection. The eval scheduler/service writes one
- * `evalruns` document per suite execution; pre-create the collection and its
- * list index so deployed instances have them before first write (same stance
- * as create-error-logs).
- */
+// Pre-creates the evalruns collection and its indexes so deployed instances have them before first write.
+// @see #225
 export class CreateEvalRuns implements MigrationInterface {
   async up(db: Db): Promise<void> {
     for (const name of await db.listCollections().toArray()) {

@@ -1,13 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 import { installChatStreamMock } from './helpers/chatMock';
 
-/*
- * Profile flows with fully page-mocked auth and mutating endpoints (same
- * isolation pattern as assets.spec.ts): no spec reaches the real persisted
- * admin user, so ZDR toggling here cannot poison later specs (see the
- * isolation note in plan-148 — this resolves the open question by mocking
- * the mutating surface).
- */
+// Profile flows, fully page-mocked auth and mutations; no spec touches the real admin user.
 
 const email = process.env.E2E_EMAIL ?? 'formsatz@gmail.com';
 
@@ -49,9 +43,8 @@ const gotoChat = async (page: Page) => {
 test('profile save PATCHes the endpoint with the current fields and only changed toggles', async ({
   page,
 }) => {
-  // #261: a user whose stored zone already matches the browser costs no
-  // timezone report — the app is in steady state, so this spec still sees
-  // exactly one PATCH: the save itself.
+  // The stored zone matches the browser, so no timezone PATCH fires; only the save itself.
+  // @see #261
   const zone = Intl.DateTimeFormat().resolvedOptions().timeZone;
   const user = { id: 'e2e-user-1', email, zdr: false, timezone: zone };
   await mockUserAndApp(page, user);
@@ -77,7 +70,6 @@ test('profile save PATCHes the endpoint with the current fields and only changed
   const patch = JSON.parse(patches[0]) as { preferredName?: string; zdr?: boolean };
   expect(patch.preferredName).toBe('Tester');
   expect(patch).not.toHaveProperty('zdr');
-  // The saved name rides the mirror immediately (ProfileView contract).
   await expect(page.getByTestId('profile-name')).toContainText('Tester');
 });
 
@@ -93,7 +85,6 @@ test('ZDR on: privacy note shows and the outgoing stream body replays history wi
   await page.getByTestId('chat-input').fill('ZDR question');
   await page.getByTestId('chat-input').press('Enter');
 
-  // The mocked streamed reply renders (assistant bubble with the final text).
   await expect(page.locator('p').filter({ hasText: /^OK$/ })).toBeVisible();
 
   const firstBody = JSON.parse(stream.bodies()[0]) as {
@@ -104,8 +95,7 @@ test('ZDR on: privacy note shows and the outgoing stream body replays history wi
   expect(firstBody.sessionId).toBeUndefined();
   expect(firstBody.content).toBe('ZDR question');
 
-  // Second turn: the first user turn is replayed in the bounded history
-  // payload instead of a session id being sent.
+  // Second turn replays the first turn as bounded history instead of a session id.
   await page.getByTestId('chat-input').fill('Second turn');
   await page.getByTestId('chat-input').press('Enter');
   await expect(page.locator('p').filter({ hasText: /^OK$/ }).nth(1)).toBeVisible();
@@ -115,7 +105,6 @@ test('ZDR on: privacy note shows and the outgoing stream body replays history wi
     sessionId?: string;
   };
   expect(secondBody.sessionId).toBeUndefined();
-  // The replayed payload contains the prior turn (user + mocked assistant reply).
   expect(secondBody.history).toContainEqual({ role: 'assistant', content: 'OK' });
   expect(secondBody.history).toContainEqual({ role: 'user', content: 'ZDR question' });
 });
@@ -164,8 +153,7 @@ test('factory reset: wrong confirm string never fires the request, right one wip
   await expect(page.getByTestId('profile-danger-zone')).toContainText('Factory reset');
 
   const button = page.getByTestId('profile-factory-reset');
-  // Disabled until the typed confirmation matches exactly: even a wrong
-  // lower/upper-cased string must not enable it.
+  // Disabled until the confirmation matches exactly, case included.
   await page.getByTestId('profile-reset-confirm').fill('reset');
   await expect(button).toBeDisabled();
   expect(resetRequests).toHaveLength(0);

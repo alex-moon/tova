@@ -93,9 +93,7 @@ describe('applyEditsToContent (#325)', () => {
     });
   });
 
-  // Tolerance ladder (ported from opencode's edit tool): when there is no
-  // exact match, the matcher retries while ignoring unicode variants, then
-  // trailing whitespace per line.
+  // Tolerance ladder: when there is no exact match, the matcher retries ignoring unicode variants, then per-line trailing whitespace.
   it('matches despite typographic quote and dash variants', () => {
     expect(
       applyEditsToContent('don’t worry — ok', [{ oldText: "don't worry - ok", newText: 'fine' }]),

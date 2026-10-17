@@ -1,9 +1,5 @@
-// Light text extraction (issue #34): deterministic and fast only. txt/md/csv
-// are decoded as UTF-8 (BOM stripped); everything else — including PDFs,
-// which the owner deferred to a follow-up ticket — returns null ("no text
-// extracted"). Decision is made from the filename extension so the
-// client-provided contentType can disagree with the file's real type without
-// changing behaviour.
+// Light text extraction: deterministic and fast only, decided from the filename extension.
+// @see #34
 const EXTRACTABLE_EXTENSIONS = new Set(['txt', 'md', 'csv']);
 
 export const isExtractable = (filename: string): boolean =>
@@ -14,9 +10,8 @@ export const extractText = (filename: string, buf: Buffer): string | null => {
   return stripBom(buf.toString('utf8'));
 };
 
-// Cap applied at prompt-inclusion time (issue #34): extraction stores the
-// decoded text, but the attached block pasted into the prompt never carries
-// more than MAX_PROMPT_TEXT_CHARS so a huge CSV cannot blow the context.
+// Cap applied at prompt-inclusion time so a huge CSV cannot blow the context.
+// @see #34
 export const MAX_PROMPT_TEXT_CHARS = 12_000;
 
 export const truncateForPrompt = (text: string, max = MAX_PROMPT_TEXT_CHARS): string => {

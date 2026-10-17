@@ -3,24 +3,8 @@ import { groqConnector, deepinfraConnector, fireworksConnector } from './mastraS
 import { buildSystemContent } from './promptAssembly';
 import { outputTokensFor, promptCharsFrom } from './outputTokenCap';
 
-/*
- * Direct model comparison (issue #129): run one prompt against the existing
- * agent on several provider/model pairs and return each answer next to its
- * latency. The runner is the shared core for both consumers of this ticket —
- * the one-off CLI (`scripts/eval-model-compare.ts`) and the admin
- * "Compare" view (`POST /api/admin/model-compare`) — so a browser run and a
- * scripted run are guaranteed to exercise the identical code path: same
- * system-prompt assembly (`buildSystemContent`), same memoised Mastra
- * agents (`mastraService` connectors), same tool wiring. Routing itself is
- * bypassed (each model is forced), route decisions are
- * *informed* by comparing outputs side by side, not absorbed into them.
- *
- * Messages assemble exactly like the chat routes (system content first, then
- * the user line), with no user envelope block (a neutral profile) unless a
- * future caller passes one. Output tokens are capped with the same
- * `outputTokensFor` sizing the chat routes use when the selected model
- * carries a context length.
- */
+/* Direct model comparison: one prompt through the existing agent on several pairs, shared core for the CLI and the admin Compare tab so both exercise the identical path; routing is bypassed, decisions informed. */
+// @see #129
 
 export interface CompareModelRef {
   provider: LlmProvider;
@@ -44,13 +28,8 @@ export interface ComparisonRun {
 
 export const MAX_COMPARE_MODELS = 6;
 
-/*
- * #151: the typesafe connector does not exist yet (openai-compatible wiring
- * is pending), so the entry resolves to `undefined` and compare runs against
- * it surface the "Unknown provider" error row instead of crashing the run.
- * #232/#234: fireworks is a first-class roster provider and is wired here so
- * the admin Compare tab can race each roster model's two backends.
- */
+/* The typesafe connector does not exist yet, so the entry resolves to undefined and compare surfaces an error row instead of crashing; fireworks is wired so Compare can race each roster model's backends. */
+// @see #151 #232 #234
 const PROVIDERS: Record<string, LlmConnector | undefined> = {
   groq: groqConnector,
   deepinfra: deepinfraConnector,
@@ -58,11 +37,7 @@ const PROVIDERS: Record<string, LlmConnector | undefined> = {
   typesafe: undefined,
 };
 
-/**
- * Runs the prompt through each model sequentially. Serialised on purpose:
- * tool-warming, rate limits and a noisy parallel fan-out make side-by-side
- * comparisons misleadingly flaky, and N here is small.
- */
+/** Runs the prompt through each model sequentially on purpose: parallel fan-out makes side-by-side comparisons misleadingly flaky, and N is small. */
 export const runModelComparison = async (
   prompt: string,
   models: CompareModelRef[],

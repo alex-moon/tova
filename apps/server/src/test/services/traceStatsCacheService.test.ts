@@ -78,9 +78,8 @@ describe('traceStatsCacheService (#224)', () => {
     expect(await TraceStatsCache.countDocuments()).toBe(0);
   });
 
-  // #248: a rejected sweep used to escape the interval callback as an
-  // unhandled rejection, which terminated the process. The poller must absorb
-  // it (and log it) while still clearing `busy` so later ticks run.
+  // A rejected sweep must not escape the interval callback as an unhandled rejection; the poller must absorb it (and log) while still clearing `busy`.
+  // @see #248
   it('does not leak an unhandled rejection when a polled sweep fails', async () => {
     jest.useFakeTimers();
     const errorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});

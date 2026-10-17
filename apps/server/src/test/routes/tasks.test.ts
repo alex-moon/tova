@@ -5,10 +5,8 @@ import { Task } from '../../main/models/Task';
 import { TaskEvent } from '../../main/models/TaskEvent';
 import { User } from '../../main/models/User';
 
-// #254 routes slice (epic #251). The task API is exercised end-to-end through
-// `createApp` against the shared in-memory Mongo (test/setup.ts empties
-// collections between tests). The poller is gated off in tests, so a created
-// task stays `queued` and these tests observe the API's own effects.
+/* The task API exercised end-to-end through createApp against the shared in-memory Mongo; the poller is gated off in tests, so a created task stays `queued` and these tests observe the API's own effects. */
+// @see #254 #251
 
 const app = createApp();
 
@@ -170,9 +168,8 @@ describe('GET /api/tasks/:id (#254 routes)', () => {
     expect(res.status).toBe(404);
   });
 
-  // The persisted tool chip carries the executed call's raw `result` (the
-  // sequencer's resume payload, D10). The browser must never receive it: the
-  // serializer strips it while keeping the #196 chip summary the client renders.
+  // The persisted tool chip carries the raw `result` (the sequencer's resume payload); the browser must never receive it — the serializer strips it while keeping the chip summary.
+  // @see #196
   it('serializes the tool chip summary but strips the raw resume result', async () => {
     const cookie = await registerUser(OWNER);
     const created = await createTask(cookie, { instruction: 'list things' });

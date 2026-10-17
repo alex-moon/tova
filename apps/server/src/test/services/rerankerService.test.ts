@@ -1,10 +1,7 @@
 import { RERANK_MODEL, rerankQuery } from '../../main/services/rerankerService';
 
-/*
- * #305: the reranker client is a thin DeepInfra POST that never throws — every
- * failure degrades to `null` so retrieval can fall back to the un-cut ranking.
- * Every test injects `fetchImpl` — the suite must never make a live call.
- */
+/* The reranker client is a thin DeepInfra POST that never throws — every failure degrades to null; every test injects `fetchImpl`. */
+// @see #305
 
 const originalKey = process.env.DEEPINFRA_API_KEY;
 

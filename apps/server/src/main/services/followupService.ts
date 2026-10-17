@@ -2,7 +2,8 @@ import { redactForLog } from './logRedaction';
 import { inferenceService } from './inferenceService';
 import { config } from '../config';
 
-// #238: aux model source (was `ROUTER_GUARD_MODEL`), read lazily.
+// Aux model source, read lazily.
+// @see #238
 const suggestionModel = (): string => config.aux.model;
 
 const SUGGESTION_PROMPT =
@@ -22,11 +23,8 @@ export const generateFollowups = async (
     .trim()
     .substring(0, 1000);
   try {
-    // Tool-free path (issue #41): with the Brave key set the default
-    // completion route attaches web_search to every agent, and the
-    // suggestion model rejects tool-carrying requests. Suggestions need no
-    // search, so this call goes to a plain agent even when the key is set.
-    // #308: sessionId threads the aux run under the chat session's thread.
+    // Tool-free path: the suggestion model rejects tool-carrying requests, so this call goes to a plain agent even when the Brave key is set; sessionId threads the run under the chat's trace thread.
+    // @see #41 #308
     const completion = await inferenceService.createToolFreeCompletion({
       provider: config.aux.provider,
       model: suggestionModel(),
@@ -46,17 +44,11 @@ export const generateFollowups = async (
   }
 };
 
-/*
- * Tolerant parser (issue #41): the suggestion model intermittently wraps a
- * usable list in prose (leading chatter, a Python-style set literal, or a
- * bulleted block). Rather than discarding the whole response on any
- * deviation, the strategies below salvage what they can in order; total
- * failure still degrades to [], as before.
- */
+/* Tolerant parser: the suggestion model intermittently wraps a usable list in prose; strategies salvage in order and total failure degrades to []. */
+// @see #41
 export const parseSuggestions = (raw: string): string[] => {
-  // 1. Clean model output: the text itself is a JSON array string.
-  // 2. The pre-#41 bracket slice `[`..`]` — cheap and usually sufficient.
-  // 3. Any `[`..`]` span anywhere in the text (prose-wrapped arrays).
+  // 1. Clean JSON array. 2. The pre-#41 bracket slice. 3. Any `[`..`]` span (prose-wrapped arrays).
+  // @see #41
   for (const candidate of [raw, ...bracketSpans(raw)]) {
     try {
       const parsed: unknown = JSON.parse(candidate);
@@ -64,16 +56,10 @@ export const parseSuggestions = (raw: string): string[] => {
       const items = parseList(parsed);
       if (items.length > 0) return items;
     } catch {
-      // not this one — try the next candidate
+      // Not this one — try the next candidate.
     }
   }
-  // 4. No bracketed array survived JSON parsing: fall back to reading the
-  // raw response as a plain list (bulleted/numbered lines, a set literal,
-  // newline- or semicolon-separated beats). Bullets, numbering and wrapping
-  // punctuation are stripped before the shared array-item post-filters.
-  // This path intentionally requires at least two survivors: a single line
-  // is indistinguishable from unstructured prose, and emitting a random
-  // sentence as a follow-up chip would be worse than emitting none.
+  // 4. Fall back to reading the raw response as a plain list; requires at least two survivors (a single line is indistinguishable from prose).
   const fromLines = parseList(
     raw
       .split(/['"`\n;,]|\s\d+[.)]\s*|\s-\s/m)
@@ -90,10 +76,7 @@ export const parseSuggestions = (raw: string): string[] => {
   return fromLines.length >= 2 ? fromLines : [];
 };
 
-/*
- * Every `[` to matching-`]` span in the text, longest first. Nested arrays
- * are naturally covered: the outermost span parses, the inner ones don't.
- */
+/* Every `[` to matching-`]` span, longest first; nested arrays covered naturally (the outermost span parses, inner ones don't). */
 const bracketSpans = (text: string): string[] => {
   const spans: string[] = [];
   for (let start = text.indexOf('['); start !== -1; start = text.indexOf('[', start + 1)) {
@@ -104,12 +87,7 @@ const bracketSpans = (text: string): string[] => {
   return spans.sort((a, b) => b.length - a.length);
 };
 
-/*
- * Shared normalisation for array items (pre-#41 plus a wider quote class
- * and a duplicate guard — the lenient fallbacks make repeated model output
- * likelier, and duplicated chips are noise): trim, strip symmetric wrapping
- * quotes, keep non-empty phraselike strings, drop duplicates, cap the list.
- */
+/* Shared array-item normalisation: trim, strip wrapping quotes, keep phraselike strings, drop duplicates, cap the list. */
 const parseList = (items: unknown[]): string[] =>
   Array.from(
     new Set(

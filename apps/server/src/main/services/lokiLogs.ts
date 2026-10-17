@@ -1,26 +1,12 @@
 import { config } from '../config';
 import type { AdminLogEntry } from '@tova/shared';
 
-/*
- * #179 read half: query retained logs from Grafana Cloud (hosted Loki) for the
- * admin logs view. The ingest half (Alloy -> Loki) is separate; this module is
- * the query side only.
- *
- * `LOKI_URL` is the full push URL (as Grafana Cloud hands it out), e.g.
- * https://logs-prod-035.grafana.net/loki/api/v1/push. The query API lives on
- * the same host at /loki/api/v1/query_range, so we derive the base by stripping
- * the push suffix.
- *
- * The whole service is failure-tolerant: an unconfigured or unreachable Loki
- * yields an empty page (with `configured: false` / an `error` message) rather
- * than throwing, so the admin view degrades to "no retained logs" instead of a
- * 500.
- */
+/* Query half for retained logs from Grafana Cloud Loki; the whole service is failure-tolerant — an unconfigured/unreachable Loki yields an empty page, not a 500. */
+// @see #179
 
 // Default look-back window; owner asked for "last 24 hours is fine".
 export const DEFAULT_HOURS = 24;
-// Upper bound on the window an admin can request (7 days) — keeps a single
-// query from scanning the whole retention period.
+// Upper bound on the requested window (7 days) — keeps one query from scanning the whole retention period.
 export const MAX_HOURS = 168;
 // Default/maximum lines returned per query.
 export const DEFAULT_LIMIT = 200;
@@ -55,13 +41,7 @@ interface LokiQueryResponse {
   data?: { result?: LokiStream[] };
 }
 
-/*
- * Best-effort severity from the raw line. Container stdout does not carry our
- * structured level, and Grafana's `detected_level` is not populated for these
- * streams, so we classify from the Docker `stream` label (stderr) and common
- * level tokens in the text. This is intentionally rough — it is a log viewer,
- * not a structured-events store.
- */
+/* Best-effort severity from the raw line: classified from the Docker stream label and common level tokens — intentionally rough. */
 export const classifyLevel = (msg: string, streamLabel?: string): AdminLogEntry['level'] => {
   if (/\b(error|fatal|panic|exception|failed|failure)\b/i.test(msg)) return 'error';
   if (/\b(warn|warning)\b/i.test(msg)) return 'warn';
@@ -82,8 +62,7 @@ const toEntries = (streams: LokiStream[]): AdminLogEntry[] => {
       });
     }
   }
-  // Newest first. Loki returns backward-order already, but flattening across
-  // streams needs an explicit sort to be safe.
+  // Newest first: Loki returns backward order, but flattening across streams needs an explicit sort to be safe.
   entries.sort((a, b) => (a.ts < b.ts ? 1 : a.ts > b.ts ? -1 : 0));
   return entries;
 };
@@ -122,9 +101,7 @@ export const queryRetainedLogs = async (
     }
     const body = (await res.json()) as LokiQueryResponse;
     let logs = toEntries(body.data?.result ?? []);
-    // Level + text filtering is applied here (not in LogQL): a LogQL line
-    // filter would be case-sensitive/regex-heavy and the level is inferred,
-    // not indexed.
+    // Level + text filtering is applied here, not in LogQL: a LogQL filter would be case-sensitive/regex-heavy and the level is inferred, not indexed.
     if (params.level) logs = logs.filter((l) => l.level === params.level);
     if (params.q) {
       const needle = params.q.toLowerCase();

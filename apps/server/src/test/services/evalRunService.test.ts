@@ -9,12 +9,8 @@ import {
   type EvalSuiteDeps,
 } from '../../main/services/evalRunService';
 
-/*
- * #225 service coverage. The suite drives live providers in production; here
- * connectors, runCase, gradeRun, fixtures, repo reads, and the LangSmith
- * client are all injected so the flows are deterministic. The shared jest
- * setup provides the in-memory Mongo (apps/server/src/test/setup.ts).
- */
+/* Service coverage: connectors, runCase, gradeRun, fixtures, repo reads and the LangSmith client are all injected so the flows are deterministic. */
+// @see #225
 
 const model = { provider: 'deepinfra' as const, model: 'openai/gpt-oss-20b' };
 const sweepModels = [
@@ -56,7 +52,8 @@ describe('parseModelsFlag (#225)', () => {
   it('resolves `all` to the roster on both wired providers (#236)', () => {
     const messages: string[] = [];
     const models = parseModelsFlag('all', (m) => messages.push(m));
-    // 2 roster models × 2 providers = 4 runs (#316: MiniMax is out).
+    // 2 roster models × 2 providers = 4 runs.
+    // @see #316
     expect(models).toHaveLength(4);
     expect(models).toContainEqual({
       provider: 'deepinfra',

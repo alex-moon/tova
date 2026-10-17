@@ -1,16 +1,7 @@
 import mongoose from 'mongoose';
 
-/*
- * #325: immutable snapshots of an assistant-generated asset's content. Every
- * content write (an `edit_file` edit, or a restore) stores both the pre-write
- * version and the new version here, so history is complete and append-only and
- * the `Asset` row always mirrors the latest version. Rows are created lazily on
- * the first write — a never-edited generated file has `version: 1` and no rows.
- *
- * The text is stored in full (like `Asset.textExtracted`) because a restore
- * reads it back; there is no separate object per version, and the Spaces object
- * at the asset's key is simply overwritten.
- */
+// Immutable append-only snapshots of generated-asset content; the `Asset` row always mirrors the latest.
+// @see #325
 const assetVersionSchema = new mongoose.Schema(
   {
     assetId: {

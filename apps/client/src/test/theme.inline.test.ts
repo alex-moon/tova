@@ -29,11 +29,7 @@ beforeEach(() => {
   delete (window as { matchMedia?: unknown }).matchMedia;
 });
 
-// The inline <head> script in apps/client/index.html is a standalone twin of
-// theme.ts's resolve logic (real environments run it before the bundle exists).
-// These tests execute the ACTUAL script text so any drift between the twin and
-// theme.ts's precedence (cookie -> localStorage -> prefers-color-scheme ->
-// light) fails loudly instead of flashing a wrong theme in production.
+// The inline head script twins theme.ts's resolve logic; run the actual script text so drift fails loudly.
 describe('inline theme script (apps/client/index.html)', () => {
   it('exists as a standalone script block', () => {
     expect(script).toContain('tova-theme=');

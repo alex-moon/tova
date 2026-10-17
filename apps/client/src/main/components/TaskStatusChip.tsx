@@ -9,9 +9,8 @@ import {
 } from 'lucide-react';
 import type { TaskStatus } from '@/services/tasks';
 
-// Status chip for a task (#254, epic #251). The six statuses are the server
-// enum (Task.status); each maps to one icon + tone. Kept in one place so the
-// list rows and the detail header cannot drift.
+// Status chip for a task: the six server statuses map to one icon + tone each.
+// @see #254 #251
 const STATUS_STYLE: Record<
   TaskStatus,
   { label: string; icon: React.ComponentType<{ className?: string }>; className: string }

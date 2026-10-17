@@ -7,13 +7,8 @@ import {
   embedWorkspaceUser,
 } from '../../main/services/workspaceEmbeddingIngest';
 
-/*
- * #294 ingest/backfill core. `embedWorkspaceSlice` is the write path the chat,
- * asset, and task hooks call; `embedWorkspaceUser` is the backfill/eval path.
- * The flag gate and the idempotency rule are the two invariants worth pinning:
- * with the feature off nothing is embedded, and re-running the backfill over an
- * unchanged corpus writes nothing.
- */
+/* Ingest/backfill core: `embedWorkspaceSlice` is the hooks' write path, `embedWorkspaceUser` the backfill/eval path; the flag gate and the idempotency rule are the two invariants worth pinning. */
+// @see #294
 describe('workspaceEmbeddingIngest (#294)', () => {
   const original = process.env.WORKSPACE_MEMORY_ENABLED;
   afterEach(() => {

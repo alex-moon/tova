@@ -4,7 +4,8 @@ import { inferenceService } from './inferenceService';
 import { computeDeterministicMetrics } from './promptMetrics';
 import { config } from '../config';
 
-// #238: aux model source (was `ROUTER_GUARD_MODEL`), read lazily.
+// Aux model source, read lazily.
+// @see #238
 const llmModel = (): string => config.aux.model;
 
 const LLM_PROMPT =
@@ -37,15 +38,13 @@ const SENTIMENTS = new Set(['positive', 'negative', 'neutral']);
 
 const asBoolean = (value: unknown): boolean | null => (typeof value === 'boolean' ? value : null);
 
-// Extract the first JSON-looking object from raw model output, tolerating
-// markdown fences and surrounding prose. Returns null on any failure.
+// Extract the first JSON-looking object from raw model output, tolerating markdown fences and prose; null on any failure.
 export const parseLlmFlags = (raw: string | null | undefined): LlmMetrics => {
   if (!raw) return NULL_LLM;
   const text = raw.replace(/```[a-z]*/gi, '');
   let start = text.indexOf('{');
   while (start !== -1) {
-    // Extend from this '{' to successive '}' until a chunk parses; this
-    // recovers output where the object sits between prose or trailing text.
+    // Extend from this '{' to successive '}' until a chunk parses; recovers output where the object sits between prose.
     for (let end = text.indexOf('}', start); end !== -1; end = text.indexOf('}', end + 1)) {
       try {
         const obj = JSON.parse(text.slice(start, end + 1)) as Record<string, unknown>;
@@ -61,10 +60,7 @@ export const parseLlmFlags = (raw: string | null | undefined): LlmMetrics => {
                 : null,
             openEnded: asBoolean(obj.openEnded),
           };
-          // A *different* JSON object (prose example, deduped content) may
-          // parse before the real flags; a decoy carries none of the
-          // expected keys. Restart scanning after it so a decoy followed by
-          // the real flags is not misread as all-nulls.
+          // A decoy JSON object may parse before the real flags; restart scanning after it so decoy-then-flags is not misread as all-nulls.
           if (
             parsed.emotional === null &&
             parsed.technical === null &&
@@ -77,7 +73,7 @@ export const parseLlmFlags = (raw: string | null | undefined): LlmMetrics => {
           return parsed;
         }
       } catch {
-        // keep extending
+        // Keep extending.
       }
     }
     start = text.indexOf('{', start + 1);
@@ -92,17 +88,14 @@ const isAllNullLlm = (llm: LlmMetrics): boolean =>
   llm.sentiment === null &&
   llm.openEnded === null;
 
-// Classify a prompt and report why flags could be missing when they are:
-// 'parse' means the call succeeded but produced unusable output, 'error'
-// means the inference call itself failed. Null when flags were parsed.
+// Classify a prompt and report why flags could be missing: 'parse' = unusable output, 'error' = the call itself failed.
 export const classifyPromptDimensions = async (
   content: string,
   sessionId?: string,
 ): Promise<{ llm: LlmMetrics; skipReason: 'parse' | 'error' | null }> => {
   try {
-    // #77: tool-free agent — same rationale as the guard classifier
-    // (tool-rejecting small models, issue #41). #308: sessionId threads the
-    // aux run under the chat session's LangSmith thread when known.
+    // Tool-free agent, same rationale as the guard classifier; sessionId threads the aux run under the chat's LangSmith thread.
+    // @see #77 #41 #308
     const completion = await inferenceService.createToolFreeCompletion({
       provider: config.aux.provider,
       model: llmModel(),
@@ -119,12 +112,8 @@ export const classifyPromptDimensions = async (
   }
 };
 
-// Classify a user message and persist the flags into its metrics subdocument.
-// Never throws for classification problems; only a failed DB update rejects,
-// and callers keep that non-fatal for the chat request. `metrics.llmSkipReason`
-// records why the flags are null when they are ('parse' or 'error');
-// 'trivial' is set by the chat routes for prompts that skip the call entirely.
-// Clearing the reason on success keeps a retried message's audit trail accurate.
+// Classify a user message and persist the flags into its metrics; never throws for classification problems; `metrics.llmSkipReason` records why flags are null.
+// @see #238
 export const classifyAndPersistPromptDimensions = async (
   messageId: string,
   content: string,
@@ -136,20 +125,11 @@ export const classifyAndPersistPromptDimensions = async (
   });
 };
 
-/*
- * Trivial-prompt skip gate (plan task 9): prompts that are, with confidence,
- * meaningfully neutral on every LLM dimension — short greetings,
- * confirmations, "please continue"-style continuations — skip the
- * classification call entirely. Not a bare regex/allowlist: a phrase list
- * alone misses "yeah sure" — a neutral-token rule covers those — and both
- * paths are bounded (word count, no question mark, no code) and fail
- * closed: anything the heuristic is unsure about still gets classified.
- */
+/* Trivial-prompt skip gate: prompts confidently neutral on every LLM dimension skip the classification call; bounded and fail-closed — unsure input still gets classified. */
 const TRIVIAL_MAX_WORDS = 6;
 const TRIVIAL_TOKEN_ONLY_MAX_WORDS = 3;
 
-// Full-message phrases (after lower-casing and punctuation stripping) that
-// are neutral on all five flags with essentially no information content.
+// Full-message phrases neutral on all five flags with no information content.
 const TRIVIAL_PHRASES = new Set([
   'yes',
   'no',
@@ -190,8 +170,7 @@ const TRIVIAL_PHRASES = new Set([
   'sounds great to me',
 ]);
 
-// Tokens that can only appear in a bare confirmation/continuation. Any word
-// outside this set makes the prompt fail closed (i.e. get classified).
+// Tokens that can only appear in a bare confirmation/continuation; any word outside makes the prompt fail closed.
 const TRIVIAL_TOKENS = new Set([
   'yes',
   'yeah',
@@ -248,8 +227,7 @@ const normalizeForTrivialMatch = (text: string): string =>
     .replace(/\s+/g, ' ')
     .trim();
 
-// True only when the heuristic is confident; unconfident input returns false
-// (fail closed) so it still gets classified.
+// True only when confident; unconfident input returns false (fail closed).
 export const isTriviallyNeutral = (content: string): boolean => {
   const metrics = computeDeterministicMetrics(content);
   if (metrics.hasQuestionMark) return false;
@@ -265,8 +243,7 @@ export const isTriviallyNeutral = (content: string): boolean => {
   const normalized = normalizeForTrivialMatch(content);
   if (TRIVIAL_PHRASES.has(normalized)) return true;
 
-  // Generic short-confirmation rule: a very short prompt made entirely of
-  // neutral tokens ("yeah sure", "ok thanks", "tell me more").
+  // Generic short-confirmation rule: a very short prompt made entirely of neutral tokens.
   if (metrics.wordCount <= TRIVIAL_TOKEN_ONLY_MAX_WORDS) {
     const words = normalized.split(' ');
     if (words.length > 0 && words.every((w) => TRIVIAL_TOKENS.has(w))) return true;

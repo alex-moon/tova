@@ -397,8 +397,7 @@ describe('aggregateScore', () => {
   const a = { type: 'tool_called', tool: 'web_search' } as const;
 
   it('scores an assertion-free run as a vacuous pass', () => {
-    // Documented edge: cases must always declare assertions; this records that
-    // the aggregator never crashes on an empty list.
+    // Cases must always declare assertions; this records that the aggregator never crashes on an empty list.
     expect(aggregateScore(assertRun(run([]), []))).toBe('pass');
   });
 

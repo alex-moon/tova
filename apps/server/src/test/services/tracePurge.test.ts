@@ -1,9 +1,7 @@
 import { purgeUserTraces } from '../../main/services/tracePurge';
 
-// Unit coverage for the best-effort trace purge (issue #143). The service
-// talks to the LangSmith REST API over global fetch (pattern: the raw REST
-// calls of traceRedaction.ts' exporter); each suite mocks global.fetch and
-// the langsmith env so the real network is never touched.
+// Unit coverage for the best-effort trace purge: each suite mocks global.fetch and the langsmith env so the real network is never touched.
+// @see #143
 
 type FetchInit = { body?: string };
 
@@ -182,9 +180,8 @@ describe('purgeUserTraces', () => {
   });
 
   it('rejects the legacy array-shaped body (the #187 regression): logs, deletes nothing', async () => {
-    // Before #187 the response body was cast as an array. Guard against a
-    // silent revert to that assumption: an array body has no `runs` key, so it
-    // must be treated as malformed rather than read as a page of runs.
+    // Guard against a silent revert to the array-cast assumption: an array body has no `runs` key and must be treated as malformed.
+    // @see #187
     const errorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
     fetchSpy.mockImplementation((url: string) => {
       if (String(url).includes('/api/v1/sessions')) {
@@ -227,9 +224,8 @@ describe('purgeUserTraces', () => {
   });
 
   it('continues to the remaining sessions when one session fails mid-loop', async () => {
-    // Queries are sequential (one per session, in list order): call #2 is
-    // bravo's. Bravo's query fails with a rate-limit while the others would
-    // have worked — the later session must still be attempted.
+    // Queries are sequential per session; one failing must not stop the later sessions from being attempted.
+    // @see #143
     let queryCalls = 0;
     const deleteCalls: unknown[] = [];
     fetchSpy.mockImplementation((url: string, init?: { body?: string }) => {

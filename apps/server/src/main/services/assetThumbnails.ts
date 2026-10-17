@@ -1,10 +1,7 @@
 import type { Types } from 'mongoose';
 
-// Image-thumbnail pipeline (issue #208): the derived thumbnail object lives
-// alongside the original under the same `<userId>/<assetId>/` prefix, so a
-// factory-reset / asset-sweep by prefix already covers it and the two objects
-// can never drift apart. Kept out of `imageThumbnail.ts` so the pure Skia
-// helper stays unaware of key layout.
+// The derived thumbnail lives under the same `<userId>/<assetId>/` prefix so a prefix sweep covers it and the pair can never drift; kept out of imageThumbnail.ts so the pure Skia helper stays key-layout-unaware.
+// @see #208
 
 export const THUMBNAIL_OBJECT_NAME = 'thumbnail';
 

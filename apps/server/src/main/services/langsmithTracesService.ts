@@ -8,44 +8,18 @@ import type {
   AdminTracesPayload,
 } from '@tova/shared';
 
-/*
- * Read-only LangSmith query service for the admin Traces tab (#186).
- *
- * Sits next to `tracePurge.ts` and shares its raw-REST stance: x-api-key
- * header, project id resolved by name (name-match only — never fall back to
- * "first session returned"), no SDK. Where the purge is failure-tolerant and
- * silent, this is an interactive read path: failures surface as thrown
- * errors, the route maps them to 502, and a missing key/project is a first-
- * class "not configured" answer (null) rather than an error.
- *
- * Verified against the live API (2026-09-27):
- *  - POST /api/v1/runs/query answers { runs, ... } (an object, not an
- *    array — see #187 for the purge's array-cast bug).
- *  - Filters used here: eq(is_root, true), eq(status, "error"),
- *    eq(trace_id, ...), gte(start_time, ...), in(trace_id, [...]),
- *    eq(run_type, "llm"). Default order is newest-first.
- *  - Model identity lives on the `llm: '<model>'` child run name (chat
- *    turns carry no session metadata today), so every page of root runs is
- *    joined with one llm-children query. Token totals come from the same
- *    children: root-level `total_tokens` aggregates appear reliable without
- *    `select` but were observed as 0 with it, while child tokens are
- *    consistent in both shapes.
- *  - The API intermittently answers 429/5xx transiently: one retry after
- *    500ms, then the error propagates.
- */
+/* Read-only LangSmith query service for the admin Traces tab: raw REST (no SDK), name-matched project, failures thrown and mapped to 502 by the route; a missing key/project is a first-class null. Root runs join one llm-children query for model identity and tokens; 429/5xx get bounded retries. */
+// @see #186 #237 #187
 
 const BASE_URL = 'https://api.smith.langchain.com';
 const PAGE_SIZE = 100;
-// Single wait before the one retry a transient 5xx gets (429s get the
-// backoff budget in RETRY_WAITS_MS).
+// Single wait before the one retry a transient 5xx gets (429s get the backoff budget in RETRY_WAITS_MS).
 export const RETRY_WAIT_MS = 500;
-// Per-attempt cap: a stalled LangSmith connection must never hang an
-// admin request (the route holds the response open until this fires).
+// Per-attempt cap: a stalled connection must never hang an admin request.
 export const REQUEST_TIMEOUT_MS = 20_000;
-// Stats window cap: enough depth for a dev project's weekly rollup while
-// bounding the paged reads behind it.
+// Stats window cap: enough depth for a weekly rollup while bounding the paged reads behind it.
 const STATS_MAX_RUNS = 500;
-// Trace detail cap: trees that exceeded this are truncated, not looped.
+// Trace detail cap: trees beyond this are truncated, not looped.
 const DETAIL_MAX_RUNS = 200;
 const ERROR_SNIPPET_CHARS = 300;
 
@@ -65,18 +39,11 @@ interface RawRun {
   app_path?: string | null;
   inputs?: unknown;
   outputs?: unknown;
-  /*
-   * #237: `extra.metadata` carries the MODEL_GENERATION span attributes the
-   * `@mastra/langsmith` exporter maps out — notably `ls_provider` and
-   * `ls_model_name` (verified live against the `tova-dev` project,
-   * 2026-10-08). The provider is how a raced turn's winner is attributed.
-   */
+  /* `extra.metadata` carries the MODEL_GENERATION span attributes the exporter maps out — notably `ls_provider` and `ls_model_name`; the provider is how a raced turn's winner is attributed. */
+  // @see #237
   extra?: { metadata?: Record<string, unknown> } | null;
-  /*
-   * #237: first-class TTFT signal. `first_token_time - start_time` is the
-   * time-to-first-token; a matching `new_token` event carries the same
-   * instant. Absent on non-streaming runs.
-   */
+  /* First-class TTFT signal: `first_token_time - start_time`; absent on non-streaming runs. */
+  // @see #237
   first_token_time?: string | null;
 }
 
@@ -94,8 +61,7 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const RETRY_WAITS_MS = [1000, 2000, 4000];
 
-// Minimal structural fetch options (Node's RequestInit DOM type is not in
-// scope under the server eslint globals).
+// Minimal structural fetch options (Node's RequestInit DOM type is not in scope under the server eslint globals).
 interface FetchInitLike {
   method?: string;
   headers?: Record<string, string>;
@@ -106,8 +72,7 @@ const fetchWithRetry = async (url: string, init: FetchInitLike): Promise<unknown
   const attempt = async (): Promise<unknown> => {
     const res = await fetch(url, {
       ...init,
-      // Hard cap per attempt — a stalled upstream connection must never
-      // hang the admin request indefinitely.
+      // Hard cap per attempt — a stalled upstream connection must never hang the admin request.
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     });
     if (!res.ok) {
@@ -119,9 +84,7 @@ const fetchWithRetry = async (url: string, init: FetchInitLike): Promise<unknown
   try {
     return await attempt();
   } catch (err) {
-    // The live API rate-limits (429) burstily and 5xxes transiently: retry
-    // 429s with backoff (honoring a longer Retry-After), 5xx once after a
-    // short wait. Real 4xx errors propagate immediately.
+    // Retry 429s with backoff (honoring a longer Retry-After), 5xx once after a short wait; real 4xx propagate immediately.
     if (!(err instanceof LangsmithError)) throw err;
     const status = Number(/HTTP (\d+)/.exec(err.message)?.[1]);
     const isRateLimit = status === 429;
@@ -156,8 +119,7 @@ const resolveProject = async (headers: Record<string, string>, project: string) 
     `${BASE_URL}/api/v1/sessions?name=${encodeURIComponent(project)}&limit=1`,
     { headers },
   )) as { id?: string; name?: string }[];
-  // Name-match only (same rule as tracePurge): a fallback pick could read
-  // runs from a project the config never named.
+  // Name-match only (same rule as tracePurge): a fallback pick could read runs from a project the config never named.
   if (!Array.isArray(res) || !res.some((s) => s.name === project && s.id)) {
     throw new LangsmithError(`project "${project}" not found`);
   }
@@ -165,48 +127,35 @@ const resolveProject = async (headers: Record<string, string>, project: string) 
   return { id: match.id, name: match.name };
 };
 
-// `llm: 'openai/gpt-oss-20b'` → `openai/gpt-oss-20b`; null for anything
-// else so non-llm runs never report a model.
+// `llm: 'openai/gpt-oss-20b'` → the model id; null for anything else so non-llm runs never report a model.
 export const modelFromRunName = (name: string | null | undefined): string | null => {
   if (!name) return null;
   const match = /^llm: '(.+)'$/.exec(name);
   return match ? match[1] : null;
 };
 
-/*
- * #237: Mastra's router provider id for Fireworks is `fireworks-ai`
- * (MASTRA_PROVIDER_ID in mastraService.ts); the app-level neutral name is
- * `fireworks`. Map it back so a trace provider matches the roster's provider
- * string. Every other id is identical to its roster name.
- */
+/* Mastra's Fireworks router id is `fireworks-ai`; map it back to the roster's `fireworks` so a trace provider matches the roster string. */
+// @see #237
 const MASTRA_PROVIDER_ALIASES: Record<string, string> = { 'fireworks-ai': 'fireworks' };
 
-// Provider from the MODEL_GENERATION span metadata (`ls_provider`), mapped to
-// the app-level provider name. Null when the run carries no provider (non-llm
-// runs, or a trace exported before #237).
+// Provider from the MODEL_GENERATION span metadata (`ls_provider`), mapped to the app-level name; null when the run carries none.
+// @see #237
 export const providerFromRun = (run: RawRun): string | null => {
   const provider = run.extra?.metadata?.ls_provider;
   if (typeof provider !== 'string' || provider.length === 0) return null;
   return MASTRA_PROVIDER_ALIASES[provider] ?? provider;
 };
 
-// #237: the run's time-to-first-token. LangSmith exposes it as a first-class
-// `first_token_time`; absent on non-streaming runs (a generate call has no
-// first-token instant), so it is null there rather than the whole-run duration.
+// The run's time-to-first-token from `first_token_time`; null on non-streaming runs rather than the whole-run duration.
+// @see #237
 export const ttftMsOf = (run: RawRun): number | null => {
   if (!run.start_time || !run.first_token_time) return null;
   const ms = new Date(run.first_token_time).getTime() - new Date(run.start_time).getTime();
   return Number.isFinite(ms) && ms >= 0 ? ms : null;
 };
 
-/*
- * #237: is this llm run a race loser that was aborted rather than a real
- * failure? The aborted provider's stream is cancelled mid-flight, which the
- * exporter records as an errored run. Such a run never served the user, so it
- * must not count toward calls/errors/latency. Matched by name or message, same
- * shape `isClientAbort` uses in modelFailover.ts (kept local to avoid the
- * service importing the routing module).
- */
+/* Is this llm run an aborted race loser rather than a real failure? Such a run never served the user and must not count toward calls/errors/latency. */
+// @see #237
 export const isAbortedRun = (run: RawRun): boolean => {
   const error = run.error ?? '';
   return /abort|cancel/i.test(error) || /AbortError|CanceledError/.test(error);
@@ -227,14 +176,10 @@ interface ModelJoin {
   tokensOf: Map<string, number>;
 }
 
-// Safety cap for the join below: a busy page of tool-heavy traces (up to
-// maxSteps llm calls each) must not loop forever on a pathological project.
+// Safety cap for the join: a page of tool-heavy traces must not loop forever on a pathological project.
 const JOIN_MAX_PAGES = 10;
 
-// One paged llm-children sweep over a page of root runs: supplies each
-// trace's model and its token total (summed across the trace's llm calls —
-// multi-step tool turns have one llm child per step, all of the same
-// model).
+// One paged llm-children sweep over a page of root runs: supplies each trace's model and its token total (summed across llm children).
 const joinLlmChildren = async (
   headers: Record<string, string>,
   projectId: string,
@@ -251,8 +196,8 @@ const joinLlmChildren = async (
       filter: `and(${baseFilter}, eq(run_type, "llm"))`,
       limit: PAGE_SIZE,
       offset: page * PAGE_SIZE,
-      // #237: `extra` carries `ls_provider`; the model still comes from the
-      // run name (the join's existing key).
+      // `extra` carries `ls_provider`; the model still comes from the run name (the join's existing key).
+      // @see #237
       select: ['trace_id', 'name', 'total_tokens', 'extra'],
     });
     const children = res.runs ?? [];
@@ -274,9 +219,8 @@ const joinLlmChildren = async (
 const rootFilter = (errorsOnly: boolean) =>
   errorsOnly ? 'and(eq(is_root, true), eq(status, "error"))' : 'eq(is_root, true)';
 
-// Workspace-memory metadata keys (#308): attached by the chat routes to the
-// main call's trace metadata, so they land on the root run. Absent on traces
-// from before #308.
+// Workspace-memory metadata keys: attached by the chat routes to the main call's trace metadata (root run); absent on pre-#308 traces.
+// @see #308
 const WORKSPACE_GATES = new Set(['yes', 'no', 'timeout', 'off']);
 
 const workspaceFactsOf = (
@@ -326,9 +270,7 @@ export interface ListTracesParams {
   limit?: number;
 }
 
-// Recent root runs, newest first, with the model filter applied post-merge
-// (the model lives on a child run name — a server-side filter would mean
-// fragile filter-string quoting for no gain at this window size).
+// Recent root runs, newest first, with the model filter applied post-merge (the model lives on a child run name — a server-side filter buys nothing at this window size).
 export const listTraces = async (
   params: ListTracesParams = {} as ListTracesParams,
 ): Promise<AdminTracesPayload | null> => {
@@ -343,7 +285,8 @@ export const listTraces = async (
   const res = await queryRuns(headers, resolved.id, {
     filter: rootFilter(Boolean(params.errorsOnly)),
     limit,
-    // `extra` carries the #308 workspace metadata the row surfaces.
+    // `extra` carries the workspace metadata the row surfaces.
+    // @see #308
     select: [
       'id',
       'trace_id',
@@ -372,11 +315,7 @@ export const listTraces = async (
   return { project: resolved, traces };
 };
 
-// Full run set of one trace, `chunk:` streaming artifacts dropped (dozens
-// per turn, zero duration, no diagnostic value), oldest first so the client
-// can render the tree top-down. Pages by PAGE_SIZE — the API rejects any
-// per-query limit above 100 (verified live: 101 → 400). Returns an empty
-// run list for an unknown trace id — the route distinguishes that as a 404.
+// Full run set of one trace, `chunk:` streaming artifacts dropped, oldest first for a top-down tree; paged (the API rejects per-query limits above 100); an empty run list means an unknown trace (404 by the route).
 export const getTrace = async (traceId: string): Promise<AdminTraceDetail | null> => {
   const apiKey = config.langsmith.apiKey;
   const project = config.langsmith.project;
@@ -421,33 +360,8 @@ export const getTrace = async (traceId: string): Promise<AdminTraceDetail | null
   return { traceId, runs };
 };
 
-/*
- * Per-(model, provider) rollup since `days` ago, aggregated from llm runs
- * directly.
- *
- * Why llm runs and not root turns: the model identity and token counts live
- * on the llm children, so a root-based rollup would need a children-join
- * per page (multiplying requests against a burstily rate-limited API — the
- * first live smoke test of that shape hung for minutes). One paged sweep of
- * llm runs answers per-model health in ~STATS_MAX_RUNS/PAGE_SIZE + 2 calls.
- *
- * #237: under racing one model is served by two providers at different
- * pricise; the rollup is now keyed by `(model, provider)`, using the
- * `ls_provider` metadata the exporter already emits. A run without a provider
- * (legacy trace) rolls up under the model with a null provider. Rows also
- * carry `avgTtftMs` from `first_token_time - start_time`, so the runtime TTFT
- * the weighted pick uses can be eyeballed against LangSmith.
- *
- * Semantics, kept honest in the contract: rows count llm *calls* (a tool
- * turn makes several to the same model), and turns that failed before any
- * llm call do not appear here — the traces list's errors-only filter covers
- * turn-level failures. An aborted race loser (an errored run whose error is an
- * abort/cancel) is excluded entirely: it never served the user.
- *
- * #224: each row and the totals also carry the input/output token split
- * (`prompt_tokens`/`completion_tokens`), so the cached rollup can price a
- * model. `totalTokens` is kept as before.
- */
+/* Per-(model, provider) rollup since `days` ago, aggregated from llm runs directly (model identity + tokens live there; a root-based rollup would multiply requests against a burstily rate-limited API). Aborted race losers are excluded; rows count llm CALLS and carry the input/output split for pricing. */
+// @see #237 #224
 export const traceStats = async (days = 7): Promise<AdminLangsmithStatsPayload | null> => {
   const apiKey = config.langsmith.apiKey;
   const project = config.langsmith.project;
@@ -506,15 +420,15 @@ export const traceStats = async (days = 7): Promise<AdminLangsmithStatsPayload |
     for (const run of llmRuns) {
       const model = modelFromRunName(run.name);
       if (!model) continue;
-      // #237: an aborted race loser never served the user; drop it entirely.
+      // An aborted race loser never served the user; drop it entirely.
+      // @see #237
       if (isAbortedRun(run)) continue;
       const provider = providerFromRun(run);
       const duration = durationMsOf(run);
       const ttft = ttftMsOf(run);
       const tokens = typeof run.total_tokens === 'number' ? run.total_tokens : 0;
-      // Token split for cost (#224). Absent/non-numeric counts as 0, same as
-      // the total above; `totalTokens` stays the reported run total, not the
-      // sum of the split (a run can report a total without the breakdown).
+      // Token split for cost: absent/non-numeric counts as 0; `totalTokens` stays the reported run total (a run can report a total without the breakdown).
+      // @see #224
       const inputTokens = typeof run.prompt_tokens === 'number' ? run.prompt_tokens : 0;
       const outputTokens = typeof run.completion_tokens === 'number' ? run.completion_tokens : 0;
       const isError = run.status === 'error';
@@ -563,8 +477,8 @@ export const traceStats = async (days = 7): Promise<AdminLangsmithStatsPayload |
       ...stats,
       avgDurationMs: durationCount > 0 ? Math.round(durationSum / durationCount) : null,
       avgTtftMs: ttftCount > 0 ? Math.round(ttftSum / ttftCount) : null,
-      // Cost is joined at read time from the in-DB price (#224); the raw
-      // aggregator never prices.
+      // Cost is joined at read time from the in-DB price; the raw aggregator never prices.
+      // @see #224
       estimatedCostUsd: null,
     }))
     .sort((a, b) => b.calls - a.calls);

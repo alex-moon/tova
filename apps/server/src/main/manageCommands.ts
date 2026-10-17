@@ -4,22 +4,13 @@ import { readFile } from 'node:fs/promises';
 import * as path from 'node:path';
 import { buildMongoUri } from '../../../shared/src/main/mongoUri';
 
-/*
- * #322: Django-style management commands for the server app — a flat registry
- * and an argv router (`manage.ts` is the thin entry). Commands use the raw
- * `mongodb` driver + shared `buildMongoUri` (the `scripts/mongo.ts` pattern),
- * not the server's mongoose/config stack, so the CLI stays light and
- * side-effect-free. Run via `npm run manage -- <command> [args]`.
- */
+// Django-style management commands: flat registry + argv router on the raw mongodb driver.
+// @see #322
 
 export interface ManageCommand {
   description: string;
   run: (args: string[]) => Promise<void> | void;
 }
-
-/* ----------------------------------------------------------------------------
- * Formatting helpers (pure, unit-tested)
- * ------------------------------------------------------------------------- */
 
 export const formatSeconds = (ms: number | undefined | null): string => {
   if (ms === undefined || ms === null || !Number.isFinite(ms)) return '-';
@@ -64,10 +55,6 @@ export const formatRosterRow = (row: RosterRow): string[] =>
 
 export const ROSTER_HEADER = `${pad('MODEL', 34)}${pad('ELIGIBLE', 9)}${pad('PROVIDER', 11)}${pad('ENABLED', 8)}${pad('TTFT', 10)}${pad('SAMPLES', 8)}${pad('COOLOFF', 24)}`;
 
-/* ----------------------------------------------------------------------------
- * roster — live roster + windowed TTFT readout (#320)
- * ------------------------------------------------------------------------- */
-
 export const rosterCommand: ManageCommand = {
   description: 'Print the live model roster: eligibility, per-provider windowed TTFT, cool-offs',
   run: async () => {
@@ -86,16 +73,8 @@ export const rosterCommand: ManageCommand = {
   },
 };
 
-/* ----------------------------------------------------------------------------
- * probe:image-tools — #318 verification probe
- * ------------------------------------------------------------------------- */
-
-/*
- * #318 probe fixtures (owner-provided): red/blue 8×8 PNGs assert actual color
- * perception (two colors guard against lucky pattern matching), kitten.jpg a
- * real photo asserts content recognition. bike-snow.jpg stays in fixtures for
- * the #318 golden-path tests.
- */
+// Probe fixtures: solid-color PNGs assert color perception, kitten.jpg a real photo content recognition.
+// @see #318
 const fixtureDataUrl = async (file: string, mediaType: string): Promise<string> => {
   const b64 = await readFile(path.join(__dirname, 'services', 'fixtures', file), 'base64');
   return `data:${mediaType};base64,${b64}`;
@@ -106,7 +85,8 @@ interface ProbeTarget {
   url: string;
   model: string;
   keyEnvVar: string;
-  /** DeepInfra rejects images in tool messages at the schema level (#318). */
+  /** DeepInfra rejects images in tool messages at the schema level. */
+  // @see #318
   toolImageExpected: boolean;
 }
 
@@ -136,11 +116,9 @@ const toolCall = {
 type ProbeCase = {
   name: string;
   fixture: [file: string, mediaType: string];
-  /** Whether the model is expected to actually SEE the image. */
   seesImage: boolean;
   /** What a model that truly saw the image answers. */
   expect: RegExp;
-  /** Question asked about the image. */
   prompt: string;
   /** Tool-message variant: the image rides the tool result instead of the user turn. */
   viaTool?: boolean;
@@ -174,8 +152,7 @@ const PROBE_CASES: ProbeCase[] = [
     name: 'user message, whiteboard.jpg (handwriting)',
     fixture: ['whiteboard.jpg', 'image/jpeg'],
     seesImage: true,
-    // Distinctive menu items — unreadable without actually parsing the
-    // handwriting.
+    // Distinctive menu items — unreadable without actually parsing the handwriting.
     expect: /\bcroissant|lemonade|barbeque|barbecue\b/i,
     prompt: 'Read the whiteboard. Name one food or drink item written on it.',
     attempts: 3,
@@ -184,8 +161,7 @@ const PROBE_CASES: ProbeCase[] = [
     name: 'user message, street.jpg (busy scene)',
     fixture: ['street.jpg', 'image/jpeg'],
     seesImage: true,
-    // Small sign text / salient vehicle — requires more than a vague scene
-    // guess.
+    // Small sign text / salient vehicle — requires more than a vague scene guess.
     expect: /\bone way\b|\bbus\b/i,
     prompt: 'Look at the street scene. What text is visible on a sign, and is there a bus?',
     attempts: 3,
@@ -252,11 +228,7 @@ export const probeImageToolsCommand: ManageCommand = {
                 content: [{ type: 'text', text: probeCase.prompt }, imagePart],
               },
             ];
-        /*
-         * Live-model perception is noisy (one run described the blue square as
-         * "solid dark red"; the next named it correctly), so each case gets a
-         * retry before it counts as a failure.
-         */
+        // Live-model perception is noisy, so each case gets a retry before it counts as a failure.
         const attemptsAllowed = probeCase.attempts ?? 2;
         let status = 0;
         let answer = '';
@@ -270,9 +242,7 @@ export const probeImageToolsCommand: ManageCommand = {
               body: JSON.stringify({
                 model: target.model,
                 messages,
-                // Reasoning models emit long reasoning_content before the
-                // answer; a small cap truncates before the item is named and
-                // reads as a perception failure when it is only token hunger.
+                // Reasoning models emit long reasoning_content; a small cap reads as a perception failure.
                 max_tokens: 400,
               }),
             });
@@ -281,9 +251,7 @@ export const probeImageToolsCommand: ManageCommand = {
           } catch (err) {
             answer = String(err);
           }
-          // A case "passes" when the HTTP shape is accepted; when the case is
-          // expected to deliver the image, the model must also answer with the
-          // expected perception.
+          // Pass = HTTP accepted; image cases must also answer with the expected perception.
           const accepted = status === 200;
           saw = accepted && probeCase.seesImage && probeCase.expect.test(answer);
           ok = accepted && (!probeCase.seesImage || saw);
@@ -303,8 +271,8 @@ export const probeImageToolsCommand: ManageCommand = {
         console.log(
           `${target.name} | ${probeCase.name}: HTTP ${status} ${answer ? JSON.stringify(answer.slice(0, 80)) : ''} — ${why}`,
         );
-        // Documented provider limitation (#318): DeepInfra rejects tool-message
-        // images at the schema level. Expected, not a regression.
+        // Documented provider limitation: DeepInfra rejects tool-message images; expected, not a regression.
+        // @see #318
         if (!accepted && probeCase.viaTool) {
           console.log(
             `  (expected: ${target.name} ${target.toolImageExpected ? 'accepts' : 'rejects'} images in tool messages — #318)`,
@@ -320,10 +288,6 @@ export const probeImageToolsCommand: ManageCommand = {
     }
   },
 };
-
-/* ----------------------------------------------------------------------------
- * Registry
- * ------------------------------------------------------------------------- */
 
 export const commands: Record<string, ManageCommand> = {
   roster: rosterCommand,

@@ -1,6 +1,4 @@
-// Bulk-download zip-entry helpers: entry names come from stored
-// Asset.filename (sanitized at presign), with a defensive second pass.
-// Collisions get `name (2).ext`.
+// Zip-entry helpers: names come from stored Asset.filename with a defensive second pass; collisions get `name (2).ext`.
 
 const sanitizeZipEntryName = (filename: string): string => {
   const cleaned = filename

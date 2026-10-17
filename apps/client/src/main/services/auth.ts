@@ -1,9 +1,7 @@
 import axios from 'axios';
 import type { AuthUser } from '@shared/contracts';
 
-// Normalised auth failure: message comes from the server response when one
-// arrived, otherwise the fallback. Views catch AuthError and read .message
-// without importing axios (PR #27 review).
+// Normalised auth failure: server message when one arrived, else the fallback; views read .message without importing axios.
 export class AuthError extends Error {
   constructor(message = 'Authentication failed', options?: { cause?: unknown }) {
     super(message, options);
@@ -19,8 +17,7 @@ const toAuthError = (err: unknown): AuthError => {
   return new AuthError('Authentication failed', { cause: err });
 };
 
-// Connector separating views/context from axios. All auth API traffic goes
-// through this module; views should not import axios directly (PR #27 review).
+// Connector separating views/context from axios; all auth API traffic goes through this module.
 const AuthService = {
   async me(): Promise<AuthUser | null> {
     const res = await axios.get<{ user?: AuthUser }>('/api/auth/me');
@@ -49,8 +46,8 @@ const AuthService = {
     await axios.post('/api/auth/logout');
   },
 
-  // PATCHes the user-owned profile (issue #35). Sends only the keys present
-  // in the patch — an empty string clears the field server-side.
+  // PATCHes the user-owned profile; sends only the keys present — an empty string clears the field.
+  // @see #35
   async updateProfile(patch: {
     preferredName?: string;
     customInstructions?: string;
@@ -69,8 +66,8 @@ const AuthService = {
     }
   },
 
-  // Factory reset (issue #143): the typed confirmation string must match the
-  // server-side literal exactly or the wipe is refused with 400.
+  // Factory reset: the typed confirmation string must match the server-side literal exactly.
+  // @see #143
   async factoryReset(confirm: string): Promise<{ reset: boolean; failedObjects: string[] }> {
     try {
       const res = await axios.post<{

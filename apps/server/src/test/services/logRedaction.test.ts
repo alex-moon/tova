@@ -1,9 +1,7 @@
 import { redactForLog, redactString } from '../../main/services/logRedaction';
 
-// Issue #145: log redaction. Chat-route errors can embed prompt content
-// (provider APIs echo request bodies) and extraction errors carry extracted
-// candidate text; everything argued to console.* must come through here.
-
+// Log redaction: chat-route errors can embed prompt content and extraction errors carry user text; everything argued to console.* must come through here.
+// @see #145
 describe('redactString', () => {
   it('keeps short structural tokens verbatim', () => {
     expect(redactString('Request failed with status code 401')).toBe(
@@ -53,10 +51,8 @@ describe('redactString', () => {
     expect(out).not.toContain('user chat message');
   });
 
-  // #358: fs error messages quote the exact file; redacting the path cost the
-  // outage diagnosis. Paths are code-controlled, so quoted segments that are
-  // narrowly path-shaped survive every rule — including the 64+-char catch-all
-  // that would otherwise swallow the whole (long) error line.
+  // fs error messages quote the exact file; redacting the path cost the outage diagnosis. Paths are code-controlled, so narrowly path-shaped quoted segments survive — including the 64+-char catch-all.
+  // @see #358
   it('keeps quoted filesystem paths from fs error messages', () => {
     const enoent =
       "Error: ENOENT: no such file or directory, open '/app/assets/tessdata/eng.traineddata.gz'";
@@ -125,8 +121,8 @@ describe('redactForLog', () => {
     const out = redactForLog({
       message: 'upstream echoed {"content":"user secret note content again"} to us',
     });
-    // Serialized structured bodies are treated as a whole: over-redaction
-    // is the deliberate conservative direction (plan-145).
+    // Serialized structured bodies are treated as a whole: over-redaction is the deliberate conservative direction.
+    // @see #145
     expect(out).not.toContain('user secret note');
   });
 
@@ -156,9 +152,8 @@ describe('redactForLog', () => {
   });
 
   it('keeps the full fs error message with its path, as prod logs it (#358)', () => {
-    // The exact shape Loki showed for the #358 outage, minus the redaction:
-    // doubled "Error:" from tesseract's throw Error(data), quoted absolute
-    // path. The whole line must stay readable.
+    // The exact shape Loki showed for the outage, minus the redaction: doubled "Error:", quoted absolute path — the whole line must stay readable.
+    // @see #358
     const err = new Error(
       "Error: ENOENT: no such file or directory, open '/app/assets/tessdata/eng.traineddata.gz'",
     );

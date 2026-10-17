@@ -1,14 +1,5 @@
-/*
- * Per-completion tool degradation (#82). Tool `execute` wrappers receive
- * Mastra's request context as their second argument (a fresh `RequestContext`
- * per completion call, pinned by mastraRequestContext.test.ts), which is the
- * natural per-completion scope: a tool that fails once is marked failed there
- * and short-circuits to a degraded result on every retry inside the same
- * completion, without another handshake or network round trip.
- *
- * Both entry points tolerate a null/undefined or contextless call-site by
- * no-oping / returning false, so legacy callers passing nothing do not break.
- */
+/* Per-completion tool degradation: a failed tool short-circuits to a degraded result on retries within the same completion; null-context call-sites no-op. */
+// @see #82
 
 const TOOL_FAILURES_KEY = 'toolFailures';
 
@@ -30,8 +21,7 @@ const failureMapOn = (ctx: unknown): Map<string, string> | undefined => {
   return fresh;
 };
 
-// Mark a tool failed for this completion. The optional reason is remembered
-// so a short-circuited retry reports the original failure, not a placeholder.
+// Mark a tool failed for this completion; the reason is remembered so retries report the original failure.
 export const markToolFailed = (ctx: unknown, toolId: string, reason?: string): void => {
   const map = failureMapOn(ctx);
   if (!map) return;
@@ -45,9 +35,7 @@ export const toolIsFailed = (ctx: unknown, toolId: string): boolean =>
 export const toolDegradeReason = (ctx: unknown, toolId: string): string =>
   failureMapOn(ctx)?.get(toolId) || 'reason unknown';
 
-// Bound any error to a short, single-line, human-readable reason. Errors
-// can carry long multi-line payloads (HTTP dumps, stack fragments); the
-// collapse keeps the tool result compact and model-friendly.
+// Bound any error to a short single-line reason; errors can carry long multi-line payloads.
 const REASON_MAX_CHARS = 255;
 
 export const reasonFrom = (error: unknown): string => {
@@ -60,11 +48,8 @@ export const reasonFrom = (error: unknown): string => {
     : collapsed;
 };
 
-// The model-facing degraded result text (#82): the only channel we own for
-// "the model surfaces that it tried to use the tool but it failed" is the
-// tool result itself, so the instruction rides in the text. Auth-flavored
-// failures add the re-connect pointer (#333): the fix is a user action in
-// the Connectors view, and this is the only place the user is looking.
+// The tool result is the only channel to tell the model the tool failed; auth-flavoured failures add the re-connect pointer.
+// @see #82 #333
 const AUTH_FLAVORED =
   /401|403|invalid_token|unauthorized|needs-reauth|not connected|unreachable|fetch failed|ECONNREFUSED/i;
 

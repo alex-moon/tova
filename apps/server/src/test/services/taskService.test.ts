@@ -15,9 +15,8 @@ import {
 } from '../../main/services/taskService';
 import type { TaskDocument } from '../../main/models/Task';
 
-// #254: Mongo-backed task queue running against the shared in-memory Mongo
-// (test/setup.ts); the beforeEach wipe empties tasks between tests.
-
+// Mongo-backed task queue running against the shared in-memory Mongo; the beforeEach wipe empties tasks between tests.
+// @see #254
 const budget = { maxSteps: 25, maxCostUsd: 5 };
 
 const createTask = (tag = '') =>
@@ -105,8 +104,7 @@ describe('runTaskTick (#254)', () => {
   });
 
   it('does not clobber a paused task the processor settled itself', async () => {
-    // A budget breach (D6) transitions the task to `paused` inside the
-    // processor; the tick must not overwrite that with `done`.
+    // A budget breach transitions the task to `paused` inside the processor; the tick must not overwrite that with `done`.
     const task = await createTask('tick-paused');
     const processor = jest.fn().mockImplementation(async (claimed: TaskDocument) => {
       await Task.updateOne({ _id: claimed._id }, { $set: { status: 'paused' } });
@@ -116,9 +114,7 @@ describe('runTaskTick (#254)', () => {
   });
 
   it('does not clobber a processor-settled status when the processor also throws', async () => {
-    // The failure path must be symmetric with the success path: a processor
-    // that pauses (D6 budget breach) and *then* throws must not be requeued by
-    // the tick — the breach outcome and its recorded reason stand.
+    // The failure path must be symmetric with the success path: a processor that pauses and *then* throws must not be requeued by the tick.
     const task = await createTask('tick-paused-throw');
     const processor = jest.fn().mockImplementation(async (claimed: TaskDocument) => {
       await Task.updateOne(
@@ -140,8 +136,7 @@ describe('stale `running` requeue (#254)', () => {
     const claimed = await claimNextTask();
     expect(claimed?.status).toBe('running');
     if (ageMs > 0) {
-      // Backdate updatedAt past the staleness cutoff. Bypass mongoose so the
-      // timestamps plugin cannot rewrite the supplied value.
+      // Backdate updatedAt past the staleness cutoff; bypass mongoose so the timestamps plugin cannot rewrite the supplied value.
       await Task.collection.updateOne(
         { _id: claimed?._id },
         { $set: { updatedAt: new Date(Date.now() - ageMs) } },
@@ -231,9 +226,7 @@ describe('steerTask / cancelTask (#254 routes slice)', () => {
     expect((await latestTask(String(active._id)))?.status).toBe('done');
   });
 
-  // Race: the route reads the task, then the poller settles/cancels it before
-  // the steer lands. The doc argument is stale; the live status must win so a
-  // terminal task is never resurrected to `queued` (cancel-clobber).
+  // Race: the route reads the task, then the poller settles/cancels it before the steer lands; the live status must win so a terminal task is never resurrected.
   it('refuses a stale steer when the task settled to a terminal status meanwhile', async () => {
     const task = await createTask('race-steer');
     await Task.updateOne({ _id: task._id }, { $set: { status: 'paused' } });
@@ -249,8 +242,7 @@ describe('steerTask / cancelTask (#254 routes slice)', () => {
     expect(await TaskEvent.countDocuments({ taskId: task._id })).toBe(1);
   });
 
-  // Race: the route reads a `running` task, then the processor finishes it to
-  // `done` before the cancel lands. The cancel must not clobber the completion.
+  // Race: the route reads a `running` task, then the processor finishes it before the cancel lands; the cancel must not clobber the completion.
   it('does not clobber a concurrently-completed task on a stale cancel', async () => {
     const task = await createTask('race-cancel');
     await Task.updateOne({ _id: task._id }, { $set: { status: 'running' } });

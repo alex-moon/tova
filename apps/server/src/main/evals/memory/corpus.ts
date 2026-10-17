@@ -1,36 +1,11 @@
 import type { GateCase, MemoryScenario } from './types';
 
-/*
- * #289 golden corpus, modelled on the owner's real usage (issue comment
- * 2026-10-13): facts seeded in longer-lived chats, probed from fresh chats that
- * are then deleted. Every fact here is **synthetic** — same structure, no real
- * personal data — so the corpus can live in the repo.
- *
- * The scenario categories are deliberate: `direct` and `file` are the easy
- * baseline, `paraphrase` and `task` are where lexical scoring is expected to
- * struggle, and `deleted-seed` is a miss by construction (excluded by
- * `deletedAt`). `out-of-pool` was a miss by construction under the pre-#293
- * bounded read; #293 searches the whole corpus, so it now expects a hit.
- */
+// Synthetic golden corpus: facts seeded in longer-lived chats, probed from fresh chats.
+// @see #289
 
-/*
- * Hand-labelled gate set. Positives are explicit refer-backs or continuations
- * whose signal lives in `history`; negatives are fresh asks AND bare deixis
- * with no resolvable referent (owner decision 2026-10-14, OQ12/OQ36: the gate
- * may only fire on a vague prompt when the referent is resolvable from the
- * history it sees — otherwise a refusal is the best answer). The set is
- * deliberately hard on both sides: continuations whose refer-back lives only
- * in `history` test recall, while fresh asks that *look* like memory probes
- * ("what should I do about my job?") and bare deixis ("and that one as well?")
- * test precision. This is the first of the three stages (#289) and the one
- * that must clear a minimum-N bar (≥ 30 cases, ≥ 12 per label) before any
- * threshold is ratified.
- *
- * `note` records the labelling source (`agent-authored` vs `owner-confirmed`,
- * per the plan's OQ1) so label independence stays auditable.
- */
+// Hand-labelled gate set: positives are refer-backs; negatives are fresh asks and unresolvable deixis.
+// @see #289
 export const GATE_CASES: GateCase[] = [
-  // Positives — explicit refer-backs to earlier decisions or work.
   {
     id: 'gate-move-decision',
     prompt: 'What did we decide about the move in the end?',
@@ -94,10 +69,6 @@ export const GATE_CASES: GateCase[] = [
     subtype: 'explicit',
     note: 'agent-authored: refer-back to a shared artefact, then extend it',
   },
-  // Negatives — bare deixis with no resolvable referent (owner decision
-  // 2026-10-14, OQ12/OQ36: the gate may only fire on a vague prompt when the
-  // referent is resolvable from visible history; with none, staying quiet —
-  // a refusal — is the best answer). Relabelled from positives.
   {
     id: 'gate-same-as-before',
     prompt: 'Do the same as before.',
@@ -128,7 +99,6 @@ export const GATE_CASES: GateCase[] = [
     refersBack: false,
     note: 'owner-confirmed: bare deixis, no history — the referent is unresolvable, so the gate stays quiet',
   },
-  // Positives — continuations whose refer-back lives only in the transcript.
   {
     id: 'gate-continuation',
     prompt: 'Can you pick that back up for me?',
@@ -173,7 +143,6 @@ export const GATE_CASES: GateCase[] = [
     subtype: 'continuation',
     note: 'agent-authored: continuation, referent only in history',
   },
-  // Negatives — fresh world-knowledge, generative, and tool asks.
   {
     id: 'gate-capital',
     prompt: 'What is the capital of Australia?',
@@ -240,7 +209,6 @@ export const GATE_CASES: GateCase[] = [
     refersBack: false,
     note: 'agent-authored: fresh translation request',
   },
-  // Negatives — fresh asks that superficially resemble memory probes.
   {
     id: 'gate-fresh-job-advice',
     prompt: 'What should I do about my job?',
@@ -277,7 +245,7 @@ export const GATE_CASES: GateCase[] = [
     refersBack: false,
     note: 'agent-authored: fresh generative request',
   },
-  // Negative with history: history alone must not imply a refer-back.
+  // History alone must not imply a refer-back.
   {
     id: 'gate-fresh-after-history',
     prompt: 'Actually, write me a short poem about the sea.',
@@ -402,8 +370,8 @@ export const MEMORY_SCENARIOS: MemoryScenario[] = [
     expectedFact: 'AX-4471',
     poolFill: 210,
   },
-  // More `direct` cases: the easy baseline that must keep surfacing, so a
-  // retrieval change (#293/#294) is not judged only by its hard-category wins.
+  // Easy `direct` baseline so retrieval changes are not judged only by hard-category wins.
+  // @see #293 #294
   {
     id: 'retrieval-direct-sister',
     description: 'Direct query names the fact ("sister").',
@@ -440,9 +408,8 @@ export const MEMORY_SCENARIOS: MemoryScenario[] = [
     expectSurfaced: true,
     expectedFact: 'Volvo',
   },
-  // More `paraphrase` cases: the query and its seed share no content word, so
-  // lexical scoring scores zero. These are the misses #293/#294 are expected to
-  // move; each is asserted no-overlap in `corpus.test.ts`.
+  // Paraphrase cases: query and seed share no content word (asserted in corpus.test.ts).
+  // @see #293 #294
   {
     id: 'retrieval-paraphrase-gardener',
     description: 'Paraphrase query shares no content word with the seed.',
@@ -588,9 +555,8 @@ export const MEMORY_SCENARIOS: MemoryScenario[] = [
     expectSurfaced: true,
     expectedFact: 'January',
   },
-  // #309: filename-reference cases — the query's pointer term lives only in
-  // the slice title (the filename), not the content. Both scored 0 before the
-  // title fold, so they pin the fix.
+  // Filename-reference cases: the pointer term lives only in the slice title.
+  // @see #309
   {
     id: 'retrieval-file-title-only',
     description:
@@ -629,7 +595,8 @@ export const MEMORY_SCENARIOS: MemoryScenario[] = [
     expectSurfaced: true,
     expectedFact: 'two hundred and fifty pounds',
   },
-  // More `task` cases (#298): the fact lives in the `assistant` TaskEvent.
+  // More `task` cases: the fact lives in the `assistant` TaskEvent.
+  // @see #298
   {
     id: 'retrieval-task-heatpump',
     description: 'Fact lives in a task transcript slice (#298).',
@@ -702,7 +669,7 @@ export const MEMORY_SCENARIOS: MemoryScenario[] = [
     expectSurfaced: true,
     expectedFact: 'Meridian',
   },
-  // A second deleted-seed case: excluded by `deletedAt`, independent of recency.
+  // Second deleted-seed case: excluded by `deletedAt`, independent of recency.
   {
     id: 'retrieval-deleted-seed-alarm',
     description: 'Seed sits in a soft-deleted chat: excluded by construction.',
@@ -722,8 +689,8 @@ export const MEMORY_SCENARIOS: MemoryScenario[] = [
     expectSurfaced: false,
     expectedFact: '4815',
   },
-  // A second out-of-pool case: buried beyond the old bounded pool by newer
-  // filler; reachable since #293 searches the whole corpus.
+  // Second out-of-pool case: buried by newer filler; reachable since the whole corpus is searched.
+  // @see #293
   {
     id: 'retrieval-out-of-pool-wheel',
     description: 'Seed buried beyond the old bounded pool by newer messages: reachable since #293.',

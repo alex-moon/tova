@@ -1,13 +1,4 @@
-/*
- * Jest-only stub standing in for `@mastra/core/agent` in test suites that do
- * not explicitly mock it. The real package's transitive deps include
- * ESM-only modules (e.g. `@sindresorhus/slugify`) that ts-jest in CJS mode
- * cannot `require`; the suites that exercise the agent machinery
- * (the route/service tests) replace this module wholesale via
- * `jest.mock('@mastra/core/agent', ...)`, so the stub never
- * participates in those suites. Any suite that reaches the `Agent` here
- * without a mock fails loudly instead of making real network calls.
- */
+/* Jest-only stub for `@mastra/core/agent` in suites that do not mock it: the real package's ESM-only transitive deps cannot be required by ts-jest in CJS mode; suites exercising agent machinery mock this module wholesale, and an unmocked reach fails loudly rather than making network calls. */
 export class Agent {
   constructor(config: { id?: string; name?: string; model?: string | { url: string } }) {
     throw new Error(

@@ -1,19 +1,8 @@
 import { groqConnector } from '../../main/services/mastraService';
 import type { CompletionOptions } from '../../main/services/llmTypes';
 
-/*
- * #254 (epic #251): the task sequencer consumes the non-streaming connector's
- * `toolResults` to build #196 tool chips and replay its own tool usage as
- * history. Mastra's `FullOutput.toolResults` is an array of `ToolResultChunk`s
- * shaped `{ type, runId, from, payload: { toolName, args, result, toolCallId } }`
- * — the fields live under `payload`, not on the entry. Reading the entry itself
- * yielded `name: ''`, no `result`, and no `args`, which silently broke the
- * sequencer's chips and its replay (the model re-ran tool calls blind until the
- * step budget ran out).
- *
- * These tests pin the unwrap against the real Mastra shape (captured from a
- * live run), with an entry-level fallback so a bare payload still maps.
- */
+/* The task sequencer consumes the non-streaming connector's `toolResults`; Mastra nests the fields under `payload`, and reading the entry itself silently broke the sequencer's chips and replay. Pins the unwrap against the real Mastra shape with an entry-level fallback. */
+// @see #254 #251 #196
 
 const mockGenerate = jest.fn();
 

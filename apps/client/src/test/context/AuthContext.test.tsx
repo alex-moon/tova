@@ -16,8 +16,7 @@ vi.mock('../../main/services/auth', () => ({
   },
 }));
 
-// The browser zone under test is whatever this runner's Intl reports; the
-// point is that the client forwards exactly that value, not a guess.
+// The browser zone is whatever this runner's Intl reports; the client must forward exactly that value.
 const zone = Intl.DateTimeFormat().resolvedOptions().timeZone;
 
 const userWithoutZone: User = {
@@ -50,8 +49,7 @@ describe('AuthContext timezone report (#261)', () => {
       expect(updateProfile).toHaveBeenCalledTimes(1);
     });
     expect(updateProfile).toHaveBeenCalledWith({ timezone: zone });
-    // The PATCH response replaces the context user so the report does not
-    // re-fire on the next effect run (the stored zone now matches).
+    // The PATCH response replaces the context user so the report does not re-fire on the next effect run.
     await waitFor(() => {
       expect(updateProfile).toHaveBeenCalledTimes(1);
     });
@@ -67,7 +65,6 @@ describe('AuthContext timezone report (#261)', () => {
     await waitFor(() => {
       expect(me).toHaveBeenCalledTimes(1);
     });
-    // Give the effect a beat; no report may fire for a matching zone.
     await new Promise((r) => setTimeout(r, 10));
     expect(updateProfile).not.toHaveBeenCalled();
   });

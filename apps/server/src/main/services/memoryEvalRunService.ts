@@ -1,19 +1,5 @@
-/*
- * #289 T6: the persisted rollup for the workspace-memory eval. Mirrors
- * `evalRunService` (same `evalruns` collection, same global lease) but writes
- * `kind:'memory'` with a continuous `metrics` payload, because precision /
- * recall@k / win-rate do not map onto the per-case `pass|partial|fail|error`
- * scores. Per-case rows reuse the existing `results` shape with the sentinel
- * `model`/`provider` `'memory'`, so the tool-use contract is untouched.
- *
- * The lease stays **global** (D14, corrected): the memory and tool-use suites
- * share one reserved `evalUserId`, so they must never overlap. Kind-scoping the
- * lease would permit exactly the concurrency that clobbers fixtures; only
- * idempotency (the scheduler, T8) is kind-aware.
- *
- * Dependencies are injectable so the flow is unit-testable without Mongo or
- * live providers (same seam style as `evalRunService`).
- */
+/* The persisted rollup for the workspace-memory eval: mirrors evalRunService but writes kind 'memory' with continuous metrics; the lease stays global because both suites share one reserved evalUserId. */
+// @see #289
 import type { AdminEvalMemoryMetrics } from '@tova/shared';
 import { config } from '../config';
 import {
@@ -50,12 +36,7 @@ const resolveRunDeps = (deps: MemoryEvalRunDeps) => ({
   run: deps.run ?? ((stages: MemoryEvalStage[]) => runMemoryEvals({}, stages)),
 });
 
-/*
- * The per-case drill-down. `score` is the closest `pass|fail` reading of the
- * case's assertion: a retrieval case passes when surfacing matches
- * `expectSurfaced`. The authoritative rates live in `metrics`; these rows are
- * only for the admin drill-down.
- */
+/* The per-case drill-down: `score` is the closest pass/fail reading of the case's assertion; the authoritative rates live in `metrics`. */
 const retrievalRow = (r: RetrievalCaseResult) => ({
   caseId: `retrieval:${r.scenarioId}`,
   model: 'memory',
@@ -81,11 +62,7 @@ const buildMetrics = (
   return metrics;
 };
 
-/**
- * Writes the `running` lease for a memory run and returns its id. Rejects with
- * `EvalRunBusyError` when **any** run (of either kind) is live — the global
- * lease (D14).
- */
+/** Writes the `running` lease for a memory run; rejects with EvalRunBusyError when ANY run is live (global lease). */
 export const beginMemoryEvalRun = async (
   options: StartMemoryEvalRunOptions,
   deps: MemoryEvalRunDeps = {},
@@ -102,11 +79,7 @@ export const beginMemoryEvalRun = async (
   return String((record as { _id: unknown })._id);
 };
 
-/**
- * Runs the requested stages for an existing lease and settles the document to
- * `done`/`error`. A run-level crash is recorded, never thrown (mirrors
- * `executeEvalRun`).
- */
+/** Runs the requested stages for an existing lease and settles the document to done/error; a crash is recorded, never thrown. */
 export const executeMemoryEvalRun = async (
   id: string,
   options: StartMemoryEvalRunOptions,

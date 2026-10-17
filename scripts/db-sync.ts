@@ -7,22 +7,9 @@ import bcrypt from 'bcryptjs';
 import { MongoClient, type IndexDescriptionInfo } from 'mongodb';
 import { buildMongoUri } from '../apps/shared/src/main/mongoUri';
 
-// One script, five subcommands:
-//   dump     — mongodump MONGODB_DUMP_URL -> data/db-dumps tarball
-//   drop     — drop the database in MONGODB_URL
-//   restore  — mongorestore --drop a tarball into MONGODB_URL
-//   sync     — dump, drop, restore (the full migration round-trip)
-//   password — reset every user password to "password" and every PAT to
-//              the shared literal "tova_pat_TEST" (local fixtures only)
-//
-// drop, restore and password are destructive against MONGODB_URL, so each
-// refuses to run unless that URL points at localhost/127.0.0.1, or the
-// caller appends --i-know-this-is-dangerous.
+// Subcommands: dump, drop, restore, sync (dump+drop+restore), password (local fixture reset); destructive ones refuse non-localhost targets without --i-know-this-is-dangerous.
 
-// Shared test credentials written by the `password` subcommand. The PAT is
-// deliberately below the real token format (`tova_pat_` + 43 base64url
-// chars) so it can never have been minted by the app — it is a fixture, not
-// a production-safe token.
+// Fixture credentials: the PAT is deliberately below the real token format so it can never be app-minted.
 const TEST_PASSWORD = 'password';
 const TEST_PAT = 'tova_pat_TEST';
 
@@ -53,12 +40,7 @@ const targetUrl = () => {
   return url;
 };
 
-// MONGODB_URL carries its own db name; parse it out (default `tova`).
-// A standard URI is `mongodb://user:pass@host:port/<db>?...`, so the db name
-// is the LAST path segment, not the first (`url.split('/')[1]` is the empty
-// string between `mongodb:` and `//`). Parsing via the URL API honours a
-// non-`tova` target instead of silently defaulting to `tova`, and returns
-// nothing for a URI with no db path (which then falls back to `tova`).
+// Parse the db name from the URI's last path segment (default `tova`); `url.split('/')[1]` is empty between `mongodb:` and `//`.
 const targetDb = (url: string): string => {
   try {
     const parsed = new URL(url);
@@ -129,9 +111,7 @@ const restore = () => {
   execFileSync('mkdir', ['-p', workDir]);
   try {
     execFileSync('tar', ['-xzf', tarball, '-C', workDir]);
-    // Tarballs may contain a single dumped-db directory (the legacy layout of
-    // the retired db-dump.sh; its tarballs may still exist) or the db files
-    // directly (dump above). Handle both.
+    // Handle both tarball layouts: a wrapped dumped-db directory or the db files directly.
     const entries = readdirSync(workDir);
     const dir =
       entries.length === 1 && existsSync(path.join(workDir, entries[0], targetDb(url)))
@@ -146,10 +126,7 @@ const restore = () => {
   console.log(`restored ${tarball} into ${db}`);
 };
 
-// Reset every login credential in the target db to a known fixture value:
-// user passwords become TEST_PASSWORD (bcrypt-hashed) and PAT rows collapse
-// to sha256(TEST_PAT). The `password` command is destructive against
-// MONGODB_URL, so it goes through the same localhost guard as drop/restore.
+// Reset every credential to the fixture values; goes through the same localhost guard as drop/restore.
 const resetPasswords = async () => {
   const url = targetUrl();
   const db = targetDb(url);
@@ -158,21 +135,13 @@ const resetPasswords = async () => {
     await client.connect();
     const database = client.db(db);
 
-    // Users use bcrypt cost 10 (see apps/server/src/models/User.ts pre-save hook);
-    // hash once and bulk-write so a large dump stays fast. Bumping the model
-    // cost would require bumping it here too.
+    // bcrypt cost 10 must match the User model's pre-save hook; bump both together.
     const passwordHash = await bcrypt.hash(TEST_PASSWORD, 10);
     const users = await database.collection('users').updateMany({}, { $set: { passwordHash } });
 
-    // Every PAT collapses onto one tokenHash, which violates the unique
-    // index on `tokenHash` (apps/server/src/models/Pat.ts) as soon as a second
-    // PAT exists. Drop it first, then warn loudly: the local schema is now
-    // missing a constraint until it is re-created.
+    // Collapsing PATs onto one tokenHash violates the unique index; drop it and warn that the constraint is gone.
     const pats = database.collection('pats');
-    // A db with no PATs yet (fresh dump, or nobody ever minted a token) has no
-    // `pats` collection; `indexes()` throws NamespaceNotFound (code 26) on it.
-    // Treat that as "no index to drop" — the whole point is a fixture reset, so
-    // zero PATs is a normal case, not an error.
+    // A db with no PATs has no `pats` collection; `indexes()` throws code 26 — treat as "no index to drop".
     let indexes: IndexDescriptionInfo[] = [];
     try {
       indexes = await pats.indexes();

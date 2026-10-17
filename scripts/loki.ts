@@ -1,25 +1,8 @@
 import 'dotenv/config';
 import { config } from '../apps/server/src/main/config';
 
-/*
- * Read logs from Grafana Cloud (hosted Loki) — the same credentials the admin
- * logs view uses (#179). `LOKI_URL` is the push URL; the query API lives on the
- * same host, so we strip the /loki/api/v1/push suffix.
- *
- * Usage:
- *   npx tsx scripts/loki.ts [query] [flags]
- *
- *   query      LogQL stream selector (default: {job="tova"})
- *   --since    look-back window, e.g. 30m, 2h, 24h, 7d (default: 1h)
- *   --limit    max lines (default: 100)
- *   --raw      print raw lines only (no timestamp/level decoration)
- *   --json     print the raw Loki JSON response
- *
- * Examples:
- *   npx tsx scripts/loki.ts
- *   npx tsx scripts/loki.ts '{job="tova", service="server"}' --since 6h --limit 50
- *   npx tsx scripts/loki.ts '{job="tova"} |= "error"' --since 24h --raw
- */
+/* Read logs from Grafana Cloud (hosted Loki) with the same credentials the admin logs view uses. */
+// @see #179
 
 const lokiBaseUrl = (url: string): string => url.replace(/\/loki\/api\/v1\/push\/?$/, '');
 

@@ -1,9 +1,4 @@
-/*
- * Jest stub: `@mastra/observability` (see `mastraCoreStub.ts`). The two
- * exported bits mirror the real API used by `mastraService.ts`: the
- * registry entrypoint class and the tracing-options builder that folds
- * `TracingOptionsUpdater`s onto the call's tracing options.
- */
+/* Jest stub for `@mastra/observability`: the registry entrypoint class and the tracing-options builder folding TracingOptionsUpdaters onto the call's tracing options. */
 
 export class Observability {
   constructor(public readonly config: unknown) {}

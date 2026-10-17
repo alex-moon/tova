@@ -5,32 +5,12 @@ import type { TokenUsage } from './llmTypes';
 import { runTaskStep, type TaskStepOutcome } from './taskSequencer';
 import { enqueueWorkspaceEmbedding } from './workspaceEmbeddingIngest';
 
-/*
- * Task processor (#254, epic #251) — the sequencer's worker-driven turn loop.
- *
- * One tick claims a task and runs its steps to a terminal or paused state:
- *
- *   - each step is one `maxSteps: 1` roster call (`runTaskStep`);
- *   - the step's outcome is appended to the task stream as an `assistant`
- *     event, then `stepCount` advances — the event write is the unit a step
- *     advances on (crash recovery reassembles from the stream);
- *   - steering is drained at the call boundary: every queued `user` event is
- *     already in the history the next step assembles, so a queued instruction
- *     is consumed at the next boundary by construction (D2);
- *   - when `stepCount` reaches the task's `maxSteps` budget, the task is
- *     `paused` with a visible `system` event (D6) rather than failed — the
- *     same mechanism a cost breach uses, resumable by a steering instruction.
- *
- * Crash recovery (D4): a stale `running` task is requeued by the poller sweep;
- * on re-claim this loop restarts from the persisted stream (`stepCount` steps
- * already match the events on it) and continues — no separate checkpoint.
- */
+/* Task processor: the worker-driven turn loop — one tick claims a task and runs its steps to a terminal or paused state; the event write is the unit a step advances on; steering drains at call boundaries; crash recovery restarts from the persisted stream. */
+// @see #254 #251
 
 const MAX_NOTICE_CHARS = 500;
 
-// The persistable event fields, declared as a plain shape (not `Pick` off the
-// hydrated document — `TaskEventDocument.model` collides with mongoose's own
-// document `model()` method and resolves to the wrong type).
+// The persistable event fields, as a plain shape — `TaskEventDocument.model` collides with mongoose's own `model()` method and resolves to the wrong type.
 export interface TaskEventInput {
   role: 'user' | 'assistant' | 'tool' | 'system';
   content: string;
@@ -41,17 +21,11 @@ export interface TaskEventInput {
   usage?: TokenUsage;
 }
 
-// Is this a `{taskId, seq}` duplicate-key error (code 11000)? Two writers can
-// now race for the same seq: the poller appends assistant/system events and the
-// API appends steering `user` events (D12). The unique index is the guard; on a
-// collision we re-read the max seq and retry rather than surfacing a 500.
+// Two writers can race for the same seq (poller + API steering); the unique index is the guard — re-read max seq and retry rather than surface a 500.
 const isDuplicateKeyError = (err: unknown): boolean =>
   typeof err === 'object' && err !== null && (err as { code?: number }).code === 11000;
 
-// Append one event at the next seq. Read-max-then-insert, retried on the
-// `{taskId, seq}` unique-index collision. A single writer (the poller) never
-// collides; the retry exists for the second writer the API introduces (D12) so
-// a concurrent steering append is correct, not merely loud.
+// Append one event at the next seq, retried on the unique-index collision (the single poller writer never collides; the retry covers the API's second writer).
 export const appendTaskEvent = async (
   taskId: TaskDocument['_id'],
   event: TaskEventInput,
@@ -69,11 +43,7 @@ export const appendTaskEvent = async (
   throw new Error('Could not allocate a task event sequence');
 };
 
-// A visible system notice (budget breach, completion), rendered like content
-// but never fed back as model context (`assembleTaskHistory` skips `system`).
-// `step` is the step the notice belongs to (the last-completed step ordinal),
-// passed explicitly — the `Task` document's own `stepCount` is the value read
-// at claim time and is stale once the loop has run.
+// A visible system notice, rendered like content but never fed back as model context; `step` is the notice's step ordinal, passed explicitly (the claimed header is stale once the loop runs).
 const appendNotice = (taskId: TaskDocument['_id'], content: string, step: number): Promise<void> =>
   appendTaskEvent(taskId, {
     role: 'system',
@@ -84,9 +54,7 @@ const appendNotice = (taskId: TaskDocument['_id'], content: string, step: number
 export const processTaskJob = async (task: TaskDocument): Promise<void> =>
   makeTaskProcessor(runTaskStep)(task);
 
-// Injectable step runner: production uses `runTaskStep` (live roster race);
-// tests inject a deterministic fake. The seam is the whole model call, so tests
-// need no provider, roster, or clock.
+// Injectable step runner: production uses the live roster race; tests inject a deterministic fake — the seam is the whole model call.
 export type TaskStepRunner = (
   task: TaskDocument,
   events: TaskEventDocument[],
@@ -95,17 +63,12 @@ export type TaskStepRunner = (
 export const makeTaskProcessor =
   (runStep: TaskStepRunner) =>
   async (task: TaskDocument): Promise<void> => {
-    // Re-read the claimed task and the stream; on a resume these already carry
-    // the prior steps, so the loop continues rather than restarting.
+    // Re-read the claimed task and the stream; on a resume these already carry the prior steps.
     const claimed = (await Task.findById(task._id)) ?? task;
     let stepCount = claimed.stepCount;
 
     for (;;) {
-      // Re-read the header before each step (D13): cancel (or any external
-      // status change) is observed at this boundary — the same boundary
-      // steering is drained at — so a cancelled running task stops within one
-      // step instead of stepping to completion. `budget` is snapshotted at
-      // creation, but `status`/`stepCount` are live.
+      // Re-read the header before each step: cancel (or any external status change) is observed at this boundary, the same one steering drains at.
       const current = (await Task.findById(task._id)) ?? claimed;
       if (current.status !== 'running') return;
       const maxSteps = current.budget.maxSteps;
@@ -138,26 +101,17 @@ export const makeTaskProcessor =
       stepCount += 1;
       await Task.updateOne({ _id: current._id }, { $set: { stepCount } });
 
-      // The step's text is the driver's read on whether the task is done. A
-      // step that called tools returns no text (spike: `text = ""` at cap 1)
-      // and the loop continues to let the model act on the results. A step
-      // with text and no tool calls is the model's final answer.
+      // The step's text is the driver's read on whether the task is done: a tool-only step continues; a text step with no tool calls is the final answer.
       if (outcome.text.trim() !== '' && outcome.tools.length === 0) {
-        // Settle first, then announce: only a task still `running` is settled
-        // to `done`, and only a task we actually settled gets the completion
-        // notice. A cancel (or any external status change) that landed during
-        // this step leaves the stream without a false "Task completed."
-        // — the previous unconditional append wrote it onto a cancelled task.
+        // Settle first, then announce: only a task still `running` settles to `done` and only a settled task gets the notice, so a cancel landing mid-step never writes a false "Task completed."
         const settled = await Task.updateOne(
           { _id: current._id, status: 'running' },
           { $set: { status: 'done', stepCount } },
         );
         if (settled.modifiedCount) {
           await appendNotice(current._id, 'Task completed.', stepCount);
-          // #294: embed the settled task's stream for semantic retrieval.
-          // Fire-and-forget + flag-gated; the read happens after the completion
-          // notice so the embedded text includes the final answer. Only a task
-          // that actually settled to `done` is embedded (a cancel is not).
+          // Embed the settled task's stream for semantic retrieval: fire-and-forget, flag-gated, after the notice so the final answer is included; only a done task is embedded.
+          // @see #294
           const taskEvents = await TaskEvent.find({
             taskId: current._id,
             role: { $in: ['user', 'assistant'] },

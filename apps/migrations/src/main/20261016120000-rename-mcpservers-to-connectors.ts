@@ -1,19 +1,11 @@
 import { MigrationInterface, Db } from 'mongo-migrate-ts';
 
-/*
- * #329 (epic #328): the MCP-server registry becomes the connector registry.
- * `mcpservers` is renamed to `connectors` (same-database renameCollection is
- * a metadata operation — the documents and all indexes, including the unique
- * per-user (scope, userId, url) index, ride along untouched), and every row
- * is backfilled with `type: 'mcp.pat'`, the only storable connector type
- * today. Down removes the backfilled field and renames back (run #327's down
- * first once it exists — this down predates the mcp.oauth vault fields).
- */
+// Renames mcpservers to connectors (indexes ride along) and backfills type: 'mcp.pat'; down reverses both.
+// @see #329 #328 #327
 export class RenameMcpserversToConnectors implements MigrationInterface {
   async up(db: Db): Promise<void> {
     const names = new Set((await db.listCollections().toArray()).map((c) => c.name));
-    // Fresh install: nothing to rename; the backfill below is a no-op on the
-    // (nonexistent) connectors collection.
+    // Fresh install: nothing to rename; the backfill below is a no-op.
     if (names.has('mcpservers')) {
       if (names.has('connectors')) {
         // Crash-window ambiguity: refuse to guess rather than merge silently.
@@ -24,9 +16,7 @@ export class RenameMcpserversToConnectors implements MigrationInterface {
         to: `${db.databaseName}.connectors`,
       });
     }
-    // Unconditional + idempotent so a run that died between the rename and
-    // this backfill completes on re-run (the type-less rows would otherwise
-    // stay untyped forever: the early return marks the migration applied).
+    // Unconditional + idempotent so a run that died between rename and backfill completes on re-run.
     await db
       .collection('connectors')
       .updateMany({ type: { $exists: false } }, { $set: { type: 'mcp.pat' } });

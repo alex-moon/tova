@@ -38,9 +38,8 @@ jest.mock('../../main/services/storageService', () => ({
 
 const MOCK_ROUTING = { model: 'mock-small-model', provider: 'deepinfra', reason: 'roster-pick' };
 
-// #233: routing runs through the fixed-roster racing path. Drive it with
-// `mockRacingState`; the mock delegates back through the (mocked)
-// `inferenceService` so the existing completion/stream mocks stay the seam.
+// Routing runs through the fixed-roster racing path; `mockRacingState` delegates back through the mocked inferenceService so the completion mocks stay the seam.
+// @see #233
 const mockRacingState: {
   routing: typeof MOCK_ROUTING | null;
   error?: unknown;
@@ -83,10 +82,8 @@ jest.mock('../../main/services/titleService', () => ({
   generateChatTitle: jest.fn().mockResolvedValue('Hello'),
 }));
 
-// #238: stub the enrichment aux call so it does not occupy the mocked
-// inference-call slots the route tests inspect.
-// #310: the enrichment gate is retired — no vote to stub. The trace-fact
-// helpers stay real so the routes' metadata is derived from the live retrieval.
+// The enrichment aux call is stubbed out of the mocked inference-call slots; with the gate retired no vote exists and the trace-fact helpers stay real so route metadata derives from live retrieval.
+// @see #238 #310
 jest.mock('../../main/services/workspaceTraceFacts', () =>
   jest.requireActual('../../main/services/workspaceTraceFacts'),
 );
@@ -109,8 +106,8 @@ const registerUser = async (email: string): Promise<string[]> => {
   return Array.isArray(cookies) ? cookies : [cookies];
 };
 
-// The "incognito by default" profile option (issue #144) reuses the settings.zdr
-// slot; at rest the flag is bridged per the ticket's decide-once semantics.
+// The "incognito by default" option reuses the settings.zdr slot, bridged per the decide-once semantics.
+// @see #144
 const setIncognitoByDefault = async (email: string) => {
   const doc = await User.findOne({ email });
   if (!doc) throw new Error('user not found');
@@ -275,9 +272,8 @@ describe('Per-chat incognito flag (issue #144)', () => {
     const email = 'incognito-leftover-session@example.com';
     const cookies = await registerUser(email);
     const user = await User.findOne({ email });
-    // No incognito session is ever created by the routes (write-nothing), so
-    // construct one directly to pin the stored-flag reject path (e.g. left
-    // over from a migration or a future temp-chat shell).
+    // No incognito session is ever created by the routes (write-nothing), so construct one directly to pin the stored-flag reject path.
+    // @see #144
     const session = await Session.create({
       userId: user?._id,
       title: 'leftover',
@@ -293,7 +289,8 @@ describe('Per-chat incognito flag (issue #144)', () => {
       content: 'continue',
     });
 
-    // Frozen #144/#116 copy: pinned by chat.zdr.test.ts, not renamed here.
+    // The 409 copy is pinned by chat.zdr.test.ts, not renamed here.
+    // @see #144 #116
     expect(plain.status).toBe(409);
     expect(plain.body.message).toContain('Zero-data-retention is on');
     expect(stream.status).toBe(409);

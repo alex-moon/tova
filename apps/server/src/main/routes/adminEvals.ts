@@ -12,12 +12,11 @@ import { config } from '../config';
 
 const router = express.Router();
 
-// Same guard as the other admin surfaces: cookie sessions for the browser
-// flow, PAT bearer for the agent/CLI path (#184).
+// Cookie sessions for the browser flow, PAT bearer for the agent/CLI path.
+// @see #184
 const adminGuard = [authenticateBearerOrSession, requireRole('admin')];
 
-// Mongo ObjectId hex; validated before any query so a garbage id is a 400/404,
-// never a driver error.
+// ObjectId hex validated before any query, so a garbage id is a 400/404, never a driver error.
 const OBJECT_ID_PATTERN = /^[a-f0-9]{24}$/i;
 
 const evalModels = () =>
@@ -43,19 +42,12 @@ router.get('/evals/runs/:id', ...adminGuard, async (req, res) => {
   res.json(run);
 });
 
-/*
- * Manual "Run now" (Decision 7): writes the `running` lease, then runs the
- * suite in the background so the request returns immediately (the suite drives
- * live providers and can take minutes). The busy guard rejects a second run
- * with 409 (Decision 6); a crash is recorded on the rollup, not here.
- */
+// Manual "Run now": writes the running lease and executes in the background; the busy guard rejects with 409.
 router.post('/evals/run', ...adminGuard, async (_req, res) => {
   const options = { models: evalModels(), trigger: 'manual' as const };
   try {
     const id = await beginEvalRun(options);
-    // Best-effort LangSmith export (Decision 4): resolve the client lazily so a
-    // keyless deploy records the rollup without an export. Never awaited here —
-    // the suite runs in the background.
+    // Best-effort LangSmith export; resolved lazily so a keyless deploy still records the rollup.
     const langsmithClient = await langsmithClientFromEnv(config.langsmith.apiKey);
     void executeEvalRun(id, options, { langsmithClient }).catch(() => {
       // The run settles its own `error` row; nothing to surface post-202.

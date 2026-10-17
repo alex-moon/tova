@@ -1,30 +1,8 @@
 import { MigrationInterface } from 'mongo-migrate-ts';
 import { Db } from 'mongodb';
 
-/*
- * #232: seed the fixed model roster into a new `modelrosters` collection.
- *
- * The roster replaces the tier-shaped `providerroutings` rows for the racing
- * path: one document per MODEL with a nested `providers[]` list carrying both
- * serverless backends. The tier collection is deliberately untouched — its
- * deletion is #233, and app-level seeding (`rosterConfig.ensureSeed`) only
- * recovers an EMPTY collection, so upgrades need this migration.
- *
- * Row content mirrors `ROSTER_SEED` in `apps/server/src/services/rosterConfig.ts`
- * exactly (drift is pinned by a test). Owner-locked roster, verified live on
- * DeepInfra and Fireworks serverless, 2026-10-08:
- *   - DeepSeek V4.1 Flash  → deepinfra `deepseek-ai/DeepSeek-V4.1-Flash`,
- *                            fireworks `accounts/fireworks/models/deepseek-v4p1-flash`
- *   - GLM 5.3 Flash        → deepinfra `zai-org/GLM-5.3-Flash`,
- *                            fireworks `accounts/fireworks/models/glm-5p3-flash`
- *
- * #316: MiniMax M3 is out of the roster (owner) and is no longer seeded — the
- * row is set ineligible on already-migrated databases via the admin surface.
- *
- * `$setOnInsert` on purpose: an admin edit to an existing roster document
- * (eligibility, enabled providers, TTFT history) must never be clobbered by a
- * re-run.
- */
+// Seeds the fixed model roster (mirroring ROSTER_SEED); $setOnInsert so an admin edit is never clobbered by a re-run.
+// @see #232 #233 #316
 const ROWS = [
   {
     modelId: 'deepseek-ai/DeepSeek-V4.1-Flash',

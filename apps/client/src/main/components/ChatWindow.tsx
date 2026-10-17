@@ -23,34 +23,30 @@ import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import AssetService, { type AssetSummary } from '@/services/assets';
 import TaskCard from './TaskCard';
-// Tolerant context read (not the throwing useAuth hook): standalone renders
-// of ChatWindow (tests, storybook-style usage) have no AuthProvider.
+// Tolerant context read: standalone renders (tests) have no AuthProvider.
 import { AuthContext } from '../context/AuthContext';
 import type { Message, ToolEvent } from '../App';
 
 interface ChatWindowProps {
   messages: Message[];
   onSendMessage: (content: string, assetId?: string, assetFilename?: string) => void;
-  // #255 (F7): hand the composer text to the background worker instead of
-  // sending a chat turn. Only offered on a persisted chat (a task's origin
-  // needs a session id) and never on ZDR.
+  // Hand composer text to the background worker instead of a chat turn; only on a persisted chat, never ZDR.
+  // @see #255
   onSendToWorker?: (content: string) => void;
-  // #255 (F6): bumped when a task is created so the embedded card refetches
-  // immediately (an empty card does not poll).
+  // Bumped when a task is created so the embedded card refetches immediately.
+  // @see #255
   taskRefreshSignal?: number;
   isLoading: boolean;
   onOpenSidebar: () => void;
-  // Active persisted chat id (null on a new chat); the incognito toggle is
-  // only available before a chat's first submission.
+  // Null on a new chat; the incognito toggle is only available before a chat's first submission.
   sessionId?: string | null;
-  // Per-chat incognito (#144): App owns the toggle state; the composer
-  // controls it before a new chat's first submission. Standalone
-  // renders (tests) fall back to the account default.
+  // App owns the toggle state; standalone renders (tests) fall back to the account default.
+  // @see #144
   incognito?: boolean;
   onToggleIncognito?: (value: boolean) => void;
   onFeedback?: (messageId: string, value: 'up' | 'down' | null) => void;
-  // #359: user-owned title + system-maintained subtitle of the active chat.
   // Null on a new chat → the header shows the brand as before.
+  // @see #359
   sessionTitle?: string | null;
   sessionSubtitle?: string | null;
   onRenameSession?: (title: string) => void | Promise<void>;
@@ -77,8 +73,8 @@ const EXAMPLE_CHIPS = [
 
 const pickPlaceholder = () => PLACEHOLDERS[Math.floor(Math.random() * PLACEHOLDERS.length)];
 
-// An assistant message this old means the provider returned no content;
-// show a placeholder in the UI instead of dropping the turn (#4 J).
+// Placeholder instead of dropping a turn when the provider returned no content.
+// @see #4
 const EMPTY_RESPONSE_PLACEHOLDER = '(no content returned)';
 
 const hostOf = (url: string): string => {
@@ -89,10 +85,8 @@ const hostOf = (url: string): string => {
   }
 };
 
-// Sources footer block (#33): compact list of the URLs the search returned,
-// labelled with captured page titles where available and hostnames otherwise.
-// Favicons come from the public s2 service (third-party request, accepted in
-// the issue); a failed load simply hides the image.
+// Compact source list: captured page titles where available, hostnames otherwise; a failed favicon load hides the image.
+// @see #33
 const SourceItem: React.FC<{ url: string; title?: string }> = ({ url, title }) => (
   <li>
     <a
@@ -115,9 +109,8 @@ const SourceItem: React.FC<{ url: string; title?: string }> = ({ url, title }) =
   </li>
 );
 
-// Sources collapse (#41): lists longer than COLLAPSED_SOURCES_COUNT render
-// only the first entries plus a "show all" toggle. State is per-message and
-// intentionally not persisted — "collapsed by default" on every load.
+// Not persisted — sources collapse by default on every load.
+// @see #41
 const COLLAPSED_SOURCES_COUNT = 3;
 
 const SourcesBlock: React.FC<{ message: Message }> = ({ message }) => {
@@ -157,24 +150,16 @@ const SourcesBlock: React.FC<{ message: Message }> = ({ message }) => {
   );
 };
 
-// Tool feedback chip (#33): spinner → check / warning with a compact result
-// summary. Detail toggle exposes the query and result domains. Stateless —
-// the tool events arrive in order while streaming.
-// Issue #114: a zero count is only meaningful for tools whose output IS a
-// results list (web_search, list_files). Legacy persisted events from other
-// tools carried the old universal `resultCount: 0` artifact — suppress its
-// display there instead of migrating stored data.
+// A zero count is only meaningful for list-producing tools; legacy events carry a universal `resultCount: 0` artifact, suppressed instead of migrating stored data.
+// @see #33 #114
 const countDisplay = (event: ToolEvent): number | null => {
   if (event.resultCount == null) return null;
   const showZero = event.name === 'web_search' || event.name === 'list_files';
   return event.resultCount === 0 && !showZero ? null : event.resultCount;
 };
 
-// Expanded detail (#196, D4): show *how* the tool was used rather than echoing
-// the chip label. A resolved chip surfaces the query carried from its call, its
-// outcome status, the count when meaningful, and the result domains; a running
-// chip surfaces its query. Null when there is genuinely nothing extra to reveal
-// (the arrow is hidden then).
+// Show how the tool was used, not the chip label; null when there is nothing extra to reveal.
+// @see #196
 const detailText = (event: ToolEvent): string | null =>
   event.phase === 'result'
     ? [
@@ -228,14 +213,8 @@ const ToolChip: React.FC<{ event: ToolEvent }> = ({ event }) => {
   );
 };
 
-// Tool-use summary box (#196, D5/D6): one collapsed line — "Used N tools" —
-// that expands in place to the individual chips. Sitting at the top of the
-// assistant turn (where chips already render, before the answer) keeps a single
-// stable element that does not jump as answer text streams in, and follows the
-// natural reading order of activity → answer. The count is the number of chips
-// (resolved plus any still-running), so it climbs live during the turn. While
-// streaming it auto-expands (activity is what's happening); once the turn
-// settles it collapses, unless the user has toggled it themselves.
+// One collapsed "Used N tools" line that expands to chips; auto-expands while streaming, collapses when settled unless the user toggled it.
+// @see #196
 const ToolSummary: React.FC<{ tools: ToolEvent[]; streaming?: boolean }> = ({
   tools,
   streaming = false,
@@ -291,12 +270,8 @@ const FollowupChips: React.FC<{ suggestions: string[]; onPick: (value: string) =
     </div>
   ) : null;
 
-/*
- * #359: the two-line header identity — a title the user owns (tap to rename)
- * over a system-maintained subtitle that must read as secondary weight
- * (smaller, muted, never competing with the title). Keyed by session id so
- * the edit state resets on chat switch.
- */
+// Two-line header identity: user-owned title over a secondary system subtitle; keyed by session id so edit state resets on switch.
+// @see #359
 const SessionHeaderTitle: React.FC<{
   title: string;
   subtitle?: string | null;
@@ -368,43 +343,40 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
   onRenameSession,
 }) => {
   const auth = useContext(AuthContext);
-  // Per-chat incognito (#144): a controlled value from App when present,
-  // else the account default; the toggle can only move a *new* chat.
+  // Controlled from App when present, else the account default; the toggle can only move a new chat.
+  // @see #144
   const incognito = incognitoProp ?? Boolean(auth?.user?.incognitoByDefault ?? auth?.user?.zdr);
   const [input, setInput] = useState('');
   const [placeholder] = useState(pickPlaceholder);
   const textareaRef = React.useRef<HTMLTextAreaElement>(null);
   const scrollRef = React.useRef<HTMLDivElement>(null);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
-  // Attach menu (#214): the paperclip opens this popover instead of the file
-  // dialogue directly. It offers "Upload" plus the user's five most recent
-  // library files, fetched lazily on first open.
+  // The paperclip opens a popover with Upload plus the five most recent library files, fetched lazily on first open.
+  // @see #214
   const attachMenuRef = React.useRef<HTMLDivElement>(null);
   const [attachMenuOpen, setAttachMenuOpen] = useState(false);
   const [recentAssets, setRecentAssets] = useState<AssetSummary[] | null>(null);
   const [recentError, setRecentError] = useState(false);
   const [recentLoading, setRecentLoading] = useState(false);
-  // Attached file (issue #34): a single asset per message; uploaded
-  // immediately on selection (presign → direct PUT → confirm) and referenced
-  // by id when the message is sent.
+  // A single asset per message, uploaded immediately on selection and referenced by id on send.
+  // @see #34
   const [attachment, setAttachment] = useState<{
     id: string;
     filename: string;
     contentType?: string;
   } | null>(null);
   const [uploading, setUploading] = useState(false);
-  // Follow-to-bottom: pinned while the user sits at (or near) the bottom;
-  // scrolling up releases the pin, sending/deltas restore it (#33 item 3).
+  // Pinned while at the bottom; scrolling up releases, sending/deltas restore.
+  // @see #33
   const pinnedRef = React.useRef(true);
   const [pendingFeedbackId, setPendingFeedbackId] = useState<string | null>(null);
-  // Issue #200: raw Markdown copy. The transient "copied" state is keyed by
-  // message id; one timer ref so a rapid re-copy can't leave a stale timer.
+  // Raw Markdown copy; one timer ref so a rapid re-copy can't leave a stale timer.
+  // @see #200
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const copyTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const handleCopyMessage = async (msg: Message) => {
-    // Copy the raw Markdown source; never the rendered HTML or the
-    // empty-response placeholder.
+    // Copy the raw Markdown source, never the rendered HTML or the empty-response placeholder.
     if (!msg.content) return;
     if (!navigator.clipboard?.writeText) {
       toast.error('Copy not supported');
@@ -427,20 +399,18 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
     [],
   );
 
-  // Issue #51: byte-identical toast for both attach paths (fresh upload and
-  // library pick) — a shared helper so the copy can't drift.
+  // Shared so the no-text toast copy can't drift between attach paths.
+  // @see #51
   const toastNoText = () =>
     toast.info('No text could be extracted from this file type — Tova will see the filename only.');
 
-  // Issue #115: images are first-class now (they attach as real image parts
-  // to the model), so the no-text toast is for genuinely unrewarded file
-  // types only — judged by content type, never the filename extension.
+  // The no-text toast is for genuinely unrewarded types, judged by content type, never the filename extension.
+  // @see #115
   const isImageAttachment = (asset: { contentType?: string }): boolean =>
     typeof asset.contentType === 'string' && asset.contentType.startsWith('image/');
 
-  // Issue #83: a pending conversion is a legitimate wait state, not a
-  // textless file — word it as such instead of firing the false-negative
-  // no-text toast. Only reached when `hasText` is already false.
+  // A pending conversion is a legitimate wait state, not a textless file.
+  // @see #83
   const toastForAsset = (asset: { contentType?: string; markdownStatus?: string }) => {
     if (isImageAttachment(asset)) return;
     if (asset.markdownStatus === 'pending')
@@ -462,9 +432,8 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
     }
   }, [messages, isLoading]);
 
-  // Contextual follow-ups: the last assistant message carrying generated
-  // suggestions (#33 item 7). Absent on first load or after generation
-  // failures — the composer keeps its static placeholder then.
+  // Absent on first load or after generation failures — the composer keeps its static placeholder.
+  // @see #33
   const followups = React.useMemo(() => {
     for (let i = messages.length - 1; i >= 0; i -= 1) {
       const msg = messages[i];
@@ -474,9 +443,8 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
     return [];
   }, [messages]);
 
-  // Tool events of the in-flight optimistic placeholder (ids 'stream-…'):
-  // while its content is still empty the dots render, and the chips need the
-  // detached events to show the search round (#33 tool feedback).
+  // The streaming dots' message has no body, so the chips need the detached tool events.
+  // @see #33
   const pendingTools = React.useMemo(
     () =>
       messages
@@ -487,8 +455,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
 
   const handleThumbClick = (msg: Message, value: 'up' | 'down') => {
     if (!onFeedback || pendingFeedbackId) return;
-    // Clicking the active thumb clears the vote (unvote); the other one
-    // overwrites it. Re-enabled only after the round trip resolves.
+    // Clicking the active thumb unvotes; the other overwrites. Re-enabled after the round trip.
     const next: 'up' | 'down' | null = msg.feedback?.value === value ? null : value;
     setPendingFeedbackId(msg._id);
     Promise.resolve(onFeedback(msg._id, next)).finally(() => setPendingFeedbackId(null));
@@ -511,9 +478,8 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
     }
   };
 
-  // #255 (F7): hand the composer text to the background worker. Same composer
-  // state as a send (clears the input), but the turn never goes into the chat
-  // stream — the task reports back via the completion drain on a later turn.
+  // Same composer state as a send, but the turn never enters the chat stream; the task reports back later.
+  // @see #255
   const handleSendToWorker = () => {
     if (!input.trim() || isLoading || !onSendToWorker) return;
     onSendToWorker(input);
@@ -526,12 +492,8 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
     if (!file || uploading) return;
     setUploading(true);
     try {
-      // Issue #116/#144: composer uploads are always tagged 'chat' — the
-      // server turns that tag into throwaway (ephemeral) uploads when the
-      // effective per-chat incognito flag says so. The composer tells the
-      // server which chat the upload belongs to (stored flag decides for an
-      // existing chat) or what the toggle currently says (a new chat's
-      // upload must precede session creation).
+      // Uploads are tagged 'chat' so the server can make them ephemeral when the per-chat incognito flag says so; a new chat's upload precedes session creation.
+      // @see #116 #144
       const asset =
         sessionId !== undefined && sessionId !== null
           ? await AssetService.upload(file, undefined, 'chat', { chatId: sessionId })
@@ -539,7 +501,8 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
       setAttachment({
         id: asset.id,
         filename: asset.filename,
-        // #115: the image chip needs the content type to show the right icon.
+        // The image chip needs the content type to show the right icon.
+        // @see #115
         contentType: asset.contentType,
       });
       if (!asset.hasText) toastForAsset(asset);
@@ -550,9 +513,8 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
     }
   };
 
-  // Attach menu (#214): fetch the five most-recent library files the first
-  // time the menu opens, then leave the list cached for the page's lifetime.
-  // A failed fetch only disables the recent list — the Upload row still works.
+  // Fetch once on first open, then cached for the page's lifetime; a failure only disables the recent list.
+  // @see #214
   const loadRecentAssets = useCallback(async () => {
     setRecentLoading(true);
     setRecentError(false);
@@ -571,8 +533,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
     if (recentAssets === null && !recentLoading) void loadRecentAssets();
   };
 
-  // Close the menu on an outside pointer-down or Escape. Bound only while the
-  // menu is open so a closed composer installs no listeners.
+  // Bound only while the menu is open so a closed composer installs no listeners.
   useEffect(() => {
     if (!attachMenuOpen) return;
     const onPointerDown = (e: MouseEvent) => {
@@ -589,8 +550,8 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
     };
   }, [attachMenuOpen]);
 
-  // Picking a recent file reuses the fresh-upload attachment shape and the
-  // same no-text/pending toast (#51 parity); the menu closes on pick.
+  // Reuses the fresh-upload attachment shape and the same no-text/pending toast; the menu closes on pick.
+  // @see #51
   const pickRecentAsset = (asset: AssetSummary) => {
     setAttachment({
       id: asset.id,
@@ -608,10 +569,8 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
           <Menu />
         </Button>
         {sessionTitle ? (
-          /* #359: chat identity in the header — min-w-0 + truncate keeps the
-              two lines inside a 375px row without mid-word overflow hiding
-              the title/subtitle distinction. No right-side brand: the
-              floating admin chip owns that corner on phone. */
+          /* min-w-0 + truncate keeps the two lines inside a 375px row; no right-side brand — the floating admin chip owns that corner on phone. */
+          // @see #359
           <SessionHeaderTitle
             key={sessionId ?? 'chat'}
             title={sessionTitle}
@@ -661,9 +620,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
               !(
                 msg.role === 'assistant' &&
                 msg.content.length === 0 &&
-                // In-flight optimistic placeholder bubbles (ids 'stream-…')
-                // are rendered as thinking dots during streaming; persisted
-                // empty messages stay visible with the placeholder below.
+                // In-flight 'stream-…' placeholders render as thinking dots; persisted empty messages stay visible.
                 isLoading &&
                 msg._id.startsWith('stream-')
               ),
@@ -841,9 +798,8 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
               data-testid="chat-input"
             />
             <div className="absolute bottom-2 right-2 flex items-center gap-1">
-              {/* Per-chat incognito (#144): visible before the first
-                  submission of a new chat only — the flag is fixed at
-                  creation and the server 409s any later switch attempt. */}
+              {/* Visible before a new chat's first submission only — the flag is fixed at creation and the server 409s later switches. */}
+              {/* @see #144 */}
               {!sessionId && messages.length === 0 && (
                 <Button
                   type="button"
@@ -872,10 +828,8 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
                   e.target.value = '';
                 }}
               />
-              {/* Attach menu (#214): the paperclip opens a small popover with
-                  "Upload" plus the five most recent library files, so an
-                  already-uploaded file (e.g. an image for a VLM) can be
-                  referenced for the next turn without re-uploading. */}
+              {/* Popover with Upload plus recent library files, so an already-uploaded file can be referenced without re-uploading. */}
+              {/* @see #214 */}
               <div ref={attachMenuRef} className="relative">
                 <Button
                   type="button"
@@ -961,9 +915,8 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
                   </div>
                 )}
               </div>
-              {/* #255 (F7): send to the background worker instead of the chat.
-                  A persisted, non-incognito chat only — a task needs an origin
-                  session, and persistence is what ZDR forbids. */}
+              {/* Send to the background worker instead of the chat; a task needs an origin session, and persistence is what ZDR forbids. */}
+              {/* @see #255 */}
               {sessionId && !incognito && onSendToWorker && (
                 <Button
                   type="button"

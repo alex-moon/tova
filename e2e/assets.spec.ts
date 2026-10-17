@@ -1,13 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 
-/*
- * Asset upload + attach flow (issue #49 / #34). The Spaces PUT is fully
- * mocked at the network layer (presign returns a mock URL fulfilled by
- * Playwright), so this never touches real storage: it exercises
- * presign → PUT → confirm, the exact pipeline the live CORS bug breaks,
- * plus the library selection/preview contract (#197 master/detail replaced
- * the old per-row attach button).
- */
+// Upload + attach flow; the Spaces PUT is network-mocked, exercising presign → PUT → confirm.
+// @see #49 #34 #197
 
 const email = process.env.E2E_EMAIL ?? 'formsatz@gmail.com';
 
@@ -38,7 +32,6 @@ const mockAssetApi = async (page: Page, assets: Array<typeof pendingAsset>) => {
 
 const openFiles = async (page: Page) => {
   if (isMobileViewport(page)) await page.getByRole('button', { name: 'Open menu' }).click();
-  // #197 made /files a sidebar link, not a modal-opening button.
   await page.getByRole('link', { name: 'Files' }).click();
   await expect(page.locator('[data-testid="asset-library"]')).toBeVisible();
 };
@@ -59,9 +52,7 @@ const mockUploadPipeline = async (
       }),
     }),
   );
-  // A "fixed" CORS rule, mirroring what the Spaces bucket must send once the
-  // Allowed Headers delta is applied: PUT is non-simple, so the browser
-  // preflights and needs the CORS response headers.
+  // Mock the CORS preflight/PUT headers the Spaces bucket must send.
   const corsHeaders = {
     'access-control-allow-origin': origin ?? '*',
     'access-control-allow-methods': 'PUT',
@@ -87,9 +78,7 @@ const mockUploadPipeline = async (
 };
 
 test.beforeEach(async ({ page }) => {
-  // Auth is mocked at the page level so this spec does not depend on an
-  // admin user existing in the target database (login still hits the real
-  // endpoint first for parity, then a page-level mock answers in the app).
+  // Page-level auth mock so the spec never touches the real persisted admin user.
   const e2eUser = { id: 'e2e-user-1', email, role: 'user' };
   await page.route('**/api/auth/me', (route) =>
     route.fulfill({
@@ -126,8 +115,7 @@ test('composer attach: upload runs presign → PUT → confirm and attaches', as
 
 test('library: failed upload shows an error and never enables attach', async ({ page }) => {
   await mockAssetApi(page, [pendingAsset]);
-  // Confirm errors even after a successful PUT (mirrors the live bug: PUT
-  // blocked/CO-retied, asset stuck pending → attach stays disabled).
+  // Mirrors the live bug: PUT succeeds but confirm fails, leaving the asset pending.
   await page.route('**/api/assets/presign', (route) => route.fulfill({ status: 500 }));
   await page.getByRole('button', { name: 'Attach a file' }).click();
   await page
@@ -141,9 +129,6 @@ test('library: failed upload shows an error and never enables attach', async ({ 
 
 test('library: selecting a ready asset opens its preview', async ({ page }) => {
   await mockAssetApi(page, [readyAsset]);
-  // The #197 master/detail view loads the extracted body through the content
-  // endpoint when a row is selected; there is no per-row attach control any
-  // more (attaching happens only from the composer, covered above).
   await page.route('**/api/assets/e2e-asset-1/content', (route) =>
     route.fulfill({
       status: 200,
@@ -164,8 +149,6 @@ test('library: pending assets cannot be selected', async ({ page }) => {
   await mockAssetApi(page, [pendingAsset]);
   await openFiles(page);
 
-  // The readiness gate moved from the removed attach button to the row's
-  // selection checkbox: a not-ready asset cannot be multi-selected.
   await expect(page.locator('[data-testid="asset-select"]').first()).toBeDisabled();
 });
 
@@ -233,6 +216,5 @@ test('library: an edited file shows its version history and can restore one (#32
   await expect(page.locator('[data-testid="assets-version-banner"]')).toContainText('Version 1');
   await expect(page.locator('[data-testid="assets-version-preview"]')).toContainText('old body');
   await page.locator('[data-testid="assets-version-restore"]').click();
-  // Restoring closes the version view and returns to the current body.
   await expect(page.locator('[data-testid="assets-version-preview"]')).toBeHidden();
 });

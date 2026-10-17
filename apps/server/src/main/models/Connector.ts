@@ -1,17 +1,10 @@
 import mongoose from 'mongoose';
 
-/*
- * Connector (#329, epic #328) — the model formerly known as McpServer. The
- * product concept is "connectors"; `type` is the discriminator. Only
- * `mcp.pat` is storable today (#329); #327 extends the enum with 'mcp.oauth'.
- * `api` / `sdk` are reserved contract names (apps/shared/src/connectors.ts),
- * rejected at validation, never stored.
- */
+// The model formerly known as McpServer; `type` is the discriminator. `api`/`sdk` are reserved names.
+// @see #329 #328 #327
 const connectorSchema = new mongoose.Schema(
   {
-    // Required with a default: the default makes any row that races the
-    // 20261016 migration (rename + type backfill) behave as a pat connector
-    // instead of failing validation.
+    // Default makes any row racing the 20261016 migration behave as a pat connector, not fail validation.
     type: {
       type: String,
       enum: ['mcp.pat', 'mcp.oauth'],
@@ -38,9 +31,8 @@ const connectorSchema = new mongoose.Schema(
       type: String,
       required: true,
       trim: true,
-      // SSRF guard (issue #36): MCP client connects are outbound HTTP; only
-      // https URLs are accepted. The API route validates too, but the model
-      // must not let a bad URL through via any other write path.
+      // SSRF guard: https-only, enforced at the model so no write path lets a bad URL through.
+      // @see #36
       validate: {
         validator: (value: string) => {
           try {
@@ -53,10 +45,7 @@ const connectorSchema = new mongoose.Schema(
         message: 'Connector url must be a valid https URL',
       },
     },
-    // mcp.pat auth material: AES-256-GCM envelope
-    // (apps/server/src/services/crypto.ts) of the auth header set. Secret
-    // material at rest is only these three fields; the toJSON transform below
-    // strips the whole envelope so no API response ever echoes it.
+    // mcp.pat auth material: AES-256-GCM envelope of the auth header set; toJSON strips it entirely.
     headers: {
       type: {
         iv: { type: String, required: true },
@@ -65,11 +54,8 @@ const connectorSchema = new mongoose.Schema(
       },
       default: null,
     },
-    // mcp.oauth token vault (#327): the same envelope shape, over a JSON
-    // blob of {accessToken, refreshToken?, expiresAt?, tokenType?, scope?,
-    // clientInformation?} — the DCR client registration rides in the vault so
-    // re-auth reuses it without a fresh registration. Swept with the document
-    // on factory reset; the toJSON transform strips it like `headers`.
+    // mcp.oauth token vault: same envelope shape over the OAuth token blob; toJSON strips it.
+    // @see #327
     oauth: {
       type: {
         iv: { type: String, required: true },
@@ -78,16 +64,14 @@ const connectorSchema = new mongoose.Schema(
       },
       default: null,
     },
-    // Grant health (#327): 'needs-reauth' when a proactive token refresh
-    // fails (revoked/expired grant); cleared by a successful re-auth. A pat
-    // connector is always 'ok'.
+    // 'needs-reauth' when a proactive token refresh fails; cleared by a successful re-auth.
+    // @see #327
     authState: {
       type: String,
       enum: ['ok', 'needs-reauth'],
       default: 'ok',
     },
-    // Denormalized so the API can show "auth configured" (wire field
-    // `authConfigured`) without exposing anything about the header itself.
+    // Denormalized so the API can show "auth configured" without exposing the header itself.
     headersConfigured: {
       type: Boolean,
       default: false,
@@ -150,6 +134,5 @@ export type ConnectorDocument = mongoose.HydratedDocument<
   mongoose.InferSchemaType<typeof connectorSchema>
 >;
 
-// Collection name pinned explicitly: the 20261016 migration renames the
-// legacy `mcpservers` collection to exactly this.
+// Collection name pinned explicitly: the 20261016 migration renames the legacy collection to exactly this.
 export const Connector = mongoose.model('Connector', connectorSchema, 'connectors');

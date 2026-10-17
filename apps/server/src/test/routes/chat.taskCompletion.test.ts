@@ -23,8 +23,8 @@ jest.mock('../../main/services/followupService', () => ({
   generateFollowups: jest.fn().mockResolvedValue([]),
 }));
 
-// #310: the enrichment gate is retired — no vote to stub. The trace-fact
-// helpers stay real so the routes' metadata is derived from the live retrieval.
+// No vote to stub; the trace-fact helpers stay real so route metadata derives from live retrieval.
+// @see #310
 jest.mock('../../main/services/workspaceTraceFacts', () =>
   jest.requireActual('../../main/services/workspaceTraceFacts'),
 );
@@ -194,9 +194,7 @@ describe('task completion drain (#255)', () => {
 
     const task = await completedTask(id, sessionId);
 
-    // The model call fails on this turn: the assistant message never persists,
-    // so the completion must stay pending for a later turn (exactly once, never
-    // lost to a failed turn).
+    // The model call fails on this turn: the assistant message never persists, so the completion must stay pending for a later turn (exactly once, never lost).
     mockPlainGenerate.mockClear();
     mockPlainGenerate.mockRejectedValueOnce(new Error('provider exploded'));
     const failed = await request(app)

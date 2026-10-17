@@ -4,14 +4,8 @@ import { ModelRoster } from '../../main/models/ModelRoster';
 import { User } from '../../main/models/User';
 import { sessionCostBreakdown } from '../../main/services/sessionCostService';
 
-/*
- * #224/#235 per-session cost breakdown. These cases pin the "unknown ≠ free"
- * behaviour for turns that predate per-message usage logging: a message whose
- * model has a known price but which carries no token usage must render as
- * unpriced (`null` → `—`), never `$0`. Also covers the total-only fallback, the
- * mixed priced/unpriced session total, and the #235 dual-provider case where
- * each turn is priced by its persisted `provider`.
- */
+/* Per-session cost breakdown: pins "unknown ≠ free" for turns predating usage logging (rendered null → —, never $0), the total-only fallback, mixed totals, and the dual-provider pricing. */
+// @see #224 #235
 describe('sessionCostBreakdown (#224/#235)', () => {
   const since = () => new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
 
@@ -35,7 +29,8 @@ describe('sessionCostBreakdown (#224/#235)', () => {
     const user = await makeUser();
     await seedModel('priced/legacy', [{ provider: 'deepinfra', inputPrice: 2, outputPrice: 4 }]);
     const session = await Session.create({ userId: user!._id, title: 'Legacy' });
-    // A pre-#224 assistant message: priced model, but no `usage` recorded.
+    // A pre-usage-logging assistant message: priced model, but no `usage` recorded.
+    // @see #224
     await Message.create({
       sessionId: session._id,
       role: 'assistant',
@@ -142,8 +137,7 @@ describe('sessionCostBreakdown (#224/#235)', () => {
       { provider: 'fireworks', inputPrice: 10, outputPrice: 10 },
     ]);
     const session = await Session.create({ userId: user!._id, title: 'LegacyDual' });
-    // No `provider` on the message → model-only fallback picks the
-    // alphabetically-first fully-priced provider (`deepinfra`).
+    // No `provider` on the message → model-only fallback picks the alphabetically-first fully-priced provider.
     await Message.create({
       sessionId: session._id,
       role: 'assistant',

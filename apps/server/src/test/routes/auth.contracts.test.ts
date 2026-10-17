@@ -1,10 +1,8 @@
 import request from 'supertest';
 import { createApp } from '../../main/index';
 
-// Drift tests for the shared auth contracts (issue #20): pin the wire
-// payloads of /api/auth/register, /login and /me to the exact field sets
-// of LoginUserPayload and AuthUser in apps/shared/src/contracts.ts. If a route
-// starts returning a different shape than the contract, these fail.
+/* Contract drift tests: pin the /register, /login and /me wire payloads to the exact field sets of the shared contracts; a shape change fails here. */
+// @see #20
 describe('auth route contract drift', () => {
   it('register returns a user payload matching LoginUserPayload exactly', async () => {
     const app = createApp();
@@ -79,8 +77,7 @@ describe('auth route contract drift', () => {
     expect(user.name).toBe('Alex Moon');
     expect(user.avatarUrl).toBe('https://example.com/a.png');
     expect(user.preferredName).toBe('Alex');
-    // settings stays internal, but the per-user prompt override ride-along on
-    // AuthUser is required by the profile modal prefill (plan tasks 6–7).
+    // The per-user prompt override ride-along on AuthUser is required by the profile modal prefill.
     expect(user.settings).toBeUndefined();
     expect(user.customInstructions).toBe('Be terse.');
   });
@@ -92,8 +89,7 @@ describe('auth route contract drift', () => {
       .send({ email: 'contract-location@example.com', password: 'password123' });
     const cookie = reg.headers['set-cookie'];
 
-    // Freshly registered: no location yet, and the loopback request IP skips
-    // resolution entirely, so none must appear.
+    // Freshly registered: no location yet, and the loopback request IP skips resolution entirely.
     const before = await request(app).get('/api/auth/me').set('Cookie', cookie);
     expect(before.body.user.location).toBeUndefined();
 

@@ -1,12 +1,6 @@
 import { inferenceService } from '../../main/services/inferenceService';
 
-/*
- * Tests the provider dispatch in the delegating service. The connectors now
- * live in `mastraService` (the single `@mastra/*` boundary); this suite pins
- * that options dispatch to the right connector and that un-tagged callers
- * default to `groq`.
- */
-
+/* Pins provider dispatch in the delegating service: options dispatch to the right connector and un-tagged callers default to groq. */
 const mockGroqCompletion = jest.fn();
 const mockGroqStream = jest.fn();
 const mockDeepinfraCompletion = jest.fn();
@@ -85,12 +79,8 @@ describe('Inference Service provider dispatch', () => {
     );
   });
 
-  /*
-   * #151: 'typesafe' is a valid type-level provider but no connector exists
-   * yet (TypeSafe API wiring is pending env values). A caller passing it —
-   * e.g. a `providerroutings` row written through the widened admin CRUD —
-   * must fail loudly, never silently ride groq.
-   */
+  /* 'typesafe' is a valid type-level provider but no connector exists yet; a caller passing it must fail loudly, never silently ride groq. */
+  // @see #151
   describe('typesafe provider before its connector lands', () => {
     it('rejects with the unknown-provider error during dispatch', async () => {
       await expect(
