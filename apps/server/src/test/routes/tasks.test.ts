@@ -294,7 +294,7 @@ describe('POST /api/tasks/:id/cancel (#254 routes)', () => {
     const created = await createTask(owner, { instruction: 'private' });
     const id = created.body.task.id as string;
 
-    const res = await cancel(other, id, );
+    const res = await cancel(other, id);
     expect(res.status).toBe(404);
   });
 });
