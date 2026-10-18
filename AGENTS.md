@@ -118,6 +118,8 @@ Comments are aggressively culled (#364): they bloat the agent context window wit
 
 `npm run ci` is the single gate for any code change. It runs everything in sequence (server lint, format check, typecheck, server tests, client lint, client format check, client tests, client build), fails at the first error, and is mirrored by the CI workflow that gates merges to `main`. Run it as the final step before finishing any change; it must pass with exit code 0. Per-step commands below are only for iterating on a single failure without re-running the whole gate:
 
+Run the gate **once**. It takes several minutes — re-running it to see the tail, the exit code, or a "confirm" pass wastes all of that. Capture both in a single invocation, e.g. `npm run ci 2>&1 | tail -40; echo "exit: ${PIPESTATUS[0]}"`, and iterate per-side with the shortcut scripts instead of full re-runs.
+
 Naming convention: a bare verb **checks**; append `:fix` to **write**. So `lint`/`format` check, `lint:fix`/`format:fix` change files.
 
 - `npm run lint` — ESLint (TypeScript rules + Prettier rules) over `apps/`. Use `npm run lint:fix` to auto-fix.
