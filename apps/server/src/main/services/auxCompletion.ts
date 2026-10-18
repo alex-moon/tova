@@ -24,7 +24,7 @@ export const auxCompletion = async <T>(
     if (!completion || completion.object == null) return null;
     return completion;
   } catch (err) {
-    console.error(`${label} error:`, redactForLog(err));
+    console.error('%s error:', label, redactForLog(err));
     return null;
   }
 };

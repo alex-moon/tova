@@ -131,6 +131,12 @@ Iterate per side with the shortcut scripts: `ci:server` / `ci:client`, plus `lin
 
 Style: Prettier settings in `.prettierrc` (single quotes, trailing commas, 100 print width). Rules live in the root `eslint.config.js`.
 
+### Security scans (Semgrep)
+
+The `scans` job runs Semgrep **only on `main`** — it is skipped on PRs, so findings surface after merge and block Deploy (this has bitten twice). Reproduce locally before merging anything that touches logging: `docker run --rm -v "$PWD:/src" -w /src semgrep/semgrep semgrep --config p/default --error --metrics=off apps/server/src/main`.
+
+The recurring finding is `unsafe-formatstring`: never interpolate variables into a `console.*`/`util.format` format string — use a constant format string with `%s` and pass the values as arguments, e.g. `console.error('%s failed:', label, err)`. Precedent: 74daa55, and the `auxCompletion.ts` fix.
+
 ### Workspace install/build contract
 
 The repo is an npm-workspaces monorepo (`apps/{client,server,shared,migrations}`).
