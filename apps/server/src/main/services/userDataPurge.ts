@@ -3,11 +3,13 @@ import { Session } from '../models/Session';
 import { Message } from '../models/Message';
 import { Asset } from '../models/Asset';
 import { AssetJob } from '../models/AssetJob';
+import { WorkspaceEmbedding } from '../models/WorkspaceEmbedding';
 import { spacesWorkspaceStorage } from './workspaceStorage';
 import { purgeUserTraces } from './tracePurge';
 import { Connector } from '../models/Connector';
 import type { ConnectorDocument } from '../models/Connector';
 import { readConnectorVault } from './oauthConnectors';
+import { drainUserEmbeddings } from './workspaceEmbeddingIngest';
 
 /* Factory reset: full wipe of every user-owned PII-bearing collection. */
 // @see #143 #327
@@ -64,14 +66,22 @@ export const purgeAllUserData = async (
   // @see #143 #333
   const oauthConnectors = await Connector.find({ scope: 'user', userId, type: 'mcp.oauth' });
   await revokeOAuthGrants(oauthConnectors);
+  // In-flight embeds settle first, or one re-inserts a vector after the sweep.
+  // @see #393
+  await drainUserEmbeddings(uid);
   await Promise.all([
     Message.deleteMany({ sessionId: { $in: sessionIds } }),
     Asset.deleteMany({ userId }),
     AssetJob.deleteMany({ assetId: { $in: assetIds } }),
     Connector.deleteMany({ scope: 'user', userId }),
+    WorkspaceEmbedding.deleteMany({ userId }),
     // Hard delete of ALL owned sessions — soft-deleted ones included.
     Session.deleteMany({ userId }),
   ]);
+  // Stragglers enqueued mid-sweep settle here, then their rows are re-wiped.
+  // @see #393
+  await drainUserEmbeddings(uid);
+  await WorkspaceEmbedding.deleteMany({ userId });
 
   // Spaces sweep: asset bytes and chat-scoped workspace files.
   // @see #143

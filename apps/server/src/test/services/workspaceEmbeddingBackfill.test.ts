@@ -130,6 +130,44 @@ describe('planEmbeddingWrites (#294)', () => {
     expect(plan.toEmbed[0].textHash).toBe(embeddingTextHash(ingestText, MODEL));
   });
 
+  it('never folds a chat title, matching ingest byte-for-byte (#393)', () => {
+    // Ingest embeds chat content bare; a folded planner hash would misfire
+    // the skip and re-embed the whole chat corpus on every backfill.
+    const planned = slice({
+      kind: 'chat',
+      id: 'c1',
+      title: 'Budget chat',
+      text: 'we agreed the budget is twelve thousand',
+    });
+    const plan = planEmbeddingWrites([planned], new Map(), MODEL);
+    const ingestText = workspaceSliceText({
+      kind: 'chat',
+      content: 'we agreed the budget is twelve thousand',
+    });
+    expect(plan.toEmbed[0].text).toBe(ingestText);
+    expect(plan.toEmbed[0].text).not.toContain('Budget chat');
+    expect(plan.toEmbed[0].textHash).toBe(embeddingTextHash(ingestText, MODEL));
+  });
+
+  it('never folds a task title, matching ingest byte-for-byte (#393)', () => {
+    const planned = slice({
+      kind: 'task',
+      id: 't1',
+      title: 'Plan the move',
+      text: 'do it\nworking  ',
+    });
+    const plan = planEmbeddingWrites([planned], new Map(), MODEL);
+    const ingestText = workspaceSliceText({
+      kind: 'task',
+      events: [
+        { role: 'user', content: 'do it' },
+        { role: 'assistant', content: 'working  ' },
+      ],
+    });
+    expect(plan.toEmbed[0].text).toBe(ingestText);
+    expect(plan.toEmbed[0].textHash).toBe(embeddingTextHash(ingestText, MODEL));
+  });
+
   it('re-embeds a file when its title changes (#309)', () => {
     const text = 'The rollout completes in three phases.';
     const existing = new Map([

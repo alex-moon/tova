@@ -29,11 +29,17 @@ export const extensionOf = (filename: string): string => {
 export const isConvertible = (filename: string): boolean =>
   CONVERTIBLE_EXTENSIONS.has(extensionOf(filename));
 
-export const withTimeout = <T>(promise: Promise<T>, ms = CONVERSION_TIMEOUT_MS): Promise<T> =>
+// Label names the stage in the timeout error; conversion is the legacy one.
+// @see #393
+export const withTimeout = <T>(
+  promise: Promise<T>,
+  ms = CONVERSION_TIMEOUT_MS,
+  label = 'conversion',
+): Promise<T> =>
   Promise.race([
     promise,
     new Promise<never>((_, reject) => {
-      const t = setTimeout(() => reject(new Error(`conversion timed out after ${ms}ms`)), ms);
+      const t = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
       // Keep the process from being held open by an orphaned timer (tests).
       t.unref?.();
     }),
