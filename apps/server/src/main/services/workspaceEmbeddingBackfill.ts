@@ -9,8 +9,8 @@ export interface EmbeddableSlice {
   kind: EmbeddableKind;
   id: string;
   text: string;
-  // Title folded via withEmbedTitle, same as ingest, keeping hashes equal.
-  // @see #309
+  // Only file titles fold (ingest parity); chat/task embed bare text.
+  // @see #309 #393
   title?: string;
 }
 
@@ -65,10 +65,11 @@ export const planEmbeddingWrites = (
   let truncated = 0;
 
   for (const slice of slices) {
-    // Hash byte-identical text across paths or the skip rule misfires.
-    // @see #309
+    // Ingest folds titles for files only; the planner must hash the same text.
+    // @see #309 #393
+    const body = slice.text.trim();
     const { text, truncated: wasTruncated } = truncateForEmbedding(
-      withEmbedTitle(slice.title, slice.text.trim()),
+      slice.kind === 'file' ? withEmbedTitle(slice.title, body) : body,
     );
     if (!text) {
       empty += 1;

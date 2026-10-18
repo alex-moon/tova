@@ -14,8 +14,11 @@ import {
   pickTopSlices,
   promptWords,
   rankWorkspaceSlices,
+  rankWorkspaceSlicesWithCut,
   retrieveWorkspaceBlock,
   RERANK_CUT,
+  RERANK_DOC_CHARS,
+  RERANK_MAX_CANDIDATES,
   rerankAndCut,
   rrfFuse,
   taskTitle,
@@ -391,6 +394,34 @@ describe('workspaceRetrievalService', () => {
       expect(block).toContain('AX-4471');
     });
 
+    it('does not retrieve a seed older than the newest-500 window (#393)', async () => {
+      // The #293 unbounded read is deliberately a newest-500 window now; pin
+      // the boundary so widening or shifting it is a conscious change.
+      const userId = String(new Types.ObjectId());
+      const session = await Session.create({ userId, title: 'Old policy' });
+      await Message.create({
+        sessionId: session._id,
+        role: 'user',
+        content: 'my travel insurance policy number is AX-4471',
+        timestamp: new Date('2026-01-05T10:00:00.000Z'),
+      });
+      const filler = await Session.create({ userId, title: 'Filler' });
+      await Message.insertMany(
+        Array.from({ length: 500 }, (_, i) => ({
+          sessionId: filler._id,
+          role: 'user',
+          content: `Filler turn ${i}: unrelated notes about the weather and lunch.`,
+          timestamp: new Date(Date.parse('2026-09-30T10:00:00.000Z') + i * 1000),
+        })),
+      );
+
+      const block = await retrieveWorkspaceBlock(
+        'what is my travel insurance policy number',
+        userId,
+      );
+      expect(block).not.toContain('AX-4471');
+    });
+
     it('excludes the just-saved current turn from the corpus', async () => {
       const userId = String(new Types.ObjectId());
       const session = await Session.create({ userId, title: 'Move' });
@@ -577,10 +608,20 @@ describe('workspaceRetrievalService', () => {
       expect(hits).toEqual([{ sourceId: 'a', score: 0.9 }]);
     });
 
-    it('sizes the ANN window with headroom (floor 100)', async () => {
+    it('gives the ANN exploration headroom over the result window (#393)', async () => {
       const search = jest.fn(async (_opts: unknown) => []);
       await vectorCandidates(query, 'user', 'model-x', 6, { embed: async () => [[1]], search });
-      expect(search.mock.calls[0][0]).toMatchObject({ limit: 100, numCandidates: 100 });
+      expect(search.mock.calls[0][0]).toMatchObject({ limit: 100, numCandidates: 400 });
+    });
+
+    it('hands the search the stage deadline so Atlas stops the query (#393)', async () => {
+      const search = jest.fn(async (_opts: unknown) => []);
+      await vectorCandidates(query, 'user', 'model-x', 6, {
+        embed: async () => [[1]],
+        search,
+        timeoutMs: 1234,
+      });
+      expect(search.mock.calls[0][0]).toMatchObject({ maxTimeMs: 1234 });
     });
 
     it('passes the userId and model through to the search filter', async () => {
@@ -603,10 +644,10 @@ describe('workspaceRetrievalService', () => {
       expect(search).not.toHaveBeenCalled();
     });
 
-    it('grows the ANN window with n so numCandidates stays >= limit', async () => {
+    it('grows the ANN window with n so numCandidates stays above limit', async () => {
       const search = jest.fn(async (_opts: unknown) => []);
       await vectorCandidates(query, 'user', 'model-x', 100, { embed: async () => [[1]], search });
-      expect(search.mock.calls[0][0]).toMatchObject({ limit: 400, numCandidates: 400 });
+      expect(search.mock.calls[0][0]).toMatchObject({ limit: 400, numCandidates: 1600 });
     });
 
     it('degrades to [] when the embed throws (e.g. missing key)', async () => {
@@ -829,6 +870,10 @@ describe('workspaceRetrievalService', () => {
   // The post-retrieval relevance bar: pure via the injectable rerank.
   // @see #305
   describe('rerankAndCut (#305)', () => {
+    afterEach(() => {
+      delete process.env.WORKSPACE_MEMORY_ENABLED;
+    });
+
     it('cuts candidates below the threshold and orders the rest by relevance', async () => {
       const a = slice({ id: 'a', text: 'budget' });
       const b = slice({ id: 'b', text: 'move budget' });
@@ -863,6 +908,55 @@ describe('workspaceRetrievalService', () => {
       expect(await rerankAndCut('what is the budget', fused, { rerank: async () => null })).toEqual(
         fused,
       );
+    });
+
+    it('grades at most the capped candidate window in fused order (#393)', async () => {
+      const fused = Array.from({ length: 50 }, (_, i) =>
+        slice({ id: `s${i}`, title: `t${i}`, text: 'budget' }),
+      );
+      const rerank = jest.fn(async (_query: string, _docs: string[]) =>
+        Array.from({ length: RERANK_MAX_CANDIDATES }, () => RERANK_CUT * 100),
+      );
+      const cut = await rerankAndCut('what is the budget', fused, { rerank });
+      expect(rerank).toHaveBeenCalledTimes(1);
+      const docs = rerank.mock.calls[0][1];
+      expect(docs).toHaveLength(RERANK_MAX_CANDIDATES);
+      // The window follows the fused order, from the top.
+      expect(docs[0].startsWith('t0\n')).toBe(true);
+      // Kept slices come from the graded window only.
+      expect(cut.every((s) => Number(s.id.slice(1)) < RERANK_MAX_CANDIDATES)).toBe(true);
+    });
+
+    it('caps the text graded per candidate, however large the slice (#393)', async () => {
+      const fused = [slice({ id: 'a', text: 'x'.repeat(RERANK_DOC_CHARS + 5000) })];
+      const rerank = jest.fn(async (_query: string, _docs: string[]) => [RERANK_CUT * 100]);
+      await rerankAndCut('what is the budget', fused, { rerank });
+      const docs = rerank.mock.calls[0][1];
+      expect(docs[0].length).toBe(RERANK_DOC_CHARS);
+    });
+
+    it('reports the graded count, and never a negative cut (#393)', async () => {
+      process.env.WORKSPACE_MEMORY_ENABLED = '1';
+      const slices = Array.from({ length: 50 }, (_, i) => slice({ id: `s${i}`, text: 'budget' }));
+      const vectorCandidates = jest.fn(async () =>
+        slices.map((s, i) => ({ sourceId: s.id, score: 1 - i / 100 })),
+      );
+      // Degradation: full fused list comes back; cuts cannot go negative.
+      const degraded = await rankWorkspaceSlicesWithCut('what is the budget', 'u', slices, 6, {
+        vectorCandidates,
+        rerank: async () => null,
+      });
+      expect(degraded.candidateCount).toBe(RERANK_MAX_CANDIDATES);
+      expect(degraded.cutCount).toBe(0);
+      const rerank = jest.fn(async () =>
+        Array.from({ length: RERANK_MAX_CANDIDATES }, () => RERANK_CUT * 100),
+      );
+      const graded = await rankWorkspaceSlicesWithCut('what is the budget', 'u', slices, 6, {
+        vectorCandidates,
+        rerank,
+      });
+      expect(graded.candidateCount).toBe(RERANK_MAX_CANDIDATES);
+      expect(graded.cutCount).toBe(0);
     });
   });
 });

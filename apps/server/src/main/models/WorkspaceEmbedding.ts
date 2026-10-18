@@ -33,6 +33,9 @@ const workspaceEmbeddingSchema = new mongoose.Schema(
 );
 
 workspaceEmbeddingSchema.index({ kind: 1, sourceId: 1, model: 1 }, { unique: true });
+// Backfill row reads filter model+user (dim too); unique index cannot serve it.
+// @see #393
+workspaceEmbeddingSchema.index({ model: 1, userId: 1 });
 
 export type WorkspaceEmbeddingDocument = mongoose.HydratedDocument<
   mongoose.InferSchemaType<typeof workspaceEmbeddingSchema>

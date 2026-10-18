@@ -4,6 +4,7 @@ import { User } from '../../main/models/User';
 import { EvalRunRecord } from '../../main/models/EvalRunRecord';
 import {
   beginEvalRun,
+  EvalConfigError,
   EvalRunBusyError,
   executeEvalRun,
   langsmithClientFromEnv,
@@ -153,6 +154,19 @@ describe('admin evals (#225)', () => {
 
     const res = await request(app).post('/api/admin/evals/run').set('Cookie', cookie);
     expect(res.status).toBe(409);
+    expect(mockedExecute).not.toHaveBeenCalled();
+  });
+
+  it('400s a manual run whose provider config cannot resolve (#394)', async () => {
+    const app = createApp();
+    const cookie = await registerAdmin(app, 'evals-config@example.com');
+    mockedModels.mockImplementation(() => {
+      throw new EvalConfigError('unknown provider');
+    });
+
+    const res = await request(app).post('/api/admin/evals/run').set('Cookie', cookie);
+    expect(res.status).toBe(400);
+    expect(mockedBegin).not.toHaveBeenCalled();
     expect(mockedExecute).not.toHaveBeenCalled();
   });
 

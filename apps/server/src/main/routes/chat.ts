@@ -94,7 +94,9 @@ const appendAssetBlock = (
   asset: AssetDoc | null,
 ): void => {
   const last = messages[messages.length - 1];
-  if (asset && last?.role === 'user') {
+  // Guard the content union: only a raw-text turn takes the envelope.
+  // @see #391
+  if (asset && last?.role === 'user' && typeof last.content === 'string') {
     last.content += buildAttachmentEnvelope({
       filename: asset.filename,
       contentType: asset.contentType,
@@ -525,14 +527,22 @@ export const messagesFromPersistedHistory = (
 export const HISTORY_MAX_MESSAGES = 200;
 export const HISTORY_MAX_CHARS = 400_000;
 export const windowedHistory = <T extends { content?: string | null }>(docs: T[]): T[] => {
-  let used = 0;
-  let count = 0;
-  for (const doc of docs) {
+  const [newest, ...rest] = docs;
+  if (!newest) return [];
+  // The current turn always rides: truncated when it alone busts the budget.
+  // @see #391
+  const newestContent = newest.content ?? '';
+  const kept: T[] =
+    newestContent.length > HISTORY_MAX_CHARS
+      ? [{ ...newest, content: newestContent.slice(0, HISTORY_MAX_CHARS) }]
+      : [newest];
+  let used = Math.min(newestContent.length, HISTORY_MAX_CHARS);
+  for (const doc of rest) {
     used += (doc.content ?? '').length;
     if (used > HISTORY_MAX_CHARS) break;
-    count += 1;
+    kept.push(doc);
   }
-  return docs.slice(0, Math.min(count, HISTORY_MAX_MESSAGES));
+  return kept.slice(0, HISTORY_MAX_MESSAGES);
 };
 
 // Throwaway attachments: row and object go once consumed; safe cleanup.
@@ -641,50 +651,58 @@ const taskCompletionBlockFor = async (
   }
 };
 
-// Chat endpoint (non-streaming, preserved for compatibility)
-router.post('/', authenticate, async (req: AuthRequest, res) => {
-  // Outside try so the catch can erase a throwaway attachment.
-  // @see #116
-  let attachedAsset: AssetDoc | null = null;
+type TurnMessages = {
+  role: 'system' | 'user' | 'assistant';
+  content: string | MessageContentPart[];
+}[];
+
+/* SSE keep-alive: proxies time out silently between headers and first token. */
+// @see #391
+const SSE_PING_MS = 15_000;
+
+// Sources paired with their titles when the search returned them.
+// @see #16 #33
+const sourceTitlesFrom = (sources: string[], titles: Map<string, string>) =>
+  sources
+    .filter((url) => titles.has(url))
+    .map((url) => ({ url, title: titles.get(url) as string }));
+
+/* Shared turn preamble: validate, resolve retention shape, parse ZDR history. */
+// @see #391 #144 #116
+const prepareTurn = async (req: AuthRequest) => {
+  const { sessionId, content } = req.body;
+  const userId = req.user?.id;
+
+  if (!content) {
+    return { ok: false as const, error: { status: 400, message: 'Content is required' } };
+  }
+
+  if (!(await hasPermission(userId as string, ROUTING_PERMISSION))) {
+    return { ok: false as const, error: { status: 403, message: NO_ROUTING_PERMISSION } };
+  }
+
+  const attachResult = await loadAttachedAsset(req);
+  if (attachResult === 'invalid') {
+    return { ok: false as const, error: { status: 400, message: 'Invalid asset reference' } };
+  }
+  if (attachResult === 'missing') {
+    return { ok: false as const, error: { status: 404, message: 'Asset not found' } };
+  }
+  const attachedAsset = attachResult;
+
   try {
-    const { sessionId, content } = req.body;
-    const userId = req.user?.id;
-
-    if (!content) {
-      return res.status(400).json({ message: 'Content is required' });
-    }
-
-    if (!(await hasPermission(userId as string, ROUTING_PERMISSION))) {
-      return res.status(403).json({ message: NO_ROUTING_PERMISSION });
-    }
-
-    const attachResult = await loadAttachedAsset(req);
-    if (attachResult === 'invalid') {
-      return res.status(400).json({ message: 'Invalid asset reference' });
-    }
-    if (attachResult === 'missing') {
-      return res.status(404).json({ message: 'Asset not found' });
-    }
-    attachedAsset = attachResult;
-
     const userDoc = await User.findById(userId);
     if (!userDoc) {
-      return res.status(404).json({ message: 'User not found' });
+      return { ok: false as const, error: { status: 404, message: 'User not found' } };
     }
 
-    // Abort the provider call if the client disconnects pre-response.
-    const abortController = new AbortController();
-    req.on('close', () => {
-      if (!res.writableEnded) abortController.abort();
-    });
-
-    /* Retention shape: reject / replay / persist, one decision. */
+    /* Retention shape: stored flag for sessionId turns, intent otherwise. */
     // @see #144 #116
     const accountIncognito = Boolean(userDoc.settings?.zdr);
     const bodyIntent: boolean | undefined =
       typeof req.body.zdr === 'boolean' ? req.body.zdr : undefined;
     let session;
-    let turnDecision;
+    let turnDecision: ReturnType<typeof decideTurn>;
     if (sessionId) {
       if (accountIncognito) {
         // Incognito cannot continue a saved chat: reject before reads.
@@ -693,11 +711,11 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
       } else {
         if (!isValidObjectId(sessionId)) {
           await cleanupEphemeralAsset(attachedAsset);
-          return res.status(400).json({ message: 'Invalid session id' });
+          return { ok: false as const, error: { status: 400, message: 'Invalid session id' } };
         }
         session = await Session.findOne({ _id: sessionId, userId, deletedAt: null });
         if (!session) {
-          return res.status(404).json({ message: 'Session not found' });
+          return { ok: false as const, error: { status: 404, message: 'Session not found' } };
         }
         turnDecision = decideTurn({ incognito: Boolean(session.incognito), sessionId });
       }
@@ -709,45 +727,241 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
     }
     if (turnDecision.reject) {
       await cleanupEphemeralAsset(attachedAsset);
-      return res.status(409).json({
-        message:
-          'Zero-data-retention is on — new turns are never stored, so they cannot continue a saved chat. Start a new chat instead.',
-      });
+      return {
+        ok: false as const,
+        error: {
+          status: 409,
+          message:
+            'Zero-data-retention is on — new turns are never stored, so they cannot continue a saved chat. Start a new chat instead.',
+        },
+      };
     }
+    // Narrow once: the cleanup closure reads the fields as consts.
+    const { persistWithHistoryReplay, requireEphemeralCleanup } = turnDecision;
     const cleanupIfEphemeral = async () => {
-      if (!turnDecision.requireEphemeralCleanup) return;
+      if (!requireEphemeralCleanup) return;
       await cleanupEphemeralAsset(attachedAsset);
     };
 
-    if (turnDecision.persistWithHistoryReplay) {
+    let zdrHistory: { role: 'user' | 'assistant'; content: string }[] = [];
+    if (persistWithHistoryReplay) {
       // ZDR: nothing is written; continuity is the replayed history.
       // @see #116
-      const zdrHistory = parseZdrHistory(req.body.history);
-      if (!zdrHistory.ok) {
+      const parsedHistory = parseZdrHistory(req.body.history);
+      if (!parsedHistory.ok) {
         // The turn is rejected pre-consumption; nothing outlives it.
         // @see #116
         await cleanupIfEphemeral();
-        return res.status(400).json({ message: 'Invalid chat history' });
+        return { ok: false as const, error: { status: 400, message: 'Invalid chat history' } };
       }
-      await ensureUserLocation(userDoc, req.ip);
-      /* ZDR turns may read the workspace but never write. */
-      // @see #253
-      const zdrWorkspaceBlock = await workspaceBlockFor(content, userId as string);
+      zdrHistory = parsedHistory.value;
+    }
 
-      /* ZDR continuity is the client replay; prompt assembled once. */
-      // @see #232
-      const zdrMessages = (): ReturnType<typeof buildZdrMessages> => {
-        const turnMessages = buildZdrMessages(zdrHistory.value, content);
-        turnMessages.unshift({
-          role: 'system',
-          content: buildSystemContent(userDoc, true, userDoc.settings?.timezone, zdrWorkspaceBlock),
-        });
-        appendAssetBlock(turnMessages, attachedAsset);
-        return turnMessages;
-      };
-      // ZDR turns never carry image parts; the race picks the provider.
+    return {
+      ok: true as const,
+      userDoc,
+      attachedAsset,
+      session: session ?? null,
+      turnDecision,
+      zdrHistory,
+      cleanupIfEphemeral,
+    };
+  } catch (err) {
+    // A throw after asset adoption must still erase a throwaway attachment.
+    // @see #116
+    await cleanupEphemeralAsset(attachedAsset);
+    throw err;
+  }
+};
+
+type PreparedTurn = Extract<Awaited<ReturnType<typeof prepareTurn>>, { ok: true }>;
+
+/* ZDR prompt: client-replayed history, system block, asset; nothing persisted. */
+// @see #116 #391
+const buildZdrTurnPrompt = async (
+  prepared: PreparedTurn,
+  userId: string,
+  ip: string | undefined,
+  content: string,
+): Promise<TurnMessages> => {
+  // Geolocation awaited so the prompt can include the country.
+  // @see #50
+  await ensureUserLocation(prepared.userDoc, ip);
+  /* ZDR turns may read the workspace but never write. */
+  // @see #253
+  const workspaceBlock = await workspaceBlockFor(content, userId);
+  const messages = buildZdrMessages(prepared.zdrHistory, content);
+  messages.unshift({
+    role: 'system',
+    // ZDR keeps the bare date line as its only clock.
+    // @see #261
+    content: buildSystemContent(
+      prepared.userDoc,
+      true,
+      prepared.userDoc.settings?.timezone,
+      workspaceBlock,
+    ),
+  });
+  if (prepared.attachedAsset) {
+    const imageAttached = turnsWithImage(prepared.attachedAsset)
+      ? await buildImageTurn(messages, prepared.attachedAsset)
+      : false;
+    if (!imageAttached) appendAssetBlock(messages, prepared.attachedAsset);
+  }
+  return messages;
+};
+
+/* Persisted-turn prompt: save the user turn, window history, assemble. */
+// @see #360 #253 #255 #391
+const buildPersistedTurnPrompt = async (
+  prepared: PreparedTurn,
+  userId: string,
+  ip: string | undefined,
+  content: string,
+) => {
+  const { userDoc, attachedAsset } = prepared;
+  let session = prepared.session;
+  // SessionId paths are loaded in prepareTurn; new chats are never incognito.
+  // @see #116
+  if (!session) {
+    session = await createSessionWithUser(userId, content, { incognito: false });
+  }
+  const sessionId = String(session._id);
+  const userMessage = await saveUserMessageWithMetrics(userId, sessionId, content, attachedAsset);
+
+  // Image turns route vision-first only when storage is configured.
+  // @see #115
+  const hasImage = turnsWithImage(attachedAsset);
+
+  // History window includes the saved turn; reversed to oldest-first.
+  // @see #360
+  const history = windowedHistory(
+    await Message.find({ sessionId: session._id })
+      .sort({ timestamp: -1 })
+      .limit(HISTORY_MAX_MESSAGES),
+  );
+  // Geolocation awaited so the prompt can include the country.
+  // @see #50
+  await ensureUserLocation(userDoc, ip);
+  /* Workspace block retrieved unconditionally; image turns skip it. */
+  // @see #253 #310
+  const workspaceBlock = await workspaceBlockFor(content, userId, {
+    skipWorkspace: hasImage,
+    excludeMessageId: String(userMessage._id),
+    excludeAssetId: attachedAsset ? String(attachedAsset._id) : undefined,
+  });
+  // Drain completed origin tasks (queued write) into this turn.
+  // @see #255
+  const taskCompletion = await taskCompletionBlockFor(userId, sessionId);
+
+  const messages = messagesFromPersistedHistory(
+    history as {
+      role: string;
+      content: string;
+      timestamp?: Date;
+      tools?: { phase?: string; name?: string }[];
+      honesty?: { flagged?: boolean | null } | null;
+    }[],
+    userDoc.settings?.timezone,
+  );
+  messages.unshift({
+    role: 'system',
+    // Persisted turns carry per-message timestamps.
+    // @see #261
+    content: buildSystemContent(
+      userDoc,
+      false,
+      userDoc.settings?.timezone,
+      workspaceBlock,
+      taskCompletion.block,
+    ),
+  });
+  if (attachedAsset) {
+    const imageAttached = hasImage ? await buildImageTurn(messages, attachedAsset) : false;
+    if (!imageAttached) appendAssetBlock(messages, attachedAsset);
+  }
+  return {
+    sessionId,
+    messages,
+    taskIds: taskCompletion.taskIds,
+    // Retrieval outcome rides trace metadata for the admin Traces tab.
+    // @see #308
+    trace: {
+      sessionId,
+      metadata: workspaceTraceMetadata(workspaceGateFrom(workspaceBlock, hasImage), workspaceBlock),
+    },
+  };
+};
+
+/* Shared assistant save: metrics, task notification, subtitle revision. */
+// @see #196 #255 #359 #391
+const persistAssistantTurn = async (input: {
+  sessionId: string;
+  content: string;
+  routing: FixedRoutingResult;
+  usage?: { inputTokens?: number; outputTokens?: number; totalTokens?: number } | undefined;
+  sources: string[];
+  sourceTitles: { url: string; title: string }[];
+  toolEvents: PersistedToolEvent[];
+  honesty?: Pick<HonestyVerdict, 'flagged' | 'reason'> | null;
+  taskIds: TaskDocument['_id'][];
+}) => {
+  const assistantMessage = new Message({
+    sessionId: input.sessionId,
+    role: 'assistant',
+    content: input.content,
+    modelName: input.routing.model,
+    provider: input.routing.provider,
+    ...(input.usage ? { usage: input.usage } : {}),
+    ...(input.sources.length > 0 ? { sources: input.sources } : {}),
+    ...(input.sourceTitles.length > 0 ? { sourceTitles: input.sourceTitles } : {}),
+    // Persist the reconciled tool summaries so chips survive a refresh.
+    // @see #196
+    ...(input.toolEvents.length > 0 ? { tools: input.toolEvents } : {}),
+    // The in-loop verdict lands in the same save as the turn.
+    // @see #381
+    ...(input.honesty ? { honesty: { ...input.honesty, checkedAt: new Date() } } : {}),
+    metrics: await buildMessageMetrics(input.sessionId, input.content),
+  });
+  await assistantMessage.save();
+
+  // Mark drained tasks notified; failures are swallowed (at-least-once).
+  // @see #255
+  await markNotified(input.taskIds).catch((err) =>
+    console.error('Task mark-notified error:', redactForLog(err)),
+  );
+  void maybeReviseSubtitle(input.sessionId);
+  return assistantMessage;
+};
+
+// Chat endpoint (non-streaming, preserved for compatibility)
+router.post('/', authenticate, async (req: AuthRequest, res) => {
+  // Outside try so the catch can erase a throwaway attachment.
+  // @see #116
+  let attachedAsset: AssetDoc | null = null;
+  try {
+    const { content } = req.body;
+    const userId = req.user?.id;
+
+    const prepared = await prepareTurn(req);
+    if (!prepared.ok) {
+      return res.status(prepared.error.status).json({ message: prepared.error.message });
+    }
+    attachedAsset = prepared.attachedAsset;
+    const { cleanupIfEphemeral } = prepared;
+
+    // Abort the provider call if the client disconnects pre-response.
+    const abortController = new AbortController();
+    req.on('close', () => {
+      if (!res.writableEnded) abortController.abort();
+    });
+
+    if (prepared.turnDecision.persistWithHistoryReplay) {
+      // ZDR: nothing is written; continuity is the replayed history.
+      // @see #116
+      const messages = await buildZdrTurnPrompt(prepared, userId as string, req.ip, content);
       const raced = await raceChatCompletion({
-        messages: zdrMessages(),
+        messages,
         userId,
         abortSignal: abortController.signal,
       });
@@ -773,88 +987,18 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
       });
     }
 
-    // SessionId paths are loaded above; new chats are never incognito.
-    // @see #116
-    if (!session) {
-      session = await createSessionWithUser(userId as string, content, {
-        incognito: false,
-      });
-    }
-    // Save user message
-    const userMessage = await saveUserMessageWithMetrics(
-      userId as string,
-      String(session!._id),
-      content,
-      attachedAsset,
-    );
-
-    // Image turns route vision-first only when storage is configured.
-    // @see #115
-    const hasImage = turnsWithImage(attachedAsset);
-
-    // History window includes the saved turn; reversed to oldest-first.
-    // @see #360
-    const history = windowedHistory(
-      await Message.find({ sessionId: session._id })
-        .sort({ timestamp: -1 })
-        .limit(HISTORY_MAX_MESSAGES),
-    );
-    // Geolocation awaited so the prompt can include the country.
-    // @see #50
-    await ensureUserLocation(userDoc, req.ip);
-    /* Workspace block retrieved unconditionally; image turns skip it. */
-    // @see #253 #310
-    const workspaceBlock = await workspaceBlockFor(content, userId as string, {
-      skipWorkspace: hasImage,
-      excludeMessageId: String(userMessage._id),
-      excludeAssetId: attachedAsset ? String(attachedAsset._id) : undefined,
-    });
-    // Retrieval outcome rides trace metadata for the admin Traces tab.
-    // @see #308
-    const workspaceMetadata = workspaceTraceMetadata(
-      workspaceGateFrom(workspaceBlock, hasImage),
-      workspaceBlock,
-    );
-    const withSystemAndAsset = async (systemContent: string) => {
-      const next = messagesFromPersistedHistory(
-        history as {
-          role: string;
-          content: string;
-          timestamp?: Date;
-          tools?: { phase?: string; name?: string }[];
-          honesty?: { flagged?: boolean | null } | null;
-        }[],
-        userDoc.settings?.timezone,
-      );
-      next.unshift({ role: 'system', content: systemContent });
-      if (attachedAsset) {
-        const imageAttached = hasImage ? await buildImageTurn(next, attachedAsset) : false;
-        if (!imageAttached) appendAssetBlock(next, attachedAsset);
-      }
-      return next;
-    };
-
-    /* Fixed model, hedged across its known backends. */
+    // Fixed model, hedged across its known backends.
     // @see #387
-    const taskCompletion = await taskCompletionBlockFor(userId as string, String(session!._id));
-    const turnMessages = await withSystemAndAsset(
-      buildSystemContent(
-        userDoc,
-        false,
-        userDoc.settings?.timezone,
-        workspaceBlock,
-        taskCompletion.block,
-      ),
-    );
+    const built = await buildPersistedTurnPrompt(prepared, userId as string, req.ip, content);
     const raced = await raceChatCompletion({
-      messages: turnMessages,
-      max_tokens: outputTokensFor(contextLengthFor(CHAT_MODEL), promptCharsFrom(turnMessages)),
+      messages: built.messages,
+      max_tokens: outputTokensFor(contextLengthFor(CHAT_MODEL), promptCharsFrom(built.messages)),
       userId,
       abortSignal: abortController.signal,
       // Tool-execution session so generate_file can stamp provenance.
       // @see #252
-      sessionId: String(session!._id),
-      trace: { sessionId: String(session!._id), metadata: workspaceMetadata },
+      sessionId: built.sessionId,
+      trace: built.trace,
     });
     const routingResult: FixedRoutingResult = raced.routing;
     const chatCompletion = raced.completion;
@@ -878,9 +1022,7 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
     for (const r of toolResults) {
       collectSourcesInto(sources, r.result, titles);
     }
-    const sourceTitles = sources
-      .filter((url) => titles.has(url))
-      .map((url) => ({ url, title: titles.get(url) as string }));
+    const sourceTitles = sourceTitlesFrom(sources, titles);
 
     // Reconciled tool chips for the persisted turn.
     // @see #196 #360
@@ -888,40 +1030,25 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
     for (const r of toolResults) reconcileToolEvent(toolEvents, toolResultEvent(r));
 
     // Save assistant message
-    const assistantMessage = new Message({
-      sessionId: session!._id,
-      role: 'assistant',
+    const assistantMessage = await persistAssistantTurn({
+      sessionId: built.sessionId,
       content: assistantContent,
-      modelName: routingResult.model,
-      provider: routingResult.provider,
-      ...(chatCompletion.usage ? { usage: chatCompletion.usage } : {}),
-      ...(sources.length > 0 ? { sources } : {}),
-      ...(sourceTitles.length > 0 ? { sourceTitles } : {}),
-      ...(toolEvents.length > 0 ? { tools: toolEvents } : {}),
-      metrics: await buildMessageMetrics(String(session!._id), assistantContent),
+      routing: routingResult,
+      usage: chatCompletion.usage,
+      sources,
+      sourceTitles,
+      toolEvents,
+      taskIds: built.taskIds,
     });
-    await assistantMessage.save();
-    void maybeReviseSubtitle(String(session!._id));
 
     // Honesty guard: fire-and-forget; zero tools + claim shape = flagged.
     // @see #371
     if (assistantContent.trim() && toolEvents.length === 0) {
-      void reviewAssistantTurn(
-        String(assistantMessage._id),
-        assistantContent,
-        [],
-        String(session!._id),
-      );
+      void reviewAssistantTurn(String(assistantMessage._id), assistantContent, [], built.sessionId);
     }
 
-    // Mark drained tasks notified; failures are swallowed (at-least-once).
-    // @see #255
-    await markNotified(taskCompletion.taskIds).catch((err) =>
-      console.error('Task mark-notified error:', redactForLog(err)),
-    );
-
     res.json({
-      sessionId: session!._id,
+      sessionId: built.sessionId,
       message: assistantMessage,
       routing: routingResult,
     });
@@ -943,172 +1070,33 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
   // @see #116
   let attachedAsset: AssetDoc | null = null;
   try {
-    const { sessionId, content } = req.body;
+    const { content } = req.body;
     const userId = req.user?.id;
 
-    if (!content) {
-      return res.status(400).json({ message: 'Content is required' });
+    const prepared = await prepareTurn(req);
+    if (!prepared.ok) {
+      return res.status(prepared.error.status).json({ message: prepared.error.message });
     }
+    attachedAsset = prepared.attachedAsset;
+    const zdr = prepared.turnDecision.persistWithHistoryReplay;
 
-    if (!(await hasPermission(userId as string, ROUTING_PERMISSION))) {
-      return res.status(403).json({ message: NO_ROUTING_PERMISSION });
-    }
-
-    const attachResult = await loadAttachedAsset(req);
-    if (attachResult === 'invalid') {
-      return res.status(400).json({ message: 'Invalid asset reference' });
-    }
-    if (attachResult === 'missing') {
-      return res.status(404).json({ message: 'Asset not found' });
-    }
-    attachedAsset = attachResult;
-
-    const streamUserDoc = await User.findById(userId);
-    if (!streamUserDoc) {
-      return res.status(404).json({ message: 'User not found' });
-    }
-    /* Retention shape: stored flag for sessionId turns, intent otherwise. */
-    // @see #144 #116
-    const accountIncognito = Boolean(streamUserDoc.settings?.zdr);
-    const bodyIntent: boolean | undefined =
-      typeof req.body.zdr === 'boolean' ? req.body.zdr : undefined;
-    let session;
-    let turnDecision;
-    if (sessionId) {
-      if (accountIncognito) {
-        // Incognito cannot continue a saved chat: reject before reads.
-        // @see #116 #144
-        turnDecision = decideTurn({ incognito: true, sessionId });
-      } else {
-        if (!isValidObjectId(sessionId)) {
-          await cleanupEphemeralAsset(attachedAsset);
-          return res.status(400).json({ message: 'Invalid session id' });
-        }
-        session = await Session.findOne({ _id: sessionId, userId, deletedAt: null });
-        if (!session) {
-          return res.status(404).json({ message: 'Session not found' });
-        }
-        turnDecision = decideTurn({ incognito: Boolean(session.incognito), sessionId });
-      }
-    } else {
-      turnDecision = decideTurn({
-        incognito: bodyIntent ?? accountIncognito,
-        sessionId: undefined,
-      });
-    }
-    if (turnDecision.reject) {
-      await cleanupEphemeralAsset(attachedAsset);
-      return res.status(409).json({
-        message:
-          'Zero-data-retention is on — new turns are never stored, so they cannot continue a saved chat. Start a new chat instead.',
-      });
-    }
-    const cleanupIfEphemeral = async () => {
-      if (!turnDecision.requireEphemeralCleanup) return;
-      await cleanupEphemeralAsset(attachedAsset);
-    };
-    const zdr = turnDecision.persistWithHistoryReplay;
-
-    let zdrHistory: { role: 'user' | 'assistant'; content: string }[] = [];
-    if (zdr) {
-      // ZDR: no session is created and saved chats cannot be continued.
-      // @see #116
-      const parsedHistory = parseZdrHistory(req.body.history);
-      if (!parsedHistory.ok) {
-        await cleanupIfEphemeral();
-        return res.status(400).json({ message: 'Invalid chat history' });
-      }
-      zdrHistory = parsedHistory.value;
-    } else if (!sessionId) {
-      session = await createSessionWithUser(userId as string, content, { incognito: false });
-    }
-
-    // Fixed model; the provider named here is the primary backend until the
-    // race crowns the winner that actually serves the turn.
-    // @see #387
     let routingResult: FixedRoutingResult = chatRoute();
-    let messages: {
-      role: 'system' | 'user' | 'assistant';
-      content: string | MessageContentPart[];
-    }[];
-
-    // Image turns: gate on content type AND a configured presign path.
-    // @see #115
-    const hasImage = turnsWithImage(attachedAsset);
-
-    await ensureUserLocation(streamUserDoc, req.ip);
-    /* Workspace block read unconditionally; ZDR read-only, images skip. */
-    // @see #253 #310
-    let streamWorkspaceBlock = '';
+    let messages: TurnMessages;
     // Drained tasks ride the persisted turn; notified once the save lands.
     // @see #255
-    let streamTaskBlock = '';
     let streamTaskIds: TaskDocument['_id'][] = [];
+    let streamSessionId: string | undefined;
+    let streamTrace: { sessionId: string; metadata: Record<string, unknown> } | undefined;
     if (zdr) {
       // Continuity comes from the client replay; nothing is read back.
       // @see #116
-      messages = buildZdrMessages(zdrHistory, content);
-      streamWorkspaceBlock = await workspaceBlockFor(content, userId as string);
+      messages = await buildZdrTurnPrompt(prepared, userId as string, req.ip, content);
     } else {
-      // Save user message
-      const userMessage = await saveUserMessageWithMetrics(
-        userId as string,
-        String(session!._id),
-        content,
-        attachedAsset,
-      );
-
-      // History window includes the saved turn; reversed to oldest-first.
-      // @see #360
-      const history = windowedHistory(
-        await Message.find({ sessionId: session!._id })
-          .sort({ timestamp: -1 })
-          .limit(HISTORY_MAX_MESSAGES),
-      );
-
-      streamWorkspaceBlock = await workspaceBlockFor(content, userId as string, {
-        skipWorkspace: hasImage,
-        excludeMessageId: String(userMessage._id),
-        excludeAssetId: attachedAsset ? String(attachedAsset._id) : undefined,
-      });
-      // Drain completed origin tasks (queued write) into this turn.
-      // @see #255
-      const streamTaskCompletion = await taskCompletionBlockFor(
-        userId as string,
-        String(session!._id),
-      );
-      streamTaskBlock = streamTaskCompletion.block;
-      streamTaskIds = streamTaskCompletion.taskIds;
-
-      // Same image-turn gating as the non-streaming route.
-      // @see #115
-      messages = messagesFromPersistedHistory(
-        history as {
-          role: string;
-          content: string;
-          timestamp?: Date;
-          tools?: { phase?: string; name?: string }[];
-          honesty?: { flagged?: boolean | null } | null;
-        }[],
-        streamUserDoc.settings?.timezone,
-      );
-    }
-
-    messages.unshift({
-      role: 'system',
-      // Persisted turns carry per-message timestamps; ZDR keeps the date.
-      // @see #261
-      content: buildSystemContent(
-        streamUserDoc,
-        zdr,
-        streamUserDoc.settings?.timezone,
-        streamWorkspaceBlock,
-        streamTaskBlock,
-      ),
-    });
-    if (attachedAsset) {
-      const imageAttached = hasImage ? await buildImageTurn(messages, attachedAsset) : false;
-      if (!imageAttached) appendAssetBlock(messages, attachedAsset);
+      const built = await buildPersistedTurnPrompt(prepared, userId as string, req.ip, content);
+      messages = built.messages;
+      streamSessionId = built.sessionId;
+      streamTaskIds = built.taskIds;
+      streamTrace = built.trace;
     }
 
     // Set SSE headers
@@ -1173,13 +1161,10 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
           });
           appendHonestyRetryNote(messages);
         }
-        sendEvent('meta', {
-          // ZDR: no sessionId is minted; nothing to point at.
-          // @see #116
-          ...(zdr ? {} : { sessionId: session!._id }),
-          routing: routingResult,
-        });
 
+        // Keep-alive while the race runs: proxies time out silently otherwise.
+        // @see #391
+        const ping = setInterval(() => res.write(': ping\n\n'), SSE_PING_MS);
         /* Hedged race keeps the first token's stream; TTFT rides the reason. */
         // @see #387
         const raced = await raceChatStream({
@@ -1191,22 +1176,20 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
           abortSignal: abortController.signal,
           // Attach the session to the trace; ZDR turns have none.
           // @see #224 #308
-          ...(zdr
-            ? {}
-            : {
-                trace: {
-                  sessionId: String(session!._id),
-                  metadata: workspaceTraceMetadata(
-                    workspaceGateFrom(streamWorkspaceBlock, hasImage),
-                    streamWorkspaceBlock,
-                  ),
-                },
-              }),
+          ...(zdr ? {} : { trace: streamTrace }),
           // The tool session rides outside the trace guard (no ZDR row).
           // @see #252
-          ...(zdr ? {} : { sessionId: String(session!._id) }),
-        });
+          ...(zdr ? {} : { sessionId: streamSessionId }),
+        }).finally(() => clearInterval(ping));
         routingResult = raced.routing;
+        // Meta follows the race: name the backend that serves the turn.
+        // @see #391
+        sendEvent('meta', {
+          // ZDR: no sessionId is minted; nothing to point at.
+          // @see #116
+          ...(zdr ? {} : { sessionId: streamSessionId }),
+          routing: routingResult,
+        });
         const stream = raced.stream;
 
         /* Tool between text runs: render as a paragraph break. */
@@ -1266,7 +1249,11 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
         // Guard pre-persist: flagged mid attempts restart before `done`.
         // @see #371 #381
         if (assistantContent.trim() && toolEvents.length === 0) {
-          honestyVerdict = await classifyAssistantTurn(assistantContent, [], String(session!._id));
+          honestyVerdict = await classifyAssistantTurn(
+            assistantContent,
+            [],
+            streamSessionId as string,
+          );
           if (honestyVerdict?.flagged && attempt < HONESTY_MAX_ATTEMPTS) continue;
         } else {
           honestyVerdict = null;
@@ -1280,6 +1267,9 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
         routingResult.model,
         redactForLog(err),
       );
+      // The user turn is already persisted: failed turns still adopt their
+      // session, or a client retry mints a duplicate. @see #391
+      if (streamSessionId) sendEvent('meta', { sessionId: streamSessionId });
       sendEvent('error', { message: streamingErrorMessage(err) });
       sendEvent('done', { complete: false });
       await cleanupEphemeralAsset(attachedAsset);
@@ -1289,9 +1279,7 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
 
     // Empty streams persist '' (fail-visibility); ZDR saves nothing.
     // @see #4 #116
-    const sourceTitleList = sources
-      .filter((url) => titles.has(url))
-      .map((url) => ({ url, title: titles.get(url) as string }));
+    const sourceTitleList = sourceTitlesFrom(sources, titles);
     if (zdr) {
       // ZDR `done` payloads carry no tool summaries; nothing written.
       // @see #196
@@ -1326,44 +1314,28 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
       return;
     }
 
-    const assistantMessage = new Message({
-      sessionId: session!._id,
-      role: 'assistant',
-      provider: routingResult.provider,
+    const assistantMessage = await persistAssistantTurn({
+      sessionId: streamSessionId as string,
       content: assistantContent,
-      modelName: routingResult.model,
-      ...(usage ? { usage } : {}),
-      ...(sources.length > 0 ? { sources } : {}),
-      ...(sourceTitleList.length > 0 ? { sourceTitles: sourceTitleList } : {}),
-      // Persist the reconciled tool summaries so chips survive a refresh.
-      // @see #196
-      ...(toolEvents.length > 0 ? { tools: toolEvents } : {}),
-      // The in-loop verdict lands in the same save as the turn.
-      // @see #381
-      ...(honestyVerdict
-        ? {
-            honesty: {
-              flagged: honestyVerdict.flagged,
-              reason: honestyVerdict.reason,
-              checkedAt: new Date(),
-            },
-          }
-        : {}),
-      metrics: await buildMessageMetrics(String(session!._id), assistantContent),
+      routing: routingResult,
+      usage,
+      sources,
+      sourceTitles: sourceTitleList,
+      toolEvents,
+      honesty: honestyVerdict
+        ? { flagged: honestyVerdict.flagged, reason: honestyVerdict.reason }
+        : null,
+      taskIds: streamTaskIds,
     });
-    await assistantMessage.save();
-    void maybeReviseSubtitle(String(session!._id));
-
-    // Mark drained tasks notified; failures are swallowed (at-least-once).
-    // @see #255
-    await markNotified(streamTaskIds).catch((err) =>
-      console.error('Task mark-notified error:', redactForLog(err)),
-    );
 
     // Suggestions from the cheap model; skipped for trivial turns.
     // @see #33
     if (!isTriviallyNeutral(content) && assistantContent) {
-      const suggestions = await generateFollowups(content, assistantContent, String(session!._id));
+      const suggestions = await generateFollowups(
+        content,
+        assistantContent,
+        streamSessionId as string,
+      );
       if (suggestions.length > 0) {
         assistantMessage.suggestions = suggestions;
         await assistantMessage.save();

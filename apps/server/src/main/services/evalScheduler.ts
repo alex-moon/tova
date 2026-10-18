@@ -55,6 +55,23 @@ export const hasRunForUtcDay = async (
   return existing !== null;
 };
 
+/* A failed autoIndex build never retries; the self-heal path rebuilds the
+ * lease index so the atomic guarantee cannot silently vanish. @see #394 */
+const ensureLeaseIndex = async (): Promise<void> => {
+  try {
+    await EvalRunRecord.collection.createIndex(
+      { status: 1 },
+      {
+        unique: true,
+        partialFilterExpression: { status: 'running' },
+        name: 'evalruns_running_lease',
+      },
+    );
+  } catch (error) {
+    console.error('eval scheduler: lease index build failed:', error);
+  }
+};
+
 /** Reclaims a stranded `running` lease older than `maxAgeMs`. */
 export const reclaimStaleEvalRuns = async (
   maxAgeMs: number = STALE_EVAL_RUNNING_MS,
@@ -68,6 +85,7 @@ export const reclaimStaleEvalRuns = async (
     },
     { $set: { status: 'error', finishedAt: new Date(), error: 'stale lease reclaimed' } },
   );
+  await ensureLeaseIndex();
   return result.modifiedCount ?? 0;
 };
 
@@ -76,7 +94,7 @@ const dueNow = (opts: EvalSchedulerOptions, now: Date): boolean => {
   return now.getUTCHours() >= hour;
 };
 
-/** One tick: catch-up-aware, idempotent per kind, never stacking. */
+/** One tick: reclaim, then catch-up-aware, idempotent per kind, never stacking. */
 export const runEvalSchedulerTick = async (
   suites: EvalSuite[],
   opts: EvalSchedulerOptions,
@@ -84,13 +102,20 @@ export const runEvalSchedulerTick = async (
 ): Promise<void> => {
   if (!opts.enabled) return;
   if (!dueNow(opts, now)) return;
+  // A stranded `running` lease must be cleared here, not only at boot.
+  // @see #394
+  try {
+    await (opts.reclaimStaleRuns ?? reclaimStaleEvalRuns)();
+  } catch (error) {
+    console.error('eval scheduler: stale-lease reclaim failed:', error);
+  }
   for (const suite of suites) {
     // Per-suite isolation: one suite's Mongo error must not skip the next.
     try {
       if (await suite.hasRun(now)) continue;
       await suite.run();
-    } catch {
-      // A failed suite must not block the next one.
+    } catch (error) {
+      console.error(`eval scheduler: suite ${suite.kind} failed:`, error);
     }
   }
 };
@@ -102,13 +127,17 @@ export const startEvalScheduler = (
   if (!opts.enabled) return null;
   if (timer) return timer;
   // Self-heal a stranded lease before the first tick (OQ7).
-  void (opts.reclaimStaleRuns ?? reclaimStaleEvalRuns)().catch(() => undefined);
+  void (opts.reclaimStaleRuns ?? reclaimStaleEvalRuns)().catch((error) => {
+    console.error('eval scheduler: boot reclaim failed:', error);
+  });
   timer = setInterval(() => {
     // A long run must not stack ticks; skip while one is in flight.
     if (busy) return;
     busy = true;
     void runEvalSchedulerTick(suites, opts)
-      .catch(() => undefined)
+      .catch((error) => {
+        console.error('eval scheduler: tick failed:', error);
+      })
       .finally(() => {
         busy = false;
       });

@@ -64,6 +64,15 @@ evalRunRecordSchema.index({ status: 1, startedAt: -1 });
 // Kind-scoped idempotency: a tool-use run must not suppress the memory run.
 // @see #289
 evalRunRecordSchema.index({ kind: 1, startedAt: -1 });
+// Atomic lease: at most one running row, any kind. @see #394
+evalRunRecordSchema.index(
+  { status: 1 },
+  {
+    unique: true,
+    partialFilterExpression: { status: 'running' },
+    name: 'evalruns_running_lease',
+  },
+);
 
 export type EvalRunRecordDocument = mongoose.HydratedDocument<
   mongoose.InferSchemaType<typeof evalRunRecordSchema>

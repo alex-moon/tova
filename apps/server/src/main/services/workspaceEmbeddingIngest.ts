@@ -60,9 +60,33 @@ export const embedWorkspaceSlice = async (
   }
 };
 
-/* Fire-and-forget wrapper; the promise is intentionally not awaited. */
+/* Fire-and-forget wrapper; the promise is tracked so purge can drain it. */
+// @see #393
+const inFlightEmbeds = new Map<string, Set<Promise<void>>>();
+
 export const enqueueWorkspaceEmbedding = (input: EmbedWorkspaceSliceInput): void => {
-  void embedWorkspaceSlice(input);
+  const pending = embedWorkspaceSlice(input);
+  let set = inFlightEmbeds.get(input.userId);
+  if (!set) {
+    set = new Set();
+    inFlightEmbeds.set(input.userId, set);
+  }
+  set.add(pending);
+  // Both paths, so a future rejection can never surface as unhandled.
+  const cleanup = () => {
+    const current = inFlightEmbeds.get(input.userId);
+    current?.delete(pending);
+    if (current && current.size === 0) inFlightEmbeds.delete(input.userId);
+  };
+  void pending.then(cleanup, cleanup);
+};
+
+/* Await every in-flight ingest for a user; the purge drains around the sweep. */
+// @see #393
+export const drainUserEmbeddings = async (userId: string): Promise<void> => {
+  const set = inFlightEmbeds.get(userId);
+  if (!set) return;
+  await Promise.allSettled([...set]);
 };
 
 export interface EmbedUserResult {
@@ -102,7 +126,9 @@ export const embedWorkspaceUser = async (
     title: slice.title,
   }));
 
-  const rows = await WorkspaceEmbedding.find({ model, userId: uid })
+  // Rows of a foreign dim never satisfy the skip; the upsert overwrites them.
+  // @see #393
+  const rows = await WorkspaceEmbedding.find({ model, userId: uid, dim: config.embeddings.dim })
     .select('kind sourceId model textHash')
     .lean();
   const plan = planEmbeddingWrites(slices, existingEmbeddingHashes(rows, model), model);

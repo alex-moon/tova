@@ -102,6 +102,16 @@ describe('convertToMarkdown (#67)', () => {
     await assertion;
     jest.useRealTimers();
   });
+
+  it('names the stage in the timeout error when labelled (#393)', async () => {
+    jest.useFakeTimers();
+    const hung = new Promise<string>(() => undefined);
+    const pending = withTimeout(hung, 5000, 'workspace vector search');
+    const assertion = expect(pending).rejects.toThrow('workspace vector search timed out');
+    jest.advanceTimersByTime(CONVERSION_TIMEOUT_MS + 6000);
+    await assertion;
+    jest.useRealTimers();
+  });
 });
 
 describe('processAssetConversionJob (#67)', () => {

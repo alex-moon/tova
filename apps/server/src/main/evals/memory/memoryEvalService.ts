@@ -81,12 +81,21 @@ export const retrievalMetrics = (results: RetrievalCaseResult[]): RetrievalMetri
 
 export interface MemoryEvalDeps {
   scenarios?: MemoryScenario[];
-  /** Defaults to the real retrieval read; injected in tests. */
-  retrieve?: (query: string, userId: string) => Promise<WorkspaceSlice[]>;
+  /** Defaults to the live retrieval read; injected in tests. Returns the
+   * ranked slices plus optional cut diagnostics — no module-global side
+   * channel. @see #394 */
+  retrieve?: (query: string, userId: string) => Promise<RetrievedSlices>;
   seed?: (scenario: MemoryScenario) => Promise<SeedIdMap>;
   clear?: () => Promise<void>;
   /** Embeds the eval user's corpus after seeding; injected in tests. */
   embed?: (userId: string) => Promise<void>;
+}
+
+/** Slices plus optional cut diagnostics from the ranking call. */
+export interface RetrievedSlices {
+  slices: WorkspaceSlice[];
+  /** Candidates before the cut; present on the live default only. */
+  candidateCount?: number;
 }
 
 export interface MemoryEvalReport {
@@ -101,19 +110,17 @@ export interface MemoryEvalReport {
 }
 
 // Default per-scenario embedding: backfills seeded slices when enabled.
-const defaultEmbedUser = async (userId: string): Promise<void> => {
+export const defaultEmbedUser = async (userId: string): Promise<void> => {
   if (!isWorkspaceMemoryEnabled()) return;
   await embedWorkspaceUser(userId);
 };
 
-// Live default reports cut diagnostics so the run can count empty cuts.
-// @see #305
-let lastCutDiagnostics: { candidateCount: number } | null = null;
-const defaultLiveRetrieve = async (query: string, userId: string): Promise<WorkspaceSlice[]> => {
+// Live default reports cut diagnostics alongside the slices it ranked.
+// @see #305 #394
+const defaultLiveRetrieve = async (query: string, userId: string): Promise<RetrievedSlices> => {
   const slices = await collectWorkspaceSlices(userId);
   const { ranked, candidateCount } = await rankWorkspaceSlicesWithCut(query, userId, slices);
-  lastCutDiagnostics = { candidateCount };
-  return ranked;
+  return { slices: ranked, candidateCount };
 };
 
 export const runRetrievalEval = async (
@@ -143,16 +150,15 @@ export const runRetrievalEval = async (
         console.error('Memory eval embedding degraded to BM25:', err);
       }
       const picks = await retrieve(scenario.query, evalUserId.toHexString());
-      const surfacedIds = picks.map((slice) => slice.id);
+      const surfacedIds = picks.slices.map((slice) => slice.id);
       const expectedId = idMap[scenario.expectedSliceId];
       const surfaced = expectedId !== undefined && surfacedIds.includes(expectedId);
-      // Empty-after-cut diagnostic; only measurable on the live default.
-      // @see #305
-      let cutEmpty: boolean | undefined;
-      if (retrieve === defaultLiveRetrieve) {
-        cutEmpty = (lastCutDiagnostics?.candidateCount ?? 0) > 0 && picks.length === 0;
-        lastCutDiagnostics = null;
-      }
+      // Empty-after-cut diagnostic: candidates existed but none survived.
+      // @see #305 #394
+      const cutEmpty =
+        typeof picks.candidateCount === 'number' &&
+        picks.candidateCount > 0 &&
+        picks.slices.length === 0;
       results.push({
         scenarioId: scenario.id,
         category: scenario.category,
@@ -161,7 +167,7 @@ export const runRetrievalEval = async (
         pass: surfaced === scenario.expectSurfaced,
         expectedSliceId: scenario.expectedSliceId,
         surfacedIds,
-        ...(cutEmpty !== undefined ? { cutEmpty } : {}),
+        cutEmpty,
       });
     }
   } finally {
@@ -219,9 +225,18 @@ export const pushMemoryCorpusToLangSmith = async (
       output: unknown,
       opts?: { datasetName: string },
     ) => Promise<unknown>;
+    listExamples?: (params: { datasetName: string }) => AsyncIterable<{ id: string }>;
+    deleteExample?: (id: string) => Promise<unknown>;
   };
   if (!(await ls.hasDataset({ datasetName: MEMORY_DATASET_NAME }))) {
     await ls.createDataset(MEMORY_DATASET_NAME);
+  }
+  // The corpus is static: replace, don't append, or re-runs grow it forever.
+  // @see #394
+  if (ls.listExamples && ls.deleteExample) {
+    for await (const example of ls.listExamples({ datasetName: MEMORY_DATASET_NAME })) {
+      await ls.deleteExample(example.id);
+    }
   }
   for (const testCase of gateCases) {
     await ls.createExample(

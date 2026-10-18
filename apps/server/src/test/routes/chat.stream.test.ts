@@ -1588,6 +1588,38 @@ describe('Chat streaming route — #168 endpoint failures', () => {
     const errorEvent = response.text.split('\n\n').find((part) => part.includes('event: error'));
     expect(errorEvent).toContain('Error streaming from model');
   });
+
+  it('a failed race still names the session so the client can adopt it (#391)', async () => {
+    mockRacingState.error = new Error('All chat backends failed');
+
+    const cookies = await registerUser('stream-fail-adopt@example.com');
+    const app = createApp();
+    const response = await request(app)
+      .post('/api/chat/stream')
+      .set('Cookie', cookies)
+      .send({ content: 'hello there' });
+
+    expect(response.status).toBe(200);
+    const events = response.text
+      .split('\n\n')
+      .filter((part) => part.trim().length > 0)
+      .map((part) => {
+        const eventLine = part.split('\n').find((l) => l.startsWith('event: '));
+        const dataLine = part.split('\n').find((l) => l.startsWith('data: '));
+        return {
+          event: eventLine?.slice(7),
+          data: dataLine ? JSON.parse(dataLine.slice(6)) : undefined,
+        };
+      });
+    // The user turn is persisted before the race; adoption must survive the
+    // failure or a client retry mints a duplicate session. @see #391
+    const meta = events.find((e) => e.event === 'meta');
+    const sessionId = meta?.data?.sessionId as string;
+    expect(sessionId).toEqual(expect.any(String));
+    expect(await Session.findById(sessionId)).not.toBeNull();
+    const userTurn = await Message.findOne({ sessionId, role: 'user' });
+    expect(userTurn).toMatchObject({ content: 'hello there' });
+  });
 });
 
 describe('reconcileToolEvent (#196)', () => {
@@ -1661,6 +1693,15 @@ describe('history window + tool provenance (#360)', () => {
     it('treats missing content as empty, not a stop', () => {
       const docs = [{ content: null }, doc('kept')];
       expect(windowedHistory(docs as { content?: string | null }[])).toHaveLength(2);
+    });
+
+    // The current turn must never vanish: it alone may bust the budget.
+    // @see #391
+    it('always retains the newest turn, truncated when it alone busts the budget', () => {
+      const huge = doc('x'.repeat(HISTORY_MAX_CHARS + 10));
+      const kept = windowedHistory([huge, doc('older')]);
+      expect(kept).toHaveLength(1);
+      expect((kept[0] as { content: string }).content).toHaveLength(HISTORY_MAX_CHARS);
     });
   });
 

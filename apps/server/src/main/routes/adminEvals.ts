@@ -3,6 +3,7 @@ import { authenticateBearerOrSession, requireRole } from '../middleware/auth';
 import { getEvalRun, listEvalRuns } from '../services/evalRunsAdminService';
 import {
   beginEvalRun,
+  EvalConfigError,
   EvalRunBusyError,
   executeEvalRun,
   langsmithClientFromEnv,
@@ -53,13 +54,14 @@ router.get('/evals/runs/:id', ...adminGuard, async (req, res) => {
   }
 });
 
-// Manual "Run now": writes the lease, runs in background; busy is 409.
+// Manual "Run now": writes the lease, runs in background; busy is 409 and a
+// bad provider config is a 400, not a 500. @see #394
 router.post('/evals/run', ...adminGuard, async (_req, res) => {
-  const options = { models: evalModels(), trigger: 'manual' as const };
   try {
-    const id = await beginEvalRun(options);
+    const options = { models: evalModels(), trigger: 'manual' as const };
     // Best-effort LangSmith export; a keyless deploy still records.
     const langsmithClient = await langsmithClientFromEnv(config.langsmith.apiKey);
+    const id = await beginEvalRun(options);
     void executeEvalRun(id, options, { langsmithClient }).catch(() => {
       // The run settles its own `error` row; nothing to surface post-202.
     });
@@ -67,6 +69,9 @@ router.post('/evals/run', ...adminGuard, async (_req, res) => {
   } catch (error) {
     if (error instanceof EvalRunBusyError) {
       return res.status(409).json({ message: error.message });
+    }
+    if (error instanceof EvalConfigError) {
+      return res.status(400).json({ message: error.message });
     }
     return res.status(500).json({ message: 'Failed to start eval run' });
   }

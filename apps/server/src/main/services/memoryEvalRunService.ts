@@ -9,10 +9,14 @@ import {
   type MemoryEvalStage,
   type RetrievalCaseResult,
 } from '../evals/memory/memoryEvalService';
-import { EvalRunRecord } from '../models/EvalRunRecord';
-import { EvalRunBusyError, resolveScheduledModels } from './evalRunService';
-
-const MAX_STORED_ERROR_CHARS = 500;
+import {
+  EvalRunBusyError,
+  MAX_STORED_ERROR_CHARS,
+  resolveLeaseDeps,
+  resolveScheduledModels,
+  writeEvalLease,
+  type EvalLeaseDeps,
+} from './evalRunService';
 
 export interface StartMemoryEvalRunOptions {
   /** Which deterministic stages to run; scheduled runs pass 'retrieval'. */
@@ -20,19 +24,12 @@ export interface StartMemoryEvalRunOptions {
   trigger: 'scheduled' | 'manual';
 }
 
-export interface MemoryEvalRunDeps {
+export type MemoryEvalRunDeps = EvalLeaseDeps & {
   run?: (stages: MemoryEvalStage[]) => Promise<MemoryEvalReport>;
-  createRecord?: typeof EvalRunRecord.create;
-  findRunning?: () => Promise<unknown | null>;
-  updateRecord?: (id: unknown, update: Record<string, unknown>) => Promise<unknown>;
-}
+};
 
 const resolveRunDeps = (deps: MemoryEvalRunDeps) => ({
-  createRecord: deps.createRecord ?? EvalRunRecord.create.bind(EvalRunRecord),
-  findRunning:
-    deps.findRunning ?? (() => EvalRunRecord.findOne({ status: 'running' }).lean().exec()),
-  updateRecord:
-    deps.updateRecord ?? ((id, update) => EvalRunRecord.updateOne({ _id: id }, update).exec()),
+  ...resolveLeaseDeps(deps),
   run: deps.run ?? ((stages: MemoryEvalStage[]) => runMemoryEvals({}, stages)),
 });
 
@@ -69,14 +66,16 @@ export const beginMemoryEvalRun = async (
 ): Promise<string> => {
   const { createRecord, findRunning } = resolveRunDeps(deps);
   if (await findRunning()) throw new EvalRunBusyError();
-  const record = await createRecord({
-    startedAt: new Date(),
-    status: 'running',
-    kind: 'memory',
-    models: ['memory'],
-    stages: options.stages,
-  });
-  return String((record as { _id: unknown })._id);
+  return writeEvalLease(
+    {
+      startedAt: new Date(),
+      status: 'running',
+      kind: 'memory',
+      models: ['memory'],
+      stages: options.stages,
+    },
+    { createRecord },
+  );
 };
 
 /** Runs the stages and settles the lease; a crash is recorded, not thrown. */
