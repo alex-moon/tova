@@ -1,4 +1,4 @@
-// Light text extraction: deterministic and fast only, decided from the filename extension.
+// Light text extraction: deterministic and fast, extension-driven.
 // @see #34
 const EXTRACTABLE_EXTENSIONS = new Set(['txt', 'md', 'csv']);
 

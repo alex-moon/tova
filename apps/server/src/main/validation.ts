@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { CONNECTOR_TYPES } from '@tova/shared';
 import { MAX_BULK_TOTAL_SIZE } from './services/assetLimits';
 
-// Canonical IANA zone list plus UTC/GMT aliases, computed once; an engine without supportedValuesOf degrades to a shape check.
+// Canonical IANA zones + UTC/GMT aliases, computed once at import.
 const supportedZones: string[] =
   (Intl as { supportedValuesOf?: (kind: 'timeZone') => string[] }).supportedValuesOf?.(
     'timeZone',
@@ -38,7 +38,7 @@ export const createPatSchema = z.object({
     .max(100, { message: 'Name must be at most 100 characters' }),
 });
 
-// PATCH /api/profile body. Strict on purpose: unknown keys are a 400, not silently dropped; absent keys untouched, trimmed-empty clears.
+// PATCH /api/profile body. Strict: unknown keys 400, empty clears.
 // @see #35
 // preferredName: 20 chars max; charset tightened server-side.
 // @see #46
@@ -52,22 +52,22 @@ export const profilePatchSchema = z.strictObject({
     .max(4000, { message: 'customInstructions must be 4000 characters or fewer' })
     .optional(),
   theme: z.enum(['light', 'dark'], { message: 'theme must be "light" or "dark"' }).optional(),
-  // Startup-chat preference: what the chat view shows on first open — most recent chat (the default) or a blank new chat.
+  // Startup chat: latest chat (default) or a blank new chat.
   // @see #96
   startupChat: z
     .enum(['recent', 'new'], {
       message: 'startupChat must be "recent" or "new"',
     })
     .optional(),
-  // Zero-data-retention preference: opts the account out of all chat persistence; forward-looking only — wiping existing data is the explicit /factory-reset route.
+  // ZDR preference: no chat persistence; wiping is /factory-reset only.
   // @see #116 #143
   zdr: z.boolean({ message: 'zdr must be a boolean' }).optional(),
   // 'Incognito by default': new chats start incognito when set.
   // @see #144
-  // Reads and writes the same settings.zdr storage slot; `zdr` is its legacy alias kept for the frozen test surface — rename both together.
+  // Same settings.zdr slot; `zdr` is the legacy alias — rename together.
   // @see #116
   incognitoByDefault: z.boolean({ message: 'incognitoByDefault must be a boolean' }).optional(),
-  // Granular delete-confirmation prefs. Strict sub-object: an unknown delete target is a 400, not a silently dropped key.
+  // Delete-confirm prefs; an unknown target is a 400, never dropped.
   // @see #59
   confirmDeletes: z
     .strictObject({
@@ -75,7 +75,7 @@ export const profilePatchSchema = z.strictObject({
       file: z.boolean().optional(),
     })
     .optional(),
-  // Browser IANA timezone: validated against the platform's own zone list so `Intl.DateTimeFormat` cannot throw on garbage; legitimate aliases accepted explicitly.
+  // Browser IANA zone, validated so `Intl.DateTimeFormat` cannot throw.
   // @see #261
   timezone: z
     .string({ message: 'timezone must be a string' })
@@ -84,7 +84,7 @@ export const profilePatchSchema = z.strictObject({
     .optional(),
 });
 
-// Factory reset: the exact confirmation string a user must type; a fixed product literal — copy on the client, exact-match verification here.
+// Factory reset: the exact string a user must type; a product literal.
 // @see #143
 export const FACTORY_RESET_CONFIRM = 'RESET';
 
@@ -98,7 +98,7 @@ export const feedbackValueSchema = z.object({
   value: z.enum(['up', 'down'], { message: 'value must be "up" or "down"' }),
 });
 
-// Task creation: a direct-origin task is first-class, so `instruction` is optional and `origin` an optional thin reference; a task's scope is the workspace, never a Message FK.
+// Task creation: `instruction` optional, `origin` a thin reference.
 // @see #254
 export const taskCreateSchema = z.strictObject({
   instruction: z
@@ -113,7 +113,7 @@ export const taskCreateSchema = z.strictObject({
     .optional(),
 });
 
-// Steering turn / resume; non-empty — an empty steering turn has nothing to say.
+// Steering turn / resume; non-empty — an empty turn has nothing to say.
 export const taskInstructionSchema = z.strictObject({
   instruction: z
     .string({ message: 'instruction is required' })
@@ -121,7 +121,7 @@ export const taskInstructionSchema = z.strictObject({
     .max(4000, { message: 'instruction must be 4000 characters or fewer' }),
 });
 
-// Asset uploads: the browser sends the file directly to Spaces, so the server only validates metadata at presign; caps are re-checked at confirm.
+// Uploads go browser-to-Spaces; presign validates metadata only.
 // @see #34
 export const assetPresignSchema = z.object({
   filename: z
@@ -135,16 +135,16 @@ export const assetPresignSchema = z.object({
     .number({ message: 'Size is required' })
     .int({ message: 'Size must be an integer' })
     .positive({ message: 'Size must be positive' }),
-  // Upload origin: the chat composer tags its uploads so a ZDR user's attachments stay out of long-term storage; the server still decides from the effective per-chat flag — the tag alone never changes storage behavior.
+  // Upload origin tags ZDR attachments; the per-chat flag still decides.
   // @see #116 #144
   scope: z.enum(['chat'], { message: 'scope must be "chat"' }).optional(),
-  // Per-chat incognito inputs: an existing chat's stored flag decides, a new incognito chat sends `zdr`, absent both the profile default decides; `chatId` ownership is checked in the route.
+  // Stored flag decides; new incognito sends `zdr`; else profile default.
   // @see #144
   chatId: z.string({ message: 'chatId must be a string' }).optional(),
   zdr: z.boolean({ message: 'zdr must be a boolean' }).optional(),
 });
 
-// ZDR chats are stateless per turn: the client replays the conversation; bound the replay hard (recent turns, the 4000-char cap).
+// ZDR chats are stateless: bound the client replay hard.
 // @see #116
 export const zdrHistoryEntrySchema = z.object({
   role: z.enum(['user', 'assistant'], { message: 'history role must be user or assistant' }),
@@ -158,7 +158,7 @@ export const zdrHistorySchema = z
   .array(zdrHistoryEntrySchema, { message: 'history must be an array' })
   .max(20, { message: 'history may contain at most 20 entries' });
 
-// Bulk-download query. Express 5's parser returns an array for repeated `?id=` but a scalar for one — preprocess both into an array; 50 entries is the per-archive cap.
+// Repeated `?id=` is array vs scalar in Express 5; normalise, cap 50.
 // @see #69
 export const assetBulkDownloadQuerySchema = z.object({
   id: z.preprocess(
@@ -172,7 +172,7 @@ export const assetBulkDownloadQuerySchema = z.object({
   ),
 });
 
-// Bulk-delete shares the repeated `?id=` contract; messages worded neutrally so both routes can use it.
+// Bulk-delete shares the `?id=` contract; wording fits both routes.
 // @see #69
 export const assetBulkDeleteQuerySchema = z.object({
   id: z.preprocess(
@@ -185,7 +185,7 @@ export const assetBulkDeleteQuerySchema = z.object({
       .max(50, { message: 'At most 50 assets can be deleted at once' }),
   ),
 });
-// Bulk upload: one batched presign/confirm round-trip for up to MAX_BULK_FILES files; hard rule — zip is never an accepted upload format, and uploaded archives are never read anywhere. These schemas shape the batch; per-item policy lives in the routes.
+// Bulk upload: one presign/confirm round-trip; never zip; capped.
 // @see #68
 export const MAX_BULK_FILES = 20;
 
@@ -212,7 +212,7 @@ export const assetBulkConfirmSchema = z
   .max(MAX_BULK_FILES, {
     message: `Bulk confirm is limited to ${MAX_BULK_FILES} assets per batch`,
   });
-// Restore an assistant-generated file to a prior version; the version number is the one GET /:id/versions returned.
+// Restore to a prior version; the number GET /:id/versions returned.
 // @see #325
 export const assetRestoreSchema = z.object({
   version: z
@@ -220,7 +220,7 @@ export const assetRestoreSchema = z.object({
     .int({ message: 'version must be an integer' })
     .positive({ message: 'version must be positive' }),
 });
-/* POST /api/connectors body: personal connectors only, https-only URLs (SSRF surface), auth as a raw token stored as one encrypted bearer header; the full type namespace parses so known-but-non-pat types get a flow-specific message. */
+/* Connector body: personal rows, https-only URLs, encrypted bearer. */
 // @see #36 #329 #327 #80
 export const connectorCreateSchema = z.strictObject({
   type: z
@@ -255,7 +255,7 @@ export const connectorCreateSchema = z.strictObject({
     .optional(),
 });
 
-// Begin a browser consent; the connector row is only created when the flow completes (no orphan rows on abandoned consents).
+// Begin consent; the row exists only when the flow completes.
 // @see #327
 export const connectorOAuthStartSchema = z.strictObject({
   name: z
@@ -271,7 +271,7 @@ export const connectorOAuthStartSchema = z.strictObject({
     }),
 });
 
-// The consent redirect's query params, relayed by the client callback page; `state` keys the server-side pending record.
+// Consent redirect params from the client callback; `state` keys it.
 // @see #327
 export const connectorOAuthCallbackSchema = z.strictObject({
   code: z.string({ message: 'code is required' }).min(1, { message: 'code is required' }).max(4000),

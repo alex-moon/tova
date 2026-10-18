@@ -1,7 +1,7 @@
 import { groqConnector } from '../../main/services/mastraService';
 import type { CompletionOptions } from '../../main/services/llmTypes';
 
-/* Connector seam: maxSteps forwards verbatim (absent keeps the mode default so every chat call site is byte-identical), and the non-streaming completion surfaces each executed call's args so the sequencer can rebuild chips and replay history. */
+/* Connector seam: maxSteps forwards verbatim; completions surface calls. */
 // @see #254 #251
 
 const mockGenerate = jest.fn();

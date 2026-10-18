@@ -1,4 +1,4 @@
-/** Pure per-message prompt metrics: cheap deterministic proxies for correlating routing/feedback with prompt characteristics; heuristics are English-only by design. */
+/** Cheap deterministic proxies for correlating routing with prompt shape. */
 
 export interface CodeIndicators {
   fences: number;

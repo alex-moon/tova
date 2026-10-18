@@ -1,4 +1,4 @@
-/* Per-turn incognito decision: one pure function owning the rule both chat routes used to duplicate; returns route-semantics flags (reject / replay / ephemeral cleanup), not HTTP decisions. */
+/* Per-turn incognito decision, one pure function; route flags, not HTTP. */
 // @see #144
 export type ZdrTurnInput = {
   incognito: boolean;

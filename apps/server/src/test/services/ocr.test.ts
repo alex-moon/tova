@@ -15,12 +15,12 @@ import {
 import { rasterizePdf } from '../../main/services/pdfRasterize';
 import { MAX_MARKDOWN_CHARS } from '../../main/services/markdownConversion';
 
-// Real tesseract.js OCR against in-memory rasters and a real image-only PDF fixture; the engine is slow, so per-test timeouts and one worker per test.
+// Real tesseract.js OCR; the engine is slow, so one worker per test.
 // @see #209
 const FIXTURE_DIR = path.join(__dirname, '..', '..', 'main', 'services', 'fixtures');
 const fixture = (file: 'scanned.pdf'): Buffer => readFileSync(`${FIXTURE_DIR}/${file}`);
 
-// A larger, high-contrast render is far more reliable for OCR than a tiny canvas.
+// A larger, high-contrast render is far more reliable for OCR.
 const pngWithText = (text: string): Buffer => {
   const width = 800;
   const height = 200;
@@ -53,7 +53,7 @@ describe('ocr constants (#209)', () => {
   });
 });
 
-// The prod image resolves a different depth above this module than tsx, which made the old fixed hop count point at /assets/tessdata; pin every known layout.
+// Prod resolves tessdata at a different depth than tsx; pin every layout.
 // @see #358
 describe('findTessdataDir (#358)', () => {
   const vendored = (root: string): void => {

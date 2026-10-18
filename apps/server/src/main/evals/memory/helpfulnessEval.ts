@@ -13,16 +13,16 @@ import { clearMemoryCorpus, seedMemoryScenario, type SeedIdMap } from './memoryS
 import type { MemoryScenario, ScenarioCategory } from './types';
 import { z } from 'zod';
 
-// Stage 3 helpfulness eval: scenarios answered with and without the retrieved block, scored by a blinded, position-swapped LLM judge.
+// Stage 3 helpfulness eval: with/without the retrieved block, blinded judge.
 // @see #289
 
-/** The judge's reply for one presentation of a pair; an error must not score as half a win. */
+/** The judge's reply for one presentation; an error must not score a win. */
 export type JudgeVerdict = 'A' | 'B' | 'tie' | 'error';
 
 /** The with-arm's outcome across the two (position-swapped) presentations. */
 export type PairOutcome = 'win' | 'loss' | 'tie' | 'error';
 
-/** Fold the two position-swapped verdicts into one outcome for the with-arm. */
+/** Fold the two position-swapped verdicts into one with-arm outcome. */
 export const resolveSwappedOutcome = (first: JudgeVerdict, second: JudgeVerdict): PairOutcome => {
   if (first === 'error' || second === 'error') return 'error';
   const withWon = first === 'A' && second === 'B';
@@ -32,7 +32,7 @@ export const resolveSwappedOutcome = (first: JudgeVerdict, second: JudgeVerdict)
   return 'tie';
 };
 
-// Judge prompt is blind to arm and pinned to preferring specificity over fluency; the verdict enum rides the structured-output schema.
+// Judge prompt is blind to arm and prefers specificity over fluency.
 export const buildJudgePrompt = (query: string, answerA: string, answerB: string): string =>
   [
     'You are comparing two assistant answers to the same user question.',
@@ -59,13 +59,13 @@ export interface HelpfulnessCaseResult {
   blockCarriesId: boolean;
   factInBlock: boolean;
   factHitWith: boolean;
-  /** The without-arm answer already carries the expected fact (no attribution). */
+  /** The without-arm answer already carries the fact. */
   counterfactualHit: boolean;
-  /** Pairwise outcome for the with-arm; null when there was no block to inject. */
+  /** Pairwise outcome for the with-arm; null when no block injected. */
   outcome: PairOutcome | null;
   /** Raw verdicts `[with-arm-as-A, with-arm-as-B]`, when judged. */
   verdicts?: [JudgeVerdict, JudgeVerdict];
-  /** Responder finish reasons per arm; `length` means a generation-budget truncation. */
+  /** Responder finish reasons per arm; `length` = budget truncation. */
   finishReasons?: { with?: string; without?: string };
 }
 
@@ -75,15 +75,15 @@ export interface HelpfulnessMetrics {
   wins: number;
   losses: number;
   ties: number;
-  /** Pairs where a presentation failed (empty/unparseable reply or a throw). */
+  /** Pairs where a presentation failed (bad reply or a throw). */
   errors: number;
   /** (wins + 0.5 × ties) / judged; null when nothing was judged. */
   winRate: number | null;
   blockIdRate: number;
   factHitRate: number;
-  /** Cases where the without-arm already carried the fact (injection not attributable). */
+  /** Cases where the without-arm already carried the fact. */
   counterfactualHits: number;
-  /** Cases where the with-arm block carried the fact AND the answer did, and the without-arm did not. */
+  /** Cases where the with-arm block carried the fact AND the answer did. */
   deterministicWins: number;
   /** Cases where either arm stopped on `length` — a truncation artefact. */
   truncated: number;
@@ -105,11 +105,11 @@ export const helpfulnessMetrics = (results: HelpfulnessCaseResult[]): Helpfulnes
     if (r.factHitWith) factHits += 1;
     if (r.counterfactualHit) counterfactualHits += 1;
     if (r.factInBlock && r.factHitWith && !r.counterfactualHit) deterministicWins += 1;
-    // A `length` stop on either arm is a generation-budget artefact, not a helpfulness signal.
+    // A `length` stop on either arm is a budget artefact, not a signal.
     if (r.finishReasons?.with === 'length' || r.finishReasons?.without === 'length') {
       truncated += 1;
     }
-    // Errors are their own count and excluded from the win-rate denominator: a failed judge call is not a tie.
+    // Errors are their own count, excluded from the win-rate denominator.
     if (r.outcome === 'error') {
       errors += 1;
       continue;
@@ -144,20 +144,20 @@ export interface HelpfulnessDeps {
   retrieve?: (query: string, userId: string) => Promise<WorkspaceSlice[]>;
   /** Answer `query` with `block` injected; `''` is the counterfactual arm. */
   respond?: (query: string, block: string) => Promise<RespondResult>;
-  /** Return the better answer (`'A'`/`'B'`) or `'tie'` for one blinded presentation. */
+  /** Return the better answer (`'A'`/`'B'`) or `'tie'` for one pair. */
   judge?: (query: string, answerA: string, answerB: string) => Promise<JudgeVerdict>;
   /** Inter-call delay before each live responder/judge call. */
   pace?: () => Promise<void>;
 }
 
-/** Casefold and collapse internal whitespace so layout differences don't read as backbone misses. */
+/** Casefold and collapse whitespace so layout differences don't misfire. */
 export const normaliseFact = (text: string): string =>
   text.toLowerCase().replace(/\s+/g, ' ').trim();
 
 const containsFact = (answer: string, fact: string): boolean =>
   normaliseFact(answer).includes(normaliseFact(fact));
 
-// Live responder: mirrors the chat path's system prompt, model and budget config-driven.
+// Live responder: mirrors the chat path's prompt, model and budget.
 export interface RespondResult {
   content: string;
   finishReason?: string;
@@ -182,10 +182,10 @@ const defaultRespond = async (query: string, block: string): Promise<RespondResu
   };
 };
 
-// Judge is a reasoning model: chain-of-thought needs headroom before the verdict.
+// Judge is a reasoning model: chain-of-thought needs headroom.
 const JUDGE_MAX_TOKENS = 512;
 
-// Schema-enforced verdict; a validation failure resolves with 'error', exactly the unparseable-verdict semantics.
+// Schema-enforced verdict; validation failure resolves with 'error'.
 // @see #368
 const VERDICT_SCHEMA = z.object({ verdict: z.enum(['A', 'B', 'tie']) });
 
@@ -213,13 +213,13 @@ export const defaultJudge = async (
 
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
-// Config-sourced inter-call pacing to avoid tripping provider RPM; tests inject a no-op.
+// Config-sourced inter-call pacing to avoid provider RPM trips.
 const defaultPace = async (): Promise<void> => {
   const ms = config.memoryEval.paceMs;
   if (ms > 0) await sleep(ms);
 };
 
-/** Run both arms per scenario, score the pair blinded and position-swapped; fixtures cleared in a finally. */
+/** Run both arms per scenario, blinded and position-swapped. */
 export const runHelpfulnessEval = async (
   deps: HelpfulnessDeps = {},
 ): Promise<{ results: HelpfulnessCaseResult[]; metrics: HelpfulnessMetrics }> => {
@@ -245,7 +245,7 @@ export const runHelpfulnessEval = async (
       await pace();
       const withResponse = await respond(scenario.query, block);
       const withAnswer = withResponse.content;
-      // No block → the arms are byte-identical; reuse the answer, counterfactual trivially true.
+      // No block → the arms are byte-identical; reuse the answer.
       let withoutAnswer = withAnswer;
       let withoutFinishReason = withResponse.finishReason;
       if (block.trim()) {
@@ -292,7 +292,7 @@ export const runHelpfulnessEval = async (
   return { results, metrics: helpfulnessMetrics(results) };
 };
 
-/** Require a parseable verdict on a fixed pair in both orders; throws on failure. */
+/** Require a parseable verdict on a fixed pair, both orders. */
 export const runJudgePreflight = async (
   judge: (query: string, answerA: string, answerB: string) => Promise<JudgeVerdict> = defaultJudge,
 ): Promise<{ first: JudgeVerdict; second: JudgeVerdict }> => {

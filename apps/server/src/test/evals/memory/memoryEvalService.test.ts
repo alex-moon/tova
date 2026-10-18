@@ -11,7 +11,7 @@ import {
 } from '../../../main/evals/memory/memoryEvalService';
 import type { MemoryScenario } from '../../../main/evals/memory/types';
 
-/* Runner logic with injected dependencies (no Mongo/provider/LangSmith): retrieval metric arithmetic, the per-scenario reseed/retrieve loop, the dataset export. */
+/* Runner logic with injected dependencies (no Mongo/provider/LangSmith). */
 // @see #289 #310
 
 describe('retrievalMetrics (#289)', () => {
@@ -158,7 +158,7 @@ describe('pushMemoryCorpusToLangSmith (#289)', () => {
       MEMORY_DATASET_NAME,
     );
     expect(created).toEqual([MEMORY_DATASET_NAME, MEMORY_DATASET_NAME]);
-    // The subtype rides the gate example, so the shareable corpus carries the same per-subtype split the local metrics report.
+    // The shared corpus carries the same per-subtype split the metrics report.
     expect(outputs[0]).toMatchObject({ refersBack: true, subtype: 'explicit' });
   });
 });

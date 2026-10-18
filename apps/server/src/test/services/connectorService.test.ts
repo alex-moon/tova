@@ -33,7 +33,7 @@ jest.mock('@modelcontextprotocol/sdk/client/index.js', () => ({
 const streamableTransport = jest.fn().mockImplementation(() => ({}));
 const sseTransport = jest.fn().mockImplementation(() => ({}));
 
-// Transport mocks must export genuinely constructable values (the client does `new StreamableHTTPClientTransport(...)`), delegating to the per-test spies.
+// Transport mocks must be constructable; delegates to per-test spies.
 jest.mock('@modelcontextprotocol/sdk/client/streamableHttp.js', () => ({
   StreamableHTTPClientTransport: jest
     .fn()
@@ -90,7 +90,7 @@ describe('connectorService', () => {
   });
 
   it('skips connectors whose handshake fails', async () => {
-    // A dead host fails both transport attempts (streamable then SSE fallback), so it is skipped from the toolset entirely.
+    // A dead host fails both transport attempts and is skipped entirely.
     streamableTransport.mockImplementation((url: URL) => {
       if (url.hostname === 'dead.example.com') throw new Error('ECONNREFUSED');
       return {} as never;
@@ -120,10 +120,10 @@ describe('connectorService', () => {
       userId: USER_ID,
       name: 'oauthed',
       url: 'https://oauthed.example.com/mcp',
-      // The shared crypto mock decrypts any envelope to a header JSON; the oauth branch reads the vault shape instead.
+      // The crypto mock decrypts to header JSON; oauth reads the vault shape.
       oauth: { iv: 'a', tag: 'b', ciphertext: 'vault' },
     });
-    // The oauth vault JSON differs from the pat header JSON; point the mock at the vault shape for this doc.
+    // Vault JSON differs from the pat header; point the mock at the vault.
     const { decryptEnvelope } = jest.requireMock('../../main/services/crypto') as {
       decryptEnvelope: jest.Mock;
     };
@@ -177,7 +177,7 @@ describe('connectorService', () => {
     });
     const findSpy = jest.spyOn(Connector, 'find').mockRejectedValueOnce(new Error('mongo down'));
     await expect(connectorToolsetsForUser(USER_ID)).rejects.toThrow('mongo down');
-    // Within the same TTL window a fresh resolution must be rebuilt, not served from the poisoned cache entry.
+    // Same TTL window: rebuild fresh, never serve the poisoned cache entry.
     const toolsets = await connectorToolsetsForUser(USER_ID);
     expect(Object.keys(toolsets)).toEqual(['mcp_platform_tools']);
     findSpy.mockRestore();
@@ -190,7 +190,7 @@ describe('connectorService', () => {
       url: 'https://mcp.example.com/mcp',
     });
     const findSpy = jest.spyOn(Connector, 'find').mockRejectedValueOnce(new Error('mongo down'));
-    // Two turns racing inside one TTL window share the stored promise, so both observe the rejection; the poisoned entry must be gone once either caller's cleanup runs.
+    // Racing turns share the stored promise; cleanup clears the poison.
     await Promise.allSettled([
       connectorToolsetsForUser(USER_ID),
       connectorToolsetsForUser(USER_ID),
@@ -214,7 +214,7 @@ describe('connectorService', () => {
     const result = (await callMcpTool('https://mcp.example.com/mcp', undefined, 'weather', {
       q: 'x',
     })) as { error?: string };
-    // The degraded payload names the tool, carries the failure reason and tells the model to surface the failure — not the bare `{ error: 'unavailable' }` the model could not distinguish from an empty result.
+    // The degraded payload names the tool and carries the failure reason.
     // @see #82
     expect(result.error).toContain('weather');
     expect(result.error).toContain('boom');
@@ -258,7 +258,7 @@ describe('connectorService', () => {
     };
     const requestContext = new RequestContext();
     const ctx = { requestContext };
-    // First attempt: full path — cached-client call, retry on a fresh connection, then the degraded result and the mark.
+    // First attempt: cached call, fresh-connection retry, then the degrade.
     const first = (await weather.execute({ q: 'x' }, ctx)) as { error?: string };
     expect(first.error).toContain('mcp_platform_tools/weather');
     expect(first.error).toContain('boom');
@@ -268,7 +268,7 @@ describe('connectorService', () => {
     const second = await weather.execute({ q: 'y' }, ctx);
     expect(mockCallTool.mock.calls.length).toBe(callsAfterFirst);
     expect(second).toEqual(first);
-    // A fresh RequestContext (a new completion) is not blocked: it goes through callMcpTool again and degrades the same way.
+    // A fresh RequestContext is not blocked: it degrades the same way.
     const retry = (await weather.execute({ q: 'z' }, { requestContext: new RequestContext() })) as {
       error?: string;
     };

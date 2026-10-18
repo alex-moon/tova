@@ -1,6 +1,6 @@
 import { lookupProviderModel, ProviderModelDetails } from '../../main/services/providerModelLookup';
 
-/* The lookup resolves provider-owned model details from DeepInfra's catalog; `fetch` is mocked throughout — the suite must never make a live provider call. */
+/* Lookup resolves details from DeepInfra's catalog; `fetch` is mocked. */
 // @see #217
 
 const originalKey = process.env.DEEPINFRA_API_KEY;

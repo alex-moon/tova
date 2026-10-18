@@ -77,7 +77,7 @@ describe('Sidebar footer avatar (issue #35)', () => {
     expect(screen.queryByTestId('profile-modal')).not.toBeInTheDocument();
   });
 
-  // Links to the standalone /files view; /assets would be shadowed by nginx ahead of the SPA fallback.
+  // Links to the standalone /files view; /assets is shadowed by nginx.
   // @see #197
   it('links the files view at /files and renders no files modal (issue #197)', () => {
     renderSidebar(user);

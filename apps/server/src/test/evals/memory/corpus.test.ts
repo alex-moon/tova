@@ -1,7 +1,7 @@
 import { promptWords } from '../../../main/services/workspaceRetrievalService';
 import { GATE_CASES, MEMORY_SCENARIOS } from '../../../main/evals/memory/corpus';
 
-/* Corpus invariants: the corpus is data, so these guardrails keep it well-formed — unique ids, resolvable seeds, a labelled gate set, and the structural claims each category makes. */
+/* Corpus invariants: unique ids, resolvable seeds, labelled gate set. */
 // @see #289
 describe('memory corpus (#289)', () => {
   it('gate cases have unique ids and both labels present', () => {
@@ -12,7 +12,7 @@ describe('memory corpus (#289)', () => {
   });
 
   it('gate set clears the minimum-N bar with both labels well represented', () => {
-    // A percentage over single digits is noise: >= 30 cases with >= 12 of each label before a threshold is ratified.
+    // Percentages over single digits are noise: demand 30 cases, 12 a label.
     expect(GATE_CASES.length).toBeGreaterThanOrEqual(30);
     const positives = GATE_CASES.filter((c) => c.refersBack).length;
     const negatives = GATE_CASES.filter((c) => !c.refersBack).length;
@@ -21,7 +21,7 @@ describe('memory corpus (#289)', () => {
   });
 
   it('records a refer-back subtype on every positive and none on negatives', () => {
-    // A per-subtype recall bar is only possible if every positive carries its subtype; negatives are fresh asks and carry none.
+    // Per-subtype recall needs a subtype on every positive; negatives none.
     const subtypes = new Set(['explicit', 'continuation', 'bare-deixis']);
     for (const testCase of GATE_CASES) {
       if (testCase.refersBack) {
@@ -36,12 +36,12 @@ describe('memory corpus (#289)', () => {
     const count = (subtype: string) => GATE_CASES.filter((c) => c.subtype === subtype).length;
     expect(count('explicit')).toBe(9);
     expect(count('continuation')).toBe(4);
-    // Zero by owner decision: no bare-deixis positives may exist — the subtype is negative-only under the resolvability rule.
+    // Zero by owner decision: bare-deixis is negative-only.
     expect(count('bare-deixis')).toBe(0);
   });
 
   it('keeps the five bare-deictic no-history cases negative (owner decision 2026-10-14)', () => {
-    // Bare deixis with no resolvable referent stays quiet — a refusal is the best answer; pin the exact ids so a relabel cannot slip in silently.
+    // A refusal is the best answer; pin the ids so a relabel cannot slip in.
     const relabelled = [
       'gate-same-as-before',
       'gate-other-one',
@@ -59,7 +59,7 @@ describe('memory corpus (#289)', () => {
   });
 
   it('keeps every bare-deixis positive history-free and every continuation history-bearing', () => {
-    // Bare deixis is the ambiguous shape: no positives may exist, and if one ever returns it must not smuggle a resolvable transcript; a continuation's refer-back lives only in its transcript, so it must carry one.
+    // Bare deixis positives stay history-free; continuations carry history.
     for (const testCase of GATE_CASES) {
       if (testCase.subtype === 'bare-deixis') {
         expect(testCase.history?.length ?? 0).toBe(0);
@@ -71,13 +71,13 @@ describe('memory corpus (#289)', () => {
   });
 
   it('has history-only positives and history-bearing negatives', () => {
-    // A continuation's refer-back lives only in its transcript, so it must carry `history`; history alone must not imply a positive.
+    // Refer-back lives only in the transcript; history must not imply a win.
     expect(GATE_CASES.some((c) => c.refersBack && (c.history?.length ?? 0) > 0)).toBe(true);
     expect(GATE_CASES.some((c) => !c.refersBack && (c.history?.length ?? 0) > 0)).toBe(true);
   });
 
   it('every gate case records its labelling source in `note`', () => {
-    // Label independence is only auditable if each case names who labelled it; enforce the provenance convention.
+    // Each case must name who labelled it; enforce the provenance convention.
     for (const testCase of GATE_CASES) {
       const note = testCase.note ?? '';
       expect(note.trim().length).toBeGreaterThan(0);
@@ -86,7 +86,7 @@ describe('memory corpus (#289)', () => {
   });
 
   it('gate cases have unique prompts (no accidental double-counting)', () => {
-    // A copied case under a fresh id would double-weight one label without showing up in the id check.
+    // A copied case under a fresh id would double-weight one label.
     const prompts = GATE_CASES.map((c) => c.prompt.trim().toLowerCase());
     expect(new Set(prompts).size).toBe(prompts.length);
   });
@@ -105,7 +105,7 @@ describe('memory corpus (#289)', () => {
   });
 
   it('marks expectSurfaced consistently with the category', () => {
-    // A scenario whose `expectSurfaced` contradicts its category silently inverts its contribution; `out-of-pool` now expects a hit.
+    // `expectSurfaced` must match the category; out-of-pool expects a hit.
     // @see #293
     const missByConstruction = new Set(['deleted-seed']);
     for (const scenario of MEMORY_SCENARIOS) {
@@ -114,14 +114,14 @@ describe('memory corpus (#289)', () => {
   });
 
   it('never puts the expected fact in the query (counterfactual stays valid)', () => {
-    // If the query already carried the expected fact, both arms would "contain" it and the A/B delta would measure the query, not the block.
+    // If the query carried the fact, both arms "contain" it: delta is void.
     for (const scenario of MEMORY_SCENARIOS) {
       expect(scenario.query.toLowerCase()).not.toContain(scenario.expectedFact.toLowerCase());
     }
   });
 
   it('every paraphrase scenario shares no content word between query and seed', () => {
-    // A paraphrase that accidentally shares a keyword would be scored lexically and stop being a RAG-headroom case.
+    // A shared keyword would make it a lexical match, not a RAG-headroom case.
     // @see #293 #294
     const paraphrases = MEMORY_SCENARIOS.filter((s) => s.category === 'paraphrase');
     expect(paraphrases.length).toBeGreaterThanOrEqual(5);
@@ -135,7 +135,7 @@ describe('memory corpus (#289)', () => {
   });
 
   it('clears the per-category minimum-N bars', () => {
-    // A percentage over a handful of cases is noise: a floor per category before a threshold is treated as evidence.
+    // Percentages over a handful of cases are noise: demand a floor per set.
     const count = (category: string) =>
       MEMORY_SCENARIOS.filter((s) => s.category === category).length;
     expect(MEMORY_SCENARIOS.length).toBeGreaterThanOrEqual(20);
@@ -147,7 +147,7 @@ describe('memory corpus (#289)', () => {
   });
 
   it('carries the expected fact in the expected seed (stage-3 backbone is reachable)', () => {
-    // Stage 3 is only a fair check if the expected fact is actually in the slice retrieval is expected to surface.
+    // Stage 3 is fair only if the fact is in the slice it should surface.
     for (const scenario of MEMORY_SCENARIOS) {
       const seed = scenario.seeds.find((s) => s.id === scenario.expectedSliceId);
       expect(seed).toBeDefined();

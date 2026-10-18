@@ -5,13 +5,13 @@ import { MAX_ASSET_SIZE, sanitizeFilename } from './assetLimits';
 import { enqueueWorkspaceEmbedding } from './workspaceEmbeddingIngest';
 import { config } from '../config';
 
-// Server-side write path for system-generated assets placed in the user's library; owned by the requesting user so all normal asset paths work unchanged.
+// Write path for system-generated assets in the user's library.
 // @see #66
 type CreateSystemAssetResult =
   | { ok: true; fileId: string; filename: string; size: number; createdAt: Date }
   | { ok: false; code: 'invalid' | 'too_large'; message: string };
 
-// The generator emits markdown only; widening the family is a one-line change here.
+// The generator emits markdown only; widen here if that changes.
 const SYSTEM_ALLOWED_CONTENT_TYPES = new Set(['text/markdown', 'text/x-markdown']);
 
 const fail = (code: 'invalid' | 'too_large', message: string): CreateSystemAssetResult => ({
@@ -25,7 +25,7 @@ export const createSystemAsset = async (
   filename: string,
   buffer: Buffer,
   contentType: string,
-  // Optional origin for the generated file; omitted means provenance is left absent (unknown), never defaulted.
+  // Optional origin; omitted leaves provenance absent (unknown).
   // @see #252
   provenance?: AssetProvenance,
 ): Promise<CreateSystemAssetResult> => {
@@ -66,7 +66,7 @@ export const createSystemAsset = async (
   }
 
   asset.key = key;
-  // The full buffer is the text by construction; the 12k cap applies only at prompt-assembly time.
+  // The full buffer is the text; the 12k cap applies at assembly.
   const text = buffer.toString('utf8');
   asset.textExtracted = text || null;
   asset.status = 'ready';
@@ -90,7 +90,7 @@ export const createSystemAsset = async (
   };
 };
 
-// Agent-side material (e.g. a scraped page for read_file): never in the library or attach picker, no Spaces object, no embedding; expiry is a native TTL index.
+// Agent-side material (scraped pages): never in the library, native TTL.
 // @see #340 #350
 export const createSystemSideAsset = async (
   userId: string,
@@ -112,19 +112,19 @@ export const createSystemSideAsset = async (
     status: 'ready',
     origin: 'system-side',
     textExtracted: markdown,
-    // Native TTL; 0 days disables expiry — the field stays absent and TTL never fires.
+    // Native TTL; 0 days disables expiry (field stays absent).
     // @see #340
     ...(ttlDays > 0 ? { expiresAt: new Date(Date.now() + ttlDays * 24 * 60 * 60 * 1000) } : {}),
     ...(sourceUrl ? { sourceUrl } : {}),
     ...(provenance ? { provenance } : {}),
   });
-  // Synthetic key: never dereferenced (no object exists), but the schema requires the field.
+  // Synthetic key: never dereferenced, but the schema requires it.
   asset.key = `agent-side/${String(asset._id)}/${safeName}`;
   await asset.save();
   return { fileId: String(asset._id), filename: safeName };
 };
 
-// Reuse a fresh agent-side copy of a URL instead of re-scraping; freshness horizon matches the TTL; exact-URL match.
+// Reuse a fresh agent-side copy instead of re-scraping; exact match.
 // @see #340
 export const findFreshScrape = async (
   userId: string,

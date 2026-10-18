@@ -2,7 +2,7 @@ import { config } from '../config';
 import { assertSafeUrl } from './safeLinkService';
 import { assertPublicHost, type FetchedPage } from './webFetchService';
 
-/* Firecrawl fallback for `fetch_url`: handles JS-rendered/anti-bot pages the plain fetch rejects; key-gated; the SSRF guard is weaker than the native one (documented) since Firecrawl resolves DNS itself. */
+/* Firecrawl fallback for `fetch_url`; key-gated, Firecrawl resolves DNS. */
 // @see #340 #113
 
 const FIRECRAWL_ENDPOINT = 'https://api.firecrawl.dev/v2/scrape';
@@ -16,7 +16,7 @@ interface FirecrawlResponse {
   };
 }
 
-// Scrape a URL to full markdown; throws so the tool wrapper owns graceful degradation; null when no key is configured.
+// Scrape a URL to markdown; throws so the tool wrapper can degrade gracefully.
 // @see #82
 export const firecrawlScrape = async (url: string): Promise<FetchedPage | null> => {
   const apiKey = config.firecrawl.apiKey;

@@ -1,6 +1,6 @@
 import type { Page } from '@playwright/test';
 
-// Shared SSE mock: configurable deltas plus POST-body capture for the ZDR request contract.
+// Shared SSE mock: configurable deltas plus POST-body capture for ZDR.
 // @see #116
 
 export interface ChatStreamCapture {
@@ -8,7 +8,7 @@ export interface ChatStreamCapture {
 }
 
 const buildSse = (opts: { sessionId?: string; deltas: string[] }) => {
-  // A zdr turn gets no session back, or the client adopts it and stops replaying history.
+  // A zdr turn gets no session back, else the client adopts it.
   // @see #116
   const meta = opts.sessionId ? `data: {"sessionId":"${opts.sessionId}"}` : 'data: {}';
   const events = ['event: meta', meta, ''];

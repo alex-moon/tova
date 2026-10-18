@@ -11,7 +11,7 @@ jest.mock('../../main/services/inferenceService', () => ({
   },
 }));
 
-// The service sanity-checks the raw reply before trusting the structured object, so mocks carry both.
+// The service checks the raw reply first; mocks carry both.
 const completion = (object: unknown, raw?: string, finishReason?: string) => ({
   choices: [
     {

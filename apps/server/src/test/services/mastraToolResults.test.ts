@@ -1,7 +1,7 @@
 import { groqConnector } from '../../main/services/mastraService';
 import type { CompletionOptions } from '../../main/services/llmTypes';
 
-/* The task sequencer consumes the non-streaming connector's `toolResults`; Mastra nests the fields under `payload`, and reading the entry itself silently broke the sequencer's chips and replay. Pins the unwrap against the real Mastra shape with an entry-level fallback. */
+/* `toolResults` nests under `payload`; pin the unwrap against the shape. */
 // @see #254 #251 #196
 
 const mockGenerate = jest.fn();

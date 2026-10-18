@@ -1,4 +1,4 @@
-/* Default output-token budget for main-chat completions: without an explicit max_tokens the provider defaults to the model's whole context (leaving no room for input), so chat always sends one. */
+/* Default output budget: providers otherwise default to the whole context. */
 // @see #104
 const DEFAULT_MAX_OUTPUT_TOKENS = 8192;
 const PROMPT_TOKEN_SLACK = 512;

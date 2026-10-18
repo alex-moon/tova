@@ -54,7 +54,7 @@ const admin = (): AdminUser => ({
   updatedAt: '2026-09-11T00:00:00.000Z',
 });
 
-// Shared mock payload helper so every mock stays consistent with the { models, errors } contract.
+// Shared mock helper keeping every mock on the { models, errors } contract.
 // @see #168
 const modelsPayload = (models: Record<string, unknown>[] = [], errors: unknown[] = []) => ({
   models,
@@ -257,7 +257,7 @@ describe('AdminView models table (issue #33/#104)', () => {
     await waitFor(() => expect(listModels).toHaveBeenCalledTimes(2));
   });
 
-  // Add = search BOTH provider catalogs, review the summary, post a roster model with the resolved providers.
+  // Add = search both catalogs, review summary, post the resolved providers.
   // @see #217 #234
   it('searches both provider catalogs and adds a model with the resolved providers', async () => {
     setup();
@@ -456,7 +456,7 @@ describe('AdminView models table (issue #33/#104)', () => {
   });
 });
 
-/* Cool-off badge on the inventory rows and the per-model error diagnostics table. */
+// Cool-off badge on the inventory rows and per-model error diagnostics.
 // @see #168 #175
 describe('AdminView cool-off badge and error diagnostics (#168)', () => {
   afterEach(cleanup);
@@ -551,7 +551,7 @@ describe('AdminView cool-off badge and error diagnostics (#168)', () => {
     expect(table).toHaveTextContent('429 · rate_limit');
     expect(table).toHaveTextContent('network');
     expect(table).toHaveTextContent('7');
-    // The long error message is collapsed by default, revealed in its own row on toggle.
+    // The long error is collapsed by default, revealed in its row on toggle.
     // @see #219
     expect(table).not.toHaveTextContent('connection reset');
     fireEvent.click(

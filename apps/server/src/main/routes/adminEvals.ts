@@ -16,7 +16,7 @@ const router = express.Router();
 // @see #184
 const adminGuard = [authenticateBearerOrSession, requireRole('admin')];
 
-// ObjectId hex validated before any query, so a garbage id is a 400/404, never a driver error.
+// ObjectId hex validated pre-query: garbage id is 400/404, not a crash.
 const OBJECT_ID_PATTERN = /^[a-f0-9]{24}$/i;
 
 const evalModels = () =>
@@ -42,12 +42,12 @@ router.get('/evals/runs/:id', ...adminGuard, async (req, res) => {
   res.json(run);
 });
 
-// Manual "Run now": writes the running lease and executes in the background; the busy guard rejects with 409.
+// Manual "Run now": writes the lease, runs in background; busy is 409.
 router.post('/evals/run', ...adminGuard, async (_req, res) => {
   const options = { models: evalModels(), trigger: 'manual' as const };
   try {
     const id = await beginEvalRun(options);
-    // Best-effort LangSmith export; resolved lazily so a keyless deploy still records the rollup.
+    // Best-effort LangSmith export; a keyless deploy still records.
     const langsmithClient = await langsmithClientFromEnv(config.langsmith.apiKey);
     void executeEvalRun(id, options, { langsmithClient }).catch(() => {
       // The run settles its own `error` row; nothing to surface post-202.

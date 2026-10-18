@@ -3,7 +3,7 @@ import { groqConnector, deepinfraConnector, fireworksConnector } from './mastraS
 import { buildSystemContent } from './promptAssembly';
 import { outputTokensFor, promptCharsFrom } from './outputTokenCap';
 
-/* Direct model comparison: one prompt through the existing agent on several pairs, shared core for the CLI and the admin Compare tab so both exercise the identical path; routing is bypassed, decisions informed. */
+/* One prompt through each model; shared core for the CLI and admin tab. */
 // @see #129
 
 export interface CompareModelRef {
@@ -28,7 +28,7 @@ export interface ComparisonRun {
 
 export const MAX_COMPARE_MODELS = 6;
 
-/* The typesafe connector does not exist yet, so the entry resolves to undefined and compare surfaces an error row instead of crashing; fireworks is wired so Compare can race each roster model's backends. */
+/* A missing connector resolves to undefined and surfaces an error row. */
 // @see #151 #232 #234
 const PROVIDERS: Record<string, LlmConnector | undefined> = {
   groq: groqConnector,
@@ -37,7 +37,7 @@ const PROVIDERS: Record<string, LlmConnector | undefined> = {
   typesafe: undefined,
 };
 
-/** Runs the prompt through each model sequentially on purpose: parallel fan-out makes side-by-side comparisons misleadingly flaky, and N is small. */
+/** Sequential on purpose: parallel fan-out makes comparisons flaky. */
 export const runModelComparison = async (
   prompt: string,
   models: CompareModelRef[],

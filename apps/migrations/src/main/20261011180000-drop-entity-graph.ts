@@ -1,6 +1,6 @@
 import { MigrationInterface, Db } from 'mongo-migrate-ts';
 
-// Forwards-only drop of the retired entities/entityedges collections; the graph is unused and needs no preserving.
+// Forwards-only drop of the retired entities/entityedges collections.
 // @see #256 #251 #138 #253
 export class DropEntityGraph implements MigrationInterface {
   async up(db: Db): Promise<void> {

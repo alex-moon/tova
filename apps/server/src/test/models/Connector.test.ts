@@ -3,7 +3,7 @@ import { Connector } from '../../main/models/Connector';
 
 describe('Connector model', () => {
   beforeAll(async () => {
-    // Mongoose builds indexes asynchronously; await explicitly so the duplicate-key expectation is deterministic under CI load.
+    // Indexes build async; await so duplicate-key checks are deterministic.
     await Connector.init();
   });
 
@@ -125,7 +125,7 @@ describe('Connector model', () => {
       userId: new mongoose.Types.ObjectId(),
       name: 'bad-type',
       url: 'https://mcp.example.com',
-      // Runtime value the static enum cannot express yet; the model must still refuse it.
+      // Runtime value the enum cannot express; the model must refuse it.
       type: 'api' as unknown as 'mcp.pat',
     });
     await expect(doc.validate()).rejects.toThrow();

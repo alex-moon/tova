@@ -1,9 +1,9 @@
 import mongoose from 'mongoose';
 
-// The fixed model roster: one document per model carrying its paired provider backends.
+// Fixed model roster: one doc per model with its paired providers.
 // @see #232 #233
 
-/** Per-provider backend entry: serving backend, rolling TTFT, and an operator disable switch. */
+/** Per-provider backend: serving backend, rolling TTFT, disable switch. */
 const rosterProviderSchema = new mongoose.Schema(
   {
     provider: {
@@ -20,7 +20,7 @@ const rosterProviderSchema = new mongoose.Schema(
       type: Boolean,
       default: true,
     },
-    /** Per-provider USD/1M pricing; the winning provider's price applies, model-root prices are the fallback. */
+    /** USD/1M pricing; the winning provider's price applies. */
     // @see #235 #199
     inputPrice: {
       type: Number,
@@ -42,7 +42,7 @@ const rosterProviderSchema = new mongoose.Schema(
     ttftUpdatedAt: {
       type: Date,
     },
-    /** Cool-off timestamp set when a backend fails; expiry applied lazily on read. */
+    /** Cool-off set when a backend fails; expiry applied lazily. */
     // @see #168 #213
     disabledUntil: {
       type: Date,
@@ -53,7 +53,7 @@ const rosterProviderSchema = new mongoose.Schema(
 );
 
 const modelRosterSchema = new mongoose.Schema({
-  /** Roster display id, unique per model; the key the routing document is addressed by. */
+  /** Roster display id, unique; the routing document's key. */
   modelId: {
     type: String,
     required: true,

@@ -3,7 +3,7 @@ import axios from 'axios';
 import AssetService from '../../main/services/assets';
 import type { AssetSummary, BulkUploadFileResult } from '../../main/services/assets';
 
-// Minimal axios mock plus a stubbed XHR exposing only the onload/onprogress slots the service drives.
+// Minimal axios mock plus a stubbed XHR exposing the onload/onprogress slots.
 // @see #68
 vi.mock('axios', () => ({
   default: {
@@ -50,7 +50,7 @@ class FakeXHR {
 
 const tick = () => new Promise((r) => setTimeout(r, 0));
 
-// Drain all in-flight PUTs until no new XHRs appear; statusFor decides each PUT's outcome by send order.
+// Drain all in-flight PUTs; statusFor decides each PUT's outcome by order.
 const flushPuts = async (statusFor: (xhr: FakeXHR, i: number) => number = () => 200) => {
   let handled = 0;
   while (FakeXHR.sent.length > handled) {
@@ -73,7 +73,7 @@ const assetRow = (id: string): AssetSummary => ({
   createdAt: new Date().toISOString(),
 });
 
-// Per-test plan read by the axios mock to force presign/confirm rejections by filename, position, or batch.
+// Per-test plan read by the mock to force presign/confirm rejections.
 const plan = {
   presignRejectFilenames: new Set<string>(),
   presignFail: false,
@@ -160,7 +160,7 @@ const stubXhr = () => {
   vi.stubGlobal('XMLHttpRequest', FakeXHR);
 };
 
-// Start uploadMany, settle the presign round-trip, drain all PUTs, return the awaited result.
+// Start uploadMany, settle presign, drain all PUTs, return the result.
 const run = async (
   files: File[],
   statusFor?: (xhr: FakeXHR, i: number) => number,
@@ -226,7 +226,7 @@ describe('AssetService.uploadMany', () => {
     const files = Array.from({ length: 6 }, (_, i) => mk(`f${i}.txt`));
     const pending = AssetService.uploadMany(files);
 
-    // Pool sends its first 3 and holds; resolving one slot starts exactly one queued file.
+    // Pool sends its first 3 and holds; one resolve starts one queued file.
     await tick();
     expect(FakeXHR.sent.length).toBe(3);
     FakeXHR.sent[0].respond();

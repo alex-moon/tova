@@ -5,7 +5,7 @@ import {
   thumbnailDimensions,
 } from '../../main/services/imageThumbnail';
 
-// The pure thumbnail helper exercised against real Skia encoding/decoding; fixtures generated in-memory so there are no binary assets to drift.
+// Real Skia encode/decode; fixtures generated in-memory, no binary assets.
 // @see #208
 const pngOf = (width: number, height: number): Buffer => {
   const canvas = createCanvas(width, height);

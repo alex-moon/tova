@@ -76,7 +76,7 @@ describe('attachmentEnvelope', () => {
       };
       const block = buildAttachmentEnvelope(hostile);
       expect(block).toContain('<\\/user_content>');
-      // The raw forged tag appears only inside the trusted rule text; inside the envelope's own data section it must never appear raw.
+      // The forged tag must never appear raw in the envelope's data section.
       const dataSection = block.split('<user_content>')[1];
       expect(dataSection.split('</user_content>')[0]).not.toContain('</user_content>');
     });

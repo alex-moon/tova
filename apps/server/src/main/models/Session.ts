@@ -11,14 +11,14 @@ const sessionSchema = new mongoose.Schema(
       type: String,
       default: 'New Chat',
     },
-    /** Who owns the title: a 'user' rename may never be overwritten by a system process. */
+    /** Who owns the title: a 'user' rename is never overwritten. */
     // @see #359
     titleSource: {
       type: String,
       enum: ['system', 'user'],
       default: 'system',
     },
-    /** System-maintained one-line summary; a soft retrieval scope signal, never user-editable. */
+    /** System-maintained summary; a soft scope signal, not editable. */
     // @see #359
     subtitle: {
       type: String,
@@ -28,13 +28,13 @@ const sessionSchema = new mongoose.Schema(
       type: Date,
       default: null,
     },
-    /** Fixed at creation; incognito sessions are never persisted, so stored rows are always false. */
+    /** Incognito sessions are never persisted, so rows are always false. */
     // @see #144
     incognito: {
       type: Boolean,
       default: false,
     },
-    /** Timestamp of the most recent persisted message; drives the sidebar order. */
+    /** Most recent persisted message; drives the sidebar order. */
     // @see #226
     lastMessageAt: {
       type: Date,
@@ -48,6 +48,6 @@ const sessionSchema = new mongoose.Schema(
 
 export const Session = mongoose.model('Session', sessionSchema);
 
-// Sidebar order: the user's live chats by most recent activity, on every app load.
+// Sidebar order: live chats by most recent activity, on every load.
 // @see #377
 sessionSchema.index({ userId: 1, deletedAt: 1, lastMessageAt: -1 });

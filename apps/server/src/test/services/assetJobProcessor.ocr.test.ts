@@ -2,13 +2,13 @@ import { readFileSync } from 'fs';
 import { Types } from 'mongoose';
 import path from 'path';
 import { createCanvas } from '@napi-rs/canvas';
-import { Asset } from '../../main/models/Asset';
+import { Asset, type AssetDocument } from '../../main/models/Asset';
 import { AssetJob } from '../../main/models/AssetJob';
 import { runAssetJobTick } from '../../main/services/assetJobService';
 import { processAssetConversionJob } from '../../main/services/assetJobProcessor';
 import { OCR_MAX_INPUT_BYTES } from '../../main/services/ocr';
 
-// The OCR branch of the asset-job processor: `recognizeImage` is mocked (the real engine takes seconds per page) while every other OCR concern runs for real; the born-digital PDF path must never call the mock.
+// OCR branch: `recognizeImage` mocked; born-digital PDFs never hit the mock.
 // @see #209
 
 const mockGetObjectBuffer = jest.fn();
@@ -49,7 +49,7 @@ const seedAsset = async (opts: {
   buffer: Buffer;
   markdownStatus?: 'pending' | 'ready' | 'none';
   thumbnailStatus?: 'pending' | 'ready' | 'none';
-}): Promise<ReturnType<typeof Asset.create>> => {
+}): Promise<AssetDocument> => {
   const asset = await Asset.create({
     userId: new Types.ObjectId(),
     filename: opts.filename,
@@ -133,7 +133,7 @@ describe('OCR job end-to-end (#209)', () => {
     await runAssetJobTick(processAssetConversionJob);
 
     const stored = await Asset.findById(asset._id);
-    // Thumbnail succeeded despite the OCR failure; markdown stays pending for retry, not lost.
+    // Thumbnail succeeded despite OCR failure; markdown stays pending.
     expect(stored?.thumbnailStatus).toBe('ready');
     expect(stored?.markdownStatus).toBe('pending');
     expect(mockPutObject).toHaveBeenCalledTimes(1);

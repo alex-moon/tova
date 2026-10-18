@@ -4,7 +4,7 @@ import { ModelRoster } from '../../main/models/ModelRoster';
 import { User } from '../../main/models/User';
 import { sessionCostBreakdown } from '../../main/services/sessionCostService';
 
-/* Per-session cost breakdown: pins "unknown ≠ free" for turns predating usage logging (rendered null → —, never $0), the total-only fallback, mixed totals, and the dual-provider pricing. */
+/* Cost breakdown: pins "unknown ≠ free" and the fallback pricing. */
 // @see #224 #235
 describe('sessionCostBreakdown (#224/#235)', () => {
   const since = () => new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
@@ -29,7 +29,7 @@ describe('sessionCostBreakdown (#224/#235)', () => {
     const user = await makeUser();
     await seedModel('priced/legacy', [{ provider: 'deepinfra', inputPrice: 2, outputPrice: 4 }]);
     const session = await Session.create({ userId: user!._id, title: 'Legacy' });
-    // A pre-usage-logging assistant message: priced model, but no `usage` recorded.
+    // A pre-usage-logging message: priced model, no `usage` recorded.
     // @see #224
     await Message.create({
       sessionId: session._id,
@@ -137,7 +137,7 @@ describe('sessionCostBreakdown (#224/#235)', () => {
       { provider: 'fireworks', inputPrice: 10, outputPrice: 10 },
     ]);
     const session = await Session.create({ userId: user!._id, title: 'LegacyDual' });
-    // No `provider` on the message → model-only fallback picks the alphabetically-first fully-priced provider.
+    // No `provider` → fallback picks the first fully-priced provider.
     await Message.create({
       sessionId: session._id,
       role: 'assistant',

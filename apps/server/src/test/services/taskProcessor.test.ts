@@ -4,7 +4,7 @@ import { claimNextTask, enqueueTask } from '../../main/services/taskService';
 import { makeTaskProcessor, type TaskStepRunner } from '../../main/services/taskProcessor';
 import type { TaskStepOutcome } from '../../main/services/taskSequencer';
 
-// The worker-driven turn loop, tested with an injected step runner so no provider, roster or clock is needed; the real runner is unit-pinned in taskSequencer.test.ts.
+// The worker-driven turn loop with an injected step runner; no provider.
 // @see #254
 const blankStep = (overrides: Partial<TaskStepOutcome> = {}): TaskStepOutcome => ({
   model: 'deepseek-ai/DeepSeek-V4.1-Flash',
@@ -45,7 +45,7 @@ describe('processTaskJob sequencer loop (#254)', () => {
     expect(settled?.stepCount).toBe(2);
 
     const events = await eventsOf(task._id);
-    // seed user, assistant step 0 (tool), assistant step 1 (text), system completion.
+    // seed user, assistant step 0 (tool), assistant step 1 (text), completion.
     expect(events.map((e) => e.role)).toEqual(['user', 'assistant', 'assistant', 'system']);
     expect(events[1].tools?.[0].name).toBe('read_file');
     expect(events[2].content).toBe('all done');
@@ -127,25 +127,32 @@ describe('processTaskJob sequencer loop (#254)', () => {
     const claimed = await claimNextTask();
     // Simulate a steering instruction queued while step 0 is in flight.
     const seen: number[] = [];
-    const runStep: TaskStepRunner = jest.fn().mockImplementation(async (_t, events) => {
-      seen.push(events.filter((e) => e.role === 'user').length);
-      if (seen.length === 1) {
-        await TaskEvent.create({
-          taskId: task._id,
-          seq: (await eventsOf(task._id)).length,
-          role: 'user',
-          content: 'also do X',
-        });
-        return blankStep({
-          tools: [{ phase: 'result', name: 'read_file', label: 'r', status: 'ok' }],
-        });
-      }
-      return blankStep({ text: 'done' });
-    });
+    const runStep: TaskStepRunner = jest
+      .fn()
+      .mockImplementation(
+        async (
+          _t: import('../../main/models/Task').TaskDocument,
+          events: import('../../main/models/TaskEvent').TaskEventDocument[],
+        ) => {
+          seen.push(events.filter((e) => e.role === 'user').length);
+          if (seen.length === 1) {
+            await TaskEvent.create({
+              taskId: task._id,
+              seq: (await eventsOf(task._id)).length,
+              role: 'user',
+              content: 'also do X',
+            });
+            return blankStep({
+              tools: [{ phase: 'result', name: 'read_file', label: 'r', status: 'ok' }],
+            });
+          }
+          return blankStep({ text: 'done' });
+        },
+      );
 
     await makeTaskProcessor(runStep)(claimed!);
 
-    // Step 0 sees the seed instruction; step 1 sees the seed + the steering turn.
+    // Step 0 sees the seed; step 1 sees the seed + the steering turn.
     expect(seen).toEqual([1, 2]);
   });
 
@@ -171,7 +178,7 @@ describe('processTaskJob sequencer loop (#254)', () => {
     // Continued from step 1 — the pre-crash step was not re-run.
     expect(settled?.stepCount).toBe(2);
     const events = await eventsOf(task._id);
-    // seed user (0), pre-crash assistant (1), resumed assistant (2), completion (3).
+    // seed user (0), pre-crash assistant (1), resumed assistant (2), done (3).
     expect(events.map((e) => e.seq)).toEqual([0, 1, 2, 3]);
   });
 
@@ -181,7 +188,7 @@ describe('processTaskJob sequencer loop (#254)', () => {
     let calls = 0;
     const runStep: TaskStepRunner = jest.fn().mockImplementation(async () => {
       calls += 1;
-      // A cancel lands while the first step is in flight (the API's header write); the loop must observe it before issuing step 1 and return without settling the task to `done`.
+      // A cancel lands mid-step; the loop must observe and not settle done.
       if (calls === 1) await Task.updateOne({ _id: task._id }, { $set: { status: 'cancelled' } });
       return blankStep({
         tools: [{ phase: 'result', name: 'read_file', label: 'r', status: 'ok' }],
@@ -198,7 +205,7 @@ describe('processTaskJob sequencer loop (#254)', () => {
     const task = await enqueue();
     const claimed = await claimNextTask();
     const runStep: TaskStepRunner = jest.fn().mockImplementation(async () => {
-      // The cancel arrives while the final (text-only) step is in flight, so the loop never gets a top-of-loop re-read to observe it; the completion branch must settle-and-announce guardedly, not append "Task completed." onto a cancelled task.
+      // The cancel lands during the final step; settle-and-announce guards.
       await Task.updateOne({ _id: task._id }, { $set: { status: 'cancelled' } });
       return blankStep({ text: 'finished anyway' });
     });
@@ -226,7 +233,7 @@ describe('appendTaskEvent seq allocation (#254)', () => {
     const { appendTaskEvent } = await import('../../main/services/taskProcessor');
     // The pre-existing event the "other writer" landed at seq 0.
     await TaskEvent.create({ taskId: task._id, seq: 0, role: 'user', content: 'other' });
-    // A concurrent writer already took the next seq, so the first insert collides with the unique index: the first `create` throws the 11000, then delegates to the real implementation; the retry must re-read max-seq and land at 1.
+    // The first insert collides on the unique index; the retry re-reads seq.
     const realCreate = TaskEvent.create.bind(TaskEvent);
     let thrown = false;
     const spy = jest.spyOn(TaskEvent, 'create').mockImplementation((async (doc: unknown) => {

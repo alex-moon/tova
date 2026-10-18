@@ -63,9 +63,9 @@ type AssetDoc = {
   markdownExtracted?: string | null;
 };
 
-// Resolves the attached asset for a turn: 'none' when absent, 'invalid' for a malformed reference, 'missing' for another user's asset.
+// Attached-asset resolution: 'none'/'invalid'/'missing' verdicts.
 // @see #34
-// Turns that will actually carry pixels; mirrors buildImageTurn's conditions so routing and message assembly can never disagree.
+// Pixel-carrying turns; mirrors buildImageTurn so routing agrees.
 // @see #115
 const turnsWithImage = (asset: AssetDoc | null): boolean =>
   Boolean(
@@ -88,7 +88,7 @@ const loadAttachedAsset = async (
   return asset ? (asset as unknown as AssetDoc) : 'missing';
 };
 
-// Attached file text rides the structured attachment envelope; the persisted user message stays raw text so UI and metrics are unaffected.
+// File text rides the attachment envelope; the message stays raw text.
 const appendAssetBlock = (
   messages: { role: 'system' | 'user' | 'assistant'; content: string | MessageContentPart[] }[],
   asset: AssetDoc | null,
@@ -99,20 +99,20 @@ const appendAssetBlock = (
       filename: asset.filename,
       contentType: asset.contentType,
       size: asset.size,
-      // Markdown conversion is the fallback source when no fast-path extraction exists.
+      // Markdown conversion is the fallback when no fast path exists.
       // @see #67
       textExtracted: asset.textExtracted ?? asset.markdownExtracted ?? null,
     });
   }
 };
 
-// Image attachments become real content parts via a presigned Spaces GET URL; the envelope is skipped for images; without storage the pre-#115 degradation holds.
+// Images become content parts via presigned GET; envelope skipped.
 // @see #115
 const buildImageTurn = async (
   messages: { role: 'system' | 'user' | 'assistant'; content: string | MessageContentPart[] }[],
   asset: AssetDoc,
 ): Promise<boolean> => {
-  // `ready` matters: a pending upload has no object in Spaces yet, so the presigned GET would 404 inside the model's fetch.
+  // `ready` matters: a pending upload would 404 the model's fetch.
   if (
     !isImageContentType(asset.contentType) ||
     asset.status !== 'ready' ||
@@ -130,7 +130,7 @@ const buildImageTurn = async (
   return true;
 };
 
-// Collect web_search result URLs incrementally deduplicated; malformed entries are never fatal; per-source titles captured for the client's sources block.
+// Collect web_search URLs, deduped; titles kept for the sources block.
 // @see #16 #33
 
 const collectSourcesInto = (
@@ -173,11 +173,11 @@ const toolLabelFrom = (name: string): string =>
                 ? 'Searched connected tools'
                 : name || 'Tool run';
 
-/* Internal bookkeeping tools: a turn whose only tool was one of these must not synthesize a confirmation. */
+/* Bookkeeping tools: a turn whose only tool was one gets no confirmation. */
 // @see #195 #360
 const NON_CONFIRMING_TOOLS = new Set(['current_datetime', 'search_tools']);
 
-// Completed-tool confirmation: when a turn ran a user-facing tool but produced no text, derive a short sentence; a real answer always wins byte-for-byte.
+// Tool-only turns get a derived confirmation; a real answer always wins.
 // @see #195
 export const confirmationForToolResults = (
   results: Array<{ name: string; result: unknown }>,
@@ -223,12 +223,12 @@ const toolCallEvent = (call: NonNullable<NeutralStreamChunk['toolCall']>) => ({
   ...(typeof call.args?.query === 'string' && call.args.query ? { query: call.args.query } : {}),
 });
 
-/* Stream error surfacing: a 413/prompt-size failure is actionable (connected toolsets bloat the request), so say so instead of the generic message. */
+/* 413/prompt-size failures are actionable: say so, not the generic text. */
 // @see #77
 export const streamingErrorMessage = (err: unknown): string => {
   const message = err instanceof Error ? err.message : '';
   const statusCode = (err as { statusCode?: unknown } | null | undefined)?.statusCode;
-  // When every model cooled off after failures, the message itself is the end-user text — pass it through verbatim.
+  // All models cooled off: the message is the end-user text, verbatim.
   // @see #168
   if (err instanceof AllModelsDisabledError) return message;
   if (statusCode === 413 || /Request too large/.test(message)) {
@@ -237,7 +237,7 @@ export const streamingErrorMessage = (err: unknown): string => {
       'may have added many tools to the request. Try again shortly or disconnect some in /connectors.'
     );
   }
-  /* A 429 (or its message body, rethrown without a status code) is actionable — surface a retry suggestion. */
+  /* A 429 is actionable — surface a retry suggestion. */
   // @see #117
   if (
     statusCode === 429 ||
@@ -262,7 +262,7 @@ const domainsFrom = (urls: string[]): string[] => {
   return [...hosts].slice(0, 5);
 };
 
-// Result chip counts: per-tool counting semantics instead of a universal count-every-array heuristic; no count is not absence of success.
+// Chip counts: per-tool semantics, not a count-every-array heuristic.
 // @see #114
 const singleArrayFieldLength = (result: unknown): number | null => {
   if (typeof result !== 'object' || result === null || Array.isArray(result)) return null;
@@ -273,11 +273,11 @@ const singleArrayFieldLength = (result: unknown): number | null => {
 type ToolCallEvent = ReturnType<typeof toolCallEvent>;
 type ToolResultEvent = ReturnType<typeof toolResultEvent>;
 
-// Persisted tool entry: an unresolved call stays phase 'call' (the live throbber); a resolved entry carries the result plus the query copied from the call.
+// Unresolved calls stay phase 'call'; resolved ones carry the result.
 // @see #196
 export type PersistedToolEvent = (ToolCallEvent | ToolResultEvent) & { query?: string };
 
-/* Reconcile a tool event onto the running per-turn list: a result merges into the most recent unresolved like-named call; unmatched results append; mutates and returns the list. */
+/* Merge a result into the latest unresolved like-named call; else append. */
 // @see #196
 export const reconcileToolEvent = <T extends PersistedToolEvent>(
   list: T[],
@@ -299,14 +299,14 @@ export const reconcileToolEvent = <T extends PersistedToolEvent>(
   return list;
 };
 
-/* Paragraph-break separator: top streamed content up to exactly one blank line when text resumes after a tool use; pure for unit tests. */
+/* Paragraph-break separator: cap at one blank line after a tool use. */
 // @see #262
 export const paragraphBreakFor = (contentEnding: string): string => {
   const trailingNewlines = contentEnding.match(/\n*$/)?.[0].length ?? 0;
   return '\n\n'.slice(Math.min(trailingNewlines, 2));
 };
 
-// Exported so the task sequencer builds the same tool chips the chat path persists; optional `args` recovers the call's query from the result alone.
+// Shared with the task sequencer so both paths build identical chips.
 // @see #254 #196
 export const toolResultEvent = (result: {
   name: string;
@@ -383,7 +383,7 @@ export const toolResultEvent = (result: {
   };
 };
 
-// Session indices count only prior messages (computed before .save()), so a session's first message gets index 0; count-based indices are racy but accepted for analytical metrics.
+// Indices count only prior messages (pre-.save), first message is 0.
 // @see #17
 const buildMessageMetrics = async (
   sessionId: string,
@@ -405,7 +405,7 @@ const createSessionWithUser = async (
   return Session.create({ userId, title, incognito });
 };
 
-/* The subtitle is a soft, revisable signal — never worth turn latency: fire-and-forget after the assistant save; first after turn 2, then every 6th. */
+/* Subtitle is soft and revisable: fire-and-forget after the assistant save. */
 // @see #359
 const SUBTITLE_FIRST_TURN = 2;
 const SUBTITLE_EVERY_TURNS = 6;
@@ -433,7 +433,7 @@ const maybeReviseSubtitle = async (sessionId: string): Promise<void> => {
   }
 };
 
-/* Zero-data retention: the routes keep nothing; continuity within an ephemeral chat is the client's bounded, validated history replay. */
+/* ZDR: the routes keep nothing; continuity is the client's replay. */
 // @see #116
 const buildZdrMessages = (
   history: { role: 'user' | 'assistant'; content: string }[],
@@ -443,7 +443,7 @@ const buildZdrMessages = (
   { role: 'user', content },
 ];
 
-/* Newest-first docs; prompt-only timestamp header on user turns; provenance line on assistant turns. */
+/* Newest-first docs; timestamps on user turns, provenance on assistant. */
 // @see #261 #315 #360
 export const toolProvenanceLine = (
   tools: { phase?: string; name?: string }[] | undefined,
@@ -461,7 +461,7 @@ export const toolProvenanceLine = (
   return `\n\n[tools used: ${summary}]`;
 };
 
-/* Imitation guard: the system-added provenance line must never enter model output — an imitated line is fabricated provenance (the timestamp-leak precedent). */
+/* Imitation guard: the provenance line must never enter model output. */
 // @see #261 #315 #360
 export const stripProvenanceLines = (content: string): string =>
   content
@@ -470,17 +470,17 @@ export const stripProvenanceLines = (content: string): string =>
     .join('\n')
     .trimEnd();
 
-/* Turn-boundary self-correction: appended to the current user turn's prompt when the previous assistant message was flagged for fabricated tool results; never persisted or shown. */
+/* Retry note for a flagged prior attempt: not persisted, never shown. */
 // @see #371
 export const HONESTY_CORRECTION_NOTE =
   '\n\n[Note: your previous reply described tool results that were never executed — no tools ran in that turn. If this task needs tools, call them for real; otherwise state plainly that you have not run anything.]';
 
-/* In-request retry note: the flagged attempt is discarded pre-persist, so the model must know the user saw none of it and answer fresh. */
+/* Retry note: the flagged attempt was discarded, so answer fresh. */
 // @see #381
 export const HONESTY_RETRY_NOTE =
   '\n\n[Note: an earlier attempt at this reply was discarded before the user saw any of it — it described tool results that were never executed. The user knows nothing about that attempt: do not apologize for it or refer to it. Answer the request fresh — if it needs tools, actually call them; otherwise state plainly that you have not run anything.]';
 
-/* Appends the retry note to the turn's (newest) user message, string or multimodal. */
+/* Appends the retry note to the turn's newest user message. */
 // @see #381
 export const appendHonestyRetryNote = (
   messages: { role: string; content: string | MessageContentPart[] }[],
@@ -504,7 +504,7 @@ export const messagesFromPersistedHistory = (
   }[],
   timezone?: string | null,
 ): { role: 'system' | 'user' | 'assistant'; content: string | MessageContentPart[] }[] => {
-  // Newest assistant message only: older flagged turns already had their correction chance.
+  // Newest assistant only: older flags had their correction chance.
   // @see #371
   const flaggedNewest = history.find((m) => m.role === 'assistant')?.honesty?.flagged === true;
   return history.reverse().map((m, i, arr) => {
@@ -513,7 +513,7 @@ export const messagesFromPersistedHistory = (
         ? `${timestampHeader(m.timestamp, history[i - 1]?.timestamp, timezone)}\n`
         : '';
     const provenance = m.role === 'assistant' ? toolProvenanceLine(m.tools) : '';
-    // The current turn is the newest user message; it is where the correction rides.
+    // The correction rides on the newest user message: this turn.
     const correction =
       flaggedNewest && m.role === 'user' && i === arr.length - 1 ? HONESTY_CORRECTION_NOTE : '';
     return {
@@ -523,7 +523,7 @@ export const messagesFromPersistedHistory = (
   });
 };
 
-/* Newest-kept history window for the 1M-token roster windows; the 413/failover path bounds outliers. */
+/* Newest-kept window for 1M-token rosters; failover bounds outliers. */
 // @see #360
 export const HISTORY_MAX_MESSAGES = 200;
 export const HISTORY_MAX_CHARS = 400_000;
@@ -538,7 +538,7 @@ export const windowedHistory = <T extends { content?: string | null }>(docs: T[]
   return docs.slice(0, Math.min(count, HISTORY_MAX_MESSAGES));
 };
 
-// Throwaway chat attachments: the row and its Spaces object go once consumed; cleanup never throws.
+// Throwaway attachments: row and object go once consumed; safe cleanup.
 // @see #116
 const cleanupEphemeralAsset = async (asset: AssetDoc | null | 'invalid' | 'missing') => {
   if (!asset || asset === 'invalid' || asset === 'missing' || !asset.ephemeral) return;
@@ -557,7 +557,7 @@ const parseZdrHistory = (
   return parsed.success ? { ok: true, value: parsed.data } : { ok: false };
 };
 
-// Persist the user turn with its metrics; trivially neutral prompts record llmSkipReason 'trivial' so skips are distinguishable from failures; the gate is computed once.
+// Persist the user turn with metrics; neutral prompts record 'trivial'.
 const saveUserMessageWithMetrics = async (
   userId: string,
   sessionId: string,
@@ -577,11 +577,11 @@ const saveUserMessageWithMetrics = async (
   });
   await userMessage.save();
 
-  // Record the session's most recent message time so the list orders by activity; awaited so sidebar order cannot lag the turn.
+  // Record last-message time for sidebar order; awaited to avoid lag.
   // @see #226
   await Session.updateOne({ _id: sessionId }, { $set: { lastMessageAt: userMessage.timestamp } });
 
-  // Embed the saved turn for semantic retrieval: fire-and-forget, flag-gated, never affects the turn; only reached on non-ZDR paths.
+  // Embed the saved turn for retrieval: fire-and-forget, flag-gated.
   // @see #294
   enqueueWorkspaceEmbedding({
     userId,
@@ -598,7 +598,7 @@ const saveUserMessageWithMetrics = async (
   return userMessage;
 };
 
-/* The workspace-memory read: unconditional on text turns (the relevance bar is the rerank, not an aux vote), never throws; excludes the current turn/asset so the turn can't be its own "past work". */
+/* Workspace read: unconditional on text turns, never throws, self-excluded. */
 // @see #253 #310 #305
 const workspaceBlockFor = async (
   prompt: string,
@@ -619,7 +619,7 @@ const workspaceBlockFor = async (
   );
 };
 
-/* Read completed background tasks into the turn's context as a queued write; reads only — the caller marks notified after the assistant message persists, preferring a wider exactly-once race over losing a completion. */
+/* Drain completed tasks into context; marked notified only after persist. */
 // @see #255
 const taskCompletionBlockFor = async (
   userId: string,
@@ -646,7 +646,7 @@ const taskCompletionBlockFor = async (
 
 // Chat endpoint (non-streaming, preserved for compatibility)
 router.post('/', authenticate, async (req: AuthRequest, res) => {
-  // Held outside try so the catch can erase a throwaway attachment on any failure path.
+  // Outside try so the catch can erase a throwaway attachment.
   // @see #116
   let attachedAsset: AssetDoc | null = null;
   try {
@@ -675,13 +675,13 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
       return res.status(404).json({ message: 'User not found' });
     }
 
-    // Abort the provider call when the client disconnects before the response lands.
+    // Abort the provider call if the client disconnects pre-response.
     const abortController = new AbortController();
     req.on('close', () => {
       if (!res.writableEnded) abortController.abort();
     });
 
-    /* One decision owns the turn's retention shape: reject / replay / persist; the effective per-chat flag comes from the stored session or the request intent. */
+    /* Retention shape: reject / replay / persist, one decision. */
     // @see #144 #116
     const accountIncognito = Boolean(userDoc.settings?.zdr);
     const bodyIntent: boolean | undefined =
@@ -690,7 +690,7 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
     let turnDecision;
     if (sessionId) {
       if (accountIncognito) {
-        // Incognito accounts cannot continue a saved chat: the reject fires before any session read.
+        // Incognito cannot continue a saved chat: reject before reads.
         // @see #116 #144
         turnDecision = decideTurn({ incognito: true, sessionId });
       } else {
@@ -723,21 +723,21 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
     };
 
     if (turnDecision.persistWithHistoryReplay) {
-      // Zero-data retention: nothing about the turn is written; continuity is the client's replayed history payload.
+      // ZDR: nothing is written; continuity is the replayed history.
       // @see #116
       const zdrHistory = parseZdrHistory(req.body.history);
       if (!zdrHistory.ok) {
-        // The turn is rejected before it consumes anything, so the throwaway attachment does not outlive the request.
+        // The turn is rejected pre-consumption; nothing outlives it.
         // @see #116
         await cleanupIfEphemeral();
         return res.status(400).json({ message: 'Invalid chat history' });
       }
       await ensureUserLocation(userDoc, req.ip);
-      /* A ZDR turn may read the workspace (read-only) — it writes nothing, so it is absent from the corpus by construction. */
+      /* ZDR turns may read the workspace but never write. */
       // @see #253
       const zdrWorkspaceBlock = await workspaceBlockFor(content, userId as string);
 
-      /* ZDR continuity is the client replay; the prompt is assembled once and raced. */
+      /* ZDR continuity is the client replay; prompt assembled once. */
       // @see #232
       const zdrMessages = (): ReturnType<typeof buildZdrMessages> => {
         const turnMessages = buildZdrMessages(zdrHistory.value, content);
@@ -748,7 +748,7 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
         appendAssetBlock(turnMessages, attachedAsset);
         return turnMessages;
       };
-      // ZDR turns never carry image parts; an empty roster surfaces as the all-disabled error.
+      // ZDR turns never carry image parts; empty roster = all-disabled.
       const zdrPrePick = await pickRosterRoute();
       if (!zdrPrePick) throw new AllModelsDisabledError();
       const raced = await routeAndComplete({
@@ -778,7 +778,7 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
       });
     }
 
-    // On the sessionId path the session is already loaded above; new persisted chats are never incognito (an incognito turn returns in the replay branch), so the flag is pinned false explicitly.
+    // SessionId paths are loaded above; new chats are never incognito.
     // @see #116
     if (!session) {
       session = await createSessionWithUser(userId as string, content, {
@@ -793,28 +793,28 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
       attachedAsset,
     );
 
-    // Image turns route vision-first only when storage is available; otherwise the turn degrades to the legacy text envelope.
+    // Image turns route vision-first only when storage is configured.
     // @see #115
     const hasImage = turnsWithImage(attachedAsset);
 
-    // Get chat history for context — the window includes the just-saved current turn, reversing to oldest-first for the prompt.
+    // History window includes the saved turn; reversed to oldest-first.
     // @see #360
     const history = windowedHistory(
       await Message.find({ sessionId: session._id })
         .sort({ timestamp: -1 })
         .limit(HISTORY_MAX_MESSAGES),
     );
-    // Coarse geolocation: awaited so this turn's prompt can include the country; the service never throws.
+    // Geolocation awaited so the prompt can include the country.
     // @see #50
     await ensureUserLocation(userDoc, req.ip);
-    /* The workspace-memory block is retrieved unconditionally — no aux vote; image turns skip the read. */
+    /* Workspace block retrieved unconditionally; image turns skip it. */
     // @see #253 #310
     const workspaceBlock = await workspaceBlockFor(content, userId as string, {
       skipWorkspace: hasImage,
       excludeMessageId: String(userMessage._id),
       excludeAssetId: attachedAsset ? String(attachedAsset._id) : undefined,
     });
-    // The retrieval outcome + hit count ride the main call's trace metadata so the admin Traces tab can show them per turn.
+    // Retrieval outcome rides trace metadata for the admin Traces tab.
     // @see #308
     const workspaceMetadata = workspaceTraceMetadata(
       workspaceGateFrom(workspaceBlock, hasImage),
@@ -839,11 +839,11 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
       return next;
     };
 
-    /* The turn races the fixed roster; the prompt is assembled once and the budget sized against the pre-race pick's window; an empty roster surfaces as the all-disabled error. */
+    /* Race the fixed roster; budget sized to the pre-race pick's window. */
     // @see #232 #310
     const rosterPrePick = await pickRosterRoute();
     if (!rosterPrePick) throw new AllModelsDisabledError();
-    // Completed background tasks ride this turn's context (queued write); marked notified only after the assistant message persists.
+    // Drained tasks ride the context; notified after the assistant saves.
     // @see #255
     const taskCompletion = await taskCompletionBlockFor(userId as string, String(session!._id));
     const turnMessages = await withSystemAndAsset(
@@ -860,7 +860,7 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
       max_tokens: outputTokensFor(rosterPrePick.contextLength, promptCharsFrom(turnMessages)),
       userId,
       abortSignal: abortController.signal,
-      // Tool-execution session (distinct from the trace) so generate_file can stamp provenance.
+      // Tool-execution session so generate_file can stamp provenance.
       // @see #252
       sessionId: String(session!._id),
       trace: { sessionId: String(session!._id), metadata: workspaceMetadata },
@@ -868,11 +868,11 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
     const routingResult: RosterRoutingResult = raced.routing;
     const chatCompletion = raced.outcome.result.completion;
 
-    // Empty provider responses persist as '' (fail-visibility); the UI shows the placeholder.
+    // Empty responses persist as '' (fail-visibility); UI shows a hint.
     // @see #4
     const rawAssistantContent = chatCompletion.choices[0]?.message?.content ?? '';
     const toolResults = chatCompletion.toolResults ?? [];
-    // A tool-only turn ends with a synthesized confirmation instead of silence; provenance markers are scrubbed before persist.
+    // Tool-only turns end with a synthesized confirmation, not silence.
     // @see #195 #360
     const assistantContent = stripProvenanceLines(
       rawAssistantContent.trim()
@@ -912,7 +912,7 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
     await assistantMessage.save();
     void maybeReviseSubtitle(String(session!._id));
 
-    // Honesty guard: fire-and-forget post-turn check — with zero executed tools, a claim-shaped reply gets flagged; the flag lands on a later read.
+    // Honesty guard: fire-and-forget; zero tools + claim shape = flagged.
     // @see #371
     if (assistantContent.trim() && toolEvents.length === 0) {
       void reviewAssistantTurn(
@@ -923,7 +923,7 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
       );
     }
 
-    // The completion notification has landed in the chat stream, so mark the drained tasks notified; a failure is swallowed (at-least-once re-surface next turn).
+    // Mark drained tasks notified; failures are swallowed (at-least-once).
     // @see #255
     await markNotified(taskCompletion.taskIds).catch((err) =>
       console.error('Task mark-notified error:', redactForLog(err)),
@@ -936,10 +936,10 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
     });
   } catch (err) {
     console.error('Chat error:', redactForLog(err));
-    // A ZDR turn failing mid-flight still erases its throwaway attachment; cleanup is a no-op for durable assets.
+    // ZDR failures still erase throwaway attachments; no-op otherwise.
     // @see #116
     await cleanupEphemeralAsset(attachedAsset);
-    // Every model cooled off after failures → the friendly message becomes the primary error text.
+    // All models cooled off: the friendly message is the primary error.
     // @see #168
     const allDisabled = err instanceof AllModelsDisabledError;
     res.status(allDisabled ? 503 : 500).json({
@@ -951,7 +951,7 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
 
 // Chat streaming endpoint (SSE)
 router.post('/stream', authenticate, async (req: AuthRequest, res) => {
-  // Held outside try so the catch can erase a throwaway attachment on any failure path; cleanup is a no-op for durable assets.
+  // Outside try so the catch can erase a throwaway attachment.
   // @see #116
   let attachedAsset: AssetDoc | null = null;
   try {
@@ -979,7 +979,7 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
     if (!streamUserDoc) {
       return res.status(404).json({ message: 'User not found' });
     }
-    /* One decision owns the turn's retention shape, mirroring the non-streaming route: stored session flag for sessionId turns, request intent otherwise. */
+    /* Retention shape: stored flag for sessionId turns, intent otherwise. */
     // @see #144 #116
     const accountIncognito = Boolean(streamUserDoc.settings?.zdr);
     const bodyIntent: boolean | undefined =
@@ -988,7 +988,7 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
     let turnDecision;
     if (sessionId) {
       if (accountIncognito) {
-        // Incognito accounts cannot continue a saved chat: the reject fires before any session read.
+        // Incognito cannot continue a saved chat: reject before reads.
         // @see #116 #144
         turnDecision = decideTurn({ incognito: true, sessionId });
       } else {
@@ -1023,7 +1023,7 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
 
     let zdrHistory: { role: 'user' | 'assistant'; content: string }[] = [];
     if (zdr) {
-      // Zero-data retention: see the non-streaming route's rationale — no session is created, and saved chats cannot be continued.
+      // ZDR: no session is created and saved chats cannot be continued.
       // @see #116
       const parsedHistory = parseZdrHistory(req.body.history);
       if (!parsedHistory.ok) {
@@ -1041,20 +1041,20 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
       content: string | MessageContentPart[];
     }[];
 
-    // Image turns: gate on both the content type and a configured presign path; the image part replaces the filename envelope.
+    // Image turns: gate on content type AND a configured presign path.
     // @see #115
     const hasImage = turnsWithImage(attachedAsset);
 
-    /* The pre-race pick supplies the contextLength for the output budget and the pre-race `meta`; the flat race decides the winner from live TTFT. */
+    /* Pre-race pick sizes the budget; the flat race decides the winner. */
     // @see #232 #316
     const rosterRoute = await pickRosterRoute();
     if (!rosterRoute) throw new AllModelsDisabledError();
 
     await ensureUserLocation(streamUserDoc, req.ip);
-    /* The workspace-memory block is retrieved unconditionally — no aux vote; ZDR turns may read (read-only) but never write; image turns skip the read. */
+    /* Workspace block read unconditionally; ZDR read-only, images skip. */
     // @see #253 #310
     let streamWorkspaceBlock = '';
-    // Completed background tasks for this session, drained into the persisted turn's context (empty on ZDR); marked notified only once the assistant message lands.
+    // Drained tasks ride the persisted turn; notified once the save lands.
     // @see #255
     let streamTaskBlock = '';
     let streamTaskIds: TaskDocument['_id'][] = [];
@@ -1073,7 +1073,7 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
         attachedAsset,
       );
 
-      // Get chat history — the window includes the just-saved current turn, reversing to oldest-first for the prompt.
+      // History window includes the saved turn; reversed to oldest-first.
       // @see #360
       const history = windowedHistory(
         await Message.find({ sessionId: session!._id })
@@ -1112,7 +1112,7 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
 
     messages.unshift({
       role: 'system',
-      // Persisted turns carry per-message timestamps (no date line); ZDR turns are untimestamped and keep the date line as their only clock.
+      // Persisted turns carry per-message timestamps; ZDR keeps the date.
       // @see #261
       content: buildSystemContent(
         streamUserDoc,
@@ -1142,25 +1142,25 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
     let sources: string[] = [];
     const titles = new Map<string, string>();
 
-    // Every executed tool of the turn, in order, so a text-less turn can still be confirmed.
+    // Every executed tool in order, so a text-less turn can confirm.
     // @see #195
     const toolResults: { name: string; result: unknown }[] = [];
 
-    // Reconciled tool events for this turn: the deduped, persisted companion the 'done' message and a refresh read from.
+    // Reconciled tool events: the persisted companion of the 'done' msg.
     // @see #196
     const toolEvents: PersistedToolEvent[] = [];
 
-    // Token usage for the turn, surfaced by the connector as a single trailing `usage` chunk.
+    // Token usage, surfaced by the connector as one trailing chunk.
     // @see #224
     let usage: { inputTokens?: number; outputTokens?: number; totalTokens?: number } | undefined;
 
-    // Abort the provider call when the client disconnects mid-stream; 'close' also fires after a normal end, so only abort when unfinished.
+    // Abort on client disconnect; 'close' also fires after normal end.
     const abortController = new AbortController();
     req.on('close', () => {
       if (!res.writableEnded) abortController.abort();
     });
 
-    // Attempt-scoped state is reset between honesty retries so nothing from a discarded attempt survives.
+    // Attempt state resets between retries so nothing leaks across.
     // @see #381
     const resetAttemptState = () => {
       assistantContent = '';
@@ -1171,7 +1171,7 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
       usage = undefined;
     };
 
-    /* Honesty auto-retry: at most one restart. A flagged first attempt is wiped (never persisted, never `done`) and the turn re-runs with the retry note; only the final attempt's verdict reaches persistence. */
+    /* Honesty auto-retry: one restart; a flagged attempt is wiped. */
     // @see #381
     const HONESTY_MAX_ATTEMPTS = 2;
     let attempt = 0;
@@ -1190,13 +1190,13 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
           appendHonestyRetryNote(messages);
         }
         sendEvent('meta', {
-          // ZDR: no sessionId is minted — nothing the replay could point at exists.
+          // ZDR: no sessionId is minted; nothing to point at.
           // @see #116
           ...(zdr ? {} : { sessionId: session!._id }),
           routing: routingResult,
         });
 
-        /* The flat race fires every live combo and keeps the first token's stream; losers record TTFT and abort; the winner replaces the pre-race pick for persistence. */
+        /* Flat race keeps the first token's stream; losers record TTFT. */
         // @see #232 #316
         const raced = await routeAndStream({
           messages,
@@ -1205,7 +1205,7 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
           max_tokens: outputTokensFor(routingResult.contextLength, promptCharsFrom(messages)),
           userId,
           abortSignal: abortController.signal,
-          // Attach the chat session to this turn's trace (ZDR turns have no session to join); the workspace retrieval outcome rides the trace metadata.
+          // Attach the session to the trace; ZDR turns have none.
           // @see #224 #308
           ...(zdr
             ? {}
@@ -1218,18 +1218,18 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
                   ),
                 },
               }),
-          // The tool-execution session rides outside the trace guard (ZDR turns have no durable session to attribute to).
+          // The tool session rides outside the trace guard (no ZDR row).
           // @see #252
           ...(zdr ? {} : { sessionId: String(session!._id) }),
         });
         routingResult = raced.routing;
         const stream = raced.outcome.result.stream;
 
-        /* A tool use between two text runs must render as a paragraph break: arm on tool-after-text, consume on the next delta. */
+        /* Tool between text runs: render as a paragraph break. */
         // @see #262
         let toolRanSinceText = false;
         for await (const chunk of stream) {
-          // The connector may emit one trailing usage chunk; capture it without forwarding it as a delta/tool event.
+          // Capture the trailing usage chunk without forwarding it.
           // @see #224
           if (chunk.usage) {
             usage = chunk.usage;
@@ -1249,13 +1249,13 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
             collectSourcesInto(sources, chunk.toolResult.result, titles);
             toolResults.push(chunk.toolResult);
           }
-          // Arm the break on any tool chunk that follows already-streamed text.
+          // Arm the break on a tool chunk after streamed text.
           if ((chunk.toolCall || chunk.toolResult) && assistantContent.length > 0) {
             toolRanSinceText = true;
           }
           const delta = chunk.delta;
           if (delta) {
-            // Consume the pending break, topping up to exactly one blank line so the two text runs render as separate paragraphs.
+            // Top up to exactly one blank line between text runs.
             // @see #262
             const emitted = (toolRanSinceText ? paragraphBreakFor(assistantContent) : '') + delta;
             toolRanSinceText = false;
@@ -1264,7 +1264,7 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
           }
         }
 
-        // A tool-only turn emits a short confirmation as a normal `delta`; an errored turn returned already and is never confirmed.
+        // Tool-only turns emit a confirmation delta; errored turns don't.
         // @see #195
         if (!assistantContent.trim()) {
           const confirmation = confirmationForToolResults(toolResults);
@@ -1273,13 +1273,13 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
             sendEvent('delta', { content: confirmation });
           }
         }
-        // Provenance markers are scrubbed before persist — already-streamed deltas can't be recalled, but history must not reinforce the pattern.
+        // Provenance markers scrubbed pre-persist; history stays clean.
         // @see #360
         assistantContent = stripProvenanceLines(assistantContent);
 
         if (zdr) break;
 
-        // Honesty guard, pre-persist so a flagged attempt can be restarted before `done` lands. A guard-eligible final attempt records its verdict (clean or flagged); a flagged mid attempt restarts.
+        // Guard pre-persist: flagged mid attempts restart before `done`.
         // @see #371 #381
         if (assistantContent.trim() && toolEvents.length === 0) {
           honestyVerdict = await classifyAssistantTurn(assistantContent, [], String(session!._id));
@@ -1303,16 +1303,16 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
       return;
     }
 
-    // Save assistant message. An empty stream still persists content: '' (fail-visibility); ZDR turns save nothing.
+    // Empty streams persist '' (fail-visibility); ZDR saves nothing.
     // @see #4 #116
     const sourceTitleList = sources
       .filter((url) => titles.has(url))
       .map((url) => ({ url, title: titles.get(url) as string }));
     if (zdr) {
-      // Reconciled tool summaries are deliberately not attached to ZDR `done` payloads — nothing is written; live 'tool' frames still stream.
+      // ZDR `done` payloads carry no tool summaries; nothing written.
       // @see #196
       if (!isTriviallyNeutral(content) && assistantContent) {
-        // Suggestions are still generated and delivered without ever being written anywhere.
+        // Suggestions are generated and delivered, never written.
         const suggestions = await generateFollowups(content, assistantContent);
         sendEvent('done', {
           complete: true,
@@ -1354,7 +1354,7 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
       // Persist the reconciled tool summaries so chips survive a refresh.
       // @see #196
       ...(toolEvents.length > 0 ? { tools: toolEvents } : {}),
-      // The in-loop guard verdict lands here instead of a post-`done` write, so the persisted turn is complete in one save.
+      // The in-loop verdict lands in the same save as the turn.
       // @see #381
       ...(honestyVerdict
         ? {
@@ -1370,13 +1370,13 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
     await assistantMessage.save();
     void maybeReviseSubtitle(String(session!._id));
 
-    // The notification landed with this persisted turn — mark drained tasks notified now; a marking failure is swallowed (at-least-once).
+    // Mark drained tasks notified; failures are swallowed (at-least-once).
     // @see #255
     await markNotified(streamTaskIds).catch((err) =>
       console.error('Task mark-notified error:', redactForLog(err)),
     );
 
-    // Follow-up suggestions from the cheap model; skipped for trivially neutral prompts and empty turns so the 'trivial' skip gate stays consistent.
+    // Suggestions from the cheap model; skipped for trivial turns.
     // @see #33
     if (!isTriviallyNeutral(content) && assistantContent) {
       const suggestions = await generateFollowups(content, assistantContent, String(session!._id));
@@ -1392,7 +1392,7 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
       ...(sourceTitleList.length > 0 ? { sourceTitles: sourceTitleList } : {}),
     });
 
-    // Honesty surface: only an exhausted auto-retry reaches the user as a flag — the badge + manual retry are the last resort.
+    // Only an exhausted retry reaches the user as a flag.
     // @see #371 #381
     if (honestyVerdict?.flagged) {
       sendEvent('honesty', { flagged: true, reason: honestyVerdict.reason });
@@ -1400,11 +1400,11 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
     res.end();
   } catch (err) {
     console.error('Chat stream error:', redactForLog(err));
-    // A ZDR turn failing before or during streaming still erases its throwaway attachment; no-op for durable assets.
+    // ZDR stream failures still erase throwaway attachments.
     // @see #116
     await cleanupEphemeralAsset(attachedAsset);
     if (!res.headersSent) {
-      // Every model cooled off before the stream opened → the friendly message is the primary text; the client surfaces it on 503.
+      // Cooloff before the stream: friendly message is primary, on 503.
       // @see #168
       const allDisabled = err instanceof AllModelsDisabledError;
       res.status(allDisabled ? 503 : 500).json({
@@ -1433,7 +1433,7 @@ router.delete('/sessions/:id', authenticate, async (req: AuthRequest, res) => {
   }
 });
 
-// Rename a chat: the title is user-owned from the first rename on (`titleSource: 'user'`) — no auto-overwrite once touched.
+// Rename: the title is user-owned from the first rename on.
 // @see #359
 router.patch('/sessions/:id', authenticate, async (req: AuthRequest, res) => {
   try {
@@ -1459,7 +1459,7 @@ router.patch('/sessions/:id', authenticate, async (req: AuthRequest, res) => {
 router.get('/sessions', authenticate, async (req: AuthRequest, res) => {
   try {
     const userId = req.user?.id;
-    // Order by most recent message; null lastMessageAt sorts last, createdAt breaks ties.
+    // Order by last message; null sorts last, createdAt breaks ties.
     // @see #226
     const sessions = await Session.find({ userId, deletedAt: null }).sort({
       lastMessageAt: -1,

@@ -7,7 +7,7 @@ import { feedbackValueSchema } from '../validation';
 
 const router = express.Router();
 
-// The Message document carries no userId, so ownership is enforced through the message's session.
+// Message has no userId; ownership goes through the message's session.
 const loadOwnedMessage = async (req: AuthRequest, res: express.Response) => {
   const { messageId } = req.params;
   if (!isValidObjectId(messageId)) {
@@ -48,7 +48,7 @@ router.post('/:messageId/feedback', authenticate, async (req: AuthRequest, res) 
     const message = await loadOwnedMessage(req, res);
     if (!message) return;
 
-    // The vote stays a user feature; only the tier-era feedback tally is gone — no stats collections touched.
+    // The vote stays a user feature; no stats collections touched.
     // @see #233
     const updated = await Message.findOneAndUpdate(
       { _id: message._id },

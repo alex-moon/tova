@@ -13,7 +13,7 @@ const messageSchema = new mongoose.Schema({
   },
   content: {
     type: String,
-    /** Empty provider responses persist as ''; only undefined/null is invalid. */
+    /** Empty provider responses persist as ''; undefined/null invalid. */
     // @see #4
     validate: {
       validator: (v: unknown) => v !== null && v !== undefined,
@@ -23,18 +23,18 @@ const messageSchema = new mongoose.Schema({
   modelName: {
     type: String,
   },
-  /** Provider that served this turn's completion, shown in the message footer. */
+  /** Provider that served this turn, shown in the message footer. */
   // @see #117
   provider: {
     type: String,
   },
-  /** Provenance URLs from web_search runs, attached to the assistant message only when non-empty. */
+  /** Provenance URLs from web_search runs, attached only when present. */
   // @see #16
   sources: {
     type: [String],
     default: undefined,
   },
-  /** Per-source page titles keyed by URL, so the client renders real titles on reload. */
+  /** Per-source page titles keyed by URL, rendered on reload. */
   // @see #33
   sourceTitles: {
     type: [
@@ -46,13 +46,13 @@ const messageSchema = new mongoose.Schema({
     ],
     default: undefined,
   },
-  /** Generated follow-up questions for the composer chips; absent when skipped or failed. */
+  /** Follow-up questions for the composer chips; absent if skipped. */
   // @see #33
   suggestions: {
     type: [String],
     default: undefined,
   },
-  /** Reconciled tool-use summaries so the chat can render tool chips after a refresh. */
+  /** Reconciled tool summaries so tool chips survive a refresh. */
   // @see #196
   tools: {
     type: [
@@ -97,7 +97,7 @@ const messageSchema = new mongoose.Schema({
       default: null,
     },
   },
-  /** Honesty-guard verdict: flagged turns claimed tool results that never executed; absent = unassessed. */
+  /** Honesty-guard verdict: claimed tool results never executed. */
   // @see #371
   honesty: {
     type: {
@@ -140,6 +140,6 @@ const messageSchema = new mongoose.Schema({
 
 export const Message = mongoose.model('Message', messageSchema);
 
-// Every turn reads history newest-first and counts prior messages; without this the per-turn reads are collection scans.
+// Turns read history newest-first and count prior messages per turn.
 // @see #377
 messageSchema.index({ sessionId: 1, timestamp: -1 });

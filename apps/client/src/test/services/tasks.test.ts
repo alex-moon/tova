@@ -6,7 +6,7 @@ import TaskService, {
   type TaskSummary,
 } from '../../main/services/tasks';
 
-// Pins the request contract against the server tasks route, plus the error normalisation the UI depends on.
+// Pins the request contract against the server tasks route plus error mapping.
 // @see #254 #251
 vi.mock('axios', () => ({
   default: {

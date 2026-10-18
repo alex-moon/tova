@@ -70,7 +70,7 @@ describe('TaskEvent model (#254)', () => {
       ],
     });
     const doc = await TaskEvent.findOne({ taskId: id, seq: 1 });
-    // The raw result must survive persistence — without it the next step's history replay loses the tool output.
+    // The raw result must survive persistence for the next step's replay.
     expect(doc?.tools?.[0].result).toEqual({ results: [{ url: 'https://example.com' }] });
     expect(doc?.tools?.[0].query).toBe('groq pricing');
   });

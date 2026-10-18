@@ -1,6 +1,6 @@
 import { redactForLog, redactString } from '../../main/services/logRedaction';
 
-// Log redaction: chat-route errors can embed prompt content and extraction errors carry user text; everything argued to console.* must come through here.
+// Everything argued to console.* must come through redaction here.
 // @see #145
 describe('redactString', () => {
   it('keeps short structural tokens verbatim', () => {
@@ -51,7 +51,7 @@ describe('redactString', () => {
     expect(out).not.toContain('user chat message');
   });
 
-  // fs error messages quote the exact file; redacting the path cost the outage diagnosis. Paths are code-controlled, so narrowly path-shaped quoted segments survive — including the 64+-char catch-all.
+  // fs errors quote the exact file; the path must survive redaction.
   // @see #358
   it('keeps quoted filesystem paths from fs error messages', () => {
     const enoent =
@@ -121,7 +121,7 @@ describe('redactForLog', () => {
     const out = redactForLog({
       message: 'upstream echoed {"content":"user secret note content again"} to us',
     });
-    // Serialized structured bodies are treated as a whole: over-redaction is the deliberate conservative direction.
+    // Serialized structured bodies are treated as a whole, over-redacting.
     // @see #145
     expect(out).not.toContain('user secret note');
   });
@@ -152,7 +152,7 @@ describe('redactForLog', () => {
   });
 
   it('keeps the full fs error message with its path, as prod logs it (#358)', () => {
-    // The exact shape Loki showed for the outage, minus the redaction: doubled "Error:", quoted absolute path — the whole line must stay readable.
+    // Loki's exact outage shape; the whole line must stay readable.
     // @see #358
     const err = new Error(
       "Error: ENOENT: no such file or directory, open '/app/assets/tessdata/eng.traineddata.gz'",

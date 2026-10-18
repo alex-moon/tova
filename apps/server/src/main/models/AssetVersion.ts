@@ -1,6 +1,6 @@
 import mongoose from 'mongoose';
 
-// Immutable append-only snapshots of generated-asset content; the `Asset` row always mirrors the latest.
+// Immutable append-only snapshots; the `Asset` row mirrors the latest.
 // @see #325
 const assetVersionSchema = new mongoose.Schema(
   {

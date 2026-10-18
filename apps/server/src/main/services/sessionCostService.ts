@@ -3,7 +3,7 @@ import { Session } from '../models/Session';
 import { estimateCostUsd, loadPriceIndex, priceFor } from './traceStatsCost';
 import type { AdminSessionCostRow, AdminSessionsCostPayload } from '@tova/shared';
 
-/* Per-session cost breakdown from our own Message rows; token/cost totals cover only turns carrying usage (post-#224), priced per (model, provider) with unknown ≠ free. */
+/* Per-session cost breakdown from Message rows; unknown usage is not free. */
 // @see #224 #199 #235
 
 export interface SessionCostOptions {
@@ -18,7 +18,7 @@ const DEFAULT_LIMIT = 50;
 const finiteOr = (value: unknown): number =>
   typeof value === 'number' && Number.isFinite(value) ? value : 0;
 
-// One row per (session, model, provider): grouping server-side keeps the result bounded; the provider dimension prices dual-provider models correctly.
+// One row per (session, model, provider); provider prices dual models right.
 // @see #235
 interface GroupedRow {
   _id: { sessionId: unknown; modelName?: string | null; provider?: string | null };
@@ -36,7 +36,7 @@ export const sessionCostBreakdown = async (
 ): Promise<AdminSessionsCostPayload> => {
   const limit = options.limit ?? DEFAULT_LIMIT;
 
-  // Grouping covers both roles; `usageCount` counts assistant rows with usage so a legacy model is not priced at $0 (unknown ≠ free).
+  // usageCount counts rows with usage so a legacy model is not $0.
   // @see #224
   const grouped = await Message.aggregate<GroupedRow>([
     { $match: { timestamp: { $gte: options.since } } },
@@ -68,7 +68,7 @@ export const sessionCostBreakdown = async (
     },
   ]);
 
-  // One roster read prices every group, with a model-only fallback for legacy turns.
+  // One roster read prices every group; model-only fallback for legacy.
   const priceIndex = await loadPriceIndex();
 
   interface Acc {
@@ -103,13 +103,13 @@ export const sessionCostBreakdown = async (
 
     let inputTokens = finiteOr(row.inputTokens);
     const outputTokens = finiteOr(row.outputTokens);
-    // A provider that reported only a total with no split must not be priced at $0; treat the total as input.
+    // A total-only report must not price at $0; treat as input.
     if (inputTokens === 0 && outputTokens === 0) {
       inputTokens = finiteOr(row.totalTokens);
     }
     acc.inputTokens += inputTokens;
     acc.outputTokens += outputTokens;
-    // A group with no logged usage has no known spend: unlogged must not misreport as free.
+    // No logged usage = no known spend; unlogged is not free.
     const cost =
       row.usageCount > 0
         ? estimateCostUsd(

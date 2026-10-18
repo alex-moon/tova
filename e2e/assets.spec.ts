@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 
-// Upload + attach flow; the Spaces PUT is network-mocked, exercising presign → PUT → confirm.
+// Upload + attach flow; Spaces PUT network-mocked (presign → PUT → confirm).
 // @see #49 #34 #197
 
 const email = process.env.E2E_EMAIL ?? 'formsatz@gmail.com';
@@ -78,7 +78,7 @@ const mockUploadPipeline = async (
 };
 
 test.beforeEach(async ({ page }) => {
-  // Page-level auth mock so the spec never touches the real persisted admin user.
+  // Page-level auth mock; never touches the real persisted admin user.
   const e2eUser = { id: 'e2e-user-1', email, role: 'user' };
   await page.route('**/api/auth/me', (route) =>
     route.fulfill({
@@ -115,7 +115,7 @@ test('composer attach: upload runs presign → PUT → confirm and attaches', as
 
 test('library: failed upload shows an error and never enables attach', async ({ page }) => {
   await mockAssetApi(page, [pendingAsset]);
-  // Mirrors the live bug: PUT succeeds but confirm fails, leaving the asset pending.
+  // Mirrors the live bug: PUT succeeds but confirm fails.
   await page.route('**/api/assets/presign', (route) => route.fulfill({ status: 500 }));
   await page.getByRole('button', { name: 'Attach a file' }).click();
   await page

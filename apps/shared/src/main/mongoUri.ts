@@ -1,4 +1,4 @@
-// Mongo connection string assembly shared by server, migrations, and scripts: MONGODB_URL passes through verbatim; the dev fallback assembles from host/password.
+// Mongo URI assembly: MONGODB_URL passes through verbatim, else dev fallback.
 // @see #257 #138
 export const buildMongoUri = (
   dbName?: string,

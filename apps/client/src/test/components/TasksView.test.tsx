@@ -81,7 +81,7 @@ describe('TasksView (#254 client)', () => {
     expect(TaskService.get).toHaveBeenCalledWith('t1');
   });
 
-  // Regression: the detail loader must key on the task id — a header-keyed loader would re-fire on its own response and loop unbounded.
+  // Regression: the loader keys on the id, or its own response re-fires.
   // @see #254
   it('does not re-fetch in a loop when each response is a fresh object', async () => {
     vi.mocked(TaskService.list).mockResolvedValue({ tasks: [task()], nextCursor: null });
@@ -102,7 +102,7 @@ describe('TasksView (#254 client)', () => {
     await waitFor(() => expect(screen.getByTestId('task-library-empty')).toBeInTheDocument());
   });
 
-  // Cursor-paged list: an appended page must survive the while-active silent poll instead of being wiped.
+  // Cursor-paged list: an appended page must survive the silent poll.
   it('loads the next page and keeps it across the active poll', async () => {
     vi.useFakeTimers();
     try {
@@ -180,7 +180,7 @@ describe('TasksView (#254 client)', () => {
     expect(screen.getAllByTestId('task-status-done').length).toBeGreaterThan(0);
   });
 
-  // A 404 mid-poll must surface the failure and stop polling, not stay frozen on a stale frame.
+  // A 404 mid-poll must surface and stop polling, not freeze on stale data.
   it('surfaces a 404 on a silent poll and stops polling', async () => {
     vi.mocked(TaskService.list).mockResolvedValue({ tasks: [task()], nextCursor: null });
     vi.mocked(TaskService.get).mockResolvedValueOnce(detail());
@@ -216,7 +216,7 @@ describe('TasksView (#254 client)', () => {
     }
   });
 
-  // Cancel is observed server-side at the next step boundary; keep the button pending until terminal.
+  // Cancel is observed server-side at the next step boundary; stay pending.
   it('keeps a pending cancel state until the task is terminal', async () => {
     vi.mocked(TaskService.list).mockResolvedValue({ tasks: [task()], nextCursor: null });
     vi.mocked(TaskService.get).mockResolvedValue(detail());

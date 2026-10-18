@@ -12,7 +12,7 @@ jest.mock('../../main/services/workspaceStorage', () => ({
   },
 }));
 
-/* Tool-level tests for #369: filename resolution on read/edit, and duplicate generated filenames versioning the same row instead of duplicating it. */
+/* Tool-level tests for #369: filename resolution and dup versioning. */
 // @see #369
 
 const asCtx = (userId?: string, sessionId?: string) => {

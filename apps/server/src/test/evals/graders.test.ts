@@ -22,7 +22,7 @@ describe('#158 text assertions (deterministic refusal / hallucination slice)', (
     "I couldn't find any relevant documents about that topic.",
     'No sources were found for that question.',
     "I'm unable to find any information about Gladiator windscreen repairs.",
-    // Hardened variants (critic pass): phrasings the original 4-pattern set missed.
+    // Hardened variants (critic pass): phrasings the first set missed.
     'There are no documents about that.',
     'I have no information about Gladiator windscreen repairs.',
     'No windscreen information available in your files.',
@@ -56,7 +56,7 @@ describe('#158 text assertions (deterministic refusal / hallucination slice)', (
 
   it('NO_SOURCES_PATTERNS are the single source of truth for the case assertion', () => {
     expect(new RegExp(noSourcesPattern, 'i')).toBeInstanceOf(RegExp);
-    // the golden refusal wording from the case test resolves through the joined pattern
+    // The golden refusal wording resolves through the joined pattern.
     expect(
       new RegExp(noSourcesPattern, 'i').test(
         'There are no sources available about windscreen cover in your files.',
@@ -330,7 +330,7 @@ describe('assertRun', () => {
 
   it('answer_contains survives no-break spaces and casing (#159 live run)', () => {
     const run_ = run([{ name: 'read_file' }], {
-      // Narrow no-break spaces (U+202F) inside the phone number, "Page" capitalised.
+      // Narrow no-break spaces (U+202F), "Page" capitalised.
       answer: 'The number is **+44\u202f20\u202f7946\u202f0812**, listed on **Page\u202f58**.',
     });
     const results = assertRun(run_, [
@@ -397,7 +397,7 @@ describe('aggregateScore', () => {
   const a = { type: 'tool_called', tool: 'web_search' } as const;
 
   it('scores an assertion-free run as a vacuous pass', () => {
-    // Cases must always declare assertions; this records that the aggregator never crashes on an empty list.
+    // The aggregator never crashes on an empty assertion list.
     expect(aggregateScore(assertRun(run([]), []))).toBe('pass');
   });
 

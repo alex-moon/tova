@@ -2,7 +2,7 @@ import { redactForLog } from './logRedaction';
 
 import { SafeBrowsingCache } from '../models/SafeBrowsingCache';
 
-// Safe Browsing link checker for `fetch_url`: every fetched URL is screened before the request; API errors fail OPEN but loudly; both Google key env names supported.
+// Safe Browsing link checker for fetch_url; API errors fail open but loudly.
 // @see #120 #16
 
 const ENDPOINT = 'https://safebrowsing.googleapis.com/v4/threatMatches:find';
@@ -71,7 +71,7 @@ const cacheKey = (url: string): string | null => {
   }
 };
 
-// A cache-read failure falls through to the live API call instead of reporting the URL unchecked.
+// A cache-read failure falls through to the live API call.
 const readCache = async (host: string): Promise<string | null> => {
   try {
     const entry = await SafeBrowsingCache.findOne({ host }).lean<{ verdict?: string }>();
@@ -94,7 +94,7 @@ const writeCache = async (host: string, verdict: 'safe' | 'unsafe'): Promise<voi
   }
 };
 
-// Screens a URL, never throws: only API errors report safe=true unchecked (fail-open); a cache outage never green-lights a flagged URL.
+// Screens a URL, never throws; only API errors report unchecked (fail-open).
 export const checkUrl = async (url: string): Promise<SafeLinkVerdict> => {
   const apiKey = safeBrowsingApiKey();
   if (!apiKey) return { enabled: false, safe: true, source: 'disabled' };
@@ -117,7 +117,7 @@ export const checkUrl = async (url: string): Promise<SafeLinkVerdict> => {
   }
 };
 
-// Throws a caller-renderable error when the URL is known-unsafe; a no-op when disabled or safe/unchecked.
+// Throws a caller-renderable error when the URL is known-unsafe.
 export const assertSafeUrl = async (url: string): Promise<void> => {
   const verdict = await checkUrl(url);
   if (!verdict.enabled || verdict.safe) return;

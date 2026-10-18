@@ -1,4 +1,4 @@
-/* Per-completion tool degradation: a failed tool short-circuits to a degraded result on retries within the same completion; null-context call-sites no-op. */
+/* Tool degradation: a failed tool degrades retries within a completion. */
 // @see #82
 
 const TOOL_FAILURES_KEY = 'toolFailures';
@@ -21,7 +21,7 @@ const failureMapOn = (ctx: unknown): Map<string, string> | undefined => {
   return fresh;
 };
 
-// Mark a tool failed for this completion; the reason is remembered so retries report the original failure.
+// Mark a tool failed for this completion; retries report the reason.
 export const markToolFailed = (ctx: unknown, toolId: string, reason?: string): void => {
   const map = failureMapOn(ctx);
   if (!map) return;
@@ -35,7 +35,7 @@ export const toolIsFailed = (ctx: unknown, toolId: string): boolean =>
 export const toolDegradeReason = (ctx: unknown, toolId: string): string =>
   failureMapOn(ctx)?.get(toolId) || 'reason unknown';
 
-// Bound any error to a short single-line reason; errors can carry long multi-line payloads.
+// Bound any error to a short single-line reason.
 const REASON_MAX_CHARS = 255;
 
 export const reasonFrom = (error: unknown): string => {
@@ -48,7 +48,7 @@ export const reasonFrom = (error: unknown): string => {
     : collapsed;
 };
 
-// The tool result is the only channel to tell the model the tool failed; auth-flavoured failures add the re-connect pointer.
+// Tool result is the only channel to tell the model of the failure.
 // @see #82 #333
 const AUTH_FLAVORED =
   /401|403|invalid_token|unauthorized|needs-reauth|not connected|unreachable|fetch failed|ECONNREFUSED/i;

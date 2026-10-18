@@ -3,7 +3,7 @@ export type Theme = 'light' | 'dark';
 export const STORAGE_KEY = 'tova-theme';
 export const COOKIE_NAME = 'tova-theme';
 
-/** Standalone twin: apps/client/index.html carries a verbatim inline copy of this logic (keep in sync). */
+/** Twin of the inline copy in index.html; keep in sync. */
 const readLocalStorage = (): string | null => {
   try {
     return localStorage.getItem(STORAGE_KEY);
@@ -49,7 +49,7 @@ export function readStoredTheme(): Theme | undefined {
   return stored === 'light' || stored === 'dark' ? stored : undefined;
 }
 
-/** The user record wins over device storage once known and mirrors into both stores; no saved preference keeps the device behaviour. */
+/** The user record wins over device storage and mirrors into both stores. */
 // @see #53
 export function applyUserTheme(userTheme: string | undefined | null): void {
   if (userTheme === 'light' || userTheme === 'dark') {

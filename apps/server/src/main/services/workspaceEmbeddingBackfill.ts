@@ -1,6 +1,6 @@
 import { embeddingTextHash, truncateForEmbedding, withEmbedTitle } from './workspaceEmbeddingText';
 
-/* Pure planning for the embedding backfill: the script owns Mongo/provider calls, this owns WHAT to embed so the idempotency rule (re-embed only when textHash differs) is unit-testable. */
+/* Pure backfill planning: this owns WHAT to embed; the script owns IO. */
 // @see #294
 
 export type EmbeddableKind = 'chat' | 'file' | 'task';
@@ -9,7 +9,7 @@ export interface EmbeddableSlice {
   kind: EmbeddableKind;
   id: string;
   text: string;
-  // The slice title, folded into the embed text through `withEmbedTitle` — the same fold the ingest path applies, so hashed text stays byte-identical between the paths.
+  // Title folded via withEmbedTitle, same as ingest, keeping hashes equal.
   // @see #309
   title?: string;
 }
@@ -40,7 +40,7 @@ export interface ExistingEmbeddingRow {
   textHash: string;
 }
 
-/* Build the `embeddingKey -> textHash` map the skip rule consults; `model` defaults per-row so a projection omitting the redundant field still keys correctly. */
+/* The embeddingKey -> textHash map the skip rule consults. */
 // @see #294
 export const existingEmbeddingHashes = (
   rows: ExistingEmbeddingRow[],
@@ -53,7 +53,7 @@ export const existingEmbeddingHashes = (
     ]),
   );
 
-/* Decide which slices need a (re-)embed: skipped when the current hash matches; text-less slices counted separately, never embedded. */
+/* Skip when the current hash matches; text-less slices count, never embed. */
 export const planEmbeddingWrites = (
   slices: EmbeddableSlice[],
   existingHashes: ReadonlyMap<string, string>,
@@ -65,7 +65,7 @@ export const planEmbeddingWrites = (
   let truncated = 0;
 
   for (const slice of slices) {
-    // Normalise so both paths hash and embed byte-identical text (otherwise the skip rule re-embeds everything the ingest path wrote); file slices fold their title in first via the same shared helper.
+    // Hash byte-identical text across paths or the skip rule misfires.
     // @see #309
     const { text, truncated: wasTruncated } = truncateForEmbedding(
       withEmbedTitle(slice.title, slice.text.trim()),

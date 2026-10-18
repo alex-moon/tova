@@ -1,6 +1,6 @@
 import { config } from '../config';
 
-/* Cross-encoder reranker via DeepInfra; scores are relevance probabilities in [0,1]; never throws — every failure degrades to null (no rerank). */
+/* Cross-encoder reranker via DeepInfra; failures degrade to null. */
 // @see #305
 
 const DEEPINFRA_BASE = 'https://api.deepinfra.com/v1';
@@ -18,7 +18,7 @@ interface RerankBody {
   scores?: unknown;
 }
 
-/* Grade one query against a batch of documents; returns one relevance probability per document, or null when the stage cannot run. */
+/* Grade one query against documents; null when the stage cannot run. */
 export const rerankQuery = async (
   query: string,
   documents: string[],

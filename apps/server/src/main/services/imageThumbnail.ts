@@ -1,6 +1,6 @@
 import { createCanvas, loadImage } from '@napi-rs/canvas';
 
-// Image thumbnails: the viewer must not pull a 15 MB original into the detail pane, so the worker derives one bounded thumbnail; @napi-rs/canvas decodes the allowlisted types and re-encodes PNG.
+// Thumbnails: the viewer must not pull a 15 MB original into the pane.
 // @see #208
 
 // Longest-edge cap; aspect ratio preserved, never upscaled.
@@ -39,7 +39,7 @@ const withTimeout = <T>(promise: Promise<T>, ms: number): Promise<T> =>
     }),
   ]);
 
-// Decode and return a bounded PNG thumbnail; throws so the job loop records a reason; the asset itself is unaffected.
+// Decode and return a bounded PNG thumbnail; throws on failure.
 export const makeThumbnail = async (
   buffer: Buffer,
   maxEdge = THUMBNAIL_MAX_EDGE,
@@ -54,7 +54,7 @@ export const makeThumbnail = async (
       const { width, height } = thumbnailDimensions(image.width, image.height, maxEdge);
       const canvas = createCanvas(width, height);
       const ctx = canvas.getContext('2d');
-      // Flatten alpha onto white: a transparent source on a dark pane reads as a hole; a white mat keeps GIF/PNG/screenshots legible.
+      // Flatten alpha onto white; a transparent source would read as a hole.
       ctx.fillStyle = '#ffffff';
       ctx.fillRect(0, 0, width, height);
       ctx.drawImage(image, 0, 0, width, height);

@@ -1,6 +1,6 @@
 import { installProcessSafetyNet, isTesseractWorkerError } from '../main/index';
 
-/* Pins the safety net's classification and listener wiring: contain tesseract worker errors (thrown from inside Worker message dispatch), exit otherwise. */
+/* Safety net: contain tesseract worker errors, exit otherwise. */
 // @see #248 #358
 
 const tesseractShapedError = (): Error =>
@@ -39,7 +39,9 @@ describe('installProcessSafetyNet', () => {
   const lastListener = (
     event: 'uncaughtException' | 'unhandledRejection',
   ): ((err: unknown) => void) => {
-    const listeners = process.listeners(event);
+    const listeners = process.listeners(
+      event as unknown as Parameters<typeof process.listeners>[0],
+    );
     return listeners.at(-1) as unknown as (err: unknown) => void;
   };
 

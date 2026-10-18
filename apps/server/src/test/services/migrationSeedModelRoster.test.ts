@@ -3,7 +3,7 @@ import mongoose from 'mongoose';
 import { SeedModelRoster } from '../../../../migrations/src/main/20261008000000-seed-model-roster';
 import { ROSTER_SEED } from '../../main/services/rosterConfig';
 
-/* The roster migration must upgrade a deployed database to the fixed model roster (app-level seeding only recovers an empty collection); the migration rows are pinned to ROSTER_SEED so the two sources cannot drift. */
+/* The migration must upgrade a deployed db to the fixed roster seed. */
 // @see #232
 describe('migration SeedModelRoster', () => {
   let db: Db;
@@ -37,7 +37,7 @@ describe('migration SeedModelRoster', () => {
       ]),
     );
 
-    // MiniMax is out of the roster and must not be seeded into a fresh database — it would otherwise join every turn's race as eligible.
+    // MiniMax is out of the roster; it must not be seeded into a fresh db.
     // @see #316
     const minimax = await db
       .collection('modelrosters')
@@ -73,7 +73,7 @@ describe('migration SeedModelRoster', () => {
         outputPrice?: number;
       }>;
       for (const p of seed.providers) {
-        // Per-provider identity AND price must match the seed: one model has two providers whose prices differ, so drift here would misprice every raced turn.
+        // Per-provider identity AND price must match the seed.
         // @see #235
         expect(rows).toEqual(
           expect.arrayContaining([

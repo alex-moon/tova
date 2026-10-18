@@ -1,9 +1,9 @@
 import { ROSTER_SEED, type RosterProvider } from './rosterConfig';
 
-/* Tier-free remnant of the tier-era config service: provider-level plumbing (names, the all-disabled error, the overload TTL) shared by the racing runtime and the app. */
+/* Provider-level plumbing shared by the racing runtime and the app. */
 // @see #233 #232
 
-/* Thrown when every model that could serve a request is cooling off; the end-user text stays actionable. */
+/* Thrown when every model that could serve a request is cooling off. */
 // @see #168
 export const ALL_MODELS_DISABLED_MESSAGE =
   'All models are temporarily unavailable after failures — they cool off for a few hours and are retried automatically. Please try again later.';
@@ -15,7 +15,7 @@ export class AllModelsDisabledError extends Error {
   }
 }
 
-/* Endpoint overload is a short saturation, unlike the 6h cool-off for a broken endpoint; its own short env-tunable TTL returns a healthy backend quickly. */
+/* Overload is a short saturation, unlike a broken endpoint's 6h cool-off. */
 // @see #213
 export const overloadCoolOffMinutes = (): number => {
   const raw = process.env.MODEL_OVERLOAD_COOL_OFF_MINUTES;
@@ -23,7 +23,7 @@ export const overloadCoolOffMinutes = (): number => {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : 5;
 };
 
-/* Bridge: the eval sweep universe seeds from the model roster rather than the deleted tier entries. */
+/* Bridge: the eval sweep universe seeds from the model roster. */
 // @see #233 #158 #236
 export interface SweepModelRef {
   provider: RosterProvider;

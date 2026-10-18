@@ -1,4 +1,4 @@
-// Shared chrome: the admin and profile views mount full-page with this link back to the chat.
+// Shared chrome: admin and profile views mount full-page with this link back.
 // @see #95
 const BackToChatLink = () => (
   <div className="absolute right-4 top-0 z-10 flex h-14 flex-col items-start justify-center gap-2">

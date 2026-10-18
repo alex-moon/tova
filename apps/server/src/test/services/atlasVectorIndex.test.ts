@@ -6,7 +6,7 @@ import {
   type SearchIndexManager,
 } from '../../main/services/atlasVectorIndex';
 
-/* The Atlas index definition + URL guard + existence check; the ANN query itself is Atlas-only and exercised live, not here. */
+/* Atlas index definition + URL guard + existence check; ANN is live-only. */
 // @see #294
 describe('vectorIndexDefinition (#294)', () => {
   it('declares a cosine vector field at the configured dimension plus model/userId filters', () => {

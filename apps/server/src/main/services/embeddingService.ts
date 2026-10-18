@@ -1,6 +1,6 @@
 import { config } from '../config';
 
-/* Embedding client for workspace-memory retrieval via DeepInfra's OpenAI-compatible endpoint: a deliberate thin-fetch exception to the library-first rule; BGE wants an instruction prefix on queries only. */
+/* DeepInfra embeddings for workspace memory; BGE prefixes queries only. */
 // @see #294
 
 const DEEPINFRA_BASE = 'https://api.deepinfra.com/v1';
@@ -14,11 +14,11 @@ export interface EmbedOptions {
   kind?: EmbedKind;
   // Injectable for tests; defaults to global `fetch`.
   fetchImpl?: typeof fetch;
-  // Overrides the config default, which only bounds the one-text query embed; a backfill batch needs far longer.
+  // Overrides the config default; backfill batches need far longer.
   timeoutMs?: number;
 }
 
-// Thrown when the provider key is absent: a configuration fault the caller must not treat as "no results".
+// Thrown when the provider key is absent — a config fault, not "no results".
 export class EmbeddingConfigError extends Error {
   constructor(message: string) {
     super(message);
@@ -48,7 +48,7 @@ const orderRows = (rows: EmbeddingRow[]): EmbeddingRow[] => {
   return [...rows].sort((a, b) => (a.index as number) - (b.index as number));
 };
 
-/* Embed a batch of texts: one validated vector per input in order (a dim mismatch means config divergence); over-context texts fall back to per-text halving until they fit. */
+/* Embed a batch: one validated vector per input, in order. */
 export const EMBED_MIN_CHARS = 32;
 
 export class ContextLengthError extends EmbeddingResponseError {}

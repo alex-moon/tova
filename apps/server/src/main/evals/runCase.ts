@@ -1,4 +1,4 @@
-/** One graded eval run: streams the agent's answer through a connector entry point. */
+/** One graded eval run: streams the answer through a connector entry. */
 // @see #158 #16
 import type { EvalCase } from './cases';
 import type { EvalRun } from './types';
@@ -9,7 +9,7 @@ type CreateStreaming = (
   options: CompletionOptions,
 ) => Promise<AsyncIterable<NeutralStreamChunk> | null | undefined>;
 
-/** Streams the answer, records tool calls in order, and accumulates `chunk.delta` into `finalText`. */
+/** Streams the answer, records tool calls, accumulates `finalText`. */
 // @see #158
 export const runCase = async (
   createStreamingCompletion: CreateStreaming,
@@ -31,7 +31,7 @@ export const runCase = async (
   const generateCall = toolCalls.find((call) => call.name === 'generate_file');
   const generatedContent =
     typeof generateCall?.args?.content === 'string' ? generateCall.args.content : undefined;
-  // Capture generated files so cases can grade answers and files, not just tool calls.
+  // Capture generated files so cases can grade files, not just tool calls.
   // @see #159
   const generatedFiles = toolCalls
     .filter((call) => call.name === 'generate_file' && typeof call.args?.content === 'string')

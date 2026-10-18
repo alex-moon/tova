@@ -21,7 +21,7 @@ import {
 } from './rosterConfig';
 import { overloadCoolOffMinutes } from './modelConfigService';
 
-/* Hedged provider racing: fire every live (model, provider) combo, keep the first stream to yield a token; losers abort after recording TTFT. */
+/* Hedged racing: fire every combo, keep the first stream to yield a token. */
 // @see #232 #316
 
 /** A stream plus the fact that its first chunk has already been read. */
@@ -40,18 +40,18 @@ export interface RaceOutcome {
   attempts: number;
 }
 
-/* Routing metadata shaped like the tier router's RoutingResult, so chat routes can persist and size budgets without knowing which path produced it. */
+/* Routing metadata shaped like the tier router's RoutingResult. */
 export interface RosterRoutingResult {
   model: string;
   provider: LlmProvider;
   reason: string;
   contextLength?: number;
-  // Structurally compatible with the tier RoutingResult so chat routes can read either path; racing never calls the guard classifier.
+  // Compatible with the tier RoutingResult; chat routes read either path.
   // @see #214
   filesLikely?: boolean;
 }
 
-/* Hard cap on completion-path attempts (mirrors modelFailover's MAX_ATTEMPTS); only the non-streaming path walks models. */
+/* Hard cap on attempts (mirrors modelFailover's MAX_ATTEMPTS). */
 export const MAX_RACE_ATTEMPTS = 6;
 
 export interface RaceDeps {
@@ -69,11 +69,11 @@ export interface RaceDeps {
 
 const nowFromDeps = (deps: RaceDeps): (() => number) => deps.now ?? (() => Date.now());
 
-/* Resolve the roster (injected or live); helper exists so the cycle-avoiding dynamic import is written once. */
+/* Roster read (injected or live); the dynamic import is written once. */
 const readRoster = async (deps: RaceDeps): Promise<RosterModel[]> =>
   deps.roster ?? (await import('./rosterConfig')).listRoster();
 
-/* Combine two abort signals; manual fallback for runtimes without `AbortSignal.any`. */
+/* Combine two abort signals; fallback when AbortSignal.any is absent. */
 const combineSignals = (a: AbortSignal, b: AbortSignal): AbortSignal => {
   const anyFn = (AbortSignal as unknown as { any?: (signals: AbortSignal[]) => AbortSignal }).any;
   if (typeof anyFn === 'function') return anyFn([a, b]);
@@ -87,7 +87,7 @@ const combineSignals = (a: AbortSignal, b: AbortSignal): AbortSignal => {
   return merged.signal;
 };
 
-/* Tag a raced provider call's trace (identifiers only, caller tags preserved); the winner is not tagged — the span exists before the outcome is known. */
+/* Tag a raced call's trace (identifiers only, caller tags preserved). */
 // @see #237
 const raceTrace = (base: TraceContext | undefined, provider: LlmProvider): TraceContext => ({
   ...(base?.sessionId ? { sessionId: base.sessionId } : {}),
@@ -109,7 +109,7 @@ type FirstResult =
     }
   | { kind: 'failed'; model: RosterModel; provider: RosterProviderRef; error: unknown };
 
-/* Wrap an already-advanced iterator into a stream that yields the buffered first chunk, then continues the SAME iterator. */
+/* Stream an already-advanced iterator: buffered first chunk, then continue. */
 const resumeStream = (first: Chunk, iterator: StreamIterator): NeutralChunkStream => {
   return (async function* (): AsyncGenerator<Chunk, void, unknown> {
     yield first;
@@ -121,7 +121,7 @@ const resumeStream = (first: Chunk, iterator: StreamIterator): NeutralChunkStrea
   })();
 };
 
-/* Race every (model, provider) combo: losers abort themselves after recording TTFT; a model whose every combo failed cools off in the background; client disconnect is preserved. */
+/* Race every combo; losers abort after TTFT; dead models cool off. */
 // @see #316
 const raceCombos = async (
   combos: { model: RosterModel; ref: RosterProviderRef }[],
@@ -133,7 +133,7 @@ const raceCombos = async (
   const clock = nowFromDeps(deps);
   const started = clock();
   const clientSignal = options.abortSignal;
-  // Sync check-and-set: the first combo to yield a chunk claims the win; late arrivals abort themselves.
+  // First combo to yield a chunk claims the win; late ones abort.
   let winnerClaimed = false;
   const controllers = combos.map(() => new AbortController());
 
@@ -163,7 +163,7 @@ const raceCombos = async (
     }
   });
 
-  /* Cool off every combo of a model whose attempts ALL failed with a provider fault; aborts, prompt-size and rate-limit errors never cool a model off. */
+  /* Cool off models whose attempts ALL failed with a provider fault. */
   const coolOffDeadModels = async (settled: FirstResult[]): Promise<void> => {
     const disable = deps.disable ?? disableRosterProvider;
     await Promise.all(
@@ -180,11 +180,11 @@ const raceCombos = async (
 
   const winner = await firstWin(attempts);
   if (winner) {
-    // Bookkeeping without blocking the turn: dead-model cool-offs once every attempt settles.
+    // Dead-model cool-offs run once every attempt settles, non-blocking.
     void Promise.all(attempts)
       .then(coolOffDeadModels)
       .catch(() => {});
-    // Abort losers still in flight when the winner's stream completes — a hung provider must not outlive the turn.
+    // Abort losers when the winner's stream completes; don't outlive turn.
     const loserControllers = controllers.filter((_, i) => combos[i].ref !== winner.provider);
     const winnerStream = resumeStream(winner.first, winner.iterator);
     return {
@@ -201,7 +201,7 @@ const raceCombos = async (
     };
   }
 
-  // No combo won: cool off dead models, then surface the most actionable error (non-abort first, else the first abort).
+  // No combo won: cool off dead models, surface the most actionable error.
   const settled = await Promise.all(attempts);
   await coolOffDeadModels(settled);
   const errors = settled
@@ -211,7 +211,7 @@ const raceCombos = async (
   throw failed ?? new Error('All providers failed');
 };
 
-/* Cool off every combo of a model whose attempts all failed with provider faults (not aborts, prompt-size or rate limits). */
+/* Dead-model detection: all combos failed with provider faults. */
 const candidatesToCool = (
   combos: { model: RosterModel; ref: RosterProviderRef }[],
   settled: FirstResult[],
@@ -241,7 +241,7 @@ const candidatesToCool = (
   return dead;
 };
 
-/* Resolve with the first winner, or null when ALL attempts fail; never hangs, never resolves a failure as a win. */
+/* First winner, or null when ALL attempts fail; never hangs. */
 const firstWin = (
   attempts: Promise<FirstResult>[],
 ): Promise<Extract<FirstResult, { kind: 'won' }> | null> => {
@@ -275,7 +275,7 @@ const firstWin = (
   });
 };
 
-/* Run one streaming turn through the roster: every combo in flight, first token wins; no fallback loop. */
+/* One streaming turn through the roster; first token wins. */
 export const raceRoster = async (
   options: Omit<CompletionOptions, 'provider' | 'model'>,
   deps: RaceDeps = {},
@@ -288,7 +288,7 @@ export const raceRoster = async (
   return { result: raced, attempts: 1 };
 };
 
-/* Non-streaming race: the first completion to RESOLVE wins; no first-token signal exists, so TTFT is not recorded — completion latency is, so the weighted pick keeps a signal. */
+/* Non-streaming race: first completion to RESOLVE wins; latency recorded. */
 export interface CompletionOutcome {
   result: {
     model: RosterModel;
@@ -317,7 +317,7 @@ export const raceRosterCompletion = async (
     tried.add(primary.modelId);
     const clock = nowFromDeps(deps);
     const started = clock();
-    // First resolver wins; slower providers settle in the background (cannot be cancelled, only ignored).
+    // First resolver wins; slower ones settle in the background, ignored.
     const attempts = primary.providers.map(
       async (p): Promise<CompletionOutcome['result'] | { failed: unknown }> => {
         try {
@@ -353,7 +353,7 @@ export const raceRosterCompletion = async (
   throw lastError ?? new Error('No roster models available');
 };
 
-/* Resolve with the first provider completion to SUCCEED, or null when every provider failed (mirrors firstWin). */
+/* First provider completion to SUCCEED, else null (mirrors firstWin). */
 const firstCompletionWin = (
   attempts: Promise<CompletionOutcome['result'] | { failed: unknown }>[],
 ): Promise<CompletionOutcome['result'] | null> => {
@@ -386,7 +386,7 @@ const firstCompletionWin = (
   });
 };
 
-/* Metadata-only weighted primary pick so routes can assemble the prompt and send `meta` before the stream starts; the actual race happens in raceRoster. */
+/* Metadata-only pick so routes can send meta before the stream starts. */
 export const pickRosterRoute = async (deps: RaceDeps = {}): Promise<RosterRoutingResult | null> => {
   const roster = await readRoster(deps);
   const primary = pickPrimary(rosterModelsForTurn(roster));
@@ -400,7 +400,7 @@ export const pickRosterRoute = async (deps: RaceDeps = {}): Promise<RosterRoutin
   };
 };
 
-/* Streaming entry point for the chat routes: race the roster and return the winning stream plus routing metadata. */
+/* Streaming entry for chat routes: race the roster, return the winner. */
 export const routeAndStream = async (
   options: Omit<CompletionOptions, 'provider' | 'model'>,
   deps: RaceDeps = {},
@@ -418,7 +418,7 @@ export const routeAndStream = async (
   };
 };
 
-/* Non-streaming entry point for the chat routes, parallel to routeAndStream so both paths shape persistence identically. */
+/* Non-streaming entry, parallel to routeAndStream for identical shapes. */
 export const routeAndComplete = async (
   options: Omit<CompletionOptions, 'provider' | 'model'>,
   deps: RaceDeps = {},

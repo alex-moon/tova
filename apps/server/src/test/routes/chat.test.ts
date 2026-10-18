@@ -14,9 +14,13 @@ jest.mock('@mastra/core/agent', () => {
   };
 });
 
-const MOCK_ROUTING = { model: 'mock-small-model', reason: 'roster-pick' };
+const MOCK_ROUTING = {
+  model: 'mock-small-model',
+  provider: 'deepinfra',
+  reason: 'roster-pick',
+};
 
-// Routing now runs through the fixed-roster racing path; the mock delegates the actual provider call back through the real inferenceService so the mocked Mastra Agent stays the observable dispatch boundary.
+// Routing uses the fixed-roster racing path; the mock stays the seam.
 // @see #233
 const mockRacingState: { routing: typeof MOCK_ROUTING | null; error?: unknown } = {
   routing: MOCK_ROUTING,
@@ -59,14 +63,14 @@ jest.mock('../../main/services/titleService', () => ({
   generateChatTitle: jest.fn().mockResolvedValue('Hello'),
 }));
 
-// Subtitle revision is fire-and-forget on a turn cadence; the mock lets the cadence describe assert when it fires without any aux call.
+// Subtitle revision is fire-and-forget on a turn cadence; mock it here.
 // @see #359
 const mockRevise = jest.fn();
 jest.mock('../../main/services/subtitleService', () => ({
   reviseSessionSubtitle: (...args: unknown[]) => mockRevise(...args),
 }));
 
-// The enrichment aux call is stubbed off the mocked inference-call slots; with the gate retired the trace-fact helpers stay real.
+// Enrichment aux stubbed off; the trace-fact helpers stay real.
 // @see #238 #310
 jest.mock('../../main/services/workspaceTraceFacts', () =>
   jest.requireActual('../../main/services/workspaceTraceFacts'),
@@ -161,7 +165,7 @@ describe('Chat route routing metadata', () => {
   });
 
   it('dispatches a DeepInfra-routed turn to the DeepInfra provider end-to-end', async () => {
-    // The DeepInfra path must be exercised at the route level, not only in connector unit tests; the mocked Agent ctor model string is the observable dispatch boundary.
+    // The DeepInfra path must be exercised at the route level too.
     mockRacingState.routing = {
       model: 'Qwen/Qwen2.5-72B-Instruct',
       reason: 'roster-pick',
@@ -185,7 +189,7 @@ describe('Chat route routing metadata', () => {
   });
 
   it('persists deduped sources when the agent ran web_search (#16)', async () => {
-    // The fire-and-forget classifier also calls generate; only the chat completion may carry the tool results.
+    // The classifier also calls generate; only chat may carry the tools.
     mockGenerate.mockImplementation(async (messages?: { role: string; content: string }[]) => {
       if (isClassifierCall({ messages })) {
         return structured(CLASSIFIER_REPLY);
@@ -240,7 +244,7 @@ describe('Chat route routing metadata', () => {
   });
 
   describe('per-user system prompt (issue #35)', () => {
-    // The connector strips the caller's leading system message(s) and folds them into the per-call `instructions` override, merged after the agent's tool instructions with one blank line — dropping only that separator leaves the caller's content intact.
+    // Leading system message(s) fold into the `instructions` override.
     // @see #198
     const systemContentFromCall = (): string => {
       for (const call of mockGenerate.mock.calls) {
@@ -309,7 +313,7 @@ describe('Chat route routing metadata', () => {
       expect(content).toContain('<user:preferred_name>\nAlex\n</user:preferred_name>');
     });
 
-    // The non-streaming route injects the workspace-memory block whenever the flag is on — the same wiring the streaming route has, so the two cannot drift.
+    // The non-streaming route injects the block like the streaming route.
     // @see #253 #310
     it('injects the workspace-memory block when the flag is on (#253, #310)', async () => {
       const app = createApp();
@@ -341,7 +345,7 @@ describe('Chat route routing metadata', () => {
       }
     });
 
-    // With the kill switch unset, no workspace block is injected and the retrieval service is never reached.
+    // Kill switch unset: no block injected, retrieval never reached.
     // @see #293
     it('injects no workspace block when the flag is off (#293)', async () => {
       const app = createApp();
@@ -450,7 +454,7 @@ describe('Chat route routing metadata', () => {
 const CLASSIFIER_REPLY =
   '{"emotional": true, "technical": false, "abstract": false, "sentiment": "negative", "openEnded": true}';
 
-// The mocked Agent bypasses Mastra's structured-output parsing, so aux mocks carry the validated object the real connector surfaces.
+// The mocked Agent bypasses Mastra's parsing; aux mocks carry the object.
 // @see #368
 const structured = (text: string) => ({ text, object: JSON.parse(text) });
 
@@ -713,9 +717,9 @@ describe('streamingErrorMessage (#77, #117)', () => {
       ),
     ).toMatch(/Rate limited/);
     expect(streamingErrorMessage(new Error('helpful nudge: TPM exceeded'))).toMatch(/Rate limited/);
-    // Slug-form bodies rethrown without a status code must match too — separators are not just spaces.
+    // Slug-form bodies without a status code must match too.
     expect(streamingErrorMessage(new Error('rate_limit_exceeded'))).toMatch(/Rate limited/);
-    // 413 takes precedence — the more specific diagnosis of the same "tokens" family.
+    // 413 takes precedence within the "tokens" family.
     // @see #117 #77
     expect(streamingErrorMessage({ statusCode: 413, message: 'TPM exceeded' })).toMatch(
       /connectors/,
@@ -768,7 +772,7 @@ describe('#168 all-cooling-off surfacing', () => {
     mockGenerate.mockReset().mockResolvedValue({
       text: 'e2e-ok',
     });
-    // An empty roster (no pickable model) is surfaced as the all-disabled error.
+    // An empty roster is surfaced as the all-disabled error.
     mockRacingState.routing = null;
   });
 
@@ -961,7 +965,7 @@ describe('Subtitle revision cadence (#359)', () => {
 
   const turn = (
     app: ReturnType<typeof createApp>,
-    cookies: unknown,
+    cookies: string,
     body: Record<string, unknown>,
   ) => request(app).post('/api/chat').set('Cookie', cookies).send(body);
 

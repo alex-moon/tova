@@ -2,7 +2,7 @@ import type { Types } from 'mongoose';
 import { Asset } from '../models/Asset';
 import { AssetJob, type AssetJobDocument } from '../models/AssetJob';
 
-/* Mongo-backed conversion queue: idempotent enqueue, atomic claim per tick, retries up to MAX_JOB_ATTEMPTS before terminal-failing job and markdown status; processor is injectable. */
+/* Mongo-backed conversion queue with idempotent enqueue and atomic claim. */
 // @see #67
 
 export const MAX_JOB_ATTEMPTS = 3;
@@ -18,7 +18,7 @@ const clampError = (err: unknown): string => {
   return message.slice(0, MAX_STORED_ERROR_CHARS);
 };
 
-// Idempotent enqueue: a live-status job for the asset is reused; a previously failed chain gets a fresh job.
+// Idempotent enqueue: a live-status job is reused; a failed chain gets fresh.
 export const enqueueAssetJob = async (
   assetId: Types.ObjectId | string,
 ): Promise<AssetJobDocument> => {
@@ -30,7 +30,7 @@ export const enqueueAssetJob = async (
   return AssetJob.create({ assetId });
 };
 
-// Atomic claim: status + attempts bump in one findOneAndUpdate, oldest-pending-first; multiple server processes cannot double-claim.
+// Atomic claim: one findOneAndUpdate; concurrent servers cannot double-claim.
 export const claimNextAssetJob = async (): Promise<AssetJobDocument | null> =>
   AssetJob.findOneAndUpdate(
     { status: 'pending' },
@@ -38,7 +38,7 @@ export const claimNextAssetJob = async (): Promise<AssetJobDocument | null> =>
     { sort: { createdAt: 1 }, new: true },
   );
 
-// One poll tick: claim, run, settle; on exhaustion terminal-fail the job and the still-pending lifecycles (the asset stays 'ready' — the binary is fine).
+// One poll tick: claim, run, settle; exhausted jobs terminal-fail.
 export const runAssetJobTick = async (processor: AssetJobProcessor): Promise<void> => {
   const job = await claimNextAssetJob();
   if (!job) return;
@@ -59,7 +59,7 @@ export const runAssetJobTick = async (processor: AssetJobProcessor): Promise<voi
       },
     );
     if (exhausted) {
-      // Fail only the lifecycles the processor did not finish; a conversion-only job must not clobber a ready thumbnail.
+      // Fail only lifecycles the processor did not finish.
       await Asset.updateOne(
         { _id: job.assetId, markdownStatus: 'pending' },
         { $set: { markdownStatus: 'failed', markdownFailureReason: message } },
@@ -76,7 +76,7 @@ let timer: ReturnType<typeof setInterval> | null = null;
 
 let busy = false;
 
-// A crash mid-job strands a `processing` row and blocks enqueue; the start sweep requeues stale ones (attempts not incremented — the processor never observed the loss).
+// A crash strands a `processing` row; the start sweep requeues stale ones.
 export const STALE_PROCESSING_MS = 5 * 60 * 1000;
 
 export const requeueStaleAssetJobs = async (
@@ -96,7 +96,7 @@ export const startAssetJobPoller = (
   if (timer) return timer;
   void requeueStaleAssetJobs().catch(() => undefined);
   timer = setInterval(() => {
-    // One job per tick; skip while the previous run is still in flight so slow conversions don't stack queries.
+    // One job per tick; skip while the previous run is still in flight.
     if (busy) return;
     busy = true;
     void runAssetJobTick(processor).finally(() => {

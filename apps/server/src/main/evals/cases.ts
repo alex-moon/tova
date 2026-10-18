@@ -1,4 +1,4 @@
-/** Golden set cases for the deterministic evals: case data kept separate from the graders. */
+/** Golden eval cases: case data kept separate from the graders. */
 // @see #112
 import type { Assertion } from './types';
 import { noSourcesPattern } from './graders';
@@ -8,7 +8,7 @@ export interface EvalCase {
   prompt: string;
   description: string;
   assertions: Assertion[];
-  /** Content the generated file must equal, or a `@repo:<path>` marker resolved against the repo. */
+  /** Content the generated file must equal, or a `@repo:<path>` marker. */
   expectedContent?: string;
 }
 
@@ -86,7 +86,7 @@ export const CASES: EvalCase[] = [
       { type: 'tool_not_called', tool: 'read_file' },
     ],
   },
-  // Refusal + hallucination cases: the deterministic slice of the ticket's rules 1 and 2.
+  // Refusal + hallucination cases: the deterministic slice of rules 1 and 2.
   // @see #158
   {
     id: 'benchmaxxed-evals-web',
@@ -118,7 +118,7 @@ export const CASES: EvalCase[] = [
     assertions: [
       { type: 'tool_called', tool: 'list_files' },
       { type: 'tool_not_called', tool: 'generate_file' },
-      // Explicit no-sources signal, compiled from NO_SOURCES_PATTERNS so the case cannot drift.
+      // Explicit no-sources signal, compiled from NO_SOURCES_PATTERNS.
       { type: 'text_matches', pattern: noSourcesPattern },
     ],
   },
@@ -145,7 +145,7 @@ export const CASES: EvalCase[] = [
       'the page number (only page 58 of 60 holds the phone).',
     assertions: [
       { type: 'tool_called', tool: 'list_files' },
-      // Navigation signal: list the unit table of contents, then read the page by line range.
+      // Navigation signal: list the unit TOC, then read by line range.
       // @see #350
       { type: 'tool_called', tool: 'read_file', argsSubset: { unitsOnly: true } },
       { type: 'answer_contains', text: 'page 58' },

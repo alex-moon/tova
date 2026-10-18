@@ -1,7 +1,7 @@
 import axios from 'axios';
 import type { AuthUser } from '@shared/contracts';
 
-// Normalised auth failure: server message when one arrived, else the fallback; views read .message without importing axios.
+// Auth failure normalisation: server message, else fallback; views read it.
 export class AuthError extends Error {
   constructor(message = 'Authentication failed', options?: { cause?: unknown }) {
     super(message, options);
@@ -17,7 +17,7 @@ const toAuthError = (err: unknown): AuthError => {
   return new AuthError('Authentication failed', { cause: err });
 };
 
-// Connector separating views/context from axios; all auth API traffic goes through this module.
+// Connector: all auth API traffic from views/context goes through this module.
 const AuthService = {
   async me(): Promise<AuthUser | null> {
     const res = await axios.get<{ user?: AuthUser }>('/api/auth/me');
@@ -46,7 +46,7 @@ const AuthService = {
     await axios.post('/api/auth/logout');
   },
 
-  // PATCHes the user-owned profile; sends only the keys present — an empty string clears the field.
+  // PATCHes the user-owned profile; sends only keys present, empty clears.
   // @see #35
   async updateProfile(patch: {
     preferredName?: string;
@@ -66,7 +66,7 @@ const AuthService = {
     }
   },
 
-  // Factory reset: the typed confirmation string must match the server-side literal exactly.
+  // Factory reset: the typed string must match the server literal exactly.
   // @see #143
   async factoryReset(confirm: string): Promise<{ reset: boolean; failedObjects: string[] }> {
     try {

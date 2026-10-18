@@ -2,7 +2,8 @@ import 'dotenv/config';
 import zlib from 'node:zlib';
 import { deepinfraConnector, groqConnector } from '../apps/server/src/main/services/mastraService';
 
-/* Manual smoke for the multimodal mapping path: real DeepInfra connector with a text+image data-URI turn; usage: npx tsx scripts/smokeImageTurn.ts [model]. */
+/* Manual smoke: real DeepInfra multimodal turn (text+image data-URI). */
+//   npx tsx scripts/smokeImageTurn.ts [model]
 // @see #115
 
 const MODEL = process.argv[2] ?? 'Qwen/Qwen3-VL-30B-A3B-Instruct';
@@ -52,7 +53,7 @@ async function main() {
   const result = await deepinfraConnector.createToolFreeCompletion({
     provider: 'deepinfra',
     model: MODEL,
-    // Same part shape the chat route assembles: text plus the image under `image_url.url`.
+    // Same part shape the chat route assembles: image under `image_url.url`.
     // @see #115
     messages: [
       {

@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 
-// Overflow smoke: every top-level route, page-mocked, must not overflow horizontally at any width.
+// Overflow smoke: every top-level route must not overflow horizontally.
 // @see #220
 
 const email = process.env.E2E_EMAIL ?? 'formsatz@gmail.com';
@@ -24,7 +24,7 @@ const mockAuth = async (page: Page) => {
   );
 };
 
-// Seeds admin Users/Models fixtures so the /admin checks hit real rows, not a 401 empty state.
+// Seeds admin Users/Models fixtures so /admin checks hit real rows.
 // @see #220
 const mockAdminData = async (page: Page) => {
   const now = new Date().toISOString();
@@ -82,7 +82,7 @@ const mockAdminData = async (page: Page) => {
   );
 };
 
-// Catches tables scrolling inside an overflow-x-auto wrapper, which the document check misses.
+// Catches tables scrolling inside an overflow-x-auto wrapper.
 // @see #220
 const adminTableOverflows = (page: Page) =>
   page.evaluate(() =>
@@ -101,7 +101,7 @@ const adminTableOverflows = (page: Page) =>
 const documentOverflows = (page: Page) =>
   page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth);
 
-// Elements past the right edge whose nearest clipping ancestor hides rather than scrolls them.
+// Elements past the right edge that a clipping ancestor hides, not scrolls.
 const clippedElements = (page: Page) =>
   page.evaluate(() => {
     const viewport = document.documentElement.clientWidth;
@@ -134,7 +134,7 @@ const clippedElements = (page: Page) =>
     return offenders;
   });
 
-// Seeds a task and stubs its detail so the list and detail pane are exercised, not a 401 state.
+// Seeds a task and stubs its detail so list and pane are exercised, not a 401.
 // @see #254
 const mockTasks = async (page: Page) => {
   const task = {
@@ -179,7 +179,7 @@ const mockTasks = async (page: Page) => {
   });
 };
 
-// The connectors catalog is static; only the connected-rows fetch needs mocking.
+// The connectors catalog is static; only connected-rows fetch needs mocking.
 // @see #331
 const mockConnectors = async (page: Page) => {
   await page.route('**/api/connectors', (route) =>
@@ -212,7 +212,7 @@ for (const { path, ready } of routes) {
     expect(await documentOverflows(page)).toBe(false);
     expect(await clippedElements(page)).toEqual([]);
 
-    // Check the task detail pane too, not just the list; that is where phone-width regressions land.
+    // Check the detail pane too, not just the list; regressions land here.
     // @see #254
     if (path === '/tasks') {
       await page.locator('[data-testid="task-row-e2e-task-1"]').click();
@@ -221,7 +221,7 @@ for (const { path, ready } of routes) {
       expect(await clippedElements(page)).toEqual([]);
     }
 
-    // On a phone the admin tables must fit, not scroll in their wrapper; assert rows rendered first.
+    // Admin tables must fit on a phone, not scroll in their wrapper.
     // @see #220
     if (path === '/admin' && (page.viewportSize()?.width ?? 1280) < 768) {
       await expect(

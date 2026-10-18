@@ -1,6 +1,6 @@
 import { config } from '../config';
 
-/* Best-effort LangSmith trace deletion by session id: resolve project, query run ids, batch-delete. Deliberately failure-tolerant — logs, never throws; a silent no-op without an API key. */
+/* Best-effort LangSmith trace deletion by session id; never throws. */
 // @see #143 #224
 
 const BASE_URL = 'https://api.smith.langchain.com';
@@ -32,7 +32,7 @@ const purgeSessionTraces = async (
     if (!queryRes.ok) {
       throw new Error(`run query failed: HTTP ${queryRes.status}`);
     }
-    // The endpoint answers an object, not an array; the array guard must throw into the best-effort catch, not read as an empty page.
+    // The endpoint answers an object; a non-array must throw, not read empty.
     const body = (await queryRes.json()) as { runs?: { trace_id?: string }[] };
     const runs = body.runs;
     if (!Array.isArray(runs)) throw new Error('unexpected run query response shape');
@@ -73,7 +73,7 @@ export const purgeUserTraces = async (sessionIds: string[]): Promise<void> => {
       throw new Error(`project lookup failed: HTTP ${res.status}`);
     }
     const sessions = (await res.json()) as { id?: string; name?: string }[];
-    // Name-match only: falling back to the first session returned could delete against an unnamed project.
+    // Name-match only; a fallback could hit the wrong project.
     const projectId = sessions.find((s) => s.name === project)?.id;
     if (!projectId) {
       throw new Error(`project "${project}" not found`);

@@ -7,9 +7,9 @@ import bcrypt from 'bcryptjs';
 import { MongoClient, type IndexDescriptionInfo } from 'mongodb';
 import { buildMongoUri } from '../apps/shared/src/main/mongoUri';
 
-// Subcommands: dump, drop, restore, sync (dump+drop+restore), password (local fixture reset); destructive ones refuse non-localhost targets without --i-know-this-is-dangerous.
+// Subcommands: dump, drop, restore, sync, password; destructive guarded.
 
-// Fixture credentials: the PAT is deliberately below the real token format so it can never be app-minted.
+// Fixture credentials: the PAT is below real token format, never app-mintable.
 const TEST_PASSWORD = 'password';
 const TEST_PAT = 'tova_pat_TEST';
 
@@ -40,7 +40,7 @@ const targetUrl = () => {
   return url;
 };
 
-// Parse the db name from the URI's last path segment (default `tova`); `url.split('/')[1]` is empty between `mongodb:` and `//`.
+// Parse the db name from the URI's last path segment (default `tova`).
 const targetDb = (url: string): string => {
   try {
     const parsed = new URL(url);
@@ -111,7 +111,7 @@ const restore = () => {
   execFileSync('mkdir', ['-p', workDir]);
   try {
     execFileSync('tar', ['-xzf', tarball, '-C', workDir]);
-    // Handle both tarball layouts: a wrapped dumped-db directory or the db files directly.
+    // Handle both tarball layouts: wrapped dumped-db dir or files directly.
     const entries = readdirSync(workDir);
     const dir =
       entries.length === 1 && existsSync(path.join(workDir, entries[0], targetDb(url)))
@@ -126,7 +126,7 @@ const restore = () => {
   console.log(`restored ${tarball} into ${db}`);
 };
 
-// Reset every credential to the fixture values; goes through the same localhost guard as drop/restore.
+// Reset every credential to fixture values; guarded like drop/restore.
 const resetPasswords = async () => {
   const url = targetUrl();
   const db = targetDb(url);
@@ -135,13 +135,13 @@ const resetPasswords = async () => {
     await client.connect();
     const database = client.db(db);
 
-    // bcrypt cost 10 must match the User model's pre-save hook; bump both together.
+    // bcrypt cost 10 must match the User model's pre-save hook.
     const passwordHash = await bcrypt.hash(TEST_PASSWORD, 10);
     const users = await database.collection('users').updateMany({}, { $set: { passwordHash } });
 
-    // Collapsing PATs onto one tokenHash violates the unique index; drop it and warn that the constraint is gone.
+    // One shared tokenHash violates the unique index; drop it and warn.
     const pats = database.collection('pats');
-    // A db with no PATs has no `pats` collection; `indexes()` throws code 26 — treat as "no index to drop".
+    // No PATs = no `pats` collection; `indexes()` throws code 26 — ignore.
     let indexes: IndexDescriptionInfo[] = [];
     try {
       indexes = await pats.indexes();

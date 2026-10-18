@@ -13,7 +13,7 @@ jest.mock('../../main/services/connectorService', () => ({
   clearConnectorCachesForTests: jest.fn(),
 }));
 
-// OAuth engine mocked at the module boundary; the pure helpers stay real so the routes' use of them is exercised.
+// OAuth engine mocked; pure helpers stay real so routes' use is exercised.
 jest.mock('../../main/services/oauthConnectors', () => ({
   ...jest.requireActual('../../main/services/oauthConnectors'),
   startConnectorOAuth: jest.fn(),
@@ -28,7 +28,7 @@ const mockCompleteConnectorOAuth = jest.requireMock('../../main/services/oauthCo
 const mockProbeConnectorOAuth = jest.requireMock('../../main/services/oauthConnectors')
   .probeConnectorOAuth as jest.Mock;
 
-// The mocked module registry is resolved lazily (after jest.mock hoisting), so the shared jest.fn instances are read from the mock, not typed imports.
+// The mock registry resolves lazily; read the jest.fn from the mock itself.
 const mockListMcpTools = jest.requireMock('../../main/services/connectorService')
   .listMcpTools as jest.Mock;
 
@@ -54,7 +54,7 @@ beforeEach(() => {
     authorizationUrl: 'https://as.example.com/authorize?client_id=dcr',
   });
   mockCompleteConnectorOAuth.mockReset();
-  // Add-time OAuth probe: default to "no OAuth advertised" — the generic unreachable copy; individual tests override per case.
+  // Add-time OAuth probe defaults to "no OAuth advertised"; tests override.
   // @see #333
   mockProbeConnectorOAuth.mockReset().mockResolvedValue(null);
 });
@@ -81,7 +81,7 @@ describe('POST /api/connectors (issues #36, #329)', () => {
     expect(unknown.status).toBe(400);
     expect(unknown.body.message).toMatch(/unknown connector type/iu);
 
-    // Reserved-but-known types: a clear not-supported-yet message, distinct from the unknown-type rejection.
+    // Reserved-but-known types: not-supported-yet, distinct from unknown-type.
     // @see #329
     for (const type of ['api', 'sdk']) {
       const reserved = await request(app)
@@ -181,7 +181,7 @@ describe('POST /api/connectors (issues #36, #329)', () => {
       .send({ type: 'mcp.pat', name: 'x', url: 'http://mcp.example.com/mcp' });
     expect(httpRes.status).toBe(400);
 
-    // 'authHeader' payloads are not a valid key — a raw token must be submitted as 'authToken'.
+    // 'authHeader' is not valid — a raw token goes as 'authToken'.
     // @see #80
     const headerRes = await request(app).post('/api/connectors').set('Cookie', cookie).send({
       type: 'mcp.pat',
@@ -256,7 +256,7 @@ describe('GET /api/connectors (issues #36, #329)', () => {
     expect(names).toContain('platform-tools');
     expect(names).toContain('mine');
     expect(names).not.toContain('theirs');
-    // Every row reports the generic authConfigured wire field; the legacy headersConfigured name is gone from the wire.
+    // Every row reports authConfigured; the legacy headersConfigured is gone.
     // @see #329
     for (const row of res.body.connectors as Array<Record<string, unknown>>) {
       expect(row).toHaveProperty('authConfigured');
@@ -366,7 +366,7 @@ describe('POST /api/connectors/oauth/start (#327)', () => {
       name: 'mine',
       url: 'https://dup-oauth.example.com/mcp',
     });
-    // The duplicate check keys on the caller; create via the API so the owner matches the cookie.
+    // Duplicate check keys on the caller; create via the API for owner match.
     await mockListMcpTools.mockResolvedValue([{ name: 'w', description: '', inputSchema: {} }]);
     await request(app)
       .post('/api/connectors')
@@ -519,7 +519,7 @@ describe('POST /api/connectors/:id/reauth (#327)', () => {
       .set('Cookie', cookie);
     expect(patRes.status).toBe(404);
 
-    // An mcp.oauth row goes through the flow with its id; owned by the caller (the route re-checks ownership).
+    // An mcp.oauth row goes through the flow; the route re-checks ownership.
     // @see #327
     const caller = await User.findOne({ email: 'oauth-reauth@example.com' });
     const doc = await Connector.create({

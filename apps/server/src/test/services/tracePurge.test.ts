@@ -1,6 +1,6 @@
 import { purgeUserTraces } from '../../main/services/tracePurge';
 
-// Unit coverage for the best-effort trace purge: each suite mocks global.fetch and the langsmith env so the real network is never touched.
+// Best-effort trace purge; fetch and env mocked, real network never touched.
 // @see #143
 
 type FetchInit = { body?: string };
@@ -180,7 +180,7 @@ describe('purgeUserTraces', () => {
   });
 
   it('rejects the legacy array-shaped body (the #187 regression): logs, deletes nothing', async () => {
-    // Guard against a silent revert to the array-cast assumption: an array body has no `runs` key and must be treated as malformed.
+    // An array body has no `runs` key and must be treated as malformed.
     // @see #187
     const errorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
     fetchSpy.mockImplementation((url: string) => {
@@ -224,7 +224,7 @@ describe('purgeUserTraces', () => {
   });
 
   it('continues to the remaining sessions when one session fails mid-loop', async () => {
-    // Queries are sequential per session; one failing must not stop the later sessions from being attempted.
+    // One failing session must not stop the later sessions being attempted.
     // @see #143
     let queryCalls = 0;
     const deleteCalls: unknown[] = [];

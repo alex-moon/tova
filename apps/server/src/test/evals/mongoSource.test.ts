@@ -49,15 +49,15 @@ describe('#112 temp mongo source', () => {
     expect(phonePages.map((u) => u.index)).toEqual([SUPPORT_PHONE_PAGE]);
     // Filler must be non-empty: a unit read must yield readable text.
     expect(units.every((u: { text: string }) => u.text.length > 0)).toBe(true);
-    // The 120-char `unitsOnly` preview must not hand over the answer material (found live: the phone sat inside page 58's preview, letting a lazy read answer both questions without walking units).
+    // The 120-char `unitsOnly` preview must not hand over the answer material.
     expect(
       units.every((u: { text: string }) => !u.text.slice(0, 120).includes(SUPPORT_PHONE)),
     ).toBe(true);
-    // The page-58 preview should still identify the support appendix so the agent has a legitimate discovery path.
+    // The page-58 preview should identify the appendix: a discovery path.
     expect(units[SUPPORT_PHONE_PAGE - 1].text.slice(0, 120)).toContain('support contact');
   });
 
-  // The phone must be visible in the default head read for a no-paging pass to be possible; the filler is sized so truncation cuts off before page 58.
+  // The phone must be visible in the default head read for a no-paging pass.
   it('whole-file read of the manual truncates before the phone page', async () => {
     await seedEvalSource();
     const manual = await Asset.findOne({ userId, filename: 'long-manual.md' });

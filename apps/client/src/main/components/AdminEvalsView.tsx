@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { AdminError, AdminEvalsService } from '../services/admin';
 import type { AdminEvalRunDetail, AdminEvalRunSummary } from '../types/admin';
 
-// Admin "Evals" tab: stored eval-rollup runs with per-case drill-down and a manual run, mounted only when the tab is active.
+// Admin "Evals" tab: eval-rollup runs with drill-down and a manual run.
 // @see #225
 
 const formatTime = (iso: string | null): string => {

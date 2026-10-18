@@ -1,4 +1,4 @@
-/* Deterministic eval runner: seeds Mongo fixtures, drives the real agent over golden cases, grades pass/partial/fail, exports to LangSmith; not part of CI. */
+/* Eval runner: seeds fixtures, drives the real agent, grades, exports. */
 // @see #112 #5 #225 #94 #236 #158
 import 'dotenv/config';
 import mongoose from 'mongoose';
@@ -47,7 +47,7 @@ const printSweepTable = (results: EvalResult[]): void => {
 };
 
 const main = async (): Promise<void> => {
-  // Default to the cheapest roster model; the retired guard model has no roster home.
+  // Default to the cheapest roster model; guard model is retired.
   // @see #236
   const fallback = resolveScheduledModels({});
   const model = process.env.TOVA_EVAL_MODEL ?? fallback[0].model;

@@ -1,12 +1,12 @@
 import { config } from '../config';
 import type { AdminLogEntry } from '@tova/shared';
 
-/* Query half for retained logs from Grafana Cloud Loki; the whole service is failure-tolerant — an unconfigured/unreachable Loki yields an empty page, not a 500. */
+/* Loki query half; failure-tolerant — unconfigured yields an empty page. */
 // @see #179
 
 // Default look-back window; owner asked for "last 24 hours is fine".
 export const DEFAULT_HOURS = 24;
-// Upper bound on the requested window (7 days) — keeps one query from scanning the whole retention period.
+// Upper bound on the requested window (7 days).
 export const MAX_HOURS = 168;
 // Default/maximum lines returned per query.
 export const DEFAULT_LIMIT = 200;
@@ -41,7 +41,7 @@ interface LokiQueryResponse {
   data?: { result?: LokiStream[] };
 }
 
-/* Best-effort severity from the raw line: classified from the Docker stream label and common level tokens — intentionally rough. */
+/* Best-effort severity from the raw line; intentionally rough. */
 export const classifyLevel = (msg: string, streamLabel?: string): AdminLogEntry['level'] => {
   if (/\b(error|fatal|panic|exception|failed|failure)\b/i.test(msg)) return 'error';
   if (/\b(warn|warning)\b/i.test(msg)) return 'warn';
@@ -62,7 +62,7 @@ const toEntries = (streams: LokiStream[]): AdminLogEntry[] => {
       });
     }
   }
-  // Newest first: Loki returns backward order, but flattening across streams needs an explicit sort to be safe.
+  // Newest first: flattening across streams needs an explicit sort.
   entries.sort((a, b) => (a.ts < b.ts ? 1 : a.ts > b.ts ? -1 : 0));
   return entries;
 };
@@ -101,7 +101,7 @@ export const queryRetainedLogs = async (
     }
     const body = (await res.json()) as LokiQueryResponse;
     let logs = toEntries(body.data?.result ?? []);
-    // Level + text filtering is applied here, not in LogQL: a LogQL filter would be case-sensitive/regex-heavy and the level is inferred, not indexed.
+    // Filtering happens here, not in LogQL: level is inferred, not indexed.
     if (params.level) logs = logs.filter((l) => l.level === params.level);
     if (params.q) {
       const needle = params.q.toLowerCase();

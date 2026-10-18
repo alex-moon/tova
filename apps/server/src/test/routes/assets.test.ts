@@ -29,7 +29,7 @@ jest.mock('../../main/services/storageService', () => ({
   putObject: (...args: unknown[]) => mockPutObject(...args),
 }));
 
-// Route the enqueue through a mock so the confirm tests can simulate an enqueue failure; by default it forwards to the real implementation.
+// Enqueue mocked so confirm tests can simulate failure; defaults to real.
 jest.mock('../../main/services/assetJobService', () => {
   const actual = jest.requireActual('../../main/services/assetJobService');
   return {
@@ -78,7 +78,7 @@ const headerForObject = (size: number, contentType?: string) => ({
 const confirmFor = (cookie: string, assetId: string) =>
   request(app).post(`/api/assets/${assetId}/confirm`).set('Cookie', [cookie]).send({});
 
-// The toBe(XXX) lines depend on storage being "configured"; resetAllMocks wipes module mock defaults, so re-seat the gate per test.
+// The toBe(XXX) lines need storage "configured"; re-seat the gate per test.
 beforeEach(() => {
   (isStorageConfigured as jest.Mock).mockReturnValue(true);
 });
@@ -104,7 +104,7 @@ describe('Assets presign', () => {
     expect(stored?.status).toBe('pending');
   });
 
-  // Zip is never an accepted upload format at any layer; if this fails, an upload path has started accepting archives.
+  // Zip is never accepted at any layer; this guards an archive-accepting path.
   // @see #68
   it('rejects zip uploads outright and creates nothing', async () => {
     const cookie = await registerUser('assets-zip-user@example.com');
@@ -399,7 +399,7 @@ describe('Assets bulk upload', () => {
     expect(await Asset.findOne({ filename: 'toolarge.bin' })).toBeNull();
   });
 
-  // Zip is never an accepted upload format, even as one item in a bulk batch; siblings' presigns are unaffected.
+  // Zip is never accepted, even as one bulk item; siblings are unaffected.
   // @see #68
   it('rejects a zip item per-item in bulk and creates nothing for it', async () => {
     const response = await bulkPresignFor(cookieBulkUser, [
@@ -693,7 +693,7 @@ describe('Assets confirm markdown conversion queue (#67)', () => {
 
     expect(confirm.status).toBe(200);
     const stored = await Asset.findById(assetId);
-    // Images drive the markdown lifecycle via OCR alongside the thumbnail; one asset job covers both pending lifecycles.
+    // Images drive markdown via OCR plus thumbnail; one job covers both.
     // @see #209 #208
     expect(stored?.markdownStatus).toBe('pending');
     expect(stored?.thumbnailStatus).toBe('pending');
@@ -1170,7 +1170,7 @@ describe('Assets bulk download', () => {
   };
 
   beforeEach(async () => {
-    // The suite-wide beforeEach wipes collections between tests, so users (and their assets) must be created per test.
+    // The suite-wide beforeEach wipes collections; recreate users per test.
     cookieA = await registerUser('assets-bulk-a@example.com');
     await registerUser('assets-bulk-b@example.com');
   });
@@ -1195,7 +1195,7 @@ describe('Assets bulk download', () => {
   });
 
   it('ignores malformed ids instead of falling back to the whole library', async () => {
-    // Regression: filtering ids by isValidObjectId used to leave an empty $in set, turning the find into a download of the caller's entire library from `?id=garbage`.
+    // Regression: invalid-id filtering left an empty $in and downloaded all.
     await createReadyAsset('assets-bulk-a@example.com', 'owned.txt', 'x');
     const response = await bulkRequest(cookieA, [
       new Types.ObjectId().toHexString().slice(0, -1) + 'z',

@@ -15,7 +15,7 @@ import { truncateForPrompt } from '../../main/services/textExtraction';
 jest.mock('../../main/services/storageService', () => ({
   isStorageConfigured: jest.fn(),
   putObject: jest.fn(),
-  // list_files/read_file never touch storageService; keep the mock surface complete so unrelated import-time references resolve.
+  // list_files/read_file never touch storageService; keep it complete.
   presignPutUrl: jest.fn(),
   presignGetUrl: jest.fn(),
 }));
@@ -25,7 +25,7 @@ const storageMocks = jest.requireMock('../../main/services/storageService') as {
   putObject: jest.Mock;
 };
 
-/* Tool-level tests for the asset-library tools: the module mapper replaces createTool with the identity function, so `execute` is invoked directly with a constructed request context. */
+/* Tool-level tests: createTool is the identity, so `execute` runs directly. */
 // @see #58
 
 const asCtx = (userId?: string) => {
@@ -52,7 +52,7 @@ const asCtxWithTask = (userId: string, taskId: string) => {
   return { requestContext };
 };
 
-// `createTool` is the identity stub, so the tools keep their plain config shape; pick the execute off it for direct invocation.
+// `createTool` is the identity stub; pick the execute off to invoke direct.
 const listExecute = (
   listFilesTool as unknown as { execute: (args: unknown[], ctx: unknown) => Promise<unknown> }
 ).execute;
@@ -145,7 +145,7 @@ describe('generate_file tool (#66)', () => {
       origin: 'system-generated',
       textExtracted: good.content,
     });
-    // Round-trip: the just-generated file is immediately listable and readable by the same tools.
+    // Round-trip: the generated file is immediately listable and readable.
     // @see #66
     const listed = (await listExecute([], asCtx(user.id))) as { files: { id: string }[] };
     expect(listed.files.map((f) => f.id)).toContain(out.file?.id);

@@ -1,4 +1,4 @@
-// Curated connector catalog: the single source the client grid reads; server validation joins it when needed.
+// Curated connector catalog: the single source the client grid reads.
 // @see #331 #328 #326 #330
 import type { ConnectorDefinition } from './connectors';
 
@@ -9,7 +9,7 @@ export type CatalogEntry = ConnectorDefinition & {
   state: ConnectorCatalogState;
   // Watchlisted entries must say why, in honest copy.
   watchlistNote?: string;
-  // Brand color for the letter-tile logo fallback (no licensed simple-icons mark).
+  // Brand color for the letter-tile logo fallback (no simple-icons mark).
   brandColor?: string;
 };
 
@@ -103,7 +103,7 @@ export const CONNECTOR_CATALOG: CatalogEntry[] = [
     watchlistNote:
       'Slack requires a pre-registered Slack app (no automatic app registration) — needs #342; not connectable by token paste.',
     brandColor: '#611F69',
-    iconRef: undefined, // removed from simple-icons (trademark request); letter tile
+    iconRef: undefined, // gone from simple-icons; letter tile fallback.
   },
   {
     id: 'trello',

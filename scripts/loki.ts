@@ -1,7 +1,7 @@
 import 'dotenv/config';
 import { config } from '../apps/server/src/main/config';
 
-/* Read logs from Grafana Cloud (hosted Loki) with the same credentials the admin logs view uses. */
+/* Read logs from Grafana Cloud with the admin logs view's credentials. */
 // @see #179
 
 const lokiBaseUrl = (url: string): string => url.replace(/\/loki\/api\/v1\/push\/?$/, '');

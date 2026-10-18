@@ -10,7 +10,7 @@ import {
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { config } from '../config';
 
-// DigitalOcean Spaces via the AWS SDK; feature-gated on env vars so callers degrade gracefully. Read lazily: env may load after module import.
+// DigitalOcean Spaces via the AWS SDK; feature-gated on env vars.
 // @see #34
 const bucket = (): string => config.storage.bucket;
 
@@ -25,7 +25,7 @@ const getClient = (): S3Client => {
   }
   if (!client) {
     client = new S3Client({
-      // Region confirmed lon1 against a real ListObjectsV2 call; env override kept for the live host.
+      // Region confirmed lon1 against a real ListObjectsV2 call.
       endpoint: `https://${config.storage.region}.digitaloceanspaces.com`,
       region: config.storage.region,
       credentials: {
@@ -68,14 +68,14 @@ export const headObject = async (key: string): Promise<HeadObjectInfo> => {
   return { size: result.ContentLength ?? 0, contentType: result.ContentType };
 };
 
-// Streams an object back for server-side piping; no size cap — callers decide what is safe to stream.
+// Streams an object for server-side piping; no size cap.
 // @see #69
 export const getObjectStream = async (key: string): Promise<Readable | null> => {
   const result = await getClient().send(new GetObjectCommand({ Bucket: bucket(), Key: key }));
   return (result.Body ?? null) as Readable | null;
 };
 
-// Buffers an object for light text extraction at confirm time; null means too big or no body, not an error.
+// Buffers an object for text extraction; null = too big, not an error.
 // @see #34
 export const getObjectBuffer = async (
   key: string,
@@ -90,7 +90,7 @@ export const getObjectBuffer = async (
   return bytes ? Buffer.from(bytes) : null;
 };
 
-// Returns true on success; NoSuchKey/NotFound converge to true so deletes are idempotent.
+// NoSuchKey/NotFound converge to true so deletes are idempotent.
 export const deleteObject = async (key: string): Promise<boolean> => {
   try {
     await getClient().send(new DeleteObjectCommand({ Bucket: bucket(), Key: key }));
@@ -102,7 +102,7 @@ export const deleteObject = async (key: string): Promise<boolean> => {
   }
 };
 
-// All keys under one prefix, paginated; callers gate on isStorageConfigured() first.
+// All keys under one prefix, paginated; callers gate first.
 // @see #143
 export const listObjectKeys = async (prefix: string): Promise<string[]> => {
   const keys: string[] = [];

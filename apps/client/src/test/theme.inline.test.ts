@@ -29,7 +29,7 @@ beforeEach(() => {
   delete (window as { matchMedia?: unknown }).matchMedia;
 });
 
-// The inline head script twins theme.ts's resolve logic; run the actual script text so drift fails loudly.
+// The inline head script twins theme.ts resolve logic; run its real text.
 describe('inline theme script (apps/client/index.html)', () => {
   it('exists as a standalone script block', () => {
     expect(script).toContain('tova-theme=');

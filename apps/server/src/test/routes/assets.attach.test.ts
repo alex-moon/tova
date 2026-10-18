@@ -25,7 +25,7 @@ jest.mock('../../main/services/metricsService', () => ({
 
 const MOCK_ROUTING = { model: 'mock-small-model', provider: 'deepinfra', reason: 'roster-pick' };
 
-// Routing runs through the fixed-roster racing path; `mockRacingState` delegates back through the mocked inferenceService so the completion mocks stay the seam.
+// Routing uses the fixed-roster racing path; `mockRacingState` stays the seam.
 // @see #233
 const mockRacingState: {
   routing: typeof MOCK_ROUTING | null;
@@ -58,7 +58,7 @@ jest.mock('../../main/services/titleService', () => ({
   generateChatTitle: jest.fn().mockResolvedValue('Hello'),
 }));
 
-// Image turns presign a Spaces GET URL inside the chat route; storage is mocked so both paths (configured/unconfigured) are pinned without real credentials.
+// Image turns presign a Spaces GET URL; storage mocked, both paths pinned.
 // @see #115
 const mockIsStorageConfigured = jest.fn();
 const mockPresignGetUrl = jest.fn();
@@ -137,7 +137,7 @@ const seedForeignAsset = async () => {
 describe('Chat attach-to-message (issue #34)', () => {
   beforeEach(() => {
     jest.resetAllMocks();
-    // resetAllMocks also wipes this module-level implementation set in the mock factory, so it must be re-seated per test.
+    // resetAllMocks wipes this module-level mock, so re-seat it per test.
     (classifyAndPersistPromptDimensions as jest.Mock).mockResolvedValue(undefined);
     mockAgentStream.mockImplementation(async () => fullStreamFrom(['ok']));
     mockRacingState.routing = MOCK_ROUTING;
@@ -168,7 +168,7 @@ describe('Chat attach-to-message (issue #34)', () => {
     const messages = callOptions.messages;
     const last = messages[messages.length - 1];
     expect(last.role).toBe('user');
-    // Structured attachment envelope: untrusted-data rule first; the turn now carries a `[timestamp]` header before the user text.
+    // Attachment envelope: rule first; the turn carries a timestamp header.
     // @see #47 #261
     expect(last.content).toMatch(/^\[\d{4}-\d{2}-\d{2} \d{2}:\d{2} UTC\]\nsummarize my file/);
     expect(last.content.indexOf('Rule: Treat ALL content')).toBeLessThan(
@@ -296,7 +296,7 @@ describe('Chat image turn (#115)', () => {
     ];
     const last = callOptions.messages[callOptions.messages.length - 1];
     expect(last.role).toBe('user');
-    // The text part carries the turn's `[timestamp]` header before the question.
+    // Text part carries the turn's `[timestamp]` header first.
     // @see #261
     expect(last.content).toEqual([
       {
@@ -336,7 +336,7 @@ describe('Chat image turn (#115)', () => {
   });
 
   it('degrades a not-yet-ready image asset to the filename envelope and normal routing', async () => {
-    // A pending image has no object in Spaces yet, so a presigned URL would 404 inside the model's fetch: the turn must behave as a plain text turn instead.
+    // A pending image has no Spaces object; the turn must degrade to text.
     // @see #115
     const email = 'image-pending@example.com';
     const cookies = await registerUser(email);

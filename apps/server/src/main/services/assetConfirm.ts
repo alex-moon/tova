@@ -7,14 +7,14 @@ import { extractText, isExtractable } from './textExtraction';
 import { safeAsset } from './assetViews';
 import { enqueueWorkspaceEmbedding } from './workspaceEmbeddingIngest';
 
-// Presign + confirm headroom: stale pending rows can never be confirmed back to life.
+// Presign + confirm headroom: stale pending rows can never be confirmed.
 // @see #34
 const CONFIRM_MAX_AGE_MS = 60 * 60 * 1000;
 
 // Extraction stays light: only objects up to this size are pulled back.
 const MAX_EXTRACT_BYTES = 1_000_000;
 
-/* Core of POST /:id/confirm and the bulk per-item loop: assumes the caller already verified ownership; returns a typed rejection instead of throwing so bulk can map per-item outcomes. */
+/* Shared by POST /:id/confirm and the bulk per-item loop; never throws. */
 // @see #68
 type ConfirmResult =
   | { status: 'ok'; asset: ReturnType<typeof safeAsset> }
@@ -55,13 +55,13 @@ const confirmAsset = async (asset: AssetDocument): Promise<ConfirmResult> => {
   let text: string | null = null;
   if (isExtractable(asset.filename) && head.size <= MAX_EXTRACT_BYTES) {
     const buf = await spacesWorkspaceStorage.getByKey(asset.key);
-    // Store the FULL extracted text — the 12k cap applies only at prompt-assembly time, so a long document stays recoverable via read_file.
+    // Store the FULL text — the 12k cap applies only at prompt-assembly time.
     if (buf) text = extractText(asset.filename, buf);
     if (text !== null) asset.textExtracted = text === '' ? null : text;
   }
 
   asset.status = 'ready';
-  // Ephemeral assets never queue work: derived jobs would outlive the row and bytes. Images queue a shared conversion+OCR+thumbnail job so the viewer never loads the original.
+  // Ephemeral assets never queue work; images queue one conversion+OCR job.
   // @see #116 #67 #208 #209
   const isImage = isImageContentType(asset.contentType);
   const needsConversion = text === null && isConvertible(asset.filename);
@@ -77,7 +77,7 @@ const confirmAsset = async (asset: AssetDocument): Promise<ConfirmResult> => {
       asset.thumbnailKey = null;
     }
     await asset.save();
-    // Enqueue is best-effort: revert the pending flags so no forever-'pending' badge outlives an unclaimed job.
+    // Enqueue is best-effort: revert pending flags on failure.
     try {
       await enqueueAssetJob(asset._id);
     } catch (enqueueErr) {
@@ -92,7 +92,7 @@ const confirmAsset = async (asset: AssetDocument): Promise<ConfirmResult> => {
     return { status: 'ok', asset: safeAsset(asset) };
   }
   await asset.save();
-  // Embed the fast-path extracted text: fire-and-forget, flag-gated, and explicitly never for ephemeral uploads (the helper cannot know the flag).
+  // Embed fast-path text: fire-and-forget, flag-gated, never ephemeral.
   // @see #294
   if (!asset.ephemeral) {
     enqueueWorkspaceEmbedding({

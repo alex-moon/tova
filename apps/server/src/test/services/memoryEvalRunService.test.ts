@@ -7,7 +7,7 @@ import {
   type MemoryEvalRunDeps,
 } from '../../main/services/memoryEvalRunService';
 
-/* The persisted memory rollup with injected fakes: the record shape, sentinel per-case rows, continuous metrics payload, global lease, error settle; the gate stage is retired. */
+/* Persisted memory rollup with injected fakes; the gate stage is retired. */
 // @see #289 #310
 
 const report: MemoryEvalReport = {
@@ -32,6 +32,7 @@ const report: MemoryEvalReport = {
       cutEmpty: 0,
       byCategory: { direct: { total: 1, surfaced: 1, expectedMet: 1 } },
     },
+    vectorEnabled: true,
   },
 };
 
@@ -73,7 +74,7 @@ describe('beginMemoryEvalRun (#289 T6)', () => {
 
 describe('executeMemoryEvalRun (#289 T6)', () => {
   it('settles done with sentinel rows and the continuous metrics payload', async () => {
-    const updateRecord = jest.fn(async () => undefined);
+    const updateRecord = jest.fn(async (_id?: string, _update?: unknown) => undefined);
     const result = await executeMemoryEvalRun(
       'id-1',
       { stages: ['retrieval'], trigger: 'manual' },
@@ -97,7 +98,7 @@ describe('executeMemoryEvalRun (#289 T6)', () => {
   });
 
   it('settles error and does not throw when the runner crashes', async () => {
-    const updateRecord = jest.fn(async () => undefined);
+    const updateRecord = jest.fn(async (_id?: string, _update?: unknown) => undefined);
     const result = await executeMemoryEvalRun(
       'id-1',
       { stages: ['retrieval'], trigger: 'manual' },

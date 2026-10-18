@@ -1,9 +1,9 @@
 import { Task, type TaskDocument } from '../models/Task';
 
-/* Completion-notification drain: the task worker only leaves `done` with notifiedAt null; the chat route folds pending completions into the next turn's context and marks them, exactly once. */
+/* Completion drain: pending done tasks fold into the next turn once. */
 // @see #255 #251 #254
 
-// The completed-but-unannounced origin tasks for a session, oldest first; only `done` tasks notify.
+// Completed-but-unannounced origin tasks for a session, oldest first.
 // @see #255
 export const pendingCompletionsFor = async (
   userId: string,
@@ -25,7 +25,7 @@ export const markNotified = async (taskIds: TaskDocument['_id'][]): Promise<void
   );
 };
 
-// The line folded into the origin turn's context; clipped so instruction or result cannot dominate the prompt.
+// The line folded into the origin turn's context; clipped.
 const NOTIFICATION_SUMMARY_CHARS = 600;
 const NOTIFICATION_INSTRUCTION_CHARS = 200;
 

@@ -10,7 +10,7 @@ import { config } from '../config';
 
 const router = express.Router();
 
-/* Task API: a task is a first-class stream (a twin of a chat), its own surface; every route is authenticated and user-scoped — a foreign id is a 404, never a 403 oracle; no route ever writes a Message. */
+/* Task API: a first-class stream; every route user-scoped, 404 no oracle. */
 // @see #254 #251
 
 const LIST_PAGE_SIZE = 20;
@@ -36,7 +36,7 @@ const serializeTask = (task: TaskDocument) => ({
   updatedAt: task.updatedAt,
 });
 
-// One stream event in the chat-turn shape plus `seq`/`step`; the raw tool `result` (sequencer replay payload) is stripped to the #196 chip fields.
+// Chat-turn event shape plus `seq`/`step`; raw `result` stripped to chips.
 // @see #196
 const serializeToolEvent = (tool: unknown) => {
   const plain = (
@@ -70,13 +70,13 @@ const serializeEvent = (event: TaskEventDocument) => ({
   timestamp: event.timestamp,
 });
 
-// Ownership-scoped lookup: an unowned or malformed id is a 404 — no oracle, no cast-error 500.
+// Ownership-scoped lookup: unowned or malformed id is a 404.
 const ownedTask = (req: AuthRequest): Promise<TaskDocument | null> =>
   isValidObjectId(req.params.id)
     ? Task.findOne({ _id: req.params.id, userId: req.user?.id })
     : Promise.resolve(null);
 
-// Create a task; refused for ZDR accounts (tasks are durable by definition), checked at creation only.
+// Create a task; refused for ZDR accounts (tasks are durable).
 // @see #254
 router.post('/', authenticate, async (req: AuthRequest, res) => {
   try {
@@ -98,7 +98,7 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
       userId: req.user?.id as string,
       ...(parsed.data.instruction ? { instruction: parsed.data.instruction } : {}),
       ...(parsed.data.origin ? { origin: parsed.data.origin } : {}),
-      // Budget is snapshotted at creation from the same config the poller reads, so a mid-task env change cannot move the goalposts.
+      // Budget snapshotted at creation; env changes can't move it.
       maxSteps: config.task.maxSteps,
       maxCostUsd: config.task.maxCostUsd,
     });
@@ -109,7 +109,7 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
   }
 });
 
-// Cursor-paged, strictly scoped to the caller; an optional `originSessionId` scopes to the tasks a chat started (the thin origin reference, never a reverse pointer).
+// Cursor-paged, caller-scoped; optional `originSessionId` filter.
 // @see #255
 router.get('/', authenticate, async (req: AuthRequest, res) => {
   try {
@@ -153,7 +153,7 @@ router.get('/:id', authenticate, async (req: AuthRequest, res) => {
   }
 });
 
-// Queue a steering turn (or resume a paused task); terminal tasks are refused with 409.
+// Queue a steering turn (or resume paused); terminal is 409.
 router.post('/:id/instruction', authenticate, async (req: AuthRequest, res) => {
   try {
     const parsed = taskInstructionSchema.safeParse(req.body ?? {});
@@ -177,7 +177,7 @@ router.post('/:id/instruction', authenticate, async (req: AuthRequest, res) => {
   }
 });
 
-// Stop an active task; a running processor observes the status at its next step boundary; terminal tasks untouched (idempotent).
+// Stop an active task; observed at the next step boundary; idempotent.
 router.post('/:id/cancel', authenticate, async (req: AuthRequest, res) => {
   try {
     const task = await ownedTask(req);

@@ -1,16 +1,16 @@
-/* Scheduled eval runs: an in-process poller (modelled on assetJobService); a tick is a no-op unless the UTC day has no run per kind; both suites run strictly sequentially; failures never crash the server. */
+/* Scheduled eval runs: in-process poller, at most one run per UTC day. */
 // @see #225 #289
 import { EvalRunRecord } from '../models/EvalRunRecord';
 
 const DEFAULT_TICK_MS = 15 * 60 * 1000;
 
-// A stranded `running` row blocks all future runs, so the scheduler reclaims one older than this (2× a generous suite duration) at start.
+// A stranded `running` row blocks all future runs; reclaimed at start.
 export const STALE_EVAL_RUNNING_MS = 2 * 60 * 60 * 1000;
 
 /** The two suites that share the `evalruns` collection (D9). */
 export type EvalRunKind = 'tool-use' | 'memory';
 
-/* One suite a tick can run: a per-kind idempotency check plus the run; suites execute in array order so the shared fixtures cannot clobber each other. */
+/* Suites execute in array order so shared fixtures cannot clobber. */
 export interface EvalSuite {
   kind: EvalRunKind;
   /** True when this kind already ran in the current UTC day. */
@@ -24,7 +24,7 @@ export interface EvalSchedulerOptions {
   /** Earliest UTC hour (0–23) a daily run may start. Default 0 (midnight). */
   hourUtc?: number;
   tickMs?: number;
-  /** Boot self-heal for a stranded `running` lease; called with no kind because the lease is global. Injectable so timer tests can disarm the Mongo call. */
+  /** Boot self-heal for a stranded `running` lease (global). */
   reclaimStaleRuns?: (maxAgeMs?: number, kind?: EvalRunKind) => Promise<unknown>;
 }
 
@@ -36,7 +36,7 @@ let busy = false;
 export const utcDayStart = (date: Date): Date =>
   new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
 
-/** True when a run already exists for the current UTC day, scoped by kind when given; any status counts (a failed run still occupied the window). */
+/** True when a run already exists for the current UTC day, any status. */
 export const hasRunForUtcDay = async (
   now: Date = new Date(),
   kind?: EvalRunKind,
@@ -46,7 +46,7 @@ export const hasRunForUtcDay = async (
   const existing = await EvalRunRecord.findOne({
     ...(kind ? { kind } : {}),
     startedAt: { $gte: start, $lt: end },
-    // Any status counts: a failed run still occupied the window; re-running is the manual "Run now" path.
+    // Any status counts; re-running is the manual "Run now" path.
     status: { $in: ['running', 'done', 'error'] },
   })
     .select({ _id: 1 })
@@ -55,7 +55,7 @@ export const hasRunForUtcDay = async (
   return existing !== null;
 };
 
-/** Reclaims a stranded `running` lease older than `maxAgeMs`, settling it to `error`; scopes by kind when given. */
+/** Reclaims a stranded `running` lease older than `maxAgeMs`. */
 export const reclaimStaleEvalRuns = async (
   maxAgeMs: number = STALE_EVAL_RUNNING_MS,
   kind?: EvalRunKind,
@@ -76,7 +76,7 @@ const dueNow = (opts: EvalSchedulerOptions, now: Date): boolean => {
   return now.getUTCHours() >= hour;
 };
 
-/** One scheduler tick: catch-up-aware, idempotent per kind, never stacking; one suite's failure is caught so it cannot skip the next. */
+/** One tick: catch-up-aware, idempotent per kind, never stacking. */
 export const runEvalSchedulerTick = async (
   suites: EvalSuite[],
   opts: EvalSchedulerOptions,
@@ -85,7 +85,7 @@ export const runEvalSchedulerTick = async (
   if (!opts.enabled) return;
   if (!dueNow(opts, now)) return;
   for (const suite of suites) {
-    // Both the idempotency check and the run are isolated per suite: a transient Mongo error in one suite's `hasRun` must not skip the next.
+    // Per-suite isolation: one suite's Mongo error must not skip the next.
     try {
       if (await suite.hasRun(now)) continue;
       await suite.run();

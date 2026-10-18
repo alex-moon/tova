@@ -3,7 +3,7 @@ import { inferenceService } from './inferenceService';
 import { config } from '../config';
 import { z } from 'zod';
 
-// The subtitle is a soft, revisable scope signal, so the aux model is low-stakes here.
+// A soft, revisable scope signal; the aux model is low-stakes here.
 // @see #359
 const subtitleModel = (): string => config.aux.model;
 
@@ -13,7 +13,7 @@ const SUBTITLE_PROMPT =
   'summary: at most ten words. If the current summary is still accurate, ' +
   'repeat it unchanged.';
 
-// Schema-enforced subtitle; a validation failure resolves with the current subtitle, the same keep-what-is-there degradation.
+// Validation failure resolves with the current subtitle.
 // @see #368
 const SUBTITLE_SCHEMA = z.object({ subtitle: z.string() });
 
@@ -45,7 +45,7 @@ export const reviseSessionSubtitle = async (
         },
       ],
       temperature: 0.3,
-      // Reasoning models spend hidden reasoning tokens from this budget before any subtitle text.
+      // Reasoning tokens come out of this budget before subtitle text.
       max_tokens: 512,
       structuredOutput: {
         schema: SUBTITLE_SCHEMA,
@@ -55,7 +55,7 @@ export const reviseSessionSubtitle = async (
       },
     });
     const subtitle = (completion.object.subtitle ?? '').trim().replace(/^["'“”]+|["'“”]+$/g, '');
-    // A failed/empty revision keeps the current subtitle; the next cadence turn retries.
+    // A failed/empty revision keeps the current subtitle.
     if (!subtitle) return current;
     return subtitle.length > MAX_SUBTITLE_LENGTH
       ? `${subtitle.slice(0, MAX_SUBTITLE_LENGTH)}…`

@@ -1,7 +1,7 @@
 import { groqConnector } from '../../main/services/mastraService';
 import { RequestContext } from '@mastra/core/request-context';
 
-/* The caller's userId must reach a built-in tool's `execute` through Mastra's request context, never baked into the memoised agent instance; the agent module is mocked (CJS/ESM constraint) and records the exact call options mastraService passes. */
+/* userId must reach a tool's `execute` via request context, not the agent. */
 // @see #58
 
 const mockGenerate = jest.fn();

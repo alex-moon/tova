@@ -12,7 +12,7 @@ import {
   putObject,
 } from './storageService';
 
-/* Storage-agnostic boundary: primitives keyed by userId + chatId + filename; semantics inherited verbatim from the Spaces driver. */
+/* Storage-agnostic boundary: primitives keyed by user/chat/filename. */
 // @see #149
 export interface WorkspaceStorage {
   put(
@@ -33,12 +33,12 @@ export interface WorkspaceStorage {
   list(userId: string, chatId: string): Promise<string[]>;
 }
 
-// Chat-scoped key layout used ONLY by chat-scoped writes; the `chats/` segment makes it structurally disjoint from the asset layout even when ids look alike, so no migration is ever needed.
+// The chats/ segment keeps this disjoint from the asset key layout.
 // @see #149
 export const chatScopedKey = (userId: string, chatId: string, filename: string): string =>
   `${userId}/chats/${chatId}/${filename}`;
 
-/* Raw-key subset: the asset domain owns persisted key strings and speaks in keys, not chat ids; a future local backend is not expected to implement these. */
+/* Raw-key subset: the asset domain speaks in keys, not chat ids. */
 export interface RawKeyStorage {
   putByKey(key: string, body: Buffer, contentType?: string): Promise<void>;
   getByKey(key: string, opts?: { maxBytes?: number }): Promise<Buffer | null>;
@@ -47,20 +47,20 @@ export interface RawKeyStorage {
   deleteByKey(key: string): Promise<boolean>;
 }
 
-// Spaces-only optional capabilities (presigns need S3 request signing), plus isConfigured so callers check readiness through the boundary.
+// Spaces-only capabilities (presigns), plus isConfigured for readiness.
 export interface SpacesCapabilities {
   isConfigured(): boolean;
   presignPutByKey(key: string, expiresIn?: number, contentType?: string): Promise<string>;
   presignGetByKey(key: string, expiresIn?: number): Promise<string>;
 }
 
-// Prefix-scoped bulk deletion by enumerating filenames no caller knows; Spaces-only.
+// Prefix-scoped bulk deletion of keys no caller knows; Spaces-only.
 // @see #143
 export interface ChatFileSweep {
   deleteChatFiles(userId: string, chatIds: string[]): Promise<string[]>;
 }
 
-// The single Spaces-backed implementation; call sites import only this object, never the driver.
+// The single Spaces-backed implementation; import this, not the driver.
 export const spacesWorkspaceStorage: WorkspaceStorage &
   RawKeyStorage &
   SpacesCapabilities &
@@ -73,12 +73,12 @@ export const spacesWorkspaceStorage: WorkspaceStorage &
     getObjectBuffer(chatScopedKey(userId, chatId, filename), opts?.maxBytes),
   getStream: (userId, chatId, filename) => getObjectStream(chatScopedKey(userId, chatId, filename)),
   delete: (userId, chatId, filename) => deleteObject(chatScopedKey(userId, chatId, filename)),
-  // No caller enumerates a chat prefix yet, so list has no inherited behaviour; throw rather than silently return empty.
+  // No caller enumerates a chat prefix; throw rather than fake empty.
   list: async () => {
     throw new Error('workspaceStorage.list is not implemented yet (no caller exists)');
   },
 
-  // Bulk chat-scoped sweep: delete every object under each chat's prefix; returns the keys whose deletion failed; resolves empty when unconfigured (nothing to sweep).
+  // Bulk chat-scoped sweep; returns the keys whose deletion failed.
   // @see #143
   deleteChatFiles: async (userId, chatIds): Promise<string[]> => {
     const failed: string[] = [];

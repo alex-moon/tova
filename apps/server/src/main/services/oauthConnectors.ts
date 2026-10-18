@@ -18,11 +18,11 @@ import type { ConnectorDocument } from '../models/Connector';
 import { Connector } from '../models/Connector';
 import { decryptEnvelope, encryptEnvelope } from './crypto';
 
-/* OAuth engine for mcp.oauth connectors: Tova is the client, the browser the consent surface; all RFC plumbing comes from the MCP SDK — this file owns pending consents, the encrypted token vault, and the proactive refresh policy. */
+/* OAuth engine for mcp.oauth connectors; SDK handles RFC plumbing. */
 // @see #327 #328
 
 const PENDING_TTL_MS = 10 * 60 * 1000;
-// Refresh an access token expiring within this window; the proactive skew keeps mid-turn expiry rare without a background prober.
+// Proactive refresh skew: keeps mid-turn expiry rare.
 const REFRESH_SKEW_MS = 60 * 1000;
 
 export interface ConnectorOAuthVault {
@@ -31,12 +31,12 @@ export interface ConnectorOAuthVault {
   expiresAt?: number;
   tokenType?: string;
   scope?: string;
-  // The RFC 8707 resource indicator the grant was issued for; re-sent on refresh.
+  // RFC 8707 resource indicator the grant was issued for; re-sent on refresh.
   resource?: string;
-  // The issuing authorization server plus the metadata it served: refreshAuthorization does NOT re-discover — without it, refresh would fall back to `{asUrl}/token`, wrong for custom-endpoint servers.
+  // The issuing AS: refreshAuthorization does NOT re-discover metadata.
   authorizationServerUrl: string;
   metadata?: AuthorizationServerMetadata;
-  // DCR-registered client, reused on re-auth so a provider sees one client per Tova server; the FULL SDK shape is persisted — narrowing it would make refresh guess the auth method.
+  // DCR client, reused on re-auth; persist the full SDK shape.
   clientInformation?: OAuthClientInformationMixed;
 }
 
@@ -48,15 +48,15 @@ interface PendingOAuth {
   authorizationServerUrl: string;
   metadata: AuthorizationServerMetadata;
   clientInformation: OAuthClientInformationMixed;
-  // RFC 8707 resource indicator from the endpoint's protected-resource doc; echoed on the token exchange so the AS binds the tokens to the resource.
+  // RFC 8707 resource indicator; echoed on the token exchange.
   resource?: string;
   codeVerifier: string;
-  // Set by the re-auth path: the callback updates this row instead of creating a new one.
+  // Set by re-auth: the callback updates this row, not create.
   connectorId?: string;
   expiresAt: number;
 }
 
-// Pending consents are in-memory by design: nothing secret is stored yet, the app is single-process, an abandoned consent self-cleans, and no collection means the factory-reset sweep is untouched.
+// Pending consents are in-memory by design: self-cleaning, nothing secret.
 const pending = new Map<string, PendingOAuth>();
 
 const prunePending = (now = Date.now()): void => {
@@ -75,12 +75,12 @@ export class ConnectorOAuthError extends Error {
 export interface ConnectorOAuthProbe {
   authorizationServerUrl: string;
   metadata: AuthorizationServerMetadata;
-  // The RFC 9728 doc when the endpoint served one; its `resource` and `scopes_supported` must ride the authorization request or multi-product authorization servers cannot route consent to the right product.
+  // RFC 9728 doc when served; its resource/scope must ride the request.
   // @see #330
   resourceMetadata?: OAuthProtectedResourceMetadata;
 }
 
-// SSRF posture parity with the connector url itself (https-only): discovery hops are fetched server-side from user input, so each must clear the same bar; loopback/private hosts are rejected.
+// SSRF parity with the connector url: discovery hops clear the same bar.
 // @see #36
 const PRIVATE_HOST =
   /^(localhost|127\.|10\.|192\.168\.|169\.254\.|172\.(1[6-9]|2\d|3[01])\.|\[::1\])/i;
@@ -98,7 +98,7 @@ const assertPublicHttpsUrl = (raw: string | URL, what: string): URL => {
   return parsed;
 };
 
-/* Probe an MCP endpoint for OAuth per the MCP auth spec: protected-resource metadata names the AS, falling back to the endpoint origin itself; null when nothing advertises OAuth. */
+/* Probe an endpoint for OAuth: metadata names the AS, else the origin. */
 // @see #327
 export const probeConnectorOAuth = async (url: string): Promise<ConnectorOAuthProbe | null> => {
   let authorizationServerUrl: string | undefined;
@@ -118,7 +118,7 @@ export const probeConnectorOAuth = async (url: string): Promise<ConnectorOAuthPr
   assertPublicHttpsUrl(authorizationServerUrl, 'OAuth authorization server');
   try {
     const metadata = await discoverAuthorizationServerMetadata(authorizationServerUrl);
-    // An authorization endpoint is the one thing a usable AS metadata must carry.
+    // An authorization endpoint is the one required metadata field.
     if (!metadata?.authorization_endpoint) return null;
     // Same bar for the endpoints discovery asks Tova to contact.
     assertPublicHttpsUrl(metadata.authorization_endpoint, 'OAuth authorization endpoint');
@@ -128,13 +128,13 @@ export const probeConnectorOAuth = async (url: string): Promise<ConnectorOAuthPr
       assertPublicHttpsUrl(metadata.registration_endpoint, 'OAuth registration endpoint');
     return { authorizationServerUrl, metadata, resourceMetadata };
   } catch (err) {
-    // A discovery doc pointing Tova at private/http endpoints is not "no OAuth" — surface why so the failure is diagnosable.
+    // Private/http discovery targets are a diagnosable failure, not none.
     if (err instanceof ConnectorOAuthError) throw err;
     return null;
   }
 };
 
-// Redirect URI base: the app is same-origin in dev and prod, so the start request's own Origin/Referer is correct; the env override covers non-standard deployments.
+// Redirect base: the request's own Origin/Referer; env override exists.
 export const redirectOriginFrom = (headers: {
   origin?: string | string[];
   referer?: string | string[];
@@ -158,7 +158,7 @@ const clientMetadata = (redirectUri: string): OAuthClientMetadata => ({
   token_endpoint_auth_method: 'none',
 });
 
-/* Operator-configured static OAuth clients: providers without RFC 7591 DCR cannot mint Tova a client at consent time; a matching static client replaces DCR entirely, persisted like any DCR result. */
+/* Static OAuth clients for providers without RFC 7591 DCR support. */
 // @see #342
 interface StaticOAuthClient {
   clientId: string;
@@ -187,7 +187,7 @@ export interface StartConnectorOAuthOptions {
   name: string;
   redirectOrigin: string | undefined;
   userId: string;
-  // Existing connector being re-authed; its vault client registration (if any) is reused instead of a fresh DCR.
+  // Existing connector re-authed; vault registration is reused, not fresh DCR.
   connectorId?: string;
   existingVault?: ConnectorOAuthVault | null;
 }
@@ -213,7 +213,7 @@ export const startConnectorOAuth = async (
     );
   }
 
-  // Client selection, most-stable first: a static client wins, then a vaulted DCR registration (only reusable against its issuing AS), then a fresh DCR.
+  // Client selection, most-stable first: static, vaulted DCR, fresh DCR.
   // @see #342
   const staticClient = staticClientFor(probe.authorizationServerUrl);
   const reusableClient =
@@ -246,12 +246,12 @@ export const startConnectorOAuth = async (
     }
   }
 
-  // RFC 8707 resource indicator + per-server scope set, verbatim from the protected-resource doc; without them a multi-product AS cannot tell which product is being authorized.
+  // Resource indicator + scopes, verbatim from the protected-resource doc.
   // @see #330
   const resource = probe.resourceMetadata?.resource;
   const scope = probe.resourceMetadata?.scopes_supported?.join(' ');
 
-  // State is generated here (not by the SDK): it keys the pending record the callback matches against.
+  // State generated here: it keys the pending record the callback matches.
   const state = randomBytes(32).toString('base64url');
   const started = await startAuthorization(probe.authorizationServerUrl, {
     metadata: probe.metadata,
@@ -283,7 +283,7 @@ export const startConnectorOAuth = async (
 export interface CompleteConnectorOAuthOptions {
   code: string;
   state: string;
-  // Caller identity: a pending record is bound to the session that started it, so a different cookie cannot complete it.
+  // A pending record is bound to the session that started it.
   userId: string;
 }
 
@@ -296,7 +296,7 @@ const readConnectorVault = (connector: ConnectorDocument): ConnectorOAuthVault |
   }
 };
 
-// Read of the encrypted vault; also used by the re-auth path to hand the stored DCR registration back to startConnectorOAuth.
+// Read of the encrypted vault; re-auth hands back the DCR registration.
 export { readConnectorVault };
 
 const vaultFromTokens = (
@@ -308,7 +308,7 @@ const vaultFromTokens = (
   previous?: ConnectorOAuthVault | null,
 ): ConnectorOAuthVault => ({
   accessToken: tokens.access_token,
-  // Providers may omit refresh_token on re-issue; keep the previous one rather than dropping the grant's only refresh credential.
+  // Keep the previous refresh token when re-issue omits one.
   refreshToken: tokens.refresh_token ?? previous?.refreshToken,
   expiresAt:
     typeof tokens.expires_in === 'number'
@@ -324,7 +324,7 @@ const vaultFromTokens = (
 
 const vaultPayload = (vault: ConnectorOAuthVault): string => JSON.stringify(vault);
 
-/* Complete a consent: match the pending record, exchange the code, create (fresh) or update (re-auth) the connector. */
+/* Complete a consent: match the pending record and exchange the code. */
 export const completeConnectorOAuth = async ({
   code,
   state,
@@ -342,7 +342,7 @@ export const completeConnectorOAuth = async ({
     throw new ConnectorOAuthError('This sign-in attempt belongs to a different session', 404);
   }
 
-  // The record is kept until the exchange settles: the callback page can race itself (StrictMode), and the provider's code is single-use — a replay gets the provider's error, not "state not recognised".
+  // Kept until the exchange settles: StrictMode replays get a clean error.
   let tokens: OAuthTokens;
   try {
     tokens = await exchangeAuthorization(record.authorizationServerUrl, {
@@ -355,7 +355,7 @@ export const completeConnectorOAuth = async ({
     });
   } catch (err) {
     pending.delete(state);
-    // No provider detail is echoed (it can embed response bodies); the server log carries the specifics.
+    // No provider detail echoed; the server log carries the specifics.
     console.error('connector oauth exchange failed:', String(err));
     throw new ConnectorOAuthError(
       'Sign-in could not be completed. Start again from settings.',
@@ -402,7 +402,7 @@ export const completeConnectorOAuth = async ({
   return doc;
 };
 
-// Single-flight refresh per connector: concurrent turns must not race a rotating refresh token (many providers invalidate it once used); the loser awaits the winner's promise.
+// Single-flight refresh per connector: no race on rotating refresh tokens.
 const refreshInFlight = new Map<string, Promise<ConnectorOAuthVault | null>>();
 
 const refreshVault = async (
@@ -413,7 +413,7 @@ const refreshVault = async (
   const existing = refreshInFlight.get(key);
   if (existing) return existing;
   const promise = (async () => {
-    // Both a refresh token and the DCR client identity are needed; missing either is the same terminal state as a rejected refresh: re-consent required.
+    // Missing refresh token or client identity means re-consent required.
     if (!vault.refreshToken || !vault.clientInformation) {
       connector.authState = 'needs-reauth';
       await connector.save().catch(() => undefined);
@@ -439,7 +439,7 @@ const refreshVault = async (
       await connector.save();
       return next;
     } catch {
-      // Revoked or expired grant: mark for re-auth — the doc-level marker is what the UI reads, no tokens are returned.
+      // Revoked/expired grant: mark for re-auth; no tokens returned.
       connector.authState = 'needs-reauth';
       await connector.save().catch(() => undefined);
       return null;
@@ -456,11 +456,11 @@ const refreshVault = async (
 const needsRefresh = (vault: ConnectorOAuthVault): boolean =>
   typeof vault.expiresAt === 'number' && vault.expiresAt <= Date.now() + REFRESH_SKEW_MS;
 
-/* mcp.oauth branch of the auth seam: a bearer header from the vault, refreshed proactively inside the skew window; undefined when the grant is dead. */
+/* oauth branch of the auth seam: bearer from vault, refreshed proactively. */
 export const oauthAuthHeaders = async (
   connector: ConnectorDocument,
 ): Promise<Record<string, string> | undefined> => {
-  // A grant already marked dead is only revived by re-auth; hammering a revoked refresh token per turn is a doomed round-trip some providers lock out.
+  // A dead grant revives only via re-auth; never hammer a revoked token.
   if (connector.authState === 'needs-reauth') return undefined;
   const vault = readConnectorVault(connector);
   if (!vault?.accessToken) return undefined;
@@ -469,7 +469,7 @@ export const oauthAuthHeaders = async (
   return { Authorization: `Bearer ${current.accessToken}` };
 };
 
-// Type-agnostic auth flag for the wire serializer (pat headers or oauth vault).
+// Type-agnostic auth flag for the wire serializer.
 export const hasVaultedAuth = (connector: ConnectorDocument): boolean =>
   Boolean(connector.oauth) || Boolean(connector.headersConfigured);
 

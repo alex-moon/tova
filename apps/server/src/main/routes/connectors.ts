@@ -23,7 +23,7 @@ import {
 
 const router = express.Router();
 
-// Discovery probe for the add-time copy: true when the endpoint advertises OAuth; a failed probe answers false (honest unreachable copy).
+// Discovery probe for add-time copy; a failed probe answers false.
 // @see #333
 const connectorAdvertisesOAuth = async (url: string): Promise<boolean> => {
   try {
@@ -33,10 +33,10 @@ const connectorAdvertisesOAuth = async (url: string): Promise<boolean> => {
   }
 };
 
-/* Personal connector registry; platform connectors surfaced read-only in GET; auth stored as one encrypted bearer header, never echoed. */
+/* Personal connector registry; platform rows are read-only in GET. */
 // @see #36 #329 #80
 
-// Explicit wire projection: per-type storage fields map onto the generic contract; envelope fields excluded by construction.
+// Wire projection: storage fields map onto the generic contract.
 // @see #329
 const serialize = (doc: ConnectorDocument): ConnectorInfo => ({
   id: String(doc._id),
@@ -63,7 +63,7 @@ router.get('/', authenticate, async (req: AuthRequest, res) => {
   }
 });
 
-// Validate, live-handshake, then persist; a connector whose endpoint fails `listTools` is rejected so a bad URL can never be saved.
+// Validate, handshake, then persist; a failed `listTools` is rejected.
 router.post('/', authenticate, async (req: AuthRequest, res) => {
   const parsed = connectorCreateSchema.safeParse(req.body ?? {});
   if (!parsed.success) {
@@ -79,7 +79,7 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
       // @see #77
       tools = await listMcpTools(url, headers);
     } catch (err) {
-      // An OAuth-only endpoint probed with a bearer fails the handshake as "bad token"; when OAuth is advertised, point at the Connect flow instead.
+      // OAuth-only + bearer probe: point at the Connect flow instead.
       // @see #333
       if (await connectorAdvertisesOAuth(url)) {
         return res.status(422).json({
@@ -91,7 +91,7 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
       return res.status(422).json({ message: `Connector is not reachable: ${message}` });
     }
     const doc = new Connector({
-      // Only mcp.pat parses here; mcp.oauth rows come from the OAuth consent flow.
+      // Only mcp.pat parses here; mcp.oauth comes from consent.
       // @see #329 #327
       type: parsed.data.type,
       scope: 'user',
@@ -118,7 +118,7 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
   }
 });
 
-// Personal connectors only; platform and other users' rows are invisible by construction (404, not 403).
+// Personal connectors only; others' rows are 404s, never 403s.
 router.delete('/:id', authenticate, async (req: AuthRequest, res) => {
   try {
     const idParam = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
@@ -137,7 +137,7 @@ router.delete('/:id', authenticate, async (req: AuthRequest, res) => {
   }
 });
 
-// Begin a browser consent for an mcp.oauth connector; a non-OAuth endpoint is a 422, a duplicate URL fails fast with 409.
+// Begin consent for mcp.oauth; non-OAuth is 422, duplicate URL 409.
 // @see #327
 router.post('/oauth/start', authenticate, async (req: AuthRequest, res) => {
   const parsed = connectorOAuthStartSchema.safeParse(req.body ?? {});
@@ -167,7 +167,7 @@ router.post('/oauth/start', authenticate, async (req: AuthRequest, res) => {
   }
 });
 
-// Restart consent for an owned mcp.oauth connector with a dead grant; the callback updates the row instead of creating a new one.
+// Restart consent for a dead grant; the callback updates the row.
 // @see #327
 router.post('/:id/reauth', authenticate, async (req: AuthRequest, res) => {
   const idParam = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
@@ -200,7 +200,7 @@ router.post('/:id/reauth', authenticate, async (req: AuthRequest, res) => {
   }
 });
 
-// Complete a consent: exchange the code, store the tokens encrypted, create or update the connector.
+// Complete consent: exchange code, store tokens, upsert connector.
 // @see #327
 router.post('/oauth/callback', authenticate, async (req: AuthRequest, res) => {
   const parsed = connectorOAuthCallbackSchema.safeParse(req.body ?? {});
@@ -212,7 +212,7 @@ router.post('/oauth/callback', authenticate, async (req: AuthRequest, res) => {
       ...parsed.data,
       userId: req.user?.id as string,
     });
-    // Post-consent handshake, parity with the PAT path: failure keeps the row (the grant is the expensive part) but honestly marked unreachable; re-auth heals an unreachable row too.
+    // Post-consent handshake; failure keeps the row, marked unreachable.
     // @see #330
     const vault = readConnectorVault(doc);
     if (vault) {

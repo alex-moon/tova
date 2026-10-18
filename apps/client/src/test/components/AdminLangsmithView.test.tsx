@@ -9,7 +9,7 @@ import type {
   AdminTraceDetail,
 } from '../../main/types/admin';
 
-/* The Traces tab renders trace rows and the stats strip, refetches on filter changes, and drills into the run tree; the service connector is mocked. */
+// The Traces tab renders trace rows and the stats strip, refetches on filters.
 // @see #186
 
 const listTraces = vi.fn();
@@ -194,7 +194,7 @@ describe('AdminLangsmithView (#186)', () => {
     expect(stats).toHaveTextContent('2');
   });
 
-  // The Memory column shows the guard outcome (+ hit count), an em dash for pre-metadata traces, timeout in the error tone.
+  // Memory column: guard outcome (+ hits), em dash for pre-metadata traces.
   // @see #308
   it('renders the workspace memory column per trace (#308)', async () => {
     listTraces.mockResolvedValue(
@@ -235,7 +235,7 @@ describe('AdminLangsmithView (#186)', () => {
     render(<AdminLangsmithView />);
     const stats = await screen.findByTestId('langsmith-stats');
 
-    // A provider-bearing row renders `model · provider`; the legacy no-provider row renders the model alone.
+    // A provider row renders model · provider; a legacy row renders the model.
     const row = screen.getByTestId('langsmith-model-openai/gpt-oss-20b-groq');
     expect(row).toHaveTextContent('openai/gpt-oss-20b · groq');
     expect(row).toHaveTextContent('400ms');

@@ -61,7 +61,7 @@ describe('ConnectorsView (#331)', () => {
   it('renders the live grid in market-share order with status badges', async () => {
     render(<ConnectorsView />);
     await screen.findByTestId('connector-card-dropbox');
-    // The grid shows only the verified ("golden six") set; watchlisted entries never render.
+    // The grid shows only the verified ("golden six") set, never watchlisted.
     // @see #333
     const ids = ['dropbox', 'notion', 'trello', 'linear', 'atlassian', 'github'];
     for (let i = 0; i < ids.length; i += 1) {
@@ -72,7 +72,7 @@ describe('ConnectorsView (#331)', () => {
         expect(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
       }
     }
-    // Watchlisted providers do not render cards; connect via the custom URL affordance instead.
+    // Watchlisted providers render no cards; connect via the custom URL.
     expect(screen.queryByTestId('connector-card-slack')).not.toBeInTheDocument();
     expect(screen.queryByTestId('connector-card-spotify')).not.toBeInTheDocument();
     expect(screen.getByTestId('connector-card-trello-status')).toHaveTextContent('Connect');

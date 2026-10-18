@@ -2,7 +2,7 @@ import { groqConnector, deepinfraConnector } from '../../main/services/mastraSer
 import { runModelComparison } from '../../main/services/modelCompare';
 import type { CompletionOptions } from '../../main/services/llmTypes';
 
-/* Strict OpenAI-compatible servers reject a system message not at index 0, so the connector collapses the caller's leading system message(s) into a per-call instructions override; these tests pin the connector-level contract with the agent module mocked. */
+/* Leading system message(s) collapse into a per-call instructions override. */
 // @see #198
 
 const mockGenerate = jest.fn();
@@ -106,7 +106,7 @@ describe('mastraService single leading system message (#198)', () => {
     expect(mockGenerate).not.toHaveBeenCalled();
   });
 
-  /* The compare/eval caller passes an explicit system message and needs no separate change — the shared connector path collapses it. */
+  /* The compare/eval caller passes an explicit system message; same path. */
   // @see #198
   it('collapses the model-compare path through the shared connector', async () => {
     await runModelComparison('compare this', [
@@ -118,7 +118,7 @@ describe('mastraService single leading system message (#198)', () => {
     expect(messages).toEqual([{ role: 'user', content: 'compare this' }]);
   });
 
-  /* `rest` must still flow through the image mapping unchanged, and a leading system message carried as content parts must collapse just the same. */
+  /* `rest` flows through image mapping; part-array content collapses too. */
   // @see #198
   it('collapses part-array system content and preserves image mapping in rest', async () => {
     await deepinfraConnector.createCompletion(

@@ -23,7 +23,7 @@ export interface HonestyVerdict {
   reason: string | null;
 }
 
-// Schema-enforced verdict; a validation failure resolves with clean (no fabrication signal), which degrades to an assessed-clean message.
+// Schema-enforced verdict; validation failure resolves clean.
 // @see #368
 const VERDICT_SCHEMA = z.object({ claimsToolUse: z.boolean(), reason: z.string() });
 
@@ -35,7 +35,7 @@ export const classifyAssistantTurn = async (
   sessionId?: string,
 ): Promise<HonestyVerdict | null> => {
   try {
-    // Tool-free agent, same rationale as the other aux classifiers; a single user message keeps the prompt intact (the connector folds system messages into per-call instructions).
+    // Tool-free agent; a single user message keeps the prompt intact.
     // @see #77 #308 #198
     const completion = await inferenceService.createStructuredCompletion({
       provider: config.aux.provider,
@@ -49,8 +49,8 @@ export const classifyAssistantTurn = async (
         },
       ],
       temperature: 0,
-      // Reasoning models spend hidden reasoning tokens from this budget before any verdict text; too small and every verdict is empty or truncated (the #129 shape).
-      // @see #378 #4
+      // Reasoning tokens come from this budget; too small starves verdicts.
+      // @see #378 #4 #129
       max_tokens: 1024,
       ...(sessionId ? { trace: { sessionId } } : {}),
       structuredOutput: {
@@ -60,7 +60,7 @@ export const classifyAssistantTurn = async (
         errorStrategy: 'fallback',
       },
     });
-    // A starved or empty reply (reasoning models burn the budget on hidden reasoning) is garbage, not a clean verdict: leave the message unassessed rather than record a false "clean".
+    // An empty reply is garbage, not a clean verdict: leave unassessed.
     // @see #378
     const raw = completion.choices[0]?.message?.content ?? '';
     if (!raw.trim() || completion.choices[0]?.finishReason === 'length') {
@@ -79,7 +79,7 @@ export const classifyAssistantTurn = async (
   }
 };
 
-// Classify a settled assistant turn and persist the verdict; never throws. Resolves the verdict so an open stream can surface it.
+// Classify a settled turn, persist the verdict; never throws.
 // @see #371
 export const reviewAssistantTurn = async (
   messageId: string,

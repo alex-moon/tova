@@ -1,7 +1,7 @@
 import { EvalRunRecord } from '../../main/models/EvalRunRecord';
-// The shared jest setup provides the in-memory Mongo, connects mongoose, syncs indexes, and clears collections per test.
+// Shared jest setup: in-memory Mongo, mongoose connect, index sync, wipes.
 
-/* The computed eval rollup: defaults keep a fresh row in the `running` lease state until the service settles it; the indexes back the list query and the once-per-window idempotency check. */
+/* Computed rollup: fresh rows sit in `running` until the service settles. */
 // @see #225
 describe('EvalRunRecord', () => {
   it('defaults to a running lease with no results', async () => {
@@ -64,7 +64,7 @@ describe('EvalRunRecord', () => {
     expect(keys).toContain(JSON.stringify({ kind: 1, startedAt: -1 }));
   });
 
-  // Without the explicit collection name Mongoose would pluralise to `evalrunrecords`, and the migration's collection and indexes would never be used.
+  // Otherwise Mongoose would pluralise, bypassing the migration's collection.
   it('binds to the `evalruns` collection the migration creates', () => {
     expect(EvalRunRecord.collection.name).toBe('evalruns');
   });

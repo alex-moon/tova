@@ -281,7 +281,7 @@ describe('App startup chat (issue #96)', () => {
   });
 });
 
-// Client mirror of the server reconcile — what stops the live chip from stacking a second entry.
+// Client mirror of the server reconcile; stops a second live chip.
 // @see #196
 describe('reconcileToolEvents (#196)', () => {
   const call = (name: string, query?: string): ToolEvent => ({

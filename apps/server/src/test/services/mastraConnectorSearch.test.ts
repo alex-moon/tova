@@ -21,6 +21,16 @@ const fakeTool = (name: string) =>
 const optionsWith = (overrides: Partial<CompletionOptions> = {}): CompletionOptions =>
   ({ userId: 'u1', ...overrides }) as CompletionOptions;
 
+// `options` is private on the processor; tests reach in via this seam.
+const processorOptions = (
+  processor: ToolSearchProcessor,
+): { tools: Record<string, unknown>; search: unknown } =>
+  (
+    processor as unknown as {
+      options: { tools: Record<string, unknown>; search: unknown };
+    }
+  ).options;
+
 beforeEach(() => {
   mockToolsetsFor.mockReset();
 });
@@ -47,8 +57,9 @@ describe('connectorSearchOptionsFrom (#360 deferred connector tools)', () => {
     expect(opts.inputProcessors).toHaveLength(1);
     const processor = opts.inputProcessors?.[0] as ToolSearchProcessor;
     expect(processor).toBeInstanceOf(ToolSearchProcessor);
-    expect(Object.keys(processor.options.tools)).toEqual(['create_pull_request']);
-    expect(processor.options.search).toMatchObject({ topK: 5, autoLoad: true });
+    const options = processorOptions(processor);
+    expect(Object.keys(options.tools)).toEqual(['create_pull_request']);
+    expect(options.search).toMatchObject({ topK: 5, autoLoad: true });
   });
 
   it('re-wraps catalog tools with provider-safe ids, preserving the executor', async () => {
@@ -58,7 +69,7 @@ describe('connectorSearchOptionsFrom (#360 deferred connector tools)', () => {
     });
     const opts = await connectorSearchOptionsFrom(optionsWith());
     const processor = opts.inputProcessors?.[0] as ToolSearchProcessor;
-    const tool = processor.options.tools['pull_request.review'] as {
+    const tool = processorOptions(processor).tools['pull_request.review'] as {
       id: string;
       execute: unknown;
     };
@@ -73,9 +84,8 @@ describe('connectorSearchOptionsFrom (#360 deferred connector tools)', () => {
     });
     const opts = await connectorSearchOptionsFrom(optionsWith());
     const processor = opts.inputProcessors?.[0] as ToolSearchProcessor;
-    expect(Object.keys(processor.options.tools)).toEqual(['shared']);
-    expect((processor.options.tools.shared as { description: string }).description).toBe(
-      'does one-shared',
-    );
+    const options = processorOptions(processor);
+    expect(Object.keys(options.tools)).toEqual(['shared']);
+    expect((options.tools.shared as { description: string }).description).toBe('does one-shared');
   });
 });

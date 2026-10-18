@@ -2,7 +2,7 @@ import request from 'supertest';
 import { createApp } from '../../main/index';
 import { Session } from '../../main/models/Session';
 import { User } from '../../main/models/User';
-/* The title is user-owned (PATCH sets it and marks titleSource 'user') and the subtitle is a system-maintained line riding every session response. */
+/* Title is user-owned; the subtitle is system-maintained. */
 // @see #359
 
 const registerUser = async (app: ReturnType<typeof createApp>, email: string) => {

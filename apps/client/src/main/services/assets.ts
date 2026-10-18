@@ -1,6 +1,6 @@
 import axios from 'axios';
 
-// Where the file came from; absent ids mean unknown (never faked); absent provenance serialises as explicit null.
+// Where the file came from; absent ids mean unknown (never faked).
 // @see #252 #251
 export interface AssetProvenance {
   kind: 'upload' | 'chat' | 'task';
@@ -9,7 +9,7 @@ export interface AssetProvenance {
   messageId?: string;
 }
 
-// File bytes go direct-to-Spaces with a presigned PUT; XHR so upload progress can be reported.
+// Bytes go direct-to-Spaces with a presigned PUT; XHR for progress events.
 // @see #34
 export interface AssetSummary {
   id: string;
@@ -17,7 +17,7 @@ export interface AssetSummary {
   contentType: string;
   size: number;
   status: string;
-  // 'system-side' is agent-only working material (no Spaces object, so download affordances must hide).
+  // 'system-side' is agent-only working material; download affordances hide.
   // @see #340 #356
   origin?: 'user-upload' | 'system-generated' | 'system-side';
   // No extracted text server-side — Tova can read the filename only.
@@ -28,7 +28,7 @@ export interface AssetSummary {
   // Worker's last failure reason for the failed-card tooltip.
   // @see #83
   markdownFailureReason?: string | null;
-  // Derived-thumbnail lifecycle; the viewer waits for 'ready' before rendering an image preview.
+  // Derived-thumbnail lifecycle; the viewer waits for ready before rendering.
   // @see #208
   thumbnailStatus?: string;
   // Provenance, or null when unknown (legacy rows / untracked).
@@ -45,7 +45,7 @@ export interface AssetListPage {
   nextCursor: string | null;
 }
 
-// The in-app viewer payload: the extracted body, which the list payload deliberately never carries.
+// The in-app viewer payload: the extracted body the list never carries.
 // @see #197
 export interface AssetContent {
   id: string;
@@ -81,7 +81,7 @@ export interface AssetVersionContent {
   createdAt: string;
 }
 
-// `url` is null until the worker produces the thumbnail; `status` lets the viewer keep polling while pending.
+// url is null until the worker produces the thumbnail; status drives polling.
 // @see #208
 export interface AssetThumbnail {
   url: string | null;
@@ -95,7 +95,7 @@ export class AssetError extends Error {
   }
 }
 
-// Mirrors the server's asset size policy and bulk batch caps; exported so the UI reuses the same numbers.
+// Mirrors the server's size policy and bulk caps; UI reuses the numbers.
 // @see #68
 export const MAX_ASSET_SIZE = 15 * 1024 * 1024;
 export const BULK_BATCH_SIZE = 20;
@@ -145,7 +145,7 @@ const putUpload = (
 
 const contentTypeOf = (file: File) => file.type || 'application/octet-stream';
 
-// One bulk-presign, a pool of direct PUTs, then one bulk-confirm for the PUT-succeeded files; nothing ever throws.
+// One bulk-presign, a pool of direct PUTs, then one bulk-confirm.
 const uploadBatch = async (
   batch: number[],
   files: File[],
@@ -187,7 +187,7 @@ const uploadBatch = async (
     return;
   }
 
-  // Bounded parallelism for the direct PUTs; progress uses the caller's global file index.
+  // Bounded parallelism for the PUTs; progress uses the global file index.
   const queue = [...okItems];
   const putSucceeded: typeof okItems = [];
   const worker = async () => {
@@ -207,7 +207,7 @@ const uploadBatch = async (
   };
   await Promise.all(Array.from({ length: Math.min(BULK_PUT_CONCURRENCY, queue.length) }, worker));
 
-  // PUT-failed files are never confirmed; results are matched back by assetId, not row order.
+  // PUT-failed files are never confirmed; matched back by assetId.
   if (!putSucceeded.length) return;
 
   try {
@@ -241,7 +241,7 @@ const uploadBatch = async (
 };
 
 const AssetService = {
-  // 'system-side' fetches ONLY agent-facing files; omitted keeps the server default, which the chat attach picker relies on.
+  // 'system-side' fetches ONLY agent-facing files; omitted keeps the default.
   // @see #356
   async list(cursor?: string | null, origin?: 'system-side'): Promise<AssetListPage> {
     const res = await axios.get<AssetListPage>('/api/assets', {
@@ -305,7 +305,7 @@ const AssetService = {
     }
   },
 
-  // Presigned URL for the derived thumbnail plus lifecycle status; `url` is null while pending or failed.
+  // Presigned thumbnail URL plus lifecycle status; url nulls while pending.
   // @see #208
   async thumbnailUrl(assetId: string): Promise<AssetThumbnail> {
     try {
@@ -316,7 +316,7 @@ const AssetService = {
     }
   },
 
-  // Plain GET with a repeatable `id` query param; the browser grabs the streamed zip, so just the URL for an anchor download.
+  // Plain GET; the browser grabs the streamed zip, so just an anchor URL.
   // @see #69
   bulkDownloadUrl(assetIds: string[]): string {
     return `/api/assets/bulk-download?${assetIds
@@ -343,7 +343,7 @@ const AssetService = {
     }
   },
 
-  // `scope: 'chat'` lets the server keep an incognito chat's attachments out of durable storage; `chatId`/`zdr` say which per-chat incognito decision applies.
+  // scope: 'chat' keeps an incognito chat's attachments out of storage.
   // @see #116 #144
   async upload(
     file: File,
@@ -385,7 +385,7 @@ const AssetService = {
     }
   },
 
-  // Bulk upload: one presign/confirm per chunk, direct PUTs in between; one result row per file, failures never throw, no archive container.
+  // Bulk upload: presign/confirm per chunk with direct PUTs in between.
   // @see #68
   async uploadMany(
     files: File[] | FileList,
@@ -404,7 +404,7 @@ const AssetService = {
       }
     }
 
-    // Chunks are sequential; the server cap is a pure-number change away and the UI never exceeds it.
+    // Chunks are sequential; the UI never exceeds the server cap.
     for (let start = 0; start < pending.length; start += BULK_BATCH_SIZE) {
       await uploadBatch(
         pending.slice(start, start + BULK_BATCH_SIZE),

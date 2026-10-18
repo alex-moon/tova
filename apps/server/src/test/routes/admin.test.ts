@@ -10,7 +10,7 @@ jest.mock('../../main/services/lokiLogs', () => ({
   queryRetainedLogs: jest.fn(),
 }));
 
-// The provider catalog call is mocked — the suite pins the guard, validation and found/miss/failure mapping, never a live provider request.
+// Provider catalog mocked; the suite pins guard, validation and error mapping.
 // @see #217
 jest.mock('../../main/services/providerModelLookup', () => ({
   lookupProviderModel: jest.fn(),
@@ -114,7 +114,7 @@ describe('admin routes', () => {
       .send({ role: 'user' });
     expect(demoteRes.status).toBe(200);
 
-    // only formsatz@gmail.com is protected; a sole non-owner admin can be demoted
+    // only formsatz@gmail.com is protected; sole non-owner admin can go
     const lastAdminRes = await request(app)
       .put(`/api/admin/users/${target._id}/role`)
       .set('Cookie', cookie)
@@ -208,7 +208,7 @@ describe('admin routes', () => {
     expect(res.status).toBe(401);
   });
 
-  // Drift test for the shared contract: the wire payload of GET /api/admin/users must type-match AdminUser field-for-field.
+  // Drift test: GET /api/admin/users must type-match AdminUser exactly.
   // @see #20
   it('returns user payloads matching the shared AdminUser contract', async () => {
     const app = createApp();
@@ -253,7 +253,7 @@ describe('admin routes', () => {
       expect(nonAdmin.status).toBe(403);
     });
 
-    // One row per model, its providers nested; the tier column and feedback tallies are gone.
+    // One row per model with providers nested; tier column is gone.
     // @see #234
     it('lists one roster row per model with nested providers and TTFT', async () => {
       const app = createApp();
@@ -310,7 +310,7 @@ describe('admin routes', () => {
       });
     });
 
-    // The cool-off lives per provider now; the error tallies stay keyed provider+model and ride the same payload.
+    // The cool-off is per provider now; tallies stay keyed provider+model.
     // @see #168 #213
     it('surfaces per-provider disabledUntil and per-model error tallies in the payload', async () => {
       const app = createApp();
@@ -329,7 +329,7 @@ describe('admin routes', () => {
         eligible: true,
         providers: [{ provider: 'fireworks', modelId: 'accounts/fireworks/models/test-healthy' }],
       });
-      // The tally rows are the single diagnostics mechanism the admin table reads.
+      // Tally rows are the single diagnostics mechanism the table reads.
       // @see #175
       await ModelRouteError.create({
         provider: 'deepinfra',
@@ -515,7 +515,7 @@ describe('admin routes', () => {
         expect(missing.status).toBe(404);
       });
 
-      // A provider edit must preserve the system-owned rolling TTFT and cool-off; only modelId/enabled are operator-owned.
+      // An edit preserves TTFT/cool-off; modelId/enabled are operator-owned.
       // @see #234
       it('preserves provider TTFT and cool-off across an edit', async () => {
         const until = new Date(Date.now() + 60 * 60 * 1000);
@@ -576,7 +576,7 @@ describe('admin routes', () => {
         expect(created.status).toBe(409);
       });
 
-      // Prices are admin-editable config; non-negative finite numbers only (sub-cent rates are legal, so not integers).
+      // Prices are admin-editable config; non-negative finite numbers only.
       // @see #199
       it('creates, updates, lists and clears model prices', async () => {
         const created = await request(app)
@@ -776,7 +776,7 @@ describe('admin retained logs endpoint (#179)', () => {
   });
 });
 
-/* Model-compare route: only validation is asserted — the runner is unit-tested in modelCompare.test.ts, so this suite never pays for a real completion. */
+/* Model-compare route: only validation; runner is unit-tested elsewhere. */
 // @see #129
 describe('POST /api/admin/model-compare (issue #129)', () => {
   it('rejects the unauthenticated and non-admin', async () => {
@@ -825,7 +825,7 @@ describe('POST /api/admin/model-compare (issue #129)', () => {
   });
 });
 
-/* Model-lookup route: the service is mocked — the contract under test is the route (guard, validation, found/miss/failure mapping, key isolation). */
+/* Model-lookup route: service mocked; the contract under test is the route. */
 // @see #217
 describe('GET /api/admin/model-lookup (#217)', () => {
   const lookupProviderModel = jest.requireMock('../../main/services/providerModelLookup')
@@ -902,7 +902,7 @@ describe('GET /api/admin/model-lookup (#217)', () => {
     expect(miss.body).toEqual({ found: false });
   });
 
-  // Fireworks is a first-class lookup provider; it reports context/vision but no prices (absent, never 0).
+  // Fireworks reports context/vision but no prices (absent, never 0).
   // @see #234
   it('resolves a fireworks catalog entry without prices', async () => {
     const app = createApp();

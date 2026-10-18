@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 
-// Real-endpoint auth flow; read-only with respect to the persisted admin account.
+// Real-endpoint auth flow; read-only against the persisted admin account.
 
 const email = process.env.E2E_EMAIL ?? 'formsatz@gmail.com';
 const password = process.env.E2E_PASSWORD ?? 'password';

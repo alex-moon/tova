@@ -13,7 +13,7 @@ import {
 import { STALE_PROCESSING_MS } from '../../main/services/assetJobService';
 import type { AssetJobDocument } from '../../main/models/AssetJob';
 
-// Mongo-backed conversion queue running against the shared in-memory Mongo; the beforeEach wipe empties assetJobs between tests.
+// Mongo-backed conversion queue on the shared in-memory Mongo.
 // @see #67
 
 const createAssetDoc = async (tag: string): Promise<{ userId: string; id: string }> => {
@@ -100,7 +100,7 @@ describe('runAssetJobTick (#67)', () => {
 
   it('terminal-fails at the attempt cap and flips the asset markdown status', async () => {
     const asset = await createAssetDoc('tick-cap');
-    // A job only exists because a lifecycle is pending (a job can also stand for a thumbnail); seed the markdown lifecycle so the terminal failure has something to flip.
+    // Seed the markdown lifecycle so the terminal failure has a target.
     // @see #208
     await Asset.updateOne({ _id: asset.id }, { $set: { markdownStatus: 'pending' } });
     await enqueueAssetJob(asset.id);
@@ -143,7 +143,7 @@ describe('stale `processing` requeue (#67, plan Open Question C)', () => {
     const claimed = await claimNextAssetJob();
     expect(claimed?.status).toBe('processing');
     if (ageMs > 0) {
-      // Backdate updatedAt past the staleness cutoff; bypass mongoose so the timestamps plugin cannot rewrite the supplied value.
+      // Backdate updatedAt; bypass mongoose so the plugin cannot rewrite.
       await AssetJob.collection.updateOne(
         { _id: claimed?._id },
         { $set: { updatedAt: new Date(Date.now() - ageMs) } },
@@ -173,7 +173,7 @@ describe('stale `processing` requeue (#67, plan Open Question C)', () => {
     // Enqueue alone is a no-op while the stranded row is "live".
     await enqueueAssetJob(asset.id);
     const processor = jest.fn().mockResolvedValue(undefined);
-    // Short-lived poller start: the fire-and-forget requeue flips the stranded row to pending, then the poller claims and completes it (a 'processing' row is not claimable).
+    // The fire-and-forget requeue flips the stranded row, then it claims.
     startAssetJobPoller(processor, 10);
     await new Promise((r) => setTimeout(r, 60));
     stopAssetJobPoller();

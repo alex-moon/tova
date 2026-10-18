@@ -2,7 +2,7 @@ import mongoose from 'mongoose';
 import { Message } from '../../main/models/Message';
 import { Session } from '../../main/models/Session';
 
-/* Index presence after the suite's syncIndexes: the hot per-turn history/count reads and the sidebar sort must not be collection scans. */
+/* Index presence: hot per-turn reads and the sidebar sort must not scan. */
 // @see #377
 
 const indexKeys = async (collection: mongoose.Collection): Promise<string[]> => {

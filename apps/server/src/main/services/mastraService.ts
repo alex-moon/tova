@@ -41,12 +41,12 @@ import { applyAssetEdits, writeAssetContent, type AssetEdit } from './assetEditS
 import { spacesWorkspaceStorage } from './workspaceStorage';
 import { config } from '../config';
 
-/* LangSmith tracing via the official Mastra plugin: a singleton Mastra instance with the redacting exporter; env-gated — with no key nothing is posted and behaviour is byte-identical to pre-#5. */
+/* LangSmith tracing via the official Mastra plugin, env-gated on the key. */
 // @see #5 #145
 const langsmithKey = config.langsmith.apiKey;
 const projectName = config.langsmith.project;
 
-// Mastra requires storage for tracing even when exporting externally; InMemoryStore only backs internal snapshot lookups — app data stays in MongoDB.
+// Mastra requires storage for tracing; InMemoryStore backs snapshot lookups.
 export const mastra = new Mastra({
   storage: new InMemoryStore(),
   ...(langsmithKey
@@ -68,13 +68,13 @@ export const mastra = new Mastra({
     : {}),
 });
 
-/* The single owner of all @mastra/* imports and provider construction: one Agent per call aimed at the right router id, normalising Mastra's AI-SDK shapes to the neutral types; callers never see Mastra shapes past this module. */
+/* Single owner of @mastra/* imports; maps Mastra shapes to neutral types. */
 // @see #4
 
-/* FullStream chunk shape: content nests in `payload`; upstream errors arrive as `{type:'error'}` chunks and are rethrown so callers fail loudly. */
+/* FullStream chunk shape: content nests in payload; error chunks rethrow. */
 interface FullStreamChunk {
   type?: string;
-  /* Text/error live at payload.text/payload.error; tool name/result at payload.toolName/payload.result; tool args at payload.input (payload.args read too). */
+  /* Text/error, toolName, result, input all live under payload (args too). */
   // @see #16 #33
   payload?: {
     text?: string;
@@ -94,7 +94,7 @@ const errorTextFrom = (payload: FullStreamChunk['payload']): string => {
   return JSON.stringify(err);
 };
 
-/* Usage normalisation: drop absent/NaN fields so "unknown" stays distinct from a real 0; undefined when nothing usable was reported. */
+/* Usage normalisation: drop absent/NaN fields so unknown stays distinct. */
 // @see #224
 const normaliseUsage = (usage: unknown): TokenUsage | undefined => {
   const u = usage as
@@ -120,7 +120,7 @@ const toNeutralStream = async (fullStream: AsyncIterable<unknown>): Promise<Neut
       const chunk = raw as FullStreamChunk;
       if (chunk?.type === 'error') throw new Error(errorTextFrom(chunk.payload));
       if (chunk?.type === 'text-delta') yield { delta: chunk.payload?.text ?? null };
-      // Tool chunks pass the call/result across the neutral boundary so callers can emit status and collect provenance without knowing Mastra's shapes; tool-name-agnostic.
+      // Tool chunks pass call/result across the neutral boundary to callers.
       // @see #16
       if (chunk?.type === 'tool-call') {
         const rawArgs = chunk.payload?.input ?? chunk.payload?.args ?? undefined;
@@ -144,15 +144,15 @@ const toNeutralStream = async (fullStream: AsyncIterable<unknown>): Promise<Neut
     }
   })();
 
-/* Omit unset call settings rather than forwarding `temperature: undefined` into Mastra's model settings (undefined keys can trip SDK validation). */
+/* Omit unset call settings; undefined keys can trip SDK validation. */
 const modelSettingsFrom = (options: CompletionOptions) => ({
   ...(options.temperature !== undefined ? { temperature: options.temperature } : {}),
   ...(options.max_tokens !== undefined ? { maxOutputTokens: options.max_tokens } : {}),
 });
 
-/* Abort/disconnect plumbing plus `maxSteps` semantics: tools-mode (not the Brave key) drives the loop cap — a low cap starves long-document workflows; userId/sessionId/taskId ride the per-call RequestContext so tools scope per user and attribute provenance, while agents are memoised per provider/model/mode. */
+/* Abort plumbing plus maxSteps semantics; context ids ride RequestContext. */
 // @see #16 #159 #52 #58 #252 #298
-/* Connector toolsets resolve per call (TTL cache) and defer to search via a per-call ToolSearchProcessor; built-ins stay in-prompt. */
+/* Connector toolsets resolve per call (TTL cache) and defer to search. */
 // @see #36 #329 #360
 export const connectorSearchOptionsFrom = async (options: CompletionOptions) => {
   if (!options.userId) return {};
@@ -161,7 +161,7 @@ export const connectorSearchOptionsFrom = async (options: CompletionOptions) => 
   const catalog: Record<string, (typeof toolsets)[string][string]> = {};
   for (const tools of Object.values(toolsets)) {
     for (const [name, tool] of Object.entries(tools)) {
-      // First connector wins on collisions; sanitized id keeps function names provider-safe.
+      // First connector wins on collisions; sanitized ids stay provider-safe.
       if (catalog[name]) continue;
       catalog[name] = createTool({
         id: name.replace(/[^a-zA-Z0-9_-]/g, '_'),
@@ -185,18 +185,18 @@ const callOptionsFrom = (
 ) => {
   const requestContext = new RequestContext();
   if (options.userId !== undefined) requestContext.set('userId', options.userId);
-  // The chat session rides alongside userId so provenance-writing tools can attribute a file to its conversation without coupling to the tracing switch.
+  // The chat session rides alongside userId for provenance attribution.
   // @see #252
   if (options.sessionId !== undefined) requestContext.set('sessionId', options.sessionId);
-  // The task id rides alongside so a task-generated file is attributed to its task (the task stream has no session).
+  // The task id rides alongside so a task-generated file is attributed to it.
   // @see #298
   if (options.taskId !== undefined) requestContext.set('taskId', options.taskId);
   return {
     ...(options.abortSignal ? { abortSignal: options.abortSignal } : {}),
-    // The merged single system message rides in as a per-call override, superseding the agent's default instructions (which would be a second leading system message).
+    // The merged system message rides in as a per-call instructions override.
     // @see #198
     ...(instructions ? { instructions } : {}),
-    // A caller may pin the per-call step cap (the task sequencer sets 1); absent falls back to the mode default.
+    // Caller may pin the per-call step cap; absent falls back to the default.
     // @see #254
     maxSteps: options.maxSteps ?? (mode === 'full' ? 12 : 1),
     modelSettings: modelSettingsFrom(options),
@@ -205,7 +205,7 @@ const callOptionsFrom = (
   };
 };
 
-/* Trace attach: everything rides through `tracingOptions` — Mastra drops top-level metadata/tags call options entirely, while TracingOptions metadata/tags reach the root span. */
+/* Trace attach: metadata/tags only reach spans via tracingOptions. */
 // @see #308
 const traceOptionsFrom = (trace?: TraceContext) => {
   if (!trace) return {};
@@ -222,7 +222,7 @@ const traceOptionsFrom = (trace?: TraceContext) => {
   };
 };
 
-/* Web search tool: defined here because this file owns all @mastra/* imports; execution is the raw Brave client degrading any failure to an empty result; with no key the tool is not attached at all. */
+/* Web search tool: raw Brave client; failures degrade to empty results. */
 // @see #16
 const hasSearchKey = (): boolean => Boolean(config.search.braveApiKey);
 
@@ -236,12 +236,12 @@ export const webSearchTool = createTool({
   inputSchema: z.object({ query: z.string().min(1).describe('Web search query') }),
   outputSchema: z.object({
     results: z.array(z.object({ title: z.string(), snippet: z.string(), url: z.string() })),
-    // Optional — only set when the search itself failed (never for a genuinely-empty search), so the model can tell the failure apart.
+    // Set only when the search failed, so the model can tell failure apart.
     // @see #82
     error: z.string().optional(),
   }),
   execute: async ({ query }, ctx) => {
-    // A web_search that already failed earlier in this completion short-circuits to the degraded result without another Brave call.
+    // A failed web_search short-circuits to the degraded result, no re-call.
     // @see #82
     if (toolIsFailed(ctx, 'web_search'))
       return {
@@ -257,7 +257,7 @@ export const webSearchTool = createTool({
   },
 });
 
-/* Fetch-url tool: read a pasted URL directly; failures degrade to a typed error, never failing the turn; a native-fetch failure retries through Firecrawl when configured, and a long scraped page is saved agent-side for read_file. */
+/* Fetch-url tool: read a pasted URL; failures degrade to a typed error. */
 // @see #113 #340
 const scrapedFilename = (page: FetchedPage): string => {
   let host = '';
@@ -283,10 +283,10 @@ const saveScrapedPage = async (
 ): Promise<{ fileId: string; filename: string } | null> => {
   const sessionId = ctx.requestContext.get('sessionId') as string | undefined;
   const taskId = ctx.requestContext.get('taskId') as string | undefined;
-  // A ZDR turn persists nothing — exactly the turn with no session and no task — so its scrapes stay head-only.
+  // A ZDR turn (no session, no task) persists nothing; scrapes stay head-only.
   // @see #116
   if (!sessionId && !taskId) return null;
-  // Same provenance rule as generate_file: attribute to the task, else the chat.
+  // Same provenance rule as generate_file: task, else the chat.
   // @see #252 #298
   const provenance = taskId
     ? ({ kind: 'task', taskId } as const)
@@ -339,9 +339,9 @@ export const fetchUrlTool = createTool({
     const userId = ctx.requestContext.get('userId') as string | undefined;
     let page: FetchedPage | null = null;
     let viaAgentSide = false;
-    // Normalized requested URL — the scrape-cache key; declared here because the save below reuses it.
+    // Normalized URL — the scrape-cache key; reused by the save below.
     let cacheKey: string | null = null;
-    // Set when the page is (or already was) persisted agent-side, so the result can carry the fileId.
+    // Set when the page was persisted agent-side; result carries the fileId.
     let saved: { fileId: string; filename: string } | null = null;
     try {
       page = await fetchPage(url);
@@ -352,11 +352,11 @@ export const fetchUrlTool = createTool({
         markToolFailed(ctx, 'fetch_url', reasonFrom(nativeError));
         return { results: [], error: degradedToolError('fetch_url', reasonFrom(nativeError)) };
       }
-      // A fresh cached copy of this URL (within the TTL) is reused instead of paying for a re-scrape.
+      // A fresh cached copy (within TTL) is reused instead of a re-scrape.
       try {
         cacheKey = new URL(url).toString();
       } catch {
-        cacheKey = null; // Invalid URL — firecrawlScrape throws the same below.
+        cacheKey = null; // Invalid URL — firecrawlScrape throws below.
       }
       const cached = userId && cacheKey ? await findFreshScrape(userId, cacheKey) : null;
       if (cached && cacheKey) {
@@ -380,9 +380,9 @@ export const fetchUrlTool = createTool({
           'The page could not be retrieved (unsupported content type); ' +
           'fall back to web_search or answer from your own knowledge.',
       };
-    // `results` mirrors web_search's provenance shape so the sources block picks up the fetched page for free.
+    // results mirrors web_search's provenance shape for the sources block.
     const results = [{ title: page.title, snippet: '', url: page.url }];
-    // A scraped page larger than the visible cap is saved agent-side (invisible to the user) so the agent can read it in full with read_file; short pages need no file, and a cache hit is already saved.
+    // An oversized scraped page is saved agent-side for full read_file access.
     // @see #340 #350
     if (!saved && viaAgentSide && userId && page.content.length > MAX_FETCH_CHARS) {
       saved = await saveScrapedPage(userId, page, ctx, cacheKey ?? undefined);
@@ -411,7 +411,7 @@ export const fetchUrlTool = createTool({
   },
 });
 
-/* Asset-library tools: per-user scoping from the request context (agents are memoised, never closed over); a missing userId degrades to an explicit `unavailable` result; only `ready` assets are exposed and ownership filtering makes cross-user probes read as "not found"; read_file serves the stored extraction only — no Spaces round-trip inside a tool. */
+/* Asset-library tools: per-user scoping; missing userId reads unavailable. */
 // @see #58
 const assetFileFrom = (asset: {
   _id: mongoose.Types.ObjectId;
@@ -423,11 +423,11 @@ const assetFileFrom = (asset: {
 }) => ({
   id: asset._id.toString(),
   filename: asset.filename,
-  // filename carries the extension hint, but the explicit MIME type keeps the model honest about what a file actually is.
+  // The explicit MIME type keeps the model honest about the file type.
   contentType: asset.contentType,
   size: asset.size,
   createdAt: (asset.createdAt ?? new Date()).toISOString(),
-  // Present on system-side rows only — the URL the page was fetched from, so the agent can match a cached copy.
+  // System-side rows only: the fetched URL, so the agent can match a cache.
   // @see #356
   ...(asset.sourceUrl ? { sourceUrl: asset.sourceUrl } : {}),
 });
@@ -471,7 +471,7 @@ export const listFilesTool = createTool({
     const userId = ctx.requestContext.get('userId') as string | undefined;
     if (!userId) return { files: [], error: 'unavailable' };
     try {
-      // 21 rows: 20 returned, the 21st only feeds the `more` flag. Agent-side rows ARE listed with their sourceUrl so the agent can rediscover a cached page in a later session; no leak to the user UI (the route keeps its own exclusion).
+      // 21 rows: 20 returned, the 21st feeds more; agent rows list too.
       // @see #356
       const rows = await Asset.find({ userId, status: 'ready' })
         .sort({ _id: -1 })
@@ -489,7 +489,7 @@ export const listFilesTool = createTool({
   },
 });
 
-// Resolve a library row by id (when valid) or sanitized filename (newest wins); null when neither resolves. The agent typically holds the filename, not the id. `units` is `select: false` and needed by the read path.
+// Resolve by id or sanitized filename; null when neither matches.
 // @see #369
 const resolveLibraryAsset = async (
   userId: string,
@@ -521,10 +521,10 @@ export const readFileTool = createTool({
   inputSchema: z.object({
     id: z.string().min(1).optional().describe('The file id from `list_files`'),
     filename: z.string().min(1).optional().describe('The file name, e.g. meeting-notes.md'),
-    // Models emit boolean tool args as the string "true" (wire-encoding drift), and a strict boolean schema makes Mastra reject the whole call; execute coerces to an actual boolean.
+    // Models emit booleans as strings; execute coerces to a real boolean.
     // @see #159
     unitsOnly: z.union([z.boolean(), z.enum(['true', 'false', 'True', 'False'])]).optional(),
-    // Models also emit numeric tool args as strings; execute coerces digit-only strings to numbers.
+    // Models emit numbers as strings; execute coerces digit-only strings.
     // @see #350
     offset: z
       .union([z.number(), z.string()])
@@ -583,7 +583,7 @@ export const readFileTool = createTool({
       return { error: 'not_found' };
     }
     try {
-      // `return await`, not `return`: a bare return would leak a resolution rejection past the catch.
+      // return await: a bare return leaks rejections past the catch.
       return await resolveThenRead(userId, id, filename, unitsOnly, rawOffset, rawLimit);
     } catch (error) {
       markToolFailed(ctx, 'read_file', reasonFrom(error));
@@ -605,13 +605,13 @@ const resolveThenRead = async (
   const asset = await resolveLibraryAsset(userId, id, filename);
   if (!asset) return { error: 'not_found' };
   const file = assetFileFrom(asset);
-  // Per-unit text (one unit per PDF page / top-level section), selected explicitly because the field is `select: false`.
+  // Per-unit text; selected explicitly because the field is select: false.
   // @see #159
   const units = (asset.get('units') ?? []) as { index: number; label: string; text: string }[];
-  // Markdown conversion is the fallback content source when fast extraction produced nothing.
+  // Markdown conversion is the fallback when fast extraction found nothing.
   // @see #67
   const text = asset.textExtracted ?? asset.markdownExtracted;
-  // Units are a table of contents — each points at the line where it begins; computed at read time so pre-#350 rows still get start lines.
+  // Units point at the line where they begin; computed at read time.
   // @see #350
   const startLineOf = (needle: string): number | undefined => {
     if (!text || !needle) return undefined;
@@ -647,7 +647,7 @@ const resolveThenRead = async (
         'binary type such as an image); use the attach flow to include it in the chat.',
     };
   }
-  // Line-range read over the extracted text; numeric args may arrive as digit-only strings, so coerce before validating.
+  // Numeric args may arrive as digit-only strings; coerce before validating.
   // @see #350 #159
   const coerceLine = (value: unknown): number | null => {
     if (typeof value === 'number' && Number.isFinite(value)) return Math.trunc(value);
@@ -694,7 +694,7 @@ const resolveThenRead = async (
   };
 };
 
-/* generate_file tool: the agent can create a NEW markdown file in the calling user's library from its own output; bytes pushed server-side; errors map to the same typed variants as the other asset tools. */
+/* generate_file tool: create a new markdown file in the caller's library. */
 // @see #66
 export const generateFileTool = createTool({
   id: 'generate_file',
@@ -744,7 +744,7 @@ const generateFileExecute = async (
   const userId = requestContext.get('userId') as string | undefined;
   if (!userId) return { error: 'unavailable' };
   if (!spacesWorkspaceStorage.isConfigured()) return { error: 'unavailable' };
-  // Attribute the file to its conversation when a session is on the context; with no session, leave provenance absent (unknown) rather than inventing one; a task-origin call stamps `kind: 'task'` and takes precedence.
+  // Attribute to task, else chat; no context leaves provenance unknown.
   // @see #252 #298
   const sessionId = requestContext.get('sessionId') as string | undefined;
   const taskId = requestContext.get('taskId') as string | undefined;
@@ -754,7 +754,7 @@ const generateFileExecute = async (
       ? ({ kind: 'chat', sessionId } as const)
       : undefined;
   try {
-    // A repeated generated filename is a new version of the same file, not a duplicate row; non-generated collisions (uploads, cached pages) are never silently superseded.
+    // A repeated generated filename is a new version, not a duplicate row.
     // @see #369
     const safeName = sanitizeFilename(filename);
     const existing = safeName
@@ -802,7 +802,7 @@ const generateFileExecute = async (
   }
 };
 
-/* edit_file tool: revise an assistant-generated file with search/replace blocks (cost proportional to the edit); only system-generated files are editable, provenance untouched, each write snapshots a new version. */
+/* edit_file tool: search/replace edits; each write snapshots a new version. */
 // @see #325
 export const editFileTool = createTool({
   id: 'edit_file',
@@ -883,7 +883,7 @@ const editFileExecute = async (
   try {
     const asset = await resolveLibraryAsset(userId, id, filename);
     if (!asset) return { error: 'not_found' };
-    // Captured before the write: the unified diff of the edit is returned so the change is auditable in the conversation.
+    // Captured before the write: the diff is returned for auditability.
     const before = asset.textExtracted ?? '';
     const result = await applyAssetEdits(asset, edits);
     if (!result.ok) return { error: result.code, note: result.message };
@@ -904,7 +904,7 @@ const editFileExecute = async (
   }
 };
 
-/* Built-in clock tool: deterministic UTC instant, no external calls; the system prompt supplies the user's zone and the model combines the two. */
+/* Built-in clock tool: deterministic UTC instant, no external calls. */
 // @see #52 #261
 export const currentDatetimeTool = createTool({
   id: 'current_datetime',
@@ -923,7 +923,7 @@ export const currentDatetimeTool = createTool({
   execute: async () => ({ utc: new Date().toISOString(), timezoneOffsetMinutes: null }),
 });
 
-/* Calculator tool: arithmetic is not a weights task; the evaluation and its security lockdown live in calculator.ts; thin per-agent singleton, always attached. */
+/* Calculator tool: arithmetic is not a weights task (calculator.ts). */
 // @see #283 #263
 export const calculateTool = createTool({
   id: 'calculate',
@@ -943,7 +943,7 @@ export const calculateTool = createTool({
   execute: async ({ expression }) => evaluateExpression(expression),
 });
 
-/* Delegate-to-worker tool: creates a task with this chat as its thin origin; the chat never receives task writes (single writer per stream). ZDR turns cannot delegate (a task is durable) and re-check settings.zdr so the seams cannot disagree; taskService is imported lazily to avoid a module cycle. */
+/* Delegate tool: creates a task with this chat as its thin origin. */
 // @see #255 #251
 export const delegateTaskTool = createTool({
   id: 'delegate_task',
@@ -967,7 +967,7 @@ export const delegateTaskTool = createTool({
   execute: async ({ instruction }, { requestContext }) => {
     const userId = requestContext.get('userId') as string | undefined;
     const sessionId = requestContext.get('sessionId') as string | undefined;
-    // A ZDR turn (or any non-persisted call) has no session to attribute or notify — and a durable task is exactly what ZDR forbids.
+    // A ZDR turn has no session; a durable task is what ZDR forbids.
     // @see #255
     if (!userId || !sessionId) {
       return { error: 'Delegation is not available in this conversation.' };
@@ -1031,22 +1031,22 @@ const TOOL_INSTRUCTIONS =
   'real tool calls; never write such a line yourself.';
 // @see #360
 
-/* Agents are memoised per provider/model (creation is stateful); instructions are empty — the system prompt rides in on the message list. */
+/* Agents are memoised per provider/model; instructions stay empty. */
 const agentCache = new Map<string, Agent>();
 
-/* `tools` override: `false` forces a plain agent with no tools (for aux completions whose model rejects tool-carrying requests); undefined keeps the default built-in-tools behaviour. */
+/* tools override: false forces a plain agent; undefined keeps built-ins. */
 // @see #52
 type ToolsMode = 'full' | 'plain';
 
 const agentFor = (provider: LlmProvider, model: string, tools?: boolean): Agent => {
   const mode: ToolsMode = tools === false ? 'plain' : 'full';
-  // The tool set is baked in at construction, so the cache key must include the Brave-key state — toggling it without a restart must not hand back a stale full agent.
+  // Cache key includes Brave-key state; the tool set is baked in.
   const cacheKey = `${provider}/${model}/${mode}/${hasSearchKey() ? 'search' : 'nosearch'}`;
   const cached = agentCache.get(cacheKey);
   if (cached) return cached;
   const routerId = MASTRA_PROVIDER_ID[provider];
   const agent = new Agent({
-    // The neutral message shape is structurally Core-compatible; the cast exists because the union `role` does not narrow to a single Mastra message variant.
+    // Cast: the union role does not narrow to a single Mastra message variant.
     id: `tova-${provider}`,
     name: `tova-${provider}`,
     instructions: mode === 'full' ? TOOL_INSTRUCTIONS : '',
@@ -1054,7 +1054,7 @@ const agentFor = (provider: LlmProvider, model: string, tools?: boolean): Agent 
     ...(mode === 'full'
       ? {
           tools: {
-            // web_search stays key-gated; current_datetime has no such dependency.
+            // web_search stays key-gated; datetime has no dependency.
             // @see #52
             ...(hasSearchKey() ? { web_search: webSearchTool } : {}),
             fetch_url: fetchUrlTool,
@@ -1069,13 +1069,13 @@ const agentFor = (provider: LlmProvider, model: string, tools?: boolean): Agent 
         }
       : {}),
   });
-  // Register with the singleton so the call context carries observability — unregistered agents generate without spans and the exporter never sees them.
+  // Register so the call context carries observability for the exporter.
   mastra.addAgent(agent, cacheKey);
   agentCache.set(cacheKey, agent);
   return agent;
 };
 
-/* Multimodal messages: neutral image_url parts map to Mastra's AI-SDK-style image part; Mastra downloads URL parts itself (verified live). Groq never takes completions with images — part-array content is rejected with a clear error. */
+/* Multimodal: image_url parts map to Mastra images; Groq rejects images. */
 // @see #115 #94
 export const mastraMessagesFor = (
   provider: LlmProvider,
@@ -1101,7 +1101,7 @@ export const mastraMessagesFor = (
   ) as unknown as Parameters<Agent['generate']>[0];
 };
 
-/* Single-system-message invariant: strict OpenAI-compatible servers reject a system message not at index 0, so leading system messages are pulled out and merged into one per-call instructions override; a non-leading system message is a loud contract violation. */
+/* Single-system-message invariant: leading system messages merge into one. */
 // @see #198
 const splitLeadingSystem = (
   messages: CompletionOptions['messages'],
@@ -1128,12 +1128,12 @@ const splitLeadingSystem = (
   return { system: system.length > 0 ? system : undefined, rest };
 };
 
-/* Merged per-call system prompt: the agent's tool instructions first, then the caller's system content — a caller with no system message still gets the tool guidance. */
+/* Merged per-call prompt: tool instructions first, then caller system. */
 // @see #198
 const mergedInstructions = (toolInstructions: string, callerSystem: string | undefined): string =>
   [toolInstructions, callerSystem].filter((part): part is string => Boolean(part)).join('\n\n');
 
-/* Mastra's bundled router reaches Fireworks under the provider id `fireworks-ai`; the neutral app-level name stays `fireworks` — only the router id is remapped here. */
+/* Mastra's Fireworks router id is fireworks-ai; app name stays fireworks. */
 // @see #232
 const MASTRA_PROVIDER_ID: Record<LlmProvider, string> = {
   groq: 'groq',
@@ -1157,7 +1157,7 @@ const buildConnector = (provider: LlmProvider): LlmConnector => {
           ...(await connectorSearchOptionsFrom(options)),
         },
       );
-      // Tool executions: FullOutput.toolResults carries every executed call with its structured result; args ride across too so the task sequencer can rebuild chips and replay calls. Mastra nests the fields under `payload` — reading the entry directly yielded `name: ''` and a missing result — so unwrap with an entry-level fallback.
+      // toolResults carries executed calls; Mastra nests fields under payload.
       // @see #16 #254
       const toolResults = (result as { toolResults?: unknown[] }).toolResults?.map((entry) => {
         const outer = entry as {
@@ -1178,7 +1178,7 @@ const buildConnector = (provider: LlmProvider): LlmConnector => {
           ...(args ? { args } : {}),
         };
       });
-      // Token usage: the turn total across all tool steps, falling back to the last step's usage.
+      // Usage: turn total across tool steps, else the last step's usage.
       // @see #224
       const usage = normaliseUsage(
         (result as { totalUsage?: unknown; usage?: unknown }).totalUsage ??
@@ -1199,7 +1199,7 @@ const buildConnector = (provider: LlmProvider): LlmConnector => {
           ...(await connectorSearchOptionsFrom(options)),
         },
       );
-      // Resolve usage after the real chunks, as a final `usage` chunk; `totalUsage` settles once the stream drains, so awaiting after the loop cannot race.
+      // Awaiting totalUsage after the loop avoids racing the stream drain.
       // @see #224
       const inner = await toNeutralStream(result.fullStream);
       const streamResult = result as { totalUsage?: Promise<unknown> };
@@ -1209,7 +1209,7 @@ const buildConnector = (provider: LlmProvider): LlmConnector => {
         if (usage) yield { usage };
       })();
     },
-    /* One-off completion path for auxiliary generation: built with a tool-free agent even when the Brave key is set, so small tool-rejecting models cannot fail the call. */
+    /* Tool-free even with a Brave key, for tool-rejecting models. */
     // @see #41
     createToolFreeCompletion: (async (options: CompletionOptions): Promise<NeutralCompletion> => {
       const { system, rest } = splitLeadingSystem(options.messages);
@@ -1220,7 +1220,7 @@ const buildConnector = (provider: LlmProvider): LlmConnector => {
       };
       const { structuredOutput } = options;
       if (structuredOutput) {
-        // Schema-enforced output: validation failure resolves with `fallbackValue` instead of throwing; a missing object (mid-stream structuring failure) degrades to the fallback the same way.
+        // Validation failure resolves with fallbackValue instead of throwing.
         // @see #368
         const result = await agentFor(provider, options.model, false).generate(messages, {
           ...base,
@@ -1241,7 +1241,7 @@ const buildConnector = (provider: LlmProvider): LlmConnector => {
         };
       }
       const result = await agentFor(provider, options.model, false).generate(messages, base);
-      // Thread the finish reason through so a `length` stop is observable instead of silently scoring as a short answer.
+      // Thread the finish reason so a length stop is observable.
       return {
         choices: [{ message: { content: result.text ?? null }, finishReason: result.finishReason }],
       };

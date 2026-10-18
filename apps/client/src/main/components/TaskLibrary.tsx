@@ -5,7 +5,7 @@ import TaskService, { isTerminalTask, type TaskSummary } from '@/services/tasks'
 import TaskStatusChip from './TaskStatusChip';
 import { cn } from '@/lib/utils';
 
-// Poll-while-pending so a task's status chip advances in place, same idiom as AssetLibrary.
+// Poll-while-pending so a status chip advances in place, as in AssetLibrary.
 const POLL_MS = 3000;
 
 const isActive = (task: TaskSummary): boolean => !isTerminalTask(task.status);
@@ -16,7 +16,7 @@ const originLabel = (task: TaskSummary): string | null => {
   return null;
 };
 
-// Short single-line summary for the list: the instruction's first line, falling back to the origin.
+// List summary: the instruction's first line, else the origin label.
 const summaryOf = (task: TaskSummary): string => {
   const first = task.instruction.split('\n')[0]?.trim();
   return first || originLabel(task) || 'Task';
@@ -34,7 +34,7 @@ const TaskLibrary: React.FC<TaskLibraryProps> = ({ selectedId = null, onSelect }
   const [error, setError] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
 
-  // A silent poll must refetch ALL loaded pages, or it would wipe appended pages and re-show "Show more" on each tick.
+  // A silent poll must refetch ALL pages or it wipes appended pages.
   const pagesLoaded = useRef(1);
 
   const fetchAll = useCallback(async (): Promise<{

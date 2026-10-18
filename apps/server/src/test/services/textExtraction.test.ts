@@ -27,7 +27,7 @@ describe('textExtraction', () => {
   });
 
   it('treats a lying filename as extractable by extension (deterministic rule)', () => {
-    // The extraction decision is extension-based only: an .md file that is really binary decodes lossily but never crashes or blocks the turn.
+    // Extraction is extension-based only; binary content decodes lossily.
     // @see #34
     expect(extractText('claims.md', Buffer.from([0xff, 0xfe]))).not.toBeNull();
   });

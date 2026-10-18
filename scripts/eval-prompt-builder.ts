@@ -1,7 +1,5 @@
-// One-off eval for #384: factorial prompt builder. The 8-paragraph system prompt is
-// deduplicated into 5 parts (identity, tool discipline, memory handling, voice & care,
-// shape & closure), each with a warm (today's text, verbatim) and a cold (operational,
-// terse) variant; all 2^5 combinations run interleaved against DeepSeek.
+// One-off eval: factorial prompt builder, all warm/cold arm combos.
+// @see #384
 //   npx tsx scripts/eval-prompt-builder.ts [--reps 8] [--concurrency 5]
 import 'dotenv/config';
 import mongoose from 'mongoose';
@@ -89,8 +87,7 @@ const runRep = async (
   const options: CompletionOptions = {
     provider: ref.provider,
     model: ref.model,
-    // No userId: tools answer 'unavailable', so the probe cannot write to the real
-    // library; invocation is decided before the call, so the metric stays clean.
+    // No userId: tools answer 'unavailable'; the metric is invocation.
     messages,
     max_tokens: outputTokensFor(ref.contextLength, promptCharsFrom(messages)),
   };
@@ -101,7 +98,7 @@ const runRep = async (
   return { toolsCalled, flagged: verdict?.flagged ?? false };
 };
 
-/* Replaces the 8 prompt paragraphs with the arm's warm/cold variant selection; the trailing factual blocks (timezone, profile, workspace, tasks, custom instructions) ride verbatim. */
+/* Swaps the 8 prompt paragraphs for the arm's warm/cold variants. */
 const armSystem = (full: string, bits: (0 | 1)[]): string => {
   const chunks = full.split('\n\n');
   if (chunks.length < 9) throw new Error('unexpected system layout');
@@ -188,7 +185,7 @@ async function main() {
   if (rosterRefs.length < MODELS.length)
     throw new Error(`wanted ${MODELS.length} refs, roster offered ${rosterRefs.length}`);
 
-  // Confirm run: baseline (00000) vs the cold-epistemics + warm-voice candidate (11100 → mask 7).
+  // Confirm run: baseline (00000) vs cold-epistemics+warm-voice (mask 7).
   const arms = [0, 7].map((mask) => {
     const bits = [mask & 1, (mask >> 1) & 1, (mask >> 2) & 1, (mask >> 3) & 1, (mask >> 4) & 1] as (
       0 | 1
@@ -246,7 +243,7 @@ async function main() {
       );
     show('baseline', base);
     show('candidate', cand);
-    // Two-proportion z on the invocation gap (unreliable when a cell is at/near 0 or 1).
+    // Two-proportion z on the invocation gap (unreliable at 0 or 1 cells).
     if (base.n > 0 && cand.n > 0) {
       const p1 = base.invoked / base.n;
       const p2 = cand.invoked / cand.n;

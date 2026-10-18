@@ -1,4 +1,4 @@
-// Trace payloads are a leak surface: redact every exported span payload at the transport, beyond console-only log redaction.
+// Trace payloads are a leak surface; redact at the exporter.
 // @see #145
 
 import type { AnyExportedSpan, TracingEvent } from '@mastra/core/observability';

@@ -226,7 +226,7 @@ describe('AssetLibrary — bulk upload (issue #68)', () => {
     expect(screen.getByText('File type is not allowed')).toBeInTheDocument();
     expect(screen.getByTestId('upload-row-0')).toHaveTextContent('Uploaded');
     expect(screen.getByTestId('upload-row-1')).toHaveTextContent('File type is not allowed');
-    // 'ok.txt' appears twice once the success lands in the grid: upload row + listing.
+    // 'ok.txt' appears twice once the success lands: upload row + listing.
     expect(await screen.findAllByText('ok.txt')).toHaveLength(2);
     expect(vi.mocked(AssetService.uploadMany).mock.calls[0][1]).toBeTypeOf('function');
   });
@@ -374,7 +374,7 @@ describe('AssetLibrary — conversion feedback (issue #83)', () => {
       await vi.advanceTimersByTimeAsync(0);
     });
     expect(screen.getByTestId('asset-extracting')).toBeInTheDocument();
-    // Transient list failures during the silent poll must not interrupt the user or stop the poll.
+    // Transient list failures during the silent poll must not stop the poll.
     await act(async () => {
       await vi.advanceTimersByTimeAsync(9000);
     });
@@ -513,7 +513,7 @@ describe('AssetLibrary — audience filter (issue #356)', () => {
     fireEvent.click(screen.getByTestId('asset-filter-agent'));
     await screen.findByText('web-example.com-page.md');
 
-    // Agent view: no dropzone, no per-row Get, no bulk download even when selected; delete stays.
+    // Agent view: no dropzone, no Get, no bulk download; delete stays.
     expect(screen.queryByTestId('asset-dropzone')).not.toBeInTheDocument();
     expect(
       screen.queryByRole('button', { name: 'Download web-example.com-page.md' }),

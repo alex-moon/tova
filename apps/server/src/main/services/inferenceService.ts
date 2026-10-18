@@ -8,7 +8,7 @@ import {
 import { deepinfraConnector, fireworksConnector, groqConnector } from './mastraService';
 import { recordModelError } from './modelErrorTally';
 
-/* Delegating LLM service: every completion call goes through here so the provider swaps in one place; the registry stays Partial so a provider can land in plumbing before its connector. */
+/* Delegating LLM service: provider swaps happen in one place. */
 // @see #151
 export {
   CompletionOptions,
@@ -24,14 +24,14 @@ const connectors: Partial<Record<LlmProvider, LlmConnector>> = {
   fireworks: fireworksConnector,
 };
 
-/* Provider strings sourced from Mongo are untyped at the boundary; a corrupted value must not surface as a bare TypeError mid-request. */
+/* Provider strings from Mongo are untyped; a bad value must not TypeError. */
 const connectorFor = (provider: LlmProvider | undefined): LlmConnector => {
   const connector = connectors[provider ?? 'groq'];
   if (!connector) throw new Error(`Unknown LLM provider: ${String(provider)}`);
   return connector;
 };
 
-// Record every completion failure against its provider route before rethrowing; this is the single choke point for all LLM calls.
+// Record failures against the provider route before rethrowing.
 // @see #175
 const withTally = async <T>(
   options: CompletionOptions,
@@ -53,12 +53,12 @@ export const inferenceService = {
     withTally(options, (connector) => connector.createStreamingCompletion(options)),
   createToolFreeCompletion: async (options: CompletionOptions) =>
     withTally(options, (connector) => connector.createToolFreeCompletion(options)),
-  /** Typed passthrough: a structuredOutput config pins the validated object type end to end. */
+  /** Typed passthrough: structuredOutput pins the object type. */
   // @see #368
   createStructuredCompletion: async <T>(
     options: CompletionOptions & { structuredOutput: StructuredOutputConfig<T> },
   ): Promise<NeutralCompletion & { object: T }> =>
-    // The connector's leading non-generic overload wins resolution, so the typed result is asserted once here.
+    // Typed result asserted once; the overload wins resolution.
     // @see #368
     withTally(options, (connector) => connector.createToolFreeCompletion(options)) as Promise<
       NeutralCompletion & { object: T }

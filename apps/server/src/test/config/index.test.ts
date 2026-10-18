@@ -177,7 +177,7 @@ describe('config/index', () => {
     });
 
     it('floors the step cap and defaults a value that floors to zero (#254)', () => {
-      // `0.5` floors to a zero-step budget: degrade to the default rather than 0; a fractional cost is legitimate so the getters deliberately differ.
+      // `0.5` floors to zero steps: default, not 0; fractional cost is fine.
       process.env.TASK_MAX_STEPS = '0.5';
       process.env.TASK_MAX_COST_USD = '0.5';
       expect(config.task.maxSteps).toBe(25);
@@ -196,7 +196,7 @@ describe('config/index', () => {
       // @see #289
       expect(config.memoryEval.judgeModel).toBe('Qwen/Qwen3-235B-A22B-Instruct-2507');
       expect(config.memoryEval.judgeProvider).toBe('deepinfra');
-      // Unset responder overrides fall through to the roster default in the runner, so the getters must return undefined, not a pin.
+      // Unset responder overrides: getters must return undefined, not a pin.
       expect(config.memoryEval.responderModel).toBeUndefined();
       expect(config.memoryEval.responderProvider).toBeUndefined();
       expect(config.memoryEval.responderTemperature).toBe(0);

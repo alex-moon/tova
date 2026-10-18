@@ -4,11 +4,11 @@ import { isPrivateIp } from './geoLocationService';
 import { htmlToMarkdown } from './markdownConversion';
 import { assertSafeUrl } from './safeLinkService';
 
-// Direct URL fetching for the `fetch_url` tool: a parseable URL is a direct link, not a search query; failures throw so the tool wrapper owns graceful degradation.
+// Direct URL fetching for fetch_url; failures throw, wrapper degrades.
 // @see #113 #82
 
 export interface FetchedPage {
-  // The URL the page was actually fetched from (after redirects), so consumers can attribute the content.
+  // The final URL after redirects, for content attribution.
   url: string;
   title: string;
   content: string;
@@ -16,16 +16,16 @@ export interface FetchedPage {
 
 const FETCH_TIMEOUT_MS = 12_000;
 
-// Cap on the raw response body buffered before conversion: stops giant pages blowing memory just to get a truncated head.
+// Cap on the raw body buffered: stops giant pages blowing memory.
 const MAX_BODY_CHARS = 2_000_000;
 
-// How much fetched page text the model actually sees: a fixed budget applied at service level.
+// How much fetched page text the model actually sees.
 export const MAX_FETCH_CHARS = 8_000;
 
 const BROWSER_UA =
   'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0 Safari/537.36';
 
-// isPrivateIp misses URL-normalized hex IPv6 (::ffff:1:2), so expand to 8 groups and evaluate the private ranges directly; unparsable input is refused (conservative is right for SSRF).
+// isPrivateIp misses hex IPv6; expand to 8 groups, refuse unparsable.
 const expandIpv6 = (addr: string): number[] | null => {
   const [left, right, ...extra] = addr.split('::');
   if (extra.length > 0) return null;
@@ -55,9 +55,9 @@ const privateIpv6 = (addr: string): boolean => {
   if (nums[0] === 0x2002) return true; // 6to4 ::2002:0.0.0.0 relay capsules
   return false;
 };
-// SSRF guard: an IP literal or any resolved private address is refused; DNS rebinding and redirects to private hosts are consciously deferred.
+// SSRF guard: IP literals and resolved private addresses refused.
 export const assertPublicHost = async (rawHostname: string): Promise<void> => {
-  // WHATWG URL hostnames keep brackets around IPv6 literals; net.isIP and isPrivateIp both expect the bare address.
+  // WHATWG keeps brackets on IPv6; isIP and isPrivateIp expect bare.
   const hostname = rawHostname.replace(/^\[|\]$/g, '');
   if (net.isIP(hostname) === 6) {
     if (privateIpv6(hostname)) {
@@ -90,11 +90,11 @@ export const assertPublicHost = async (rawHostname: string): Promise<void> => {
   }
 };
 
-// Truncate without splitting a surrogate pair, which would corrupt the tail of the prompt text.
+// Truncate without splitting a surrogate pair.
 export const safeSlice = (text: string, max: number): string =>
   /[\uD800-\uDBFF]/.test(text.slice(max - 1, max)) ? text.slice(0, max - 1) : text.slice(0, max);
 
-// Stream the body to a real cap: response.text() would buffer an arbitrarily large page before we could slice it.
+// Stream to a real cap; response.text() would buffer the whole page.
 const readBodyCapped = async (response: Response): Promise<string> => {
   const declared = Number(response.headers.get('content-length') ?? 0);
   if (declared > MAX_BODY_CHARS) {
@@ -123,7 +123,7 @@ const readBodyCapped = async (response: Response): Promise<string> => {
   return text;
 };
 
-// Each hop is re-checked against the SSRF guard, so a redirect to a private host is refused instead of followed.
+// Each redirect hop re-clears the SSRF guard.
 const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
 const MAX_REDIRECTS = 5;
 
@@ -134,7 +134,7 @@ const titleOf = (html: string, fallback: string): string => {
   return title ? title.slice(0, 300) : fallback;
 };
 
-// Fetch a page and return its title + truncated text; throws on bad scheme, SSRF refusal, network failure, non-2xx and unsupported content types; null when there is no readable text.
+// Fetch a page, return title + truncated text; throws on any refusal.
 // @see #113
 export const fetchPage = async (url: string): Promise<FetchedPage | null> => {
   let parsed: URL;

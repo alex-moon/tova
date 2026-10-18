@@ -1,7 +1,7 @@
 import mongoose from 'mongoose';
 import type { PersistedToolEvent } from '../routes/chat';
 
-// Ordered event log of a task: the task's content and resume state; never written to `messages`.
+// Ordered task event log: content and resume state; never in `messages`.
 // @see #254 #251 #196
 const taskEventSchema = new mongoose.Schema({
   taskId: {
@@ -9,12 +9,12 @@ const taskEventSchema = new mongoose.Schema({
     ref: 'Task',
     required: true,
   },
-  // Monotonic per-task sequence; the read order and the uniqueness key a step advances on.
+  // Monotonic per-task sequence; read order and the step uniqueness key.
   seq: {
     type: Number,
     required: true,
   },
-  // `system` rows are visible notices (e.g. a budget breach), never model context.
+  // `system` rows are visible notices, never model context.
   role: {
     type: String,
     enum: ['user', 'assistant', 'tool', 'system'],
@@ -27,7 +27,7 @@ const taskEventSchema = new mongoose.Schema({
   // Set on assistant events: the model/provider that served the step.
   model: { type: String },
   provider: { type: String },
-  // Reactive tool chips plus the raw executed `result` — the resume payload, clipped only at render time.
+  // Tool chips plus the raw `result` resume payload, clipped at render.
   // @see #196
   tools: {
     type: [
@@ -57,9 +57,9 @@ const taskEventSchema = new mongoose.Schema({
     },
     default: undefined,
   },
-  // The step index this event belongs to (0-based); user rows carry the step they are consumed at.
+  // 0-based step index; user rows carry the step they are consumed at.
   step: { type: Number },
-  // Explicit UTC clock; the stream orders by `seq`, so a `timestamps` pair would be redundant.
+  // Explicit UTC clock; the stream orders by `seq`, not by time.
   // @see #254
   timestamp: {
     type: Date,

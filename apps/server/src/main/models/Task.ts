@@ -1,6 +1,6 @@
 import mongoose from 'mongoose';
 
-// A task is a first-class stream, a twin of a chat: this doc is the header, events live in `TaskEvent`.
+// A task is a first-class stream: this doc is the header, events in TaskEvent.
 // @see #254 #251
 const taskSchema = new mongoose.Schema(
   {
@@ -9,13 +9,13 @@ const taskSchema = new mongoose.Schema(
       ref: 'User',
       required: true,
     },
-    // queued -> running on claim; paused is a resumable budget breach; done/failed/cancelled terminal.
+    // queued -> running on claim; paused is a resumable budget breach.
     status: {
       type: String,
       enum: ['queued', 'running', 'paused', 'done', 'failed', 'cancelled'],
       default: 'queued',
     },
-    // Thin origin reference: chat-origin tasks carry the session id; never a Message FK.
+    // Chat-origin tasks carry the session id; never a Message FK.
     origin: {
       required: false,
       type: new mongoose.Schema(
@@ -35,12 +35,12 @@ const taskSchema = new mongoose.Schema(
       type: String,
       default: '',
     },
-    // Monotonic count of completed steps; the resume clock a crash-recovery requeue continues from.
+    // Completed-step count; the clock a crash-recovery requeue resumes.
     stepCount: {
       type: Number,
       default: 0,
     },
-    // Budgets snapshotted from config at creation so a mid-task env change cannot move the goalposts.
+    // Budgets snapshotted at creation; a mid-task env change can't move them.
     budget: {
       type: new mongoose.Schema(
         {
@@ -52,7 +52,7 @@ const taskSchema = new mongoose.Schema(
       ),
       required: true,
     },
-    // Incremented on every claim; MAX_TASK_ATTEMPTS terminal-fails the task. Distinct from the step cap.
+    // Bumped per claim; MAX_TASK_ATTEMPTS terminal-fails, unlike the cap.
     attempts: {
       type: Number,
       default: 0,
@@ -61,7 +61,7 @@ const taskSchema = new mongoose.Schema(
       type: String,
       default: null,
     },
-    // The chat route's drain marker for the completion notification; delivered exactly once, never mid-turn.
+    // Drain marker for the completion notification; once, never mid-turn.
     // @see #255
     notifiedAt: {
       type: Date,
@@ -78,7 +78,7 @@ taskSchema.index({ status: 1, createdAt: 1 });
 
 export type TaskDocument = mongoose.HydratedDocument<mongoose.InferSchemaType<typeof taskSchema>>;
 
-// Origin vocabulary, re-exported so callers share one shape; absent means unknown, never faked.
+// Origin vocabulary, re-exported; absent means unknown, never faked.
 // @see #252
 export interface TaskOrigin {
   kind: 'chat' | 'direct';

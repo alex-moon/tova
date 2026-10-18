@@ -1,4 +1,4 @@
-// Per-provider token-setup instructions for PAT connectors, rendered as data by the connect modal.
+// Per-provider token-setup instructions for PAT connectors, as data.
 // @see #332 #328
 import type { CatalogEntry } from './connectorCatalog';
 
@@ -62,6 +62,6 @@ export const CONNECTOR_INSTRUCTIONS: Record<string, ConnectorInstructions> = {
   },
 };
 
-// Real content when the ref resolves, undefined so the modal can fall back to generic copy.
+// Real content when the ref resolves; undefined falls back to generic copy.
 export const instructionsFor = (entry: CatalogEntry): ConnectorInstructions | undefined =>
   entry.instructionsRef ? CONNECTOR_INSTRUCTIONS[entry.instructionsRef] : undefined;

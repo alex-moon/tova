@@ -1,7 +1,7 @@
 import type { Request, Response, NextFunction } from 'express';
 import { logger } from '../services/logService';
 
-// One compact line per request; the logs endpoint is skipped so polling doesn't spam the buffer.
+// One compact line per request; the logs endpoint is skipped to avoid spam.
 // @see #76
 export const requestLog = (req: Request, res: Response, next: NextFunction) => {
   const skip = req.method === 'GET' && req.path === '/api/admin/logs';

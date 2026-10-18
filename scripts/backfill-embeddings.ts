@@ -1,4 +1,4 @@
-/* Embed the existing workspace corpus into `workspace_embeddings`; idempotent by textHash. */
+/* Embed the workspace corpus into `workspace_embeddings`; idempotent. */
 // @see #294 #289
 import 'dotenv/config';
 import mongoose from 'mongoose';
@@ -7,7 +7,7 @@ import { config } from '../apps/server/src/main/config';
 import { User } from '../apps/server/src/main/models/User';
 import { embedWorkspaceUser } from '../apps/server/src/main/services/workspaceEmbeddingIngest';
 
-// Rough public embedding pricing; an order-of-magnitude cost bound, not a bill.
+// Rough public embedding pricing; order-of-magnitude bound, not a bill.
 const USD_PER_MILLION_TOKENS = 0.067;
 const CHARS_PER_TOKEN = 4;
 

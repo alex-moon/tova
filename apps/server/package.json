@@ -6,7 +6,9 @@
   "main": "dist/main.js",
   "scripts": {
     "build": "tsc -b tsconfig.build.json",
-    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "typecheck": "npm run typecheck:src && npm run typecheck:tests",
+    "typecheck:src": "tsc --noEmit -p tsconfig.json",
+    "typecheck:tests": "tsc --noEmit -p tsconfig.lspcheck.json",
     "start": "node dist/main.js"
   },
   "dependencies": {

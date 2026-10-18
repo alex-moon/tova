@@ -29,7 +29,7 @@ const provenanceLabel = (kind: string | undefined): string | null => {
   return null;
 };
 
-// Icons only, never content previews — file contents are not rendered in the browser.
+// Icons only, never content previews; contents are never rendered in-browser.
 // @see #34
 const IconFor: React.FC<{ contentType: string; filename: string }> = ({
   contentType,
@@ -48,13 +48,13 @@ const IconFor: React.FC<{ contentType: string; filename: string }> = ({
 };
 
 interface AssetLibraryProps {
-  // The library is always an embedded pane beside a preview; onSelect reports a click, selectedId highlights.
+  // Always an embedded pane beside a preview; onSelect reports a click.
   // @see #197
   onSelect?: (asset: AssetSummary) => void;
   selectedId?: string | null;
 }
 
-// 'agent' flips the server filter to ONLY agent-facing files (pages fetch_url saved for read_file).
+// 'agent' flips the server filter to ONLY agent-facing files.
 // @see #356
 type AssetFilter = 'mine' | 'agent';
 
@@ -110,7 +110,7 @@ const AssetLibrary: React.FC<AssetLibraryProps> = ({ onSelect, selectedId = null
     setSelectedIds(new Set());
   };
 
-  // Poll silently while conversion or thumbnail work is pending so cards settle in place.
+  // Poll silently while conversion/thumbnail work is pending so cards settle.
   // @see #83 #208
   const anyPending = assets.some(
     (a) => a.markdownStatus === 'pending' || a.thumbnailStatus === 'pending',
@@ -121,7 +121,7 @@ const AssetLibrary: React.FC<AssetLibraryProps> = ({ onSelect, selectedId = null
     return () => clearInterval(timer);
   }, [anyPending, load]);
 
-  // Per-file rows with progress/error plus an aggregate outcome; per-file errors resolve from the service rather than throwing.
+  // Per-file rows with progress/error plus an aggregate outcome.
   // @see #68
   const handleFiles = useCallback(async (files: FileList | null) => {
     if (!files?.length) return;
@@ -194,7 +194,7 @@ const AssetLibrary: React.FC<AssetLibraryProps> = ({ onSelect, selectedId = null
     else void handleDelete(id);
   });
 
-  // Agent-side rows have no object behind them, so a presigned download can never resolve.
+  // Agent-side rows have no object, so a presigned download can never resolve.
   // @see #356
   const anyAgentSideSelected = assets.some(
     (a) => selectedIds.has(a.id) && a.origin === 'system-side',

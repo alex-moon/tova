@@ -1,6 +1,6 @@
 import { MigrationInterface, Db } from 'mongo-migrate-ts';
 
-// Forwards-only drop of the dead providerroutings collection; no app code reads it any more.
+// Forwards-only drop of the dead providerroutings collection.
 // @see #246 #235 #234 #233
 export class DropProviderRouting implements MigrationInterface {
   async up(db: Db): Promise<void> {

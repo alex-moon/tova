@@ -1,6 +1,6 @@
 import { MigrationInterface, Db } from 'mongo-migrate-ts';
 
-// Pre-creates the modelrouteerrors collection and its unique tally key index so the tally cannot race a lazy-create.
+// Pre-creates the modelrouteerrors collection and its unique tally key index.
 // @see #175
 export class CreateModelRouteErrors implements MigrationInterface {
   async up(db: Db): Promise<void> {

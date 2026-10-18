@@ -6,7 +6,7 @@ import {
   type TraceStatsCacheDocument,
 } from '../models/TraceStatsCache';
 
-/* Background poller for the admin Traces summary cache: recomputes the overview every ~120s and upserts one document per window so the route serves it from Mongo; tokens only — cost joins at read time. */
+/* Poller for the admin Traces cache: recompute, upsert per window. */
 // @see #224
 
 export const DEFAULT_TRACE_STATS_INTERVAL_MS = 120_000;
@@ -14,10 +14,10 @@ export const DEFAULT_TRACE_STATS_INTERVAL_MS = 120_000;
 // The window the poller pre-computes; other windows fall back to live.
 export const TRACE_STATS_WINDOW_DAYS = 7;
 
-// A cache older than two intervals reads as stale; the route then falls back to a live sweep so the tab never shows a frozen summary.
+// Older than two intervals reads stale; the route sweeps live.
 export const TRACE_STATS_STALE_MS = DEFAULT_TRACE_STATS_INTERVAL_MS * 2;
 
-// Compute the rollup and upsert it for the window; null when tracing is unconfigured (nothing to cache).
+// Compute the rollup and upsert it; null when tracing is unconfigured.
 export const runTraceStatsTick = async (
   days: number = TRACE_STATS_WINDOW_DAYS,
 ): Promise<TraceStatsCacheDocument | null> => {
@@ -66,7 +66,7 @@ export const startTraceStatsPoller = (
   timer = setInterval(() => {
     if (busy) return;
     busy = true;
-    // A failed sweep must not kill the poller or the process; the `.catch` is load-bearing — a bare `.finally` re-throws the rejection and an unhandled rejection terminates the process.
+    // The .catch is load-bearing: a bare .finally would re-throw unhandled.
     void runTraceStatsTick()
       .catch((err) => {
         console.error('Trace stats poll failed:', redactForLog(err));

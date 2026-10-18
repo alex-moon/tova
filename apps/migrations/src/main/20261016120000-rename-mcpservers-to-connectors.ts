@@ -1,6 +1,6 @@
 import { MigrationInterface, Db } from 'mongo-migrate-ts';
 
-// Renames mcpservers to connectors (indexes ride along) and backfills type: 'mcp.pat'; down reverses both.
+// Renames mcpservers to connectors and backfills type: 'mcp.pat'.
 // @see #329 #328 #327
 export class RenameMcpserversToConnectors implements MigrationInterface {
   async up(db: Db): Promise<void> {
@@ -16,7 +16,7 @@ export class RenameMcpserversToConnectors implements MigrationInterface {
         to: `${db.databaseName}.connectors`,
       });
     }
-    // Unconditional + idempotent so a run that died between rename and backfill completes on re-run.
+    // Idempotent so a run that died mid-rename completes on re-run.
     await db
       .collection('connectors')
       .updateMany({ type: { $exists: false } }, { $set: { type: 'mcp.pat' } });

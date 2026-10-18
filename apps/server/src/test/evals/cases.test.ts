@@ -94,7 +94,7 @@ describe('#112 golden set', () => {
     expect(resolveExpectedContent('any literal', () => 'unused')).toBe('any literal');
   });
 
-  /* The runner is not in CI, so a @repo: marker that no longer resolves fails silently until the next live run — pin every marker against the actual reader. */
+  /* @repo: markers can fail silently outside CI; pin each here. */
   // @see #257
   it('every @repo: marker in CASES resolves against the real repo reader', () => {
     for (const testCase of CASES) {
@@ -108,7 +108,7 @@ describe('#112 golden set', () => {
         expect(() => resolveExpectedContent(marker, defaultReadRepoFile)).not.toThrow();
         expect(resolveExpectedContent(marker, defaultReadRepoFile).length).toBeGreaterThan(0);
       }
-      // The whole assertion set must resolve, not just the markers scanned above.
+      // Every assertion must resolve, not just the markers scanned above.
       expect(() => resolveAssertions(testCase, defaultReadRepoFile)).not.toThrow();
     }
   });

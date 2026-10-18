@@ -1,4 +1,4 @@
-/* Jest stub for `@mastra/observability`: the registry entrypoint class and the tracing-options builder folding TracingOptionsUpdaters onto the call's tracing options. */
+/* Jest stub for `@mastra/observability`: entrypoint and options builder. */
 
 export class Observability {
   constructor(public readonly config: unknown) {}

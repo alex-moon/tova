@@ -1,4 +1,4 @@
-/* Memory-eval runner: seeds the corpus, scores retrieval hit-rate, optional helpfulness stage and LangSmith export; not part of CI. */
+/* Memory-eval runner: seeds corpus, scores hit-rate, optional stages. */
 // @see #289
 import 'dotenv/config';
 import mongoose from 'mongoose';
@@ -24,13 +24,13 @@ import { config } from '../apps/server/src/main/config';
 const pct = (value: number | null): string =>
   value === null ? 'n/a' : `${(value * 100).toFixed(1)}%`;
 
-/* Stage 3 makes live responder + judge calls, so it is manual-only via --helpfulness. */
+/* Stage 3 makes live calls; manual-only via --helpfulness. */
 const wantsHelpfulness = (): boolean => process.argv.slice(2).includes('--helpfulness');
 
-/* --preflight-judge issues one judge call in both orders and requires a parseable verdict; fails loudly before the Mongo connection. */
+/* --preflight-judge: one judge call in both orders; fails pre-connection. */
 const wantsPreflight = (): boolean => process.argv.slice(2).includes('--preflight-judge');
 
-/* --validate-judge scores the judge against the constructed set (smoke) and the hand-labelled seed (non-circular evidence), printing accuracy and kappa. */
+/* --validate-judge: judge accuracy + kappa on the hand-labelled seed. */
 const wantsValidateJudge = (): boolean => process.argv.slice(2).includes('--validate-judge');
 
 const printAgreement = async (

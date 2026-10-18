@@ -1,6 +1,6 @@
 import mongoose from 'mongoose';
 
-// One embedding vector per workspace slice, kept off the hot source collections; keyed by (kind, sourceId, model).
+// One embedding per workspace slice, off the hot collections.
 // @see #294
 const workspaceEmbeddingSchema = new mongoose.Schema(
   {
@@ -17,7 +17,7 @@ const workspaceEmbeddingSchema = new mongoose.Schema(
     sourceId: { type: String, required: true },
     model: { type: String, required: true },
     dim: { type: Number, required: true },
-    // Mongoose arrays default to `[]` and `required` doesn't reject that, so non-empty is explicit.
+    // Mongoose arrays default to `[]`; non-empty must be explicit.
     vector: {
       type: [Number],
       required: true,
@@ -26,7 +26,7 @@ const workspaceEmbeddingSchema = new mongoose.Schema(
         message: 'vector must be non-empty',
       },
     },
-    // sha256 of the embed text + model; drives re-embed-on-change and skip-if-unchanged.
+    // sha256 of embed text + model; drives the skip-if-unchanged rule.
     textHash: { type: String, required: true },
   },
   { collection: 'workspace_embeddings', timestamps: true },

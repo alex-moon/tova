@@ -5,14 +5,14 @@ import {
   embedTexts,
 } from '../../main/services/embeddingService';
 
-/* The embedding client is a thin DeepInfra OpenAI-compatible POST; every test injects `fetchImpl` — the suite must never make a live provider call. */
+/* Embedding client: a thin DeepInfra POST; every test injects `fetchImpl`. */
 // @see #294
 
 const originalKey = process.env.DEEPINFRA_API_KEY;
 const originalDim = process.env.EMBEDDING_DIM;
 const originalModel = process.env.EMBEDDING_MODEL;
 
-// The `fetch` init shape the service builds; `RequestInit` is a DOM lib type not available under this tsconfig's `types`.
+// The `fetch` init shape the service builds; `RequestInit` is DOM-lib only.
 interface FetchInit {
   headers?: unknown;
   body?: string;
@@ -112,7 +112,7 @@ describe('embedTexts (#294)', () => {
   });
 
   it('keeps provider order when rows carry no numeric index', async () => {
-    // The `index` field is optional on the wire; when absent the client must not reorder, since there is nothing to sort by.
+    // `index` is optional on the wire; when absent the client must not sort.
     const fetchImpl = jest.fn(async () => ({
       ok: true,
       status: 200,
@@ -168,7 +168,7 @@ describe('embedTexts (#294)', () => {
   });
 
   it('recovers a context-length 400 by splitting per text and halving the offender', async () => {
-    // `EMBEDDING_MAX_CHARS` cannot see token density, so a code-dense slice can still exceed the model's window and 400 the whole batch; clean text must come back intact and in order, with only the offender retried, halved until it fits.
+    // A code-dense slice can exceed the window; retry halved until it fits.
     const dense = 'x'.repeat(3000);
     const contextError = {
       ok: false,

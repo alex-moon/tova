@@ -1,4 +1,4 @@
-// Memory-eval corpus types: a hand-labelled gate set plus scenarios driving retrieval and helpfulness.
+// Memory-eval corpus types: gate set plus retrieval/helpfulness scenarios.
 // @see #289 #112
 
 /** The three workspace-memory corpus kinds retrieval reads. */
@@ -6,15 +6,15 @@ export type SeedKind = 'chat' | 'file' | 'task';
 
 /** A known piece of work materialised in Mongo for one scenario. */
 export interface MemorySeed {
-  /** Stable synthetic id, unique within a scenario; hit-rate matches on this. */
+  /** Stable synthetic id, unique per scenario; hit-rate keys on it. */
   id: string;
   kind: SeedKind;
   title: string;
   /** Content carrying the fact a query should retrieve. */
   text: string;
-  /** ISO date. Recency is a tiebreak only, but keeps fixtures deterministic. */
+  /** ISO date. Recency is a tiebreak only; keeps fixtures fixed. */
   at: string;
-  /** Soft-deleted chat seed: materialised, then excluded by `deletedAt` (chat-only flag). */
+  /** Soft-deleted chat seed, excluded by `deletedAt` (chat-only flag). */
   deleted?: boolean;
 }
 
@@ -22,7 +22,7 @@ export interface MemorySeed {
 export type ScenarioCategory =
   'direct' | 'paraphrase' | 'file' | 'task' | 'deleted-seed' | 'out-of-pool';
 
-/** A seeded retrieval scenario, reused by stages 2 (hit-rate) and 3 (helpfulness). */
+/** A seeded retrieval scenario, reused by stages 2 and 3. */
 export interface MemoryScenario {
   id: string;
   description: string;
@@ -31,12 +31,12 @@ export interface MemoryScenario {
   query: string;
   /** Seed id a correct retrieval must surface. */
   expectedSliceId: string;
-  /** Whether the baseline is expected to surface it; false documents a known miss by construction. */
+  /** Whether the baseline should surface it; false is a known miss. */
   // @see #293
   expectSurfaced: boolean;
-  /** Deterministic substring a helpful answer must contain (stage-3 backbone). */
+  /** Deterministic substring a helpful answer must contain. */
   expectedFact: string;
-  /** Filler messages burying the seed beyond the old bounded pool (`out-of-pool` only). */
+  /** Filler burying the seed beyond the old pool (`out-of-pool`). */
   // @see #293
   poolFill?: number;
 }
@@ -44,7 +44,7 @@ export interface MemoryScenario {
 /** How a positive turn refers back, so recall can be reported per subtype. */
 export type GateSubtype = 'explicit' | 'continuation' | 'bare-deixis';
 
-/** One hand-labelled gate case: does this turn refer back to the user's past work? */
+/** One gate case: does this turn refer back to the user's past work? */
 export interface GateCase {
   id: string;
   prompt: string;

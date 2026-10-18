@@ -2,7 +2,7 @@ import { MEMORY_SCENARIOS } from '../../../main/evals/memory/corpus';
 import { runHelpfulnessEval } from '../../../main/evals/memory/helpfulnessEval';
 import { clearMemoryCorpus } from '../../../main/evals/memory/memorySource';
 
-/* Stage-3 integration over real Mongo fixtures with only provider calls faked: the block builds from the seeded slice, both arms run, and the judge sees both orders. */
+/* Stage-3 integration over real Mongo fixtures, provider calls faked. */
 // @see #289
 describe('helpfulness eval integration (#289)', () => {
   afterAll(async () => {
@@ -21,7 +21,7 @@ describe('helpfulness eval integration (#289)', () => {
           : { content: 'I have nothing on that.' },
       judge: async (_query, a, b) => {
         judgeOrders.push([a, b]);
-        // A judge that always picks the first answer must fold to a tie (with-arm-as-A wins, with-arm-as-B loses).
+        // A first-answer judge must fold to a tie across the arm swap.
         return 'A';
       },
     });

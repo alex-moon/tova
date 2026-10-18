@@ -1,6 +1,6 @@
 import { MigrationInterface, Db } from 'mongo-migrate-ts';
 
-// Backfills lastMessageAt from the newest message per session and adds the compound listing index.
+// Backfills lastMessageAt from the newest message and adds the listing index.
 // @see #226
 export class SessionLastMessageAt implements MigrationInterface {
   async up(db: Db): Promise<void> {
