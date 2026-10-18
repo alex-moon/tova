@@ -90,6 +90,24 @@ describe('traceRedaction', () => {
       expect(span.errorInfo.stack).toBe('at fn');
       expect(span.errorInfo.details).toEqual(details);
     });
+
+    it('bounds errorInfo.details structurally without redacting content', () => {
+      const details: Record<string, unknown> = {
+        note: 'upstream said: ' + 'q'.repeat(2200),
+      };
+      details.self = details;
+      const span = { errorInfo: { message: 'boom', details } };
+      expect(() => redactSpanPayload(span as never)).not.toThrow();
+      const capped = (span as never as { errorInfo: { details: typeof details } }).errorInfo
+        .details;
+      const note = capped.note as string;
+      expect(note).toContain('upstream said: qqqq');
+      expect(note.length).toBe(2000);
+      let node: unknown = capped.self;
+      for (let i = 0; i < 5; i += 1) node = (node as { self: unknown }).self;
+      expect(node).toBe('[depth-limit]');
+      expect((JSON.stringify(capped) as string).length).toBeLessThan(20000);
+    });
   });
 
   describe('RedactedLangSmithExporter', () => {

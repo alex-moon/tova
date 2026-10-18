@@ -32,13 +32,24 @@ Grafana/Loki) stays conservative; the ticket's pain is trace readability.
   whitespace-free run has no "words" to keep — partial reveal would leak key
   material.
 - **Catch-all defers to earlier rules.** In partial mode a ≥64-char run that
-  already carries a `[redacted]` marker is kept as-is: an earlier rule (e.g.
-  quoted-payload partialization) already decided that line's exposure, and
-  re-blanking it destroyed the context this ticket exists to keep. Runs
-  without a marker still get head/tail treatment.
-- **Errors unredacted in traces.** `errorInfo` (message + details + stack)
-  passes through verbatim per the ticket; input/output stay redacted. Log-path
-  error redaction is unchanged.
+  already carries a machine-generated `[redacted]` marker is kept as-is: an
+  earlier rule (e.g. quoted-payload partialization) already decided that line's
+  exposure, and re-blanking it destroyed the context this ticket exists to
+  keep. Runs without a marker still get head/tail treatment.
+- **User-typed markers are stashed.** A literal `[redacted]` in user text would
+  otherwise trip the catch-all skip and preserve a whole line verbatim — an
+  attacker-controlled escape hatch around the backstop. Such literals are
+  swapped for placeholders at entry and restored at exit, so only markers the
+  rules themselves emitted trigger the skip. Residual accepted exposure: bare,
+  unkeyworded secrets in the kept head/tail words — inherent to the head/tail
+  reveal the ticket asks for (short lines with bare secrets were never
+  redacted, even before this work).
+- **Errors unredacted in traces, but bounded.** `errorInfo` (message + details
+  + stack) passes through verbatim per the ticket; input/output stay redacted.
+  `details` alone goes through a structural cap (depth 6, arrays 50, strings
+  2000 — content verbatim, fresh containers so cycles cannot survive into the
+  exporter), restoring the envelope `redactDeep` used to apply. Log-path error
+  redaction is unchanged.
 - **(b) deferred.** Guard-model redaction waits for the eval in the issue
   comment; shipped (a) is purely deterministic so trace content claims for
   #388 follow from what actually ships.
@@ -48,8 +59,11 @@ Grafana/Loki) stays conservative; the ticket's pain is trace readability.
 - [x] `redactString` accepts a partial mode; logs unchanged by default
 - [x] Trace redaction opts into partial mode
 - [x] Trace `errorInfo` no longer redacted
+- [x] Hardened: user-typed `[redacted]` markers stashed out of the catch-all
+      skip; `errorInfo.details` structurally bounded (cycles/size)
 - [x] Tests: head/tail words survive in traces; secrets/JSON still full;
-      errors verbatim; log behavior pinned unchanged
+      errors verbatim; log behavior pinned unchanged; marker-escape and
+      details-bounds regressions pinned
 - [x] `npm run ci` green
 
 ## Follow-ups

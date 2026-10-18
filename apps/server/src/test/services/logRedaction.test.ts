@@ -39,6 +39,15 @@ describe('redactString', () => {
     expect(redactString(prose)).toBe(REDACTED);
   });
 
+  it('partial catch-all ignores user-typed markers (no wholesale escape)', () => {
+    const line =
+      'start [redacted] filler one two three AKIAJWWWCOSYEEXAMPLEKEY9 four five six seven end words here';
+    const out = redactString(line, { partial: true });
+    expect(out).not.toContain('AKIAJWWWCOSYEEXAMPLEKEY9');
+    expect(out).toContain('start [redacted] filler');
+    expect(redactString(line)).toBe(REDACTED);
+  });
+
   it('does not corrupt prose containing apostrophes (critic finding)', () => {
     const prose = "It doesn't seem to resolve for the user's request, oddly enough";
     expect(redactString(prose)).toBe(prose);

@@ -41,6 +41,8 @@ const isPathShaped = (text: string): boolean =>
 // @see #358
 const QUOTED_SEGMENT = /'((?:\\.|[^']){1,300})'|"((?:\\.|[^"]){1,300})"/g;
 const PATH_PLACEHOLDER = (i: number): string => `\u0000${i}\u0000`;
+// Literal markers in user text must not trip the partial catch-all skip.
+const USER_MARKER = /\[redacted\]/g;
 
 // Head/tail words survive with the middle blanked; full-blank when the
 // match has no words to keep (whitespace-free runs) or too few to hide.
@@ -58,14 +60,16 @@ export const redactString = (text: string, opts: RedactOptions = {}): string => 
   const partial = opts.partial === true;
   const softBlank = (inner: string): string => (partial ? partialRedact(inner) : REDACTED);
   const paths: string[] = [];
-  let out = text.replace(
-    QUOTED_SEGMENT,
-    (quoted, sq: string | undefined, dq: string | undefined) => {
+  let out = text
+    .replace(USER_MARKER, () => {
+      paths.push(REDACTED);
+      return PATH_PLACEHOLDER(paths.length - 1);
+    })
+    .replace(QUOTED_SEGMENT, (quoted, sq: string | undefined, dq: string | undefined) => {
       if (!isPathShaped(sq ?? dq ?? '')) return quoted;
       paths.push(quoted);
       return PATH_PLACEHOLDER(paths.length - 1);
-    },
-  );
+    });
   // JSON-ish objects/arrays >= 40 chars (embedded request bodies); may
   // carry keys, so partial mode still blanks them wholesale.
   out = out.replace(/[{[][\s\S]{40,}[}\]]/g, REDACTED);
@@ -84,8 +88,9 @@ export const redactString = (text: string, opts: RedactOptions = {}): string => 
   // Long whitespace-free runs — UUIDs/b64/keys/system dumps; no words to keep.
   out = out.replace(/[^\s'"{}[\]]{64,}/g, REDACTED);
   // Catch-all: any remaining >= 64-char run; partial keeps head/tail words.
-  // Runs already carrying a marker were decided by an earlier rule — the
-  // backstop must not blank the context it kept. @see #383
+  // A run carrying a machine marker was decided by an earlier rule — the
+  // backstop must not blank the context it kept; user-typed markers are
+  // stashed above and cannot trigger the skip. @see #383
   out = out.replace(/[^\n\r]{64,}/g, (run) => {
     if (!partial) return REDACTED;
     return run.includes(REDACTED) ? run : partialRedact(run);
