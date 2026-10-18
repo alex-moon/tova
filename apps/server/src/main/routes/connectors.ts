@@ -71,7 +71,9 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
     return res.status(400).json({ message: parsed.error.issues[0]?.message ?? 'Invalid payload' });
   }
   const { name, url } = parsed.data;
-  const authToken = parsed.data.authToken?.trim();
+  // A pasted value may include the scheme; wrap exactly one Bearer.
+  // @see #403
+  const authToken = parsed.data.authToken?.trim().replace(/^bearer\s+/i, '');
   const headers = authToken ? { Authorization: `Bearer ${authToken}` } : undefined;
   try {
     let tools;

@@ -74,7 +74,7 @@ export const CONNECTOR_INSTRUCTIONS: Record<string, ConnectorInstructions> = {
       },
       {
         title: 'Paste it here',
-        body: 'The key is submitted once, stored encrypted, and never shown again. Disconnecting deletes it.',
+        body: 'Paste the key only — not a URL or a Bearer header. The key is submitted once, stored encrypted, and never shown again. Disconnecting deletes it.',
       },
     ],
     scopeNote:

@@ -18,6 +18,21 @@
 - [x] Grid-order test extended (golden six → seven) + instructions render pinned
 - [x] `npm run ci` green; connectors e2e (mobile+desktop) and phone-viewport browser check pass
 
+## Review hardening (pre-ready sweep)
+
+- **Double-Bearer paste trap:** the provider's docs show `Authorization: Bearer YOUR_KEY`, so a
+  whole-header paste produced `Bearer Bearer …` → 401 → an unhelpful "not reachable" 422. The PAT
+  ingest now strips a leading `bearer ` scheme (case-insensitive) before wrapping; pinned by a
+  route test.
+- **Key-in-URL paste trap:** their `/mcp/YOUR_KEY` convenience form invites pasting a URL into the
+  token field; the "Paste it here" step now says key only.
+- **Catalog contract test:** `instructionsFor` falls back to generic copy on an unresolvable ref,
+  and `watchlistNote` was comment-enforced only — a shared contract test pins unique ids, https
+  endpoints, resolvable `instructionsRef`s, non-empty watchlist notes, hex brand colors, and
+  instructions on every live PAT entry.
+- Verified non-issues: letter-tile fallback (exercised by Slack), e2e count pins (none), grid
+  ordering (catalog order), trailing-slash normalization, modal's token-required gate.
+
 ## Follow-ups
 
 - None yet.

@@ -202,6 +202,25 @@ describe('POST /api/connectors (issues #36, #329)', () => {
     expect(mockListMcpTools).not.toHaveBeenCalled();
   });
 
+  it('strips a pasted Bearer scheme prefix so the header wraps once (#403)', async () => {
+    const { app, cookie } = await registerUser('conn-bearer@example.com');
+    for (const [i, pasted] of ['Bearer ttd_abc123', 'bearer ttd_abc123'].entries()) {
+      const res = await request(app)
+        .post('/api/connectors')
+        .set('Cookie', cookie)
+        .send({
+          type: 'mcp.pat',
+          name: 'pasted-header',
+          url: `https://bearer-${i}.example.com/mcp`,
+          authToken: pasted,
+        });
+      expect(res.status).toBe(201);
+      expect(mockListMcpTools).toHaveBeenCalledWith(`https://bearer-${i}.example.com/mcp`, {
+        Authorization: 'Bearer ttd_abc123',
+      });
+    }
+  });
+
   it('stores the header value encrypted at rest and not in plaintext form', async () => {
     const { app, cookie } = await registerUser('conn-enc@example.com');
     const res = await request(app).post('/api/connectors').set('Cookie', cookie).send({
