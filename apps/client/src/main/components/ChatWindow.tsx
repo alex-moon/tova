@@ -8,6 +8,7 @@ import {
   EyeOff,
   FileImage,
   FileText,
+  HelpCircle,
   ListTree,
   Loader2,
   Menu,
@@ -224,24 +225,30 @@ const ToolSummary: React.FC<{ tools: ToolEvent[]; streaming?: boolean }> = ({
   const [userToggled, setUserToggled] = useState<boolean | null>(null);
   if (tools.length === 0) return null;
   const open = userToggled ?? streaming;
+  // Any unresolved call keeps a spinner next to the toggle so a running tool doesn't look frozen; results and errors flip phase and clear it.
+  // @see #389
+  const running = streaming && tools.some((t) => t.phase === 'call');
   return (
     <div className="mb-2 text-xs text-muted-foreground" data-testid="tool-summary">
-      <button
-        type="button"
-        onClick={() => setUserToggled(!open)}
-        aria-expanded={open}
-        data-testid="tool-summary-toggle"
-        className="inline-flex items-center gap-1.5 rounded-md border border-border bg-muted px-2.5 py-1 hover:bg-accent focus-visible:outline-2 focus-visible:outline-primary"
-      >
-        <ChevronDown
-          size={12}
-          aria-hidden
-          className={`transition-transform ${open ? 'rotate-180' : ''}`}
-        />
-        <span>
-          Used {tools.length} {tools.length === 1 ? 'tool' : 'tools'}
-        </span>
-      </button>
+      <span className="inline-flex items-center gap-2">
+        <button
+          type="button"
+          onClick={() => setUserToggled(!open)}
+          aria-expanded={open}
+          data-testid="tool-summary-toggle"
+          className="inline-flex items-center gap-1.5 rounded-md border border-border bg-muted px-2.5 py-1 hover:bg-accent focus-visible:outline-2 focus-visible:outline-primary"
+        >
+          <ChevronDown
+            size={12}
+            aria-hidden
+            className={`transition-transform ${open ? 'rotate-180' : ''}`}
+          />
+          <span>
+            Used {tools.length} {tools.length === 1 ? 'tool' : 'tools'}
+          </span>
+        </button>
+        {running && <Loader2 size={13} aria-hidden className="animate-spin" />}
+      </span>
       {open && (
         <div className="mt-1.5 flex flex-wrap gap-1.5" data-testid="tool-chips">
           {tools.map((event, i) => (
@@ -421,6 +428,90 @@ const CapabilitiesPanel: React.FC = () => {
   );
 };
 
+// Bottom-sheet on phones, centered dialog on desktop; Escape and overlay click close it.
+// @see #388
+const PrivacyModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-end justify-center sm:items-center"
+      role="presentation"
+    >
+      <div className="absolute inset-0 bg-black/50" onClick={onClose} />
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label="Privacy and capabilities"
+        data-testid="privacy-modal"
+        className="relative max-h-[85dvh] w-full overflow-y-auto rounded-t-lg border border-border panel-surface shadow-xl pb-[calc(0.75rem+env(safe-area-inset-bottom))] sm:max-w-lg sm:rounded-lg sm:pb-0"
+      >
+        <div className="sticky top-0 z-10 flex items-center justify-between border-b border-border panel-surface px-4 py-3 backdrop-blur-sm">
+          <h3 className="font-heading text-sm font-semibold">Privacy &amp; capabilities</h3>
+          <button
+            type="button"
+            aria-label="Close"
+            data-testid="privacy-modal-close"
+            onClick={onClose}
+            className="rounded p-1 transition-colors hover:bg-accent hover:text-foreground"
+          >
+            <X className="size-4" />
+          </button>
+        </div>
+        <div className="space-y-4 px-4 py-4 text-xs text-muted-foreground sm:px-5">
+          <section data-testid="privacy-training-note">
+            <h4 className="mb-1 text-sm font-medium text-foreground">
+              Your data is never used to train models — by anyone, ever.
+            </h4>
+            <ul className="list-disc space-y-1 pl-4">
+              <li>
+                Chat is routed only to zero-data-retention (ZDR) providers, so prompts and replies
+                are not retained on their side.
+              </li>
+              <li>
+                Traces and logs (LangSmith, Grafana) are redacted before they leave the server —
+                prompt sizes are recorded, not your conversation content.
+              </li>
+              <li>
+                It does <em className="text-foreground">not</em> mean your chats are never stored:
+                chats and uploaded files are stored because the product needs them — history,
+                workspace memory, reranking. Delete any chat from the sidebar, or everything at once
+                via factory reset in /profile.
+              </li>
+            </ul>
+          </section>
+          <section>
+            <h4 className="mb-1 text-sm font-medium text-foreground">Incognito</h4>
+            <p>
+              Nothing sent or attached in an incognito chat is stored — it vanishes when the
+              conversation ends. That is why incognito is limited: with nothing stored, there is no
+              workspace memory to read or write, no follow-up suggestions and no background tasks,
+              because all of those rely on saved conversation turns. Files uploaded in Assets are
+              kept so you can reuse them; they are deleted only when you delete them.
+            </p>
+          </section>
+          <section>
+            <h4 className="mb-1 text-sm font-medium text-foreground">Factory reset</h4>
+            <p>
+              Permanently wipes every chat, message, uploaded file and derived trace for this
+              account. Nothing survives. Find it in /profile under Danger zone.
+            </p>
+          </section>
+          <section>
+            <h4 className="mb-1 text-sm font-medium text-foreground">What Tova can use</h4>
+            <CapabilitiesPanel />
+          </section>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 const ChatWindow: React.FC<ChatWindowProps> = ({
   messages,
   onSendMessage,
@@ -463,8 +554,8 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
   // Pinned while at the bottom; scrolling up releases, sending/deltas restore.
   // @see #33
   const pinnedRef = React.useRef(true);
-  // The capabilities panel is a deliberate footer affordance; fetched lazily on first open.
-  // @see #366
+  // Capabilities open the privacy modal (? in the composer); fetched lazily on first open by the panel.
+  // @see #366 #388
   const [capabilitiesOpen, setCapabilitiesOpen] = useState(false);
   const [pendingFeedbackId, setPendingFeedbackId] = useState<string | null>(null);
   // Raw Markdown copy; one timer ref so a rapid re-copy can't leave a stale timer.
@@ -776,8 +867,32 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
                     Tova
                   </div>
                   <div className="px-4 py-3 md:px-5">
-                    <ToolSummary tools={msg.tools ?? []} />
-                    <MarkdownContent content={msg.content || EMPTY_RESPONSE_PLACEHOLDER} markdown />
+                    {/* While tools are unresolved the summary rides below the streaming text so incoming content can't scroll it off-screen; settled turns render it above. */}
+                    {/* @see #389 */}
+                    {(() => {
+                      const streamingTools =
+                        isLoading && (msg.tools ?? []).some((t) => t.phase === 'call');
+                      const summary = (
+                        <ToolSummary tools={msg.tools ?? []} streaming={streamingTools} />
+                      );
+                      return streamingTools ? (
+                        <>
+                          <MarkdownContent
+                            content={msg.content || EMPTY_RESPONSE_PLACEHOLDER}
+                            markdown
+                          />
+                          {summary}
+                        </>
+                      ) : (
+                        <>
+                          {summary}
+                          <MarkdownContent
+                            content={msg.content || EMPTY_RESPONSE_PLACEHOLDER}
+                            markdown
+                          />
+                        </>
+                      );
+                    })()}
                   </div>
                   {msg.honesty?.flagged && (
                     <div
@@ -912,7 +1027,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
             )}
             <textarea
               ref={textareaRef}
-              className="block max-h-[40dvh] w-full resize-none overflow-y-auto bg-transparent pr-24 text-base outline-none placeholder:text-muted-foreground"
+              className="block max-h-[40dvh] w-full resize-none overflow-y-auto bg-transparent text-base outline-none placeholder:text-muted-foreground"
               rows={2}
               placeholder={messages.some((m) => m.role === 'user') ? '' : placeholder}
               value={input}
@@ -929,7 +1044,26 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
               disabled={isLoading}
               data-testid="chat-input"
             />
-            <div className="absolute bottom-2 right-2 flex items-center gap-1">
+            {!sessionId && incognito && (
+              <p data-testid="privacy-note" className="mt-1 text-xs text-muted-foreground">
+                Incognito is on for this chat: nothing sent or attached is stored.
+              </p>
+            )}
+            {/* Icon band below the text: textarea and controls can never overlap. */}
+            {/* @see #388 */}
+            <div className="mt-1.5 flex items-center gap-1">
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                aria-label="Privacy and capabilities"
+                title="Privacy & capabilities: what Tova stores and can do"
+                onClick={() => setCapabilitiesOpen(true)}
+                data-testid="capabilities-toggle"
+                className="h-8 w-8 shrink-0 text-muted-foreground hover:text-foreground"
+              >
+                <HelpCircle className="size-4" />
+              </Button>
               {/* Visible before a new chat's first submission only — the flag is fixed at creation and the server 409s later switches. */}
               {/* @see #144 */}
               {!sessionId && messages.length === 0 && (
@@ -962,7 +1096,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
               />
               {/* Popover with Upload plus recent library files, so an already-uploaded file can be referenced without re-uploading. */}
               {/* @see #214 */}
-              <div ref={attachMenuRef} className="relative">
+              <div ref={attachMenuRef} className="relative ml-auto">
                 <Button
                   type="button"
                   variant="ghost"
@@ -1077,25 +1211,8 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
             </div>
           </div>
         </form>
-        {capabilitiesOpen && <CapabilitiesPanel />}
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <button
-            type="button"
-            data-testid="capabilities-toggle"
-            aria-expanded={capabilitiesOpen}
-            onClick={() => setCapabilitiesOpen((open) => !open)}
-            className="text-xs text-muted-foreground underline underline-offset-2 transition-colors hover:text-foreground"
-          >
-            What can Tova do?
-          </button>
-          <p className="text-xs text-muted-foreground" data-testid="privacy-note">
-            Your chats and files are never used to train models — by anyone, ever.
-            {!sessionId && incognito
-              ? ' Incognito is on for this chat: nothing sent or attached is stored.'
-              : ''}
-          </p>
-        </div>
       </footer>
+      {capabilitiesOpen && <PrivacyModal onClose={() => setCapabilitiesOpen(false)} />}
     </section>
   );
 };
