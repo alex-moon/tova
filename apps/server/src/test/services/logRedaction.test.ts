@@ -1,4 +1,4 @@
-import { redactForLog, redactString } from '../../main/services/logRedaction';
+import { REDACTED, redactForLog, redactString } from '../../main/services/logRedaction';
 
 // Everything argued to console.* must come through redaction here.
 // @see #145
@@ -32,6 +32,20 @@ describe('redactString', () => {
 
   it('treats empty string as empty', () => {
     expect(redactString('')).toBe('');
+  });
+
+  it('blanks long prose lines wholesale by default (traces opt into partial)', () => {
+    const prose = Array.from({ length: 30 }, (_, i) => `word${i}`).join(' ');
+    expect(redactString(prose)).toBe(REDACTED);
+  });
+
+  it('partial catch-all ignores user-typed markers (no wholesale escape)', () => {
+    const line =
+      'start [redacted] filler one two three AKIAJWWWCOSYEEXAMPLEKEY9 four five six seven end words here';
+    const out = redactString(line, { partial: true });
+    expect(out).not.toContain('AKIAJWWWCOSYEEXAMPLEKEY9');
+    expect(out).toContain('start [redacted] filler');
+    expect(redactString(line)).toBe(REDACTED);
   });
 
   it('does not corrupt prose containing apostrophes (critic finding)', () => {
