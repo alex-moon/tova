@@ -44,6 +44,21 @@ export const requireRole =
     next();
   };
 
+// Per-token stamp throttle: bearer auth fires on every request; the Access
+// tab only needs minute-fresh data, so write at most once per window.
+// @see #397
+const PAT_STAMP_INTERVAL_MS = 5 * 60 * 1000;
+const lastPatStamp = new Map<string, number>();
+
+const stampPatUsage = (tokenHash: string): void => {
+  const now = Date.now();
+  const last = lastPatStamp.get(tokenHash);
+  if (last !== undefined && now - last < PAT_STAMP_INTERVAL_MS) return;
+  if (lastPatStamp.size >= 1000) lastPatStamp.clear();
+  lastPatStamp.set(tokenHash, now);
+  Pat.updateOne({ tokenHash }, { lastUsedAt: new Date() }).catch(() => {});
+};
+
 // PAT bearer auth: an Authorization header opts into token auth, else cookie.
 // @see #184
 export const authenticateBearerOrSession = async (
@@ -68,7 +83,7 @@ export const authenticateBearerOrSession = async (
 
     req.user = { id: creator._id.toString(), email: creator.email, role: creator.role };
     // Usage stamp for the Access tab: diagnostics only, never fatal.
-    pat.updateOne({ lastUsedAt: new Date() }).catch(() => {});
+    stampPatUsage(tokenHash);
     next();
   } catch (_err) {
     res.status(500).json({ message: 'Error authenticating token' });

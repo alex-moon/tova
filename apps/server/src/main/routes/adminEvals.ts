@@ -28,18 +28,26 @@ const evalModels = () =>
 
 // Recent runs, newest first. `limit` is clamped server-side.
 router.get('/evals/runs', ...adminGuard, async (req, res) => {
-  const rawLimit = Number(req.query.limit);
-  const runs = await listEvalRuns(Number.isInteger(rawLimit) ? rawLimit : undefined);
-  res.json({ runs });
+  try {
+    const rawLimit = Number(req.query.limit);
+    const runs = await listEvalRuns(Number.isInteger(rawLimit) ? rawLimit : undefined);
+    res.json({ runs });
+  } catch {
+    res.status(500).json({ message: 'Failed to list eval runs' });
+  }
 });
 
 // One run's per-case breakdown.
 router.get('/evals/runs/:id', ...adminGuard, async (req, res) => {
-  const id = String(req.params.id);
-  if (!OBJECT_ID_PATTERN.test(id)) return res.status(400).json({ message: 'Invalid run id' });
-  const run = await getEvalRun(id);
-  if (!run) return res.status(404).json({ message: 'Run not found' });
-  res.json(run);
+  try {
+    const id = String(req.params.id);
+    if (!OBJECT_ID_PATTERN.test(id)) return res.status(400).json({ message: 'Invalid run id' });
+    const run = await getEvalRun(id);
+    if (!run) return res.status(404).json({ message: 'Run not found' });
+    res.json(run);
+  } catch {
+    res.status(500).json({ message: 'Failed to fetch eval run' });
+  }
 });
 
 // Manual "Run now": writes the lease, runs in background; busy is 409.

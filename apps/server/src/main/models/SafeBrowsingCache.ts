@@ -1,12 +1,13 @@
 import mongoose from 'mongoose';
 
-// Domain verdict cache for the Safe Browsing checker, TTL ~24h.
-// @see #120
+// Per-URL verdict cache for the Safe Browsing checker, TTL ~24h; verdicts
+// must never widen to the host (shared-host green-lighting).
+// @see #120 #397
 const CACHE_TTL_SECONDS = 24 * 60 * 60;
 
 const safeBrowsingCacheSchema = new mongoose.Schema(
   {
-    host: {
+    url: {
       type: String,
       required: true,
       unique: true,

@@ -164,4 +164,29 @@ describe('admin evals (#225)', () => {
     const res = await request(app).post('/api/admin/evals/run').set('Cookie', cookie);
     expect(res.status).toBe(500);
   });
+
+  it('500s as JSON when a Mongo rejection escapes the GET handlers (#397)', async () => {
+    const errorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+    const svc = await import('../../main/services/evalRunsAdminService');
+    const listSpy = jest.spyOn(svc, 'listEvalRuns').mockRejectedValue(new Error('mongo down'));
+    const getSpy = jest.spyOn(svc, 'getEvalRun').mockRejectedValue(new Error('mongo down'));
+    try {
+      const app = createApp();
+      const cookie = await registerAdmin(app, 'evals-mongo@example.com');
+
+      const list = await request(app).get('/api/admin/evals/runs').set('Cookie', cookie);
+      expect(list.status).toBe(500);
+      expect(list.type).toBe('application/json');
+
+      const detail = await request(app)
+        .get('/api/admin/evals/runs/64b7f9f2a1c3d4e5f6a7b8c9')
+        .set('Cookie', cookie);
+      expect(detail.status).toBe(500);
+      expect(detail.type).toBe('application/json');
+    } finally {
+      listSpy.mockRestore();
+      getSpy.mockRestore();
+      errorSpy.mockRestore();
+    }
+  });
 });

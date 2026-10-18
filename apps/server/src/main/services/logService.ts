@@ -3,6 +3,7 @@
 
 import { format } from 'util';
 import { ErrorLog } from '../models/ErrorLog';
+import { redactString } from './logRedaction';
 
 export type LogLevel = 'info' | 'warn' | 'error';
 
@@ -12,7 +13,9 @@ const MAX_MSG_LENGTH = 2000;
 // @see #175
 const persistErrorEntry = (ts: string, msg: string) => {
   if (process.env.NODE_ENV === 'test') return;
-  ErrorLog.create({ bufferId: null, ts, msg }).catch(() => {});
+  // The capture choke point is the one cheap place to redact before persistence.
+  // @see #397
+  ErrorLog.create({ bufferId: null, ts, msg: redactString(msg) }).catch(() => {});
 };
 
 let captureAttached = false;

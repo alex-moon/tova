@@ -89,6 +89,28 @@ describe('admin pats (#184)', () => {
     expect(listed.lastUsedAt).not.toBeNull();
   });
 
+  it('throttles the lastUsedAt stamp to one write per window (#397)', async () => {
+    const app = createApp();
+    const cookie = await registerAdmin(app, 'patstamp@example.com');
+    const created = await request(app)
+      .post('/api/admin/pats')
+      .set('Cookie', cookie)
+      .send({ name: 'stamped' });
+    const token: string = created.body.pat.token;
+
+    const updateSpy = jest.spyOn(Pat, 'updateOne');
+    try {
+      await request(app).get('/api/admin/users').set('Authorization', `Bearer ${token}`);
+      await request(app).get('/api/admin/users').set('Authorization', `Bearer ${token}`);
+      // Give the fire-and-forget stamp from the first request a beat, then
+      // verify the second request inside the window wrote nothing more.
+      await new Promise((r) => setTimeout(r, 20));
+      expect(updateSpy).toHaveBeenCalledTimes(1);
+    } finally {
+      updateSpy.mockRestore();
+    }
+  });
+
   it('lists tokens with creator email and never the token or hash', async () => {
     const app = createApp();
     const cookie = await registerAdmin(app, 'patlister@example.com');

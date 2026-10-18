@@ -65,32 +65,36 @@ const callThreatMatches = async (url: string, apiKey: string): Promise<string[]>
 
 const cacheKey = (url: string): string | null => {
   try {
-    return new URL(url).hostname;
+    // Full-URL key: a host-level verdict would green-light unrelated paths.
+    // @see #397
+    const parsed = new URL(url);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null;
+    return parsed.toString();
   } catch {
     return null;
   }
 };
 
 // A cache-read failure falls through to the live API call.
-const readCache = async (host: string): Promise<string | null> => {
+const readCache = async (url: string): Promise<string | null> => {
   try {
-    const entry = await SafeBrowsingCache.findOne({ host }).lean<{ verdict?: string }>();
+    const entry = await SafeBrowsingCache.findOne({ url }).lean<{ verdict?: string }>();
     return entry?.verdict ?? null;
   } catch (err) {
-    warnOutage(`cache read for ${host}`, err);
+    warnOutage(`cache read for ${url}`, err);
     return null;
   }
 };
 
-const writeCache = async (host: string, verdict: 'safe' | 'unsafe'): Promise<void> => {
+const writeCache = async (url: string, verdict: 'safe' | 'unsafe'): Promise<void> => {
   try {
     await SafeBrowsingCache.updateOne(
-      { host },
+      { url },
       { verdict, checkedAt: new Date() },
       { upsert: true },
     );
   } catch (err) {
-    warnOutage(`cache write for ${host}`, err);
+    warnOutage(`cache write for ${url}`, err);
   }
 };
 
@@ -98,15 +102,15 @@ const writeCache = async (host: string, verdict: 'safe' | 'unsafe'): Promise<voi
 export const checkUrl = async (url: string): Promise<SafeLinkVerdict> => {
   const apiKey = safeBrowsingApiKey();
   if (!apiKey) return { enabled: false, safe: true, source: 'disabled' };
-  const host = cacheKey(url);
-  if (host) {
-    const verdict = await readCache(host);
+  const key = cacheKey(url);
+  if (key) {
+    const verdict = await readCache(key);
     if (verdict === 'unsafe') return { enabled: true, safe: false, source: 'cache' };
     if (verdict === 'safe') return { enabled: true, safe: true, source: 'cache' };
   }
   try {
     const threats = await callThreatMatches(url, apiKey);
-    if (host) await writeCache(host, threats.length > 0 ? 'unsafe' : 'safe');
+    if (key) await writeCache(key, threats.length > 0 ? 'unsafe' : 'safe');
     if (threats.length > 0) {
       return { enabled: true, safe: false, source: 'api', threats };
     }

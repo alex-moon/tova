@@ -140,9 +140,9 @@ describe('POST /api/connectors (issues #36, #329)', () => {
     expect(mockListMcpTools).toHaveBeenCalledTimes(1);
   });
 
-  it('rejects a connector whose handshake fails with the connection error', async () => {
+  it('rejects a connector whose handshake fails without leaking the upstream error (#397)', async () => {
     const { app, cookie } = await registerUser('conn-dead@example.com');
-    mockListMcpTools.mockRejectedValue(new Error('connect ECONNREFUSED'));
+    mockListMcpTools.mockRejectedValue(new Error('connect ECONNREFUSED 10.0.0.9:443'));
 
     const res = await request(app)
       .post('/api/connectors')
@@ -150,7 +150,9 @@ describe('POST /api/connectors (issues #36, #329)', () => {
       .send({ type: 'mcp.pat', name: 'dead', url: 'https://dead.example.com/mcp' });
 
     expect(res.status).toBe(422);
-    expect(res.body.message).toMatch(/not reachable.*ECONNREFUSED/u);
+    expect(res.body.message).toMatch(/not reachable/u);
+    expect(res.body.message).not.toContain('ECONNREFUSED');
+    expect(res.body.message).not.toContain('10.0.0.9');
   });
 
   it('says an OAuth-only endpoint needs Connect, not a token (#333 wash-up)', async () => {

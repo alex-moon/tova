@@ -76,6 +76,10 @@ export const queryRetainedLogs = async (
 
   const hours = Math.min(Math.max(params.hours ?? DEFAULT_HOURS, 1), MAX_HOURS);
   const limit = Math.min(Math.max(params.limit ?? DEFAULT_LIMIT, 1), MAX_LIMIT);
+  // Post-filtering shrinks the page below `limit`; over-fetch when filters
+  // are present so sparse matches still fill it (hard-capped by MAX_LIMIT).
+  // @see #397
+  const fetchLimit = params.level || params.q ? Math.min(limit * 4, MAX_LIMIT) : limit;
   const end = Date.now();
   const start = end - hours * 60 * 60 * 1000;
 
@@ -84,7 +88,7 @@ export const queryRetainedLogs = async (
   url.searchParams.set('query', '{job="tova"}');
   url.searchParams.set('start', `${start}000000`);
   url.searchParams.set('end', `${end}000000`);
-  url.searchParams.set('limit', String(limit));
+  url.searchParams.set('limit', String(fetchLimit));
   url.searchParams.set('direction', 'backward');
 
   const auth = Buffer.from(`${config.loki.username}:${config.loki.password}`).toString('base64');

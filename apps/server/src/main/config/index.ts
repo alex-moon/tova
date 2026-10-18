@@ -6,6 +6,16 @@ import type { LlmProvider } from '../services/llmTypes';
 
 export { getJwtSecret, JWT_SECRET_ENV_VAR } from './jwt';
 
+const LLM_PROVIDERS: readonly LlmProvider[] = ['groq', 'deepinfra', 'fireworks'];
+
+// A typo'd provider env must fall back at boot-access, not fail per request.
+// @see #397
+const providerFromEnv = (raw: string | undefined, fallback: LlmProvider): LlmProvider =>
+  LLM_PROVIDERS.includes(raw as LlmProvider) ? (raw as LlmProvider) : fallback;
+
+const optionalProviderFromEnv = (raw: string | undefined): LlmProvider | undefined =>
+  LLM_PROVIDERS.includes(raw as LlmProvider) ? (raw as LlmProvider) : undefined;
+
 export const config = {
   jwt: {
     get secret(): string {
@@ -124,7 +134,7 @@ export const config = {
       return process.env.AUX_MODEL || 'openai/gpt-oss-20b';
     },
     get provider(): LlmProvider {
-      return (process.env.AUX_PROVIDER as LlmProvider) || 'groq';
+      return providerFromEnv(process.env.AUX_PROVIDER, 'groq');
     },
   },
 
@@ -135,13 +145,13 @@ export const config = {
       return process.env.MEMORY_JUDGE_MODEL || 'Qwen/Qwen3-235B-A22B-Instruct-2507';
     },
     get judgeProvider(): LlmProvider {
-      return (process.env.MEMORY_JUDGE_PROVIDER as LlmProvider) || 'deepinfra';
+      return providerFromEnv(process.env.MEMORY_JUDGE_PROVIDER, 'deepinfra');
     },
     get responderModel(): string | undefined {
       return process.env.MEMORY_RESPONDER_MODEL || undefined;
     },
     get responderProvider(): LlmProvider | undefined {
-      return (process.env.MEMORY_RESPONDER_PROVIDER as LlmProvider) || undefined;
+      return optionalProviderFromEnv(process.env.MEMORY_RESPONDER_PROVIDER);
     },
     get responderTemperature(): number {
       const raw = process.env.MEMORY_RESPONDER_TEMPERATURE;

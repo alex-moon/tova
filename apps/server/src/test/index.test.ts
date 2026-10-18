@@ -1,5 +1,5 @@
 import request from 'supertest';
-import { createApp } from '../main/index';
+import { createApp, getPort } from '../main/index';
 
 describe('Server bootstrap', () => {
   it('returns an ok health response', async () => {
@@ -62,6 +62,48 @@ describe('Server bootstrap', () => {
       expect(() => createApp()).toThrow(/JWT_SECRET/);
     } finally {
       process.env = originalEnv;
+    }
+  });
+
+  it('answers unknown /api/* paths with a JSON 404, never SPA HTML (#397)', async () => {
+    const app = createApp();
+
+    const response = await request(app).get('/api/nonexistent');
+
+    expect(response.status).toBe(404);
+    expect(response.type).toBe('application/json');
+    expect(response.body).toEqual({ message: 'Not found' });
+  });
+
+  it('answers malformed JSON with a JSON 400 from the terminal error handler (#397)', async () => {
+    const errorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+    const app = createApp();
+
+    const response = await request(app)
+      .post('/api/auth/login')
+      .set('Content-Type', 'application/json')
+      .send('{"email": ');
+
+    expect(response.status).toBe(400);
+    expect(response.type).toBe('application/json');
+    expect(response.body).toEqual({ message: 'Malformed JSON body' });
+    // A client payload error is not an internal error: nothing logged.
+    expect(errorSpy).not.toHaveBeenCalled();
+    errorSpy.mockRestore();
+  });
+
+  it('treats PORT="" as unset instead of binding port 0 (#397)', () => {
+    const prev = process.env.PORT;
+    try {
+      process.env.PORT = '';
+      expect(getPort()).toBe(5000);
+      process.env.PORT = '   ';
+      expect(getPort()).toBe(5000);
+      process.env.PORT = '4000';
+      expect(getPort()).toBe(4000);
+    } finally {
+      if (prev === undefined) delete process.env.PORT;
+      else process.env.PORT = prev;
     }
   });
 });

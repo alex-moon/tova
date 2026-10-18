@@ -7,7 +7,7 @@ import { spacesWorkspaceStorage } from './workspaceStorage';
 import { purgeUserTraces } from './tracePurge';
 import { Connector } from '../models/Connector';
 import type { ConnectorDocument } from '../models/Connector';
-import { readConnectorVault } from './oauthConnectors';
+import { readConnectorVault, assertPublicHttpsUrl } from './oauthConnectors';
 
 /* Factory reset: full wipe of every user-owned PII-bearing collection. */
 // @see #143 #327
@@ -35,6 +35,14 @@ const revokeOAuthGrants = async (connectors: ConnectorDocument[]): Promise<void>
         return; // Undecryptable or key missing: the row delete below still wipes the material.
       }
       if (!token || !revocationEndpoint) return;
+      // The endpoint is persisted attacker-influenced metadata: re-validate
+      // immediately before the POST or it receives the bearer token.
+      // @see #397
+      try {
+        assertPublicHttpsUrl(revocationEndpoint, 'OAuth revocation endpoint');
+      } catch {
+        return; // Best-effort revocation; the row delete below still wipes the material.
+      }
       await fetch(revocationEndpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },

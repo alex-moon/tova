@@ -9,7 +9,6 @@ export interface CoarseLocation {
 }
 
 const COUNTRY_IS_URL = 'https://api.country.is/';
-const IP_API_URL = 'http://ip-api.com/json/?fields=country,countryCode';
 
 // Short per-provider timeout so a hung lookup cannot stall a request.
 const PROVIDER_TIMEOUT_MS = 2000;
@@ -21,8 +20,15 @@ const RESOLVE_INTERVAL_MS = 7 * 24 * 60 * 60 * 1000;
 // In-process cooldown after a failed lookup suppresses repeat attempts.
 const FAILURE_COOLDOWN_MS = 60 * 60 * 1000;
 
-// Last failed resolve per user; successes go to Mongo instead.
+// Last failed resolve per user; successes go to Mongo instead. Entries are
+// pruned opportunistically so a user who never succeeds cannot pin memory.
 const failureCooldown = new Map<string, number>();
+
+const pruneCooldowns = (now = Date.now()): void => {
+  for (const [key, at] of failureCooldown) {
+    if (now - at >= FAILURE_COOLDOWN_MS) failureCooldown.delete(key);
+  }
+};
 
 // Accept 2-letter ASCII in any case; normalized at the boundary.
 const TWO_LETTER_CODE_ANY_CASE = /^[A-Za-z]{2}$/;
@@ -82,17 +88,6 @@ export const isPrivateIp = (ip: string | undefined): boolean => {
   return privateRanges.some((range) => rangeContains(v4, range));
 };
 
-const isCoarseLocation = (value: unknown): value is CoarseLocation => {
-  if (!value || typeof value !== 'object') return false;
-  const candidate = value as Record<string, unknown>;
-  return (
-    typeof candidate.country === 'string' &&
-    candidate.country.trim().length > 0 &&
-    typeof candidate.countryCode === 'string' &&
-    TWO_LETTER_CODE_ANY_CASE.test(candidate.countryCode.trim())
-  );
-};
-
 const fetchProvider = async (
   url: string,
   pick: (data: Record<string, unknown>) => CoarseLocation | null,
@@ -118,20 +113,13 @@ const resolveCountryIs = (ip: string | undefined): Promise<CoarseLocation | null
     return { country: code, countryCode: code };
   });
 
-// Fallback: ip-api.com — only country/countryCode are requested.
-const resolveIpApi = (): Promise<CoarseLocation | null> =>
-  fetchProvider(IP_API_URL, (data) => {
-    if (!isCoarseLocation(data)) return null;
-    return {
-      country: String(data.country).trim(),
-      countryCode: String(data.countryCode).trim().toUpperCase(),
-    };
-  });
-
-// Never throws: every failure mode collapses to `null`.
+// Never throws: every failure mode collapses to `null`. The http-only
+// ip-api.com fallback is gone on purpose — it echoes the user's IP in
+// cleartext, which is the exact datum being resolved.
+// @see #397 #50
 export const resolveCountry = async (ip: string | undefined): Promise<CoarseLocation | null> => {
   if (isPrivateIp(ip)) return null;
-  return (await resolveCountryIs(ip)) ?? (await resolveIpApi());
+  return resolveCountryIs(ip);
 };
 
 const isFresh = (location: UserDocument['location']): boolean =>
@@ -156,6 +144,7 @@ export const ensureUserLocation = async (
 
     const resolved = await resolveCountry(ip);
     if (!resolved) {
+      pruneCooldowns();
       failureCooldown.set(key, Date.now());
       return;
     }

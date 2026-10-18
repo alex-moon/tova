@@ -80,4 +80,19 @@ describe('logService', () => {
     }
     expect(ErrorLog.create).not.toHaveBeenCalled();
   });
+
+  it('redacts error lines before persisting them (#397)', () => {
+    const prev = process.env.NODE_ENV;
+    process.env.NODE_ENV = 'development';
+    attachConsoleCapture();
+    try {
+      console.error('Google OAuth error: Error: token "sk-abcdefghijklmnop1234" rejected');
+    } finally {
+      process.env.NODE_ENV = prev;
+      detachConsoleCapture();
+    }
+    const [entry] = (ErrorLog.create as jest.Mock).mock.calls[0];
+    expect(entry.msg).not.toContain('sk-abcdefghijklmnop1234');
+    expect(entry.msg).toContain('[redacted]');
+  });
 });

@@ -31,7 +31,7 @@ describe('purgeUserTraces', () => {
 
   it('is a silent no-op without an API key (dev/stub parity with the exporter)', async () => {
     process.env.LANGSMITH_API_KEY = '';
-    await expect(purgeUserTraces(['s1'])).resolves.toBeUndefined();
+    await expect(purgeUserTraces(['111111111111111111111111'])).resolves.toBeUndefined();
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
@@ -65,7 +65,7 @@ describe('purgeUserTraces', () => {
       return Promise.resolve(jsonResponse(202, {}));
     });
 
-    await expect(purgeUserTraces(['sess-abc'])).resolves.toBeUndefined();
+    await expect(purgeUserTraces(['abc123456789abcdef012345'])).resolves.toBeUndefined();
 
     const queryCall = fetchSpy.mock.calls.find(([u]) => String(u).includes('/runs/query'));
     expect(queryCall?.[1]).toMatchObject({
@@ -74,7 +74,8 @@ describe('purgeUserTraces', () => {
     });
     expect(JSON.parse((queryCall?.[1] as FetchInit).body as string)).toMatchObject({
       session: ['proj-1'],
-      filter: 'and(in(metadata_key, ["session_id"]), eq(metadata_value, "sess-abc"))',
+      filter:
+        'and(in(metadata_key, ["session_id"]), eq(metadata_value, "abc123456789abcdef012345"))',
       limit: 100,
       offset: 0,
     });
@@ -89,7 +90,7 @@ describe('purgeUserTraces', () => {
       return Promise.resolve(jsonResponse(200, []));
     });
 
-    await purgeUserTraces(['sess-1']);
+    await purgeUserTraces(['222222222222222222222222']);
 
     // No run query or delete may fire for an unverifiable project id.
     expect(fetchSpy.mock.calls.filter(([u]) => String(u).includes('/runs/'))).toHaveLength(0);
@@ -110,7 +111,7 @@ describe('purgeUserTraces', () => {
       return Promise.resolve(jsonResponse(202, {}));
     });
 
-    await purgeUserTraces(['sess-1']);
+    await purgeUserTraces(['222222222222222222222222']);
 
     // First page full (offset 0), second page empty → stop after two queries.
     expect(fetchSpy.mock.calls.filter(([u]) => String(u).includes('/runs/query')).length).toBe(2);
@@ -137,7 +138,7 @@ describe('purgeUserTraces', () => {
       return Promise.resolve(jsonResponse(202, {}));
     });
 
-    await purgeUserTraces(['sess-1']);
+    await purgeUserTraces(['222222222222222222222222']);
 
     // 150 ids → one batch of 100, then a remainder batch of 50.
     expect(deleteBodies).toHaveLength(2);
@@ -156,7 +157,7 @@ describe('purgeUserTraces', () => {
       return Promise.resolve(jsonResponse(200, { runs: 'nope' }));
     });
 
-    await expect(purgeUserTraces(['sess-1'])).resolves.toBeUndefined();
+    await expect(purgeUserTraces(['222222222222222222222222'])).resolves.toBeUndefined();
 
     expect(errorSpy).toHaveBeenCalled();
     expect(fetchSpy.mock.calls.filter(([u]) => String(u).includes('/runs/delete'))).toHaveLength(0);
@@ -172,7 +173,7 @@ describe('purgeUserTraces', () => {
       return Promise.resolve(jsonResponse(200, { cursors: [] }));
     });
 
-    await expect(purgeUserTraces(['sess-1'])).resolves.toBeUndefined();
+    await expect(purgeUserTraces(['222222222222222222222222'])).resolves.toBeUndefined();
 
     expect(errorSpy).toHaveBeenCalled();
     expect(fetchSpy.mock.calls.filter(([u]) => String(u).includes('/runs/delete'))).toHaveLength(0);
@@ -190,7 +191,7 @@ describe('purgeUserTraces', () => {
       return Promise.resolve(jsonResponse(200, [{ trace_id: 'trace-1' }]));
     });
 
-    await expect(purgeUserTraces(['sess-1'])).resolves.toBeUndefined();
+    await expect(purgeUserTraces(['222222222222222222222222'])).resolves.toBeUndefined();
 
     expect(errorSpy).toHaveBeenCalled();
     expect(fetchSpy.mock.calls.filter(([u]) => String(u).includes('/runs/delete'))).toHaveLength(0);
@@ -211,7 +212,7 @@ describe('purgeUserTraces', () => {
       return Promise.resolve(jsonResponse(202, {}));
     });
 
-    await expect(purgeUserTraces(['sess-1'])).resolves.toBeUndefined();
+    await expect(purgeUserTraces(['222222222222222222222222'])).resolves.toBeUndefined();
 
     // Full blank page → a second page is queried; no ids were ever collected.
     expect(fetchSpy.mock.calls.filter(([u]) => String(u).includes('/runs/query')).length).toBe(2);
@@ -220,7 +221,7 @@ describe('purgeUserTraces', () => {
 
   it('degrades every API failure to a log, never a throw', async () => {
     fetchSpy.mockImplementation(() => Promise.resolve(jsonResponse(403, { detail: 'no' })));
-    await expect(purgeUserTraces(['sess-1'])).resolves.toBeUndefined();
+    await expect(purgeUserTraces(['222222222222222222222222'])).resolves.toBeUndefined();
   });
 
   it('continues to the remaining sessions when one session fails mid-loop', async () => {
@@ -243,7 +244,11 @@ describe('purgeUserTraces', () => {
     });
 
     await expect(
-      purgeUserTraces(['sess-alpha', 'sess-bravo', 'sess-charlie']),
+      purgeUserTraces([
+        'aaaaaaaaaaaaaaaaaaaaaaaa',
+        'bbbbbbbbbbbbbbbbbbbbbbbb',
+        'cccccccccccccccccccccccc',
+      ]),
     ).resolves.toBeUndefined();
 
     expect(queryCalls).toBe(3);
@@ -256,6 +261,12 @@ describe('purgeUserTraces', () => {
 
   it('never throws when fetch itself rejects (network down)', async () => {
     fetchSpy.mockImplementation(() => Promise.reject(new Error('offline')));
-    await expect(purgeUserTraces(['sess-1'])).resolves.toBeUndefined();
+    await expect(purgeUserTraces(['222222222222222222222222'])).resolves.toBeUndefined();
+  });
+
+  it('skips session ids that are not ObjectId hex (filter injection hardening, #397)', async () => {
+    await expect(purgeUserTraces(['x") eq(1,1) "'])).resolves.toBeUndefined();
+    // Only the project lookup may have run; no query/delete for the hostile id.
+    expect(fetchSpy.mock.calls.filter(([u]) => String(u).includes('/runs/'))).toHaveLength(0);
   });
 });
