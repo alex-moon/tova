@@ -1,11 +1,5 @@
-import { redactForLog } from './logRedaction';
-import { inferenceService } from './inferenceService';
-import { config } from '../config';
+import { auxCompletion, stripSurroundingQuotes } from './auxCompletion';
 import { z } from 'zod';
-
-// Aux model source, read lazily so late env mutations are seen.
-// @see #238
-const titleModel = (): string => config.aux.model;
 
 const TITLE_PROMPT =
   'Generate a short chat title (at most six words) summarising what the user asks about.';
@@ -17,30 +11,24 @@ const TITLE_SCHEMA = z.object({ title: z.string() });
 export const generateChatTitle = async (content: string): Promise<string> => {
   const trimmed = content.replace(/\s+/g, ' ').trim();
   const fallback = `${trimmed.substring(0, 30)}${trimmed.length > 30 ? '…' : ''}`;
-  try {
-    const completion = await inferenceService.createStructuredCompletion({
-      provider: config.aux.provider,
-      model: titleModel(),
-      messages: [
-        { role: 'system', content: TITLE_PROMPT },
-        { role: 'user', content: trimmed },
-      ],
-      temperature: 0.3,
-      // Reasoning tokens come out of this budget before title text.
-      // @see #4
-      max_tokens: 512,
-      structuredOutput: {
-        schema: TITLE_SCHEMA,
-        fallbackValue: { title: fallback },
-        jsonPromptInjection: 'auto',
-        errorStrategy: 'fallback',
-      },
-    });
-    const title = (completion.object.title ?? '').trim().replace(/^["'“”]+|["'“”]+$/g, '');
-    if (!title) return fallback;
-    return title.length > 60 ? `${title.substring(0, 60)}…` : title;
-  } catch (err) {
-    console.error('Title generation error:', redactForLog(err));
-    return fallback;
-  }
+  const completion = await auxCompletion<z.infer<typeof TITLE_SCHEMA>>('Title generation', {
+    messages: [
+      { role: 'system', content: TITLE_PROMPT },
+      { role: 'user', content: trimmed },
+    ],
+    temperature: 0.3,
+    // Reasoning tokens come out of this budget before title text.
+    // @see #4
+    max_tokens: 512,
+    structuredOutput: {
+      schema: TITLE_SCHEMA,
+      fallbackValue: { title: fallback },
+      jsonPromptInjection: 'auto',
+      errorStrategy: 'fallback',
+    },
+  });
+  if (!completion) return fallback;
+  const title = stripSurroundingQuotes((completion.object.title ?? '').trim());
+  if (!title) return fallback;
+  return title.length > 60 ? `${title.substring(0, 60)}…` : title;
 };

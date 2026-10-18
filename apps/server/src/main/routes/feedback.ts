@@ -3,7 +3,7 @@ import { isValidObjectId } from 'mongoose';
 import { authenticate, AuthRequest } from '../middleware/auth';
 import { Session } from '../models/Session';
 import { Message } from '../models/Message';
-import { feedbackValueSchema } from '../validation';
+import { zodMessage, feedbackValueSchema } from '../validation';
 
 const router = express.Router();
 
@@ -39,9 +39,7 @@ router.post('/:messageId/feedback', authenticate, async (req: AuthRequest, res) 
   try {
     const parsed = feedbackValueSchema.safeParse(req.body ?? {});
     if (!parsed.success) {
-      return res
-        .status(400)
-        .json({ message: parsed.error.issues[0]?.message ?? 'value must be "up" or "down"' });
+      return res.status(400).json({ message: zodMessage(parsed, 'value must be "up" or "down"') });
     }
     const value = parsed.data.value;
 

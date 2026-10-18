@@ -92,7 +92,6 @@ const headingUnits = (markdown: string): AssetUnit[] => {
       text: sliceFromLines(start.lineNo, to),
     });
   }
-  if (units.length === 1) return wholeDocUnit(markdown);
   return units;
 };
 

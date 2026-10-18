@@ -27,9 +27,12 @@ export interface AttachmentItem {
   textExtracted?: string | null;
 }
 
-export const MAX_ATTACHMENT_PROMPT_CHARS = 12_000;
+// Shared prompt-inclusion cap; the alias is the attachment-facing name.
+// @see #34 #398
+export { MAX_PROMPT_TEXT_CHARS as MAX_ATTACHMENT_PROMPT_CHARS } from './textExtraction';
+import { MAX_PROMPT_TEXT_CHARS } from './textExtraction';
 
-const truncateText = (text: string, max = MAX_ATTACHMENT_PROMPT_CHARS): string =>
+const truncateText = (text: string, max = MAX_PROMPT_TEXT_CHARS): string =>
   text.length <= max ? text : `${text.slice(0, max)}\n[…truncated…]`;
 
 const fileElement = (item: AttachmentItem): string => {

@@ -70,7 +70,7 @@ const IMPERATIVE_VERBS = new Set([
   'let',
 ]);
 
-const STOPWORDS = new Set([
+const METRIC_STOPWORDS = new Set([
   'a',
   'an',
   'and',
@@ -143,12 +143,12 @@ const WORDS_RE = /[\p{L}\p{N}']+/gu;
 
 export const countWords = (text: string): number => {
   if (!text) return 0;
-  return (text.match(new RegExp(WORDS_RE.source, WORDS_RE.flags)) || []).length;
+  return (text.match(WORDS_RE) || []).length;
 };
 
 export const countCodeTokens = (text: string): number => {
   if (!text) return 0;
-  const m = text.match(new RegExp(CODE_TOKEN_RE.source, CODE_TOKEN_RE.flags));
+  const m = text.match(CODE_TOKEN_RE);
   return m ? m.length : 0;
 };
 
@@ -174,7 +174,7 @@ const countSyllables = (word: string): number => {
 };
 
 export const estimateAvgWordLength = (text: string): number => {
-  const words = text ? text.match(new RegExp(WORDS_RE.source, WORDS_RE.flags)) : null;
+  const words = text ? text.match(WORDS_RE) : null;
   if (!words || words.length === 0) return 0;
   const total = words.reduce((sum, w) => sum + w.length, 0);
   return total / words.length;
@@ -182,23 +182,23 @@ export const estimateAvgWordLength = (text: string): number => {
 
 // Average syllable count per word; 0 when there are no words.
 export const estimateSyllablesAvg = (text: string): number => {
-  const words = text ? text.match(new RegExp(WORDS_RE.source, WORDS_RE.flags)) : null;
+  const words = text ? text.match(WORDS_RE) : null;
   if (!words || words.length === 0) return 0;
   const total = words.reduce((sum, w) => sum + countSyllables(w), 0);
   return total / words.length;
 };
 
 export const computeStopwordRatio = (text: string): number => {
-  const words = text ? text.match(new RegExp(WORDS_RE.source, WORDS_RE.flags)) : null;
+  const words = text ? text.match(WORDS_RE) : null;
   if (!words || words.length === 0) return 0;
-  const stops = words.filter((w) => STOPWORDS.has(w.toLowerCase()));
+  const stops = words.filter((w) => METRIC_STOPWORDS.has(w.toLowerCase()));
   return stops.length / words.length;
 };
 
 export const hasQuestionMark = (text: string): boolean => /\?/.test(text || '');
 
 export const hasImperative = (text: string): boolean => {
-  const words = text ? text.match(new RegExp(WORDS_RE.source, WORDS_RE.flags)) : null;
+  const words = text ? text.match(WORDS_RE) : null;
   if (!words || words.length === 0) return false;
   return IMPERATIVE_VERBS.has(words[0].toLowerCase());
 };

@@ -3,6 +3,7 @@ import { Task, type TaskDocument } from '../models/Task';
 import { TaskEvent } from '../models/TaskEvent';
 import { appendTaskEvent, abortTaskRun } from './taskProcessor';
 import { redactForLog } from './logRedaction';
+import { clampError } from './clampError';
 
 /* Sequencer runtime: enqueue, atomic claim, poll tick, boot sweep. */
 // @see #254 #251 #395
@@ -16,15 +17,8 @@ const isTerminalTaskStatus = (status: string): boolean =>
 
 const POLL_INTERVAL_MS = 5000;
 
-const MAX_STORED_ERROR_CHARS = 500;
-
 // The work a claim runs: the sequencer loop; injectable for tests.
 export type TaskProcessor = (task: TaskDocument) => Promise<void>;
-
-const clampError = (err: unknown): string => {
-  const message = err instanceof Error ? err.message : String(err);
-  return message.slice(0, MAX_STORED_ERROR_CHARS);
-};
 
 // Stream is never empty: the driver and the task page need a first turn.
 const NO_INSTRUCTION_PLACEHOLDER = '(no instruction provided)';

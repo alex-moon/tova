@@ -251,5 +251,3 @@ export const buildSystemContent = (
   ].filter(Boolean);
   return parts.join('\n\n');
 };
-
-export { SYSTEM_PROMPT };

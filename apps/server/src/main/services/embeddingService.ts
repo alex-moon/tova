@@ -51,7 +51,7 @@ const orderRows = (rows: EmbeddingRow[]): EmbeddingRow[] => {
 /* Embed a batch: one validated vector per input, in order. */
 export const EMBED_MIN_CHARS = 32;
 
-export class ContextLengthError extends EmbeddingResponseError {}
+class ContextLengthError extends EmbeddingResponseError {}
 
 export const embedTexts = async (texts: string[], opts: EmbedOptions = {}): Promise<number[][]> => {
   if (texts.length === 0) return [];

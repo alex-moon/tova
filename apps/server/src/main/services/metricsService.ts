@@ -1,13 +1,7 @@
-import { redactForLog } from './logRedaction';
+import { auxCompletion, AUX_INPUT_CHAR_CAP } from './auxCompletion';
 import { Message } from '../models/Message';
-import { inferenceService } from './inferenceService';
 import { computeDeterministicMetrics } from './promptMetrics';
-import { config } from '../config';
 import { z } from 'zod';
-
-// Aux model source, read lazily.
-// @see #238
-const llmModel = (): string => config.aux.model;
 
 const LLM_PROMPT =
   'Classify the user prompt below. ' +
@@ -48,36 +42,35 @@ export const classifyPromptDimensions = async (
   content: string,
   sessionId?: string,
 ): Promise<{ llm: LlmMetrics; skipReason: 'parse' | 'error' | null }> => {
-  try {
-    // Tool-free agent; sessionId threads the aux run under the chat thread.
-    // @see #77 #41 #308
-    const completion = await inferenceService.createStructuredCompletion({
-      provider: config.aux.provider,
-      model: llmModel(),
-      messages: [{ role: 'user', content: `${LLM_PROMPT}\n\nPrompt: ${content.trim()}` }],
-      temperature: 0,
-      // Reasoning tokens come out of this budget before any flags text.
-      // @see #378 #4
-      max_tokens: 1024,
-      ...(sessionId ? { trace: { sessionId } } : {}),
-      structuredOutput: {
-        schema: FLAGS_SCHEMA,
-        fallbackValue: NULL_LLM,
-        jsonPromptInjection: 'auto',
-        errorStrategy: 'fallback',
+  // Tool-free agent; sessionId threads the aux run under the chat thread.
+  // @see #77 #41 #308
+  const completion = await auxCompletion<LlmMetrics>('Prompt classification', {
+    messages: [
+      {
+        role: 'user',
+        content: `${LLM_PROMPT}\n\nPrompt: ${content.trim().substring(0, AUX_INPUT_CHAR_CAP)}`,
       },
-    });
-    const skipReason = isAllNullLlm(completion.object) ? ('parse' as const) : null;
-    if (skipReason === 'parse') {
-      console.warn(
-        'Prompt classification: unparseable classifier output — flags left null; check the aux model token budget.',
-      );
-    }
-    return { llm: completion.object, skipReason };
-  } catch (err) {
-    console.error('Prompt classification error:', redactForLog(err));
-    return { llm: NULL_LLM, skipReason: 'error' };
+    ],
+    temperature: 0,
+    // Reasoning tokens come out of this budget before any flags text.
+    // @see #378 #4
+    max_tokens: 1024,
+    ...(sessionId ? { trace: { sessionId } } : {}),
+    structuredOutput: {
+      schema: FLAGS_SCHEMA,
+      fallbackValue: NULL_LLM,
+      jsonPromptInjection: 'auto',
+      errorStrategy: 'fallback',
+    },
+  });
+  if (!completion) return { llm: NULL_LLM, skipReason: 'error' };
+  const skipReason = isAllNullLlm(completion.object) ? ('parse' as const) : null;
+  if (skipReason === 'parse') {
+    console.warn(
+      'Prompt classification: unparseable classifier output — flags left null; check the aux model token budget.',
+    );
   }
+  return { llm: completion.object, skipReason };
 };
 
 const isAllNullLlm = (llm: LlmMetrics): boolean =>

@@ -1,4 +1,5 @@
 import { createCanvas, loadImage } from '@napi-rs/canvas';
+import { withTimeout } from './markdownConversion';
 
 // Thumbnails: the viewer must not pull a 15 MB original into the pane.
 // @see #208
@@ -38,15 +39,6 @@ export const thumbnailDimensions = (
   };
 };
 
-const withTimeout = <T>(promise: Promise<T>, ms: number): Promise<T> =>
-  Promise.race([
-    promise,
-    new Promise<never>((_, reject) => {
-      const t = setTimeout(() => reject(new Error(`thumbnail timed out after ${ms}ms`)), ms);
-      t.unref?.();
-    }),
-  ]);
-
 // Decode and return a bounded PNG thumbnail; throws on failure.
 export const makeThumbnail = async (
   buffer: Buffer,
@@ -72,4 +64,5 @@ export const makeThumbnail = async (
       return { buffer: canvas.toBuffer('image/png'), width, height };
     })(),
     timeoutMs,
+    'thumbnail',
   );

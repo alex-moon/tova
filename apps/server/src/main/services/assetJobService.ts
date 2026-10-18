@@ -2,6 +2,7 @@ import { randomUUID } from 'crypto';
 import type { Types } from 'mongoose';
 import { Asset } from '../models/Asset';
 import { AssetJob, type AssetJobDocument } from '../models/AssetJob';
+import { clampError } from './clampError';
 import { redactForLog } from './logRedaction';
 
 /* Mongo-backed conversion queue with idempotent enqueue and atomic claim. */
@@ -11,8 +12,6 @@ export const MAX_JOB_ATTEMPTS = 3;
 
 const POLL_INTERVAL_MS = 5000;
 
-const MAX_STORED_ERROR_CHARS = 500;
-
 // Terminal rows stick around for debugging, then the TTL index reclaims them.
 const JOB_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -20,11 +19,6 @@ const JOB_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const HEARTBEAT_MS = 60_000;
 
 export type AssetJobProcessor = (job: AssetJobDocument) => Promise<void>;
-
-const clampError = (err: unknown): string => {
-  const message = err instanceof Error ? err.message : String(err);
-  return message.slice(0, MAX_STORED_ERROR_CHARS);
-};
 
 // Idempotent enqueue: a live-status job is reused; a failed chain gets fresh.
 export const enqueueAssetJob = async (

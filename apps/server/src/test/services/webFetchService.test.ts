@@ -231,9 +231,8 @@ describe('Web Fetch Service', () => {
     });
 
     it('refuses a redirect whose target host resolves to a private address', async () => {
-      // Two checks for the original host, then one for the redirect target.
+      // One check for the original host (hop 0), then one for the redirect.
       (dns.promises.lookup as jest.Mock)
-        .mockResolvedValueOnce([{ address: '93.184.216.34', family: 4 }])
         .mockResolvedValueOnce([{ address: '93.184.216.34', family: 4 }])
         .mockResolvedValueOnce([{ address: '10.0.0.7', family: 4 }]);
       (global.fetch as jest.Mock).mockResolvedValueOnce(
@@ -243,7 +242,6 @@ describe('Web Fetch Service', () => {
       // The redirect was followed; only the target check refused, once.
       expect((global.fetch as jest.Mock).mock.calls[0][0]).toBe('https://example.com/rebind');
       expect((dns.promises.lookup as jest.Mock).mock.calls.map((c) => c[0])).toEqual([
-        'example.com',
         'example.com',
         'intranet.example.com',
       ]);
@@ -315,8 +313,8 @@ describe('Web Fetch Service', () => {
         .mockResolvedValueOnce(okResponse('<html><title>ok</title></html>'));
       await fetchPage('https://example.com/hop-chain');
       expect(mockAssertSafeUrl.mock.calls.map((c) => c[0])).toEqual([
+        // Hop 0 is the initial URL; screened once, not twice.
         'https://example.com/hop-chain',
-        'https://example.com/hop-chain', // hop 0 re-check shares the initial call's verdict
         'https://moved.example.com/finally',
       ]);
     });

@@ -1,5 +1,7 @@
 // Light text extraction: deterministic and fast, extension-driven.
 // @see #34
+import { extensionOf } from './markdownConversion';
+
 const EXTRACTABLE_EXTENSIONS = new Set(['txt', 'md', 'csv']);
 
 export const isExtractable = (filename: string): boolean =>
@@ -17,11 +19,6 @@ export const MAX_PROMPT_TEXT_CHARS = 12_000;
 export const truncateForPrompt = (text: string, max = MAX_PROMPT_TEXT_CHARS): string => {
   if (text.length <= max) return text;
   return `${text.slice(0, max)}\n[...truncated ${text.length - max} characters...]`;
-};
-
-const extensionOf = (filename: string): string => {
-  const dot = filename.lastIndexOf('.');
-  return dot === -1 ? '' : filename.slice(dot + 1).toLowerCase();
 };
 
 const stripBom = (text: string): string => (text.startsWith('\ufeff') ? text.slice(1) : text);

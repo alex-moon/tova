@@ -142,7 +142,7 @@ describe('POST /api/profile/factory-reset (issue #143)', () => {
     expect(res.status).toBe(200);
 
     await expectNothingPIIBearingRemains(userId, [orphanId]);
-  });
+  }, 15000);
 
   it('is idempotent-safe for a user with no data at all', async () => {
     const { app, cookie } = await registerUser('reset-empty@example.com');

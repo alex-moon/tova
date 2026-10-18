@@ -89,3 +89,7 @@ export const authenticateBearerOrSession = async (
     res.status(500).json({ message: 'Error authenticating token' });
   }
 };
+
+// One admin gate for every /api/admin route file; session or PAT bearer.
+// @see #398
+export const adminGuard = [authenticateBearerOrSession, requireRole('admin')] as const;

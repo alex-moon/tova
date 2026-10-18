@@ -235,8 +235,9 @@ describe('purgeUserTraces', () => {
       }
       if (String(url).includes('/api/v1/runs/query')) {
         queryCalls += 1;
+        // 400: not retried by the shared fetch plumbing, so the session fails.
         return queryCalls === 2
-          ? Promise.resolve(jsonResponse(429, { detail: 'rate limited' }))
+          ? Promise.resolve(jsonResponse(400, { detail: 'bad request' }))
           : Promise.resolve(jsonResponse(200, { runs: [{ trace_id: `t-${queryCalls}` }] }));
       }
       deleteCalls.push(JSON.parse(init?.body ?? '{}'));

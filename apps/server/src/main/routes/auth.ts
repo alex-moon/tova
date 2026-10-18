@@ -5,7 +5,8 @@ import { User, UserDocument } from '../models/User';
 import { resolveOrCreateUser, toAuthUser } from '../services/userService';
 import { LoginUserPayload } from '@tova/shared';
 import { getJwtSecret } from '../config/jwt';
-import { loginSchema, registerSchema } from '../validation';
+import { config } from '../config';
+import { zodMessage, loginSchema, registerSchema } from '../validation';
 import { authenticate, AuthRequest } from '../middleware/auth';
 import { ensureUserLocation } from '../services/geoLocationService';
 
@@ -40,18 +41,9 @@ const fetchGoogleProfile = async (
 };
 
 const getGoogleConfig = () => {
-  if (
-    !process.env.GOOGLE_CLIENT_ID ||
-    !process.env.GOOGLE_CLIENT_SECRET ||
-    !process.env.GOOGLE_CALLBACK_URL
-  ) {
-    return null;
-  }
-  return {
-    clientId: process.env.GOOGLE_CLIENT_ID,
-    clientSecret: process.env.GOOGLE_CLIENT_SECRET,
-    callbackUrl: process.env.GOOGLE_CALLBACK_URL,
-  };
+  const { clientId, clientSecret, callbackUrl } = config.googleOAuth;
+  if (!clientId || !clientSecret || !callbackUrl) return null;
+  return { clientId, clientSecret, callbackUrl };
 };
 
 const issueSessionCookie = (user: UserDocument, res: express.Response) => {
@@ -72,9 +64,7 @@ router.post('/register', async (req, res) => {
     const { email, password } = req.body ?? {};
     const parsed = registerSchema.safeParse({ email, password });
     if (!parsed.success) {
-      return res
-        .status(400)
-        .json({ message: parsed.error.issues[0]?.message ?? 'Invalid payload' });
+      return res.status(400).json({ message: zodMessage(parsed, 'Invalid payload') });
     }
     const registerData = parsed.data;
 
@@ -113,9 +103,7 @@ router.post('/login', async (req, res) => {
     const { email, password } = req.body ?? {};
     const parsed = loginSchema.safeParse({ email, password });
     if (!parsed.success) {
-      return res
-        .status(400)
-        .json({ message: parsed.error.issues[0]?.message ?? 'Invalid payload' });
+      return res.status(400).json({ message: zodMessage(parsed, 'Invalid payload') });
     }
     const loginData = parsed.data;
 

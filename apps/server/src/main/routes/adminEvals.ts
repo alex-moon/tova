@@ -1,5 +1,5 @@
 import express from 'express';
-import { authenticateBearerOrSession, requireRole } from '../middleware/auth';
+import { adminGuard } from '../middleware/auth';
 import { getEvalRun, listEvalRuns } from '../services/evalRunsAdminService';
 import {
   beginEvalRun,
@@ -16,7 +16,6 @@ const router = express.Router();
 
 // Cookie sessions for the browser flow, PAT bearer for the agent/CLI path.
 // @see #184
-const adminGuard = [authenticateBearerOrSession, requireRole('admin')];
 
 // ObjectId hex validated pre-query: garbage id is 400/404, not a crash.
 const OBJECT_ID_PATTERN = /^[a-f0-9]{24}$/i;

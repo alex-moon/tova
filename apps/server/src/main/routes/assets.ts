@@ -14,6 +14,7 @@ import {
   assetBulkPresignSchema,
   assetPresignSchema,
   assetRestoreSchema,
+  zodMessage,
 } from '../validation';
 import { spacesWorkspaceStorage } from '../services/workspaceStorage';
 // Domain cores live in services/: presign/confirm, views, zip, caps.
@@ -23,10 +24,9 @@ import { restoreAssetVersion } from '../services/assetEditService';
 import { previewAsset, safeAsset } from '../services/assetViews';
 import { dedupeEntryNames } from '../services/assetZip';
 import { BULK_MAX_TOTAL_SIZE, MAX_BULK_TOTAL_SIZE } from '../services/assetLimits';
+import { cursorPage, LIST_PAGE_SIZE } from '../services/cursorPage';
 
 const router = express.Router();
-
-const LIST_PAGE_SIZE = 20;
 
 const ownedAsset = async (req: AuthRequest): Promise<AssetDocument | null> => {
   // Malformed ids are a 404, never a CastError 500.
@@ -48,7 +48,7 @@ router.post('/presign', authenticate, async (req: AuthRequest, res) => {
     const parsed = assetPresignSchema.safeParse(req.body ?? {});
     if (!parsed.success) {
       return res.status(400).json({
-        message: parsed.error.issues[0]?.message ?? 'Invalid upload request',
+        message: zodMessage(parsed, 'Invalid upload request'),
       });
     }
     // Gate ephemeral chat uploads on the effective per-chat incognito flag.
@@ -101,7 +101,7 @@ router.post('/bulk-presign', authenticate, async (req: AuthRequest, res) => {
     const parsed = assetBulkPresignSchema.safeParse(req.body);
     if (!parsed.success) {
       return res.status(400).json({
-        message: parsed.error.issues[0]?.message ?? 'Invalid bulk upload request',
+        message: zodMessage(parsed, 'Invalid bulk upload request'),
       });
     }
     const declaredTotal = parsed.data.reduce((sum, item) => sum + item.size, 0);
@@ -164,7 +164,7 @@ router.post('/bulk-confirm', authenticate, async (req: AuthRequest, res) => {
     const parsed = assetBulkConfirmSchema.safeParse(req.body);
     if (!parsed.success) {
       return res.status(400).json({
-        message: parsed.error.issues[0]?.message ?? 'Invalid bulk confirm request',
+        message: zodMessage(parsed, 'Invalid bulk confirm request'),
       });
     }
 
@@ -218,11 +218,10 @@ router.get('/', authenticate, async (req: AuthRequest, res) => {
       .sort({ _id: -1 })
       .limit(LIST_PAGE_SIZE + 1);
 
-    const hasMore = assets.length > LIST_PAGE_SIZE;
-    const page = hasMore ? assets.slice(0, LIST_PAGE_SIZE) : assets;
+    const { page, nextCursor } = cursorPage(assets);
     return res.json({
       assets: page.map(safeAsset),
-      nextCursor: hasMore ? String(page[page.length - 1]._id) : null,
+      nextCursor,
     });
   } catch (err) {
     console.error('Asset list error:', err);
@@ -237,7 +236,7 @@ router.get('/bulk-download', authenticate, async (req: AuthRequest, res) => {
   const parsed = assetBulkDownloadQuerySchema.safeParse({ id: ids });
   if (!parsed.success) {
     return res.status(400).json({
-      message: parsed.error.issues[0]?.message ?? 'Invalid bulk download request',
+      message: zodMessage(parsed, 'Invalid bulk download request'),
     });
   }
 
@@ -424,9 +423,7 @@ router.post('/:id/restore', authenticate, async (req: AuthRequest, res) => {
     }
     const parsed = assetRestoreSchema.safeParse(req.body ?? {});
     if (!parsed.success) {
-      return res
-        .status(400)
-        .json({ message: parsed.error.issues[0]?.message ?? 'Invalid request' });
+      return res.status(400).json({ message: zodMessage(parsed, 'Invalid request') });
     }
     const result = await restoreAssetVersion(asset, parsed.data.version);
     if (!result.ok) {
@@ -494,7 +491,7 @@ router.delete('/bulk-delete', authenticate, async (req: AuthRequest, res) => {
   const parsed = assetBulkDeleteQuerySchema.safeParse({ id: ids });
   if (!parsed.success) {
     return res.status(400).json({
-      message: parsed.error.issues[0]?.message ?? 'Invalid bulk delete request',
+      message: zodMessage(parsed, 'Invalid bulk delete request'),
     });
   }
 

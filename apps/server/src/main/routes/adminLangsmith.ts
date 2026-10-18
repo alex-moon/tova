@@ -1,5 +1,5 @@
 import express from 'express';
-import { authenticateBearerOrSession, requireRole } from '../middleware/auth';
+import { adminGuard } from '../middleware/auth';
 import {
   getTrace,
   listTraces,
@@ -15,7 +15,6 @@ const router = express.Router();
 
 // Cookie sessions for the browser flow, PAT bearer for the agent/CLI path.
 // @see #184
-const adminGuard = [authenticateBearerOrSession, requireRole('admin')];
 
 // Trace ids are uuid-shaped; the regex keeps injection out of the query.
 const TRACE_ID_PATTERN = /^[A-Za-z0-9-]+$/;

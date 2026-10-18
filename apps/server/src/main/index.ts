@@ -95,7 +95,7 @@ const DEFAULT_PORT = 5000;
 
 export const getPort = () => {
   // '' must not become port 0 ("bind any free port") — treat empty as unset.
-  const raw = process.env.PORT?.trim();
+  const raw = config.runtime.port?.trim();
   const parsedPort = raw ? Number(raw) : NaN;
   return Number.isInteger(parsedPort) && parsedPort >= 0 ? parsedPort : DEFAULT_PORT;
 };
@@ -110,7 +110,7 @@ export const createApp = (): Express => {
 
   // Behind a proxy, trust only the last TRUST_PROXY_HOPS XFF entries.
   // @see #50
-  const hops = Number(process.env.TRUST_PROXY_HOPS ?? 1);
+  const hops = Number(config.runtime.trustProxyHops ?? 1);
   if (Number.isInteger(hops) && hops > 0) {
     app.set('trust proxy', hops);
   }
@@ -121,7 +121,7 @@ export const createApp = (): Express => {
 
   // Same-origin app in dev (Vite) and prod (static), so no CORS middleware.
   // @see #32
-  const isProduction = process.env.NODE_ENV === 'production';
+  const isProduction = config.runtime.nodeEnv === 'production';
 
   // JWT configuration should fail at boot in production, not per request.
   if (isProduction) getJwtSecret();
@@ -167,14 +167,14 @@ export const createApp = (): Express => {
     res.status(404).json({ message: 'Not found' });
   });
 
-  if (process.env.NODE_ENV === 'production') {
+  if (config.runtime.nodeEnv === 'production') {
     const clientBuildPath = path.join(__dirname, '../../client/dist');
     app.use(express.static(clientBuildPath));
 
     app.get(/.*/, (_req, res) => {
       res.sendFile(path.join(clientBuildPath, 'index.html'));
     });
-  } else if (process.env.NODE_ENV !== 'test') {
+  } else if (config.runtime.nodeEnv !== 'test') {
     app.use(
       '/',
       createProxyMiddleware({
@@ -201,7 +201,7 @@ export const startServer = async (): Promise<Server> => {
 
   // In-process conversion worker; no-op under test to isolate route tests.
   // @see #67
-  if (process.env.NODE_ENV !== 'test') {
+  if (config.runtime.nodeEnv !== 'test') {
     startAssetJobPoller(processAssetConversionJob);
 
     // Task sequencer poller, same non-test gate.

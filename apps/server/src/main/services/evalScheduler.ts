@@ -46,8 +46,6 @@ export const hasRunForUtcDay = async (
   const existing = await EvalRunRecord.findOne({
     ...(kind ? { kind } : {}),
     startedAt: { $gte: start, $lt: end },
-    // Any status counts; re-running is the manual "Run now" path.
-    status: { $in: ['running', 'done', 'error'] },
   })
     .select({ _id: 1 })
     .lean()
