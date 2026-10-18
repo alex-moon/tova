@@ -2,10 +2,17 @@ import mongoose from 'mongoose';
 import { Message } from '../../main/models/Message';
 import { Session } from '../../main/models/Session';
 import { WorkspaceEmbedding } from '../../main/models/WorkspaceEmbedding';
+import { config } from '../../main/config';
+import { embedTexts } from '../../main/services/embeddingService';
+import { embeddingTextHash } from '../../main/services/workspaceEmbeddingText';
 import {
+  drainUserEmbeddings,
   embedWorkspaceSlice,
   embedWorkspaceUser,
+  enqueueWorkspaceEmbedding,
 } from '../../main/services/workspaceEmbeddingIngest';
+
+jest.mock('../../main/services/embeddingService');
 
 /* Ingest/backfill core: flag gate and idempotency are the invariants. */
 // @see #294
@@ -14,6 +21,7 @@ describe('workspaceEmbeddingIngest (#294)', () => {
   afterEach(() => {
     if (original === undefined) delete process.env.WORKSPACE_MEMORY_ENABLED;
     else process.env.WORKSPACE_MEMORY_ENABLED = original;
+    jest.resetAllMocks();
   });
 
   const userId = new mongoose.Types.ObjectId().toHexString();
@@ -123,5 +131,68 @@ describe('workspaceEmbeddingIngest (#294)', () => {
     expect(result.embedded).toBe(0);
     expect(embed).not.toHaveBeenCalled();
     expect(await WorkspaceEmbedding.countDocuments({})).toBe(0);
+  });
+
+  it('re-embeds a row whose dim no longer matches the config (#393)', async () => {
+    process.env.WORKSPACE_MEMORY_ENABLED = '1';
+    const uid = new mongoose.Types.ObjectId();
+    const session = await Session.create({
+      userId: uid,
+      title: 'Dim shift',
+      lastMessageAt: new Date(),
+    });
+    const message = await Message.create({
+      sessionId: session._id,
+      role: 'user',
+      content: 'the budget is twelve thousand',
+      timestamp: new Date(),
+    });
+    const text = 'the budget is twelve thousand';
+    await WorkspaceEmbedding.create({
+      userId: uid,
+      kind: 'chat',
+      sourceId: String(message._id),
+      model: config.embeddings.model,
+      dim: config.embeddings.dim + 1,
+      vector: [0.1],
+      // The hash matches; only the stale dim may force the re-embed.
+      textHash: embeddingTextHash(text, config.embeddings.model),
+    });
+    const embed = jest.fn().mockResolvedValue([[0.5, 0.6]]);
+    const result = await embedWorkspaceUser(uid.toHexString(), { embed });
+    // The stale-dim row never satisfies the skip; the upsert overwrites it.
+    expect(result.skipped).toBe(0);
+    expect(result.embedded).toBe(1);
+    const row = await WorkspaceEmbedding.findOne({ sourceId: String(message._id) }).lean();
+    expect(row?.dim).toBe(config.embeddings.dim);
+  });
+
+  it('drainUserEmbeddings waits for an in-flight ingest to settle (#393)', async () => {
+    process.env.WORKSPACE_MEMORY_ENABLED = '1';
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    jest.mocked(embedTexts).mockImplementation(() => gate.then(() => [[0.1, 0.2]]));
+    enqueueWorkspaceEmbedding({
+      userId,
+      kind: 'chat',
+      sourceId: 'drain-1',
+      source: { kind: 'chat', content: 'settle me' },
+    });
+    let drained = false;
+    const drain = drainUserEmbeddings(userId).then(() => {
+      drained = true;
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(drained).toBe(false);
+    release();
+    await drain;
+    expect(drained).toBe(true);
+    expect(await WorkspaceEmbedding.countDocuments({ sourceId: 'drain-1' })).toBe(1);
+  });
+
+  it('drainUserEmbeddings resolves when nothing is in flight (#393)', async () => {
+    await expect(drainUserEmbeddings('nobody')).resolves.toBeUndefined();
   });
 });

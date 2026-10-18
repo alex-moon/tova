@@ -60,6 +60,9 @@ export const BLOCK_CAP = 1200;
 // Asset/task candidate pools: still bounded (see the corpus-read comment).
 const ASSET_POOL = 50;
 const TASK_POOL = 50;
+// Newest-500 chat window: O(1) per turn, generous for real corpora.
+// @see #393
+const CHAT_POOL = 500;
 const MAX_SLICES = 6;
 
 export type WorkspaceSlice = {
@@ -224,12 +227,15 @@ export const collectWorkspaceSlices = async (
   const sessionIds = sessions.map((s) => s._id as mongoose.Types.ObjectId);
 
   const [messages, assets, tasks] = await Promise.all([
-    // An empty $in yields no rows; files still retrieve without chats.
+    // Newest window only: the corpus read is O(1) per turn, not O(history).
+    // @see #393
     Message.find({
       role: 'user',
       sessionId: { $in: sessionIds },
       _id: { $ne: excludeMessageId ?? null },
     })
+      .sort({ timestamp: -1 })
+      .limit(CHAT_POOL)
       .select('sessionId content timestamp')
       .lean(),
     Asset.find({
@@ -363,6 +369,8 @@ export interface VectorSearchParams {
   queryVector: number[];
   limit: number;
   numCandidates: number;
+  // Server-side ANN deadline; the client-side race discards late results.
+  maxTimeMs?: number;
 }
 
 export interface VectorSearchDeps {
@@ -373,9 +381,12 @@ export interface VectorSearchDeps {
   timeoutMs?: number;
 }
 
-/* Over-fetch: orphan rows still occupy the window; numCandidates >= limit. */
+/* Over-fetch: orphan rows still occupy the window; candidates get ANN
+   exploration headroom above the result window. */
+// @see #294 #393
 export const VECTOR_CANDIDATE_MULTIPLIER = 4;
 export const VECTOR_CANDIDATE_FLOOR = 100;
+export const VECTOR_NUM_CANDIDATE_MULTIPLIER = 4;
 
 const defaultVectorSearch = async (params: VectorSearchParams): Promise<VectorHit[]> => {
   const rows = await WorkspaceEmbedding.aggregate([
@@ -391,7 +402,9 @@ const defaultVectorSearch = async (params: VectorSearchParams): Promise<VectorHi
       },
     },
     { $project: { _id: 0, sourceId: 1, score: { $meta: 'vectorSearchScore' } } },
-  ]);
+    // Server-side deadline: the query stops, not just the caller.
+    // @see #393
+  ]).option({ maxTimeMS: params.maxTimeMs ?? config.embeddings.timeoutMs });
   return rows.map((row) => ({ sourceId: String(row.sourceId), score: Number(row.score) }));
 };
 
@@ -403,7 +416,8 @@ export const vectorCandidates = async (
   deps: VectorSearchDeps = {},
 ): Promise<VectorHit[]> => {
   const limit = Math.max(n * VECTOR_CANDIDATE_MULTIPLIER, VECTOR_CANDIDATE_FLOOR);
-  const numCandidates = Math.max(limit, VECTOR_CANDIDATE_FLOOR);
+  const numCandidates = limit * VECTOR_NUM_CANDIDATE_MULTIPLIER;
+  const timeoutMs = deps.timeoutMs ?? config.embeddings.timeoutMs;
   try {
     const embed = deps.embed ?? ((texts: string[]) => embedTexts(texts, { kind: 'query' }));
     const search = deps.search ?? defaultVectorSearch;
@@ -412,9 +426,9 @@ export const vectorCandidates = async (
     const run = async (): Promise<VectorHit[]> => {
       const [queryVector] = await embed([query]);
       if (!queryVector || queryVector.length === 0) return [];
-      return search({ userId, model, queryVector, limit, numCandidates });
+      return search({ userId, model, queryVector, limit, numCandidates, maxTimeMs: timeoutMs });
     };
-    return await withTimeout(run(), deps.timeoutMs ?? config.embeddings.timeoutMs);
+    return await withTimeout(run(), timeoutMs, 'workspace vector search');
   } catch (err) {
     console.error('Workspace vector search degraded to BM25:', err);
     return [];
@@ -483,6 +497,11 @@ export interface RetrievalDeps {
 // @see #305 #289
 export const RERANK_CUT = 0.005;
 
+// Rerank budget: RRF-ordered candidates and doc chars sent for grading.
+// @see #393
+export const RERANK_MAX_CANDIDATES = 24;
+export const RERANK_DOC_CHARS = 2000;
+
 // The text a candidate is graded on: title above content.
 // @see #309
 const rerankDocText = (slice: WorkspaceSlice): string =>
@@ -495,11 +514,17 @@ export const rerankAndCut = async (
 ): Promise<WorkspaceSlice[]> => {
   if (fused.length === 0) return [];
   const rerank = deps.rerank ?? rerankQuery;
-  const scores = await rerank(prompt, fused.map(rerankDocText));
+  // Grading sees a bounded window in RRF order; slices keep full text.
+  // @see #393
+  const graded = fused.slice(0, RERANK_MAX_CANDIDATES);
+  const scores = await rerank(
+    prompt,
+    graded.map((slice) => rerankDocText(slice).slice(0, RERANK_DOC_CHARS)),
+  );
   // Degradation: a failed/unavailable reranker behaves exactly as pre-#305.
   // @see #305
   if (!scores) return fused;
-  return fused
+  return graded
     .map((slice, i) => ({ slice, score: scores[i] ?? 0 }))
     .filter(({ score }) => score >= RERANK_CUT)
     .sort((x, y) => y.score - x.score) // stable: equal scores keep fused order
@@ -534,10 +559,13 @@ export const rankWorkspaceSlicesWithCut = async (
     return { ranked, candidateCount: 0, cutCount: 0 };
   }
   const reranked = await rerankAndCut(prompt, fused, deps);
+  const gradedCount = Math.min(fused.length, RERANK_MAX_CANDIDATES);
+  // Degradation returns the full fused list; cuts never go negative.
+  const kept = Math.min(reranked.length, gradedCount);
   return {
     ranked: reranked.slice(0, n),
-    candidateCount: fused.length,
-    cutCount: fused.length - reranked.length,
+    candidateCount: gradedCount,
+    cutCount: gradedCount - kept,
   };
 };
 

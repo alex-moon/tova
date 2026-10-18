@@ -3,9 +3,12 @@ import { Session } from '../../main/models/Session';
 import { Message } from '../../main/models/Message';
 import { Asset } from '../../main/models/Asset';
 import { AssetJob } from '../../main/models/AssetJob';
+import { WorkspaceEmbedding } from '../../main/models/WorkspaceEmbedding';
 import { Connector } from '../../main/models/Connector';
 import { encryptEnvelope, MCP_ENCRYPTION_KEY_ENV_VAR } from '../../main/services/crypto';
 import { purgeAllUserData } from '../../main/services/userDataPurge';
+import { embedTexts } from '../../main/services/embeddingService';
+import { enqueueWorkspaceEmbedding } from '../../main/services/workspaceEmbeddingIngest';
 
 // Data-level purge coverage: storage and trace purge are mocked at the seam.
 // @see #143
@@ -24,6 +27,8 @@ jest.mock('../../main/services/storageService', () => ({
 jest.mock('../../main/services/tracePurge', () => ({
   purgeUserTraces: jest.fn(),
 }));
+
+jest.mock('../../main/services/embeddingService');
 
 // Tests are exempt from the storage-boundary import rule (eslint.config.js).
 import { spacesWorkspaceStorage } from '../../main/services/workspaceStorage';
@@ -190,6 +195,65 @@ describe('purgeAllUserData (issue #143: factory reset)', () => {
 
     expect(result.failedObjects).toEqual([`${uid}/chats/*`]);
     expect(await Session.countDocuments({ userId: uid })).toBe(0);
+  });
+
+  it('sweeps the workspace embeddings; another user keeps theirs (#393)', async () => {
+    const owner = userId();
+    const other = userId();
+    await WorkspaceEmbedding.create({
+      userId: owner,
+      kind: 'chat',
+      sourceId: 'own-1',
+      model: 'm',
+      dim: 3,
+      vector: [0.1, 0.2, 0.3],
+      textHash: 'h1',
+    });
+    await WorkspaceEmbedding.create({
+      userId: other,
+      kind: 'chat',
+      sourceId: 'other-1',
+      model: 'm',
+      dim: 3,
+      vector: [0.4, 0.5, 0.6],
+      textHash: 'h2',
+    });
+
+    await purgeAllUserData(owner);
+
+    // Content-derived vectors are PII-bearing and die with the account data.
+    expect(await WorkspaceEmbedding.countDocuments({ userId: owner })).toBe(0);
+    expect(await WorkspaceEmbedding.countDocuments({ userId: other })).toBe(1);
+  });
+
+  it('drains an in-flight embed around the sweep so no vector re-inserts (#393)', async () => {
+    const owner = userId();
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    jest.mocked(embedTexts).mockImplementation(() => gate.then(() => [[0.1]]));
+    process.env.WORKSPACE_MEMORY_ENABLED = '1';
+    enqueueWorkspaceEmbedding({
+      userId: String(owner),
+      kind: 'chat',
+      sourceId: 'race-1',
+      source: { kind: 'chat', content: 'leak me after the reset' },
+    });
+
+    try {
+      const purgePromise = purgeAllUserData(owner);
+      // Pre-reads settle well within this wait; the purge then blocks in the
+      // drain on the still-closed gate.
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      release();
+      await purgePromise;
+      // The drained embed wrote its row, then the sweep wiped it — without
+      // the drain, this upsert would land after the sweep and survive.
+      expect(await WorkspaceEmbedding.countDocuments({ userId: owner })).toBe(0);
+    } finally {
+      delete process.env.WORKSPACE_MEMORY_ENABLED;
+    }
   });
 });
 
