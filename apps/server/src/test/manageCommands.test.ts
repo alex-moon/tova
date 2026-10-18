@@ -1,11 +1,11 @@
-import { commands, formatSeconds, formatRosterRow, ROSTER_HEADER } from '../main/manageCommands';
+import { commands, formatSeconds } from '../main/manageCommands';
 
-/* Registry shape and the pure formatting helpers behind the roster readout. */
-// @see #322
+/* Registry shape and the pure formatting helper behind the probe output. */
+// @see #322 #387
 
-describe('manage command registry (#322)', () => {
-  it('exposes the roster and image-tool probe commands with descriptions', () => {
-    expect(Object.keys(commands).sort()).toEqual(['probe:image-tools', 'roster']);
+describe('manage command registry (#322/#387)', () => {
+  it('exposes the image-tool probe command with a description', () => {
+    expect(Object.keys(commands).sort()).toEqual(['probe:image-tools']);
     for (const entry of Object.values(commands)) {
       expect(entry.description).toBeTruthy();
       expect(typeof entry.run).toBe('function');
@@ -23,59 +23,5 @@ describe('formatSeconds', () => {
     expect(formatSeconds(undefined)).toBe('-');
     expect(formatSeconds(null)).toBe('-');
     expect(formatSeconds(NaN)).toBe('-');
-  });
-});
-
-describe('formatRosterRow', () => {
-  it('renders one line per provider entry with eligibility, TTFT and cool-off', () => {
-    // Relative to now: a past fixture date would be (correctly) dropped.
-    const coolOff = new Date(Date.now() + 60 * 60 * 1000);
-    const lines = formatRosterRow({
-      modelId: 'zai-org/GLM-5.3-Flash',
-      eligible: true,
-      providers: [
-        { provider: 'deepinfra', enabled: true, ttftMs: 5668.12, ttftSamples: 33 },
-        {
-          provider: 'fireworks',
-          enabled: true,
-          ttftMs: 18500,
-          ttftSamples: 31,
-          disabledUntil: coolOff,
-        },
-      ],
-    });
-    expect(lines).toHaveLength(2);
-    expect(lines[0]).toContain('zai-org/GLM-5.3-Flash');
-    expect(lines[0]).toContain('deepinfra');
-    expect(lines[0]).toContain('5.7s');
-    expect(lines[0]).toContain('33');
-    expect(lines[1]).toContain('fireworks');
-    expect(lines[1]).toContain('18.5s');
-    expect(lines[1]).toContain(`until ${coolOff.toISOString().slice(0, 16).replace('T', ' ')}`);
-  });
-
-  it('renders an expired cool-off as uncooled', () => {
-    const lines = formatRosterRow({
-      modelId: 'm',
-      providers: [{ provider: 'deepinfra', disabledUntil: new Date(Date.now() - 1000) }],
-    });
-    expect(lines[0].trimEnd().endsWith('-')).toBe(true);
-  });
-
-  it('renders a fresh (uncooled) provider without a cool-off date', () => {
-    const lines = formatRosterRow({
-      modelId: 'm',
-      providers: [{ provider: 'deepinfra', disabledUntil: null }],
-    });
-    expect(lines[0].trimEnd().endsWith('-')).toBe(true);
-  });
-
-  it('aligns columns with the header', () => {
-    const lines = formatRosterRow({
-      modelId: 'm',
-      providers: [{ provider: 'deepinfra' }],
-    });
-    // The provider column starts where the header says it does.
-    expect(lines[0].indexOf('deepinfra')).toBe(ROSTER_HEADER.indexOf('PROVIDER'));
   });
 });

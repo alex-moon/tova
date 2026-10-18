@@ -1,6 +1,6 @@
 import { Message } from '../models/Message';
 import { Session } from '../models/Session';
-import { estimateCostUsd, loadPriceIndex, priceFor } from './traceStatsCost';
+import { estimateCostUsd, loadPriceIndex, priceFor, type PriceIndex } from './traceStatsCost';
 import type { AdminSessionCostRow, AdminSessionsCostPayload } from '@tova/shared';
 
 /* Per-session cost breakdown from Message rows; unknown usage is not free. */
@@ -11,6 +11,9 @@ export interface SessionCostOptions {
   since: Date;
   /** Cap the number of sessions returned (most recent first). */
   limit?: number;
+  /** Override the price index (tests); default is the static fixed-model one. */
+  // @see #387
+  priceIndex?: PriceIndex;
 }
 
 const DEFAULT_LIMIT = 50;
@@ -68,8 +71,8 @@ export const sessionCostBreakdown = async (
     },
   ]);
 
-  // One roster read prices every group; model-only fallback for legacy.
-  const priceIndex = await loadPriceIndex();
+  // One index read prices every group; model-only fallback for legacy.
+  const priceIndex = options.priceIndex ?? (await loadPriceIndex());
 
   interface Acc {
     messagesIn: number;

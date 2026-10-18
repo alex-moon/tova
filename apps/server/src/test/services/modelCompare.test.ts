@@ -85,10 +85,8 @@ describe('runModelComparison (issue #129)', () => {
     expect(mockCreate(groqConnector)).not.toHaveBeenCalled();
   });
 
-  /* 'typesafe' has no connector yet; it takes the error-row path. */
-  // @see #151
-  it('emits an error row for the typesafe provider while its connector is pending', async () => {
-    const run = await runModelComparison('hi', [{ provider: 'typesafe', model: 'jev' }]);
+  it('emits an error row for a retired provider id rather than crashing', async () => {
+    const run = await runModelComparison('hi', [{ provider: 'typesafe' as 'groq', model: 'jev' }]);
     expect(run.results[0]).toEqual(
       expect.objectContaining({
         provider: 'typesafe',

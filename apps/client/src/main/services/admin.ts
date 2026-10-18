@@ -1,8 +1,6 @@
 import axios from 'axios';
 import type {
-  AdminModel,
   AdminModelsPayload,
-  AdminModelLookup,
   AdminUser,
   AdminLogsPayload,
   AdminPatCreated,
@@ -64,65 +62,14 @@ const AdminService = {
 
 export default AdminService;
 
-// Model inventory CRUD over roster rows; the list carries error diagnostics.
-// @see #104 #234 #168
-export type ModelInput = Partial<
-  Omit<AdminModel, 'id' | 'providers' | 'contextLength' | 'inputPrice' | 'outputPrice'>
-> & {
-  contextLength?: number | null;
-  inputPrice?: number | null;
-  outputPrice?: number | null;
-  providers?: { provider: string; modelId: string; enabled?: boolean }[];
-};
-
+// Read-only fixed-model list plus error diagnostics.
+// @see #387 #168
 const listModels = async (): Promise<AdminModelsPayload> => {
   try {
     const res = await axios.get<AdminModelsPayload>('/api/admin/models');
     return res.data;
   } catch (err) {
     throw toAdminError(err, 'Failed to load models.');
-  }
-};
-
-const createModel = async (payload: ModelInput): Promise<{ id: string }> => {
-  try {
-    const res = await axios.post<{ id: string }>('/api/admin/models', payload);
-    return res.data;
-  } catch (err) {
-    throw toAdminError(err, 'Failed to create model.');
-  }
-};
-
-const updateModel = async (id: string, payload: ModelInput): Promise<{ id: string }> => {
-  try {
-    const res = await axios.put<{ id: string }>(`/api/admin/models/${id}`, payload);
-    return res.data;
-  } catch (err) {
-    throw toAdminError(err, 'Failed to update model.');
-  }
-};
-
-const deleteModel = async (id: string): Promise<void> => {
-  try {
-    await axios.delete(`/api/admin/models/${id}`);
-  } catch (err) {
-    throw toAdminError(err, 'Failed to delete model.');
-  }
-};
-
-// Provider catalog lookup; `found: false` is a normal miss, not an error.
-// @see #217 #234
-const lookupModel = async (
-  provider: 'deepinfra' | 'fireworks',
-  model: string,
-): Promise<AdminModelLookup> => {
-  try {
-    const res = await axios.get<AdminModelLookup>('/api/admin/model-lookup', {
-      params: { provider, model },
-    });
-    return res.data;
-  } catch (err) {
-    throw toAdminError(err, 'Failed to look up model.');
   }
 };
 
@@ -145,11 +92,7 @@ const compareModels = async (
 
 const AdminModelsService = {
   listModels,
-  createModel,
-  updateModel,
-  deleteModel,
   compareModels,
-  lookupModel,
 };
 
 export interface ListLogsParams {

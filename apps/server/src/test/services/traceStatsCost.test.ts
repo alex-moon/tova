@@ -1,9 +1,13 @@
-import { ModelRoster } from '../../main/models/ModelRoster';
 import {
   applyCostToStats,
+  buildPriceIndex,
   estimateCostUsd,
   pickPriceRow,
+  priceFor,
+  type PriceIndex,
+  type PriceLookup,
 } from '../../main/services/traceStatsCost';
+import { CHAT_MODEL } from '../../main/services/modelDefaults';
 import type { AdminLangsmithStatsPayload } from '@tova/shared';
 
 const basePayload = (models: AdminLangsmithStatsPayload['models']): AdminLangsmithStatsPayload => ({
@@ -35,20 +39,20 @@ const row = (
   ...partial,
 });
 
-// A roster model carrying two priced providers (the dual-price case).
-// @see #235
-const seedModel = (
-  modelId: string,
-  providers: { provider: string; inputPrice?: number; outputPrice?: number }[],
-) =>
-  ModelRoster.create({
-    modelId,
-    label: modelId,
-    tools: true,
-    vision: true,
-    eligible: true,
-    providers: providers.map((p) => ({ ...p, modelId, enabled: true, disabledUntil: null })),
-  });
+// Synthetic index over arbitrary models, standing in for the static table.
+// @see #387
+const makeIndex = (
+  models: Record<string, { provider: string; inputPrice: number; outputPrice: number }[]>,
+): PriceIndex => {
+  const byProvider = new Map<string, Map<string, PriceLookup>>();
+  const fallback = new Map<string, PriceLookup[]>();
+  for (const [modelId, providers] of Object.entries(models)) {
+    const rows = providers.map((p) => ({ inputPrice: p.inputPrice, outputPrice: p.outputPrice }));
+    byProvider.set(modelId, new Map(providers.map((p, i) => [p.provider, rows[i]])));
+    fallback.set(modelId, rows);
+  }
+  return { byProvider, fallback };
+};
 
 describe('estimateCostUsd (#224)', () => {
   it('multiplies each side by its per-1M price', () => {
@@ -80,14 +84,36 @@ describe('estimateCostUsd (#224)', () => {
   });
 });
 
+describe('buildPriceIndex/priceFor (#387 static table)', () => {
+  it('prices the chat model on both wired providers', () => {
+    const index = buildPriceIndex();
+    expect(priceFor(index, CHAT_MODEL, 'deepinfra')).toEqual({
+      inputPrice: 0.15,
+      outputPrice: 0.5,
+    });
+    expect(priceFor(index, CHAT_MODEL, 'fireworks')).toEqual({
+      inputPrice: 0.15,
+      outputPrice: 0.5,
+    });
+  });
+
+  it('falls back to the model-only row and nulls unknown models', () => {
+    const index = buildPriceIndex();
+    expect(priceFor(index, CHAT_MODEL)).toEqual({ inputPrice: 0.15, outputPrice: 0.5 });
+    expect(priceFor(index, 'unknown/model', 'deepinfra')).toBeNull();
+  });
+});
+
 describe('applyCostToStats (#224/#235)', () => {
   it('stamps each priced model and the totals', async () => {
-    await seedModel('priced/model', [{ provider: 'deepinfra', inputPrice: 1, outputPrice: 2 }]);
-
+    const index = makeIndex({
+      'priced/model': [{ provider: 'deepinfra', inputPrice: 1, outputPrice: 2 }],
+    });
     const result = await applyCostToStats(
       basePayload([
         row({ model: 'priced/model', inputTokens: 1_000_000, outputTokens: 1_000_000 }),
       ]),
+      index,
     );
 
     expect(result.models[0].estimatedCostUsd).toBe(3);
@@ -97,19 +123,22 @@ describe('applyCostToStats (#224/#235)', () => {
   it('renders an unpriced model as null and keeps totals null when none priced', async () => {
     const result = await applyCostToStats(
       basePayload([row({ model: 'unknown/model', inputTokens: 10, outputTokens: 10 })]),
+      makeIndex({}),
     );
     expect(result.models[0].estimatedCostUsd).toBeNull();
     expect(result.totals.estimatedCostUsd).toBeNull();
   });
 
   it('sums only the priced models and leaves unknown ones null', async () => {
-    await seedModel('priced/one', [{ provider: 'deepinfra', inputPrice: 1, outputPrice: 1 }]);
-
+    const index = makeIndex({
+      'priced/one': [{ provider: 'deepinfra', inputPrice: 1, outputPrice: 1 }],
+    });
     const result = await applyCostToStats(
       basePayload([
         row({ model: 'priced/one', inputTokens: 1_000_000, outputTokens: 0 }),
         row({ model: 'unknown/model', inputTokens: 999, outputTokens: 999 }),
       ]),
+      index,
     );
 
     expect(result.models[0].estimatedCostUsd).toBe(1);
@@ -118,25 +147,35 @@ describe('applyCostToStats (#224/#235)', () => {
   });
 
   it('treats a partially-priced model as unknown (unknown ≠ 0)', async () => {
-    await seedModel('half/model', [{ provider: 'deepinfra', inputPrice: 1 }]);
-
+    const index = makeIndex({
+      'half/model': [{ provider: 'deepinfra', inputPrice: 1, outputPrice: NaN }],
+    });
     const result = await applyCostToStats(
       basePayload([row({ model: 'half/model', inputTokens: 1_000_000, outputTokens: 0 })]),
+      index,
     );
     expect(result.models[0].estimatedCostUsd).toBeNull();
   });
 
-  it('uses the model-only fallback when the rollup names a dual-priced model (#235)', async () => {
-    // The fallback prefers the fully-priced, alphabetically-first provider.
-    // @see #235 #237
-    await seedModel('dual/model', [
-      { provider: 'fireworks', inputPrice: 10, outputPrice: 10 },
-      { provider: 'deepinfra', inputPrice: 1, outputPrice: 1 },
-    ]);
+  it('uses the per-provider row when the rollup names one (#235)', async () => {
+    const index = makeIndex({
+      'dual/model': [
+        { provider: 'deepinfra', inputPrice: 1, outputPrice: 1 },
+        { provider: 'fireworks', inputPrice: 10, outputPrice: 10 },
+      ],
+    });
 
     const result = await applyCostToStats(
-      basePayload([row({ model: 'dual/model', inputTokens: 1_000_000, outputTokens: 0 })]),
+      basePayload([
+        row({
+          model: 'dual/model',
+          provider: 'fireworks',
+          inputTokens: 1_000_000,
+          outputTokens: 0,
+        }),
+      ]),
+      index,
     );
-    expect(result.models[0].estimatedCostUsd).toBe(1);
+    expect(result.models[0].estimatedCostUsd).toBe(10);
   });
 });

@@ -34,7 +34,6 @@ const PROVIDERS: Record<string, LlmConnector | undefined> = {
   groq: groqConnector,
   deepinfra: deepinfraConnector,
   fireworks: fireworksConnector,
-  typesafe: undefined,
 };
 
 /** Sequential on purpose: parallel fan-out makes comparisons flaky. */

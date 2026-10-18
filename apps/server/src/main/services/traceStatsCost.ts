@@ -1,8 +1,8 @@
 import type { AdminLangsmithModelStats, AdminLangsmithStatsPayload } from '@tova/shared';
-import { listRoster, type RosterModel } from './rosterConfig';
+import { pricedModels, priceRowsForModel } from './modelDefaults';
 
-/* Cost for the Traces cache: joins stored tokens against roster prices. */
-// @see #224 #199 #235 #237
+/* Cost for the Traces cache: joins stored tokens against fixed-model prices. */
+// @see #224 #199 #235 #237 #387
 
 export interface PriceLookup {
   inputPrice?: number;
@@ -25,31 +25,21 @@ export interface PriceIndex {
   fallback: Map<string, PriceLookup[]>;
 }
 
-const priceOf = (ref: { inputPrice?: number; outputPrice?: number }): PriceLookup | null =>
-  ref.inputPrice !== undefined || ref.outputPrice !== undefined
-    ? { inputPrice: ref.inputPrice, outputPrice: ref.outputPrice }
-    : null;
-
-export const buildPriceIndex = (roster: RosterModel[]): PriceIndex => {
+/* Static price index over the fixed models; unknown rows estimate as null. */
+export const buildPriceIndex = (): PriceIndex => {
   const byProvider = new Map<string, Map<string, PriceLookup>>();
   const fallback = new Map<string, PriceLookup[]>();
-
-  for (const model of roster) {
-    const providers = new Map<string, PriceLookup>();
-    const candidates: PriceLookup[] = [];
-    const modelDefault = priceOf(model);
-    if (modelDefault) candidates.push(modelDefault);
-    // Sort by provider name so the fallback pick is deterministic.
-    for (const p of model.providers.slice().sort((a, b) => a.provider.localeCompare(b.provider))) {
-      const price = priceOf(p);
-      if (!price) continue;
-      providers.set(p.provider, price);
-      candidates.push(price);
-    }
-    if (providers.size > 0) byProvider.set(model.modelId, providers);
-    if (candidates.length > 0) fallback.set(model.modelId, candidates);
+  for (const modelId of pricedModels()) {
+    const rows = priceRowsForModel(modelId);
+    const entries = Object.entries(rows);
+    if (entries.length === 0) continue;
+    byProvider.set(
+      modelId,
+      new Map(entries.map(([provider, price]) => [provider, price as PriceLookup])),
+    );
+    // Model-only fallback is deterministic: the first provider's row.
+    fallback.set(modelId, [entries[0][1] as PriceLookup]);
   }
-
   return { byProvider, fallback };
 };
 
@@ -66,8 +56,8 @@ export const priceFor = (
   return pickPriceRow(index.fallback.get(modelId) ?? []);
 };
 
-// Load the roster price index; mirrors listRoster's fallback semantics.
-export const loadPriceIndex = async (): Promise<PriceIndex> => buildPriceIndex(await listRoster());
+// Load the static price index; no IO, kept async-shaped for callers.
+export const loadPriceIndex = async (): Promise<PriceIndex> => buildPriceIndex();
 
 /* Price one token split; null when either price is missing. */
 export const estimateCostUsd = (

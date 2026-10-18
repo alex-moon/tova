@@ -49,12 +49,12 @@ describe('parseModelsFlag (#225)', () => {
     expect(() => parseModelsFlag('typesafe:x')).toThrow(/Unknown provider/);
   });
 
-  it('resolves `all` to the roster on both wired providers (#236)', () => {
+  it('resolves `all` to the fixed-model backends (#387)', () => {
     const messages: string[] = [];
     const models = parseModelsFlag('all', (m) => messages.push(m));
-    // 2 roster models × 2 providers = 4 runs.
-    // @see #316
-    expect(models).toHaveLength(4);
+    // GLM (deepinfra + fireworks) + DeepSeek (deepinfra), deduped.
+    // @see #387
+    expect(models).toHaveLength(3);
     expect(models).toContainEqual({
       provider: 'deepinfra',
       model: 'zai-org/GLM-5.3-Flash',
@@ -63,7 +63,11 @@ describe('parseModelsFlag (#225)', () => {
       provider: 'fireworks',
       model: 'accounts/fireworks/models/glm-5p3-flash',
     });
-    // groq is wired for single-run defaults but has no roster rows.
+    expect(models).toContainEqual({
+      provider: 'deepinfra',
+      model: 'deepseek-ai/DeepSeek-V4.1-Flash-1017',
+    });
+    // groq is wired for single-run defaults but hosts no fixed model.
     expect(models!.every((m) => m.provider !== 'groq')).toBe(true);
     expect(messages[0]).toMatch(/wired providers/);
   });
@@ -93,13 +97,13 @@ describe('resolveScheduledModels (#225)', () => {
     ]);
   });
 
-  it('uses the cheapest roster model when nothing is configured (#236)', () => {
+  it('uses CHAT_MODEL on deepinfra when nothing is configured (#387)', () => {
     expect(resolveScheduledModels({})).toEqual([
       { provider: 'deepinfra', model: 'zai-org/GLM-5.3-Flash' },
     ]);
   });
 
-  it('lets a configured model override the roster default on deepinfra', () => {
+  it('lets a configured model override the CHAT_MODEL default on deepinfra', () => {
     expect(resolveScheduledModels({ model: 'MiniMaxAI/MiniMax-M3' })).toEqual([
       { provider: 'deepinfra', model: 'MiniMaxAI/MiniMax-M3' },
     ]);

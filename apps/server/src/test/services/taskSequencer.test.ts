@@ -1,6 +1,5 @@
-import type { RosterModel } from '../../main/services/rosterConfig';
-import type { RaceDeps } from '../../main/services/racingService';
-import type { NeutralCompletion } from '../../main/services/llmTypes';
+import type { CompletionOptions, NeutralCompletion } from '../../main/services/llmTypes';
+import { TASK_MODEL, TASK_PROVIDER } from '../../main/services/modelDefaults';
 import { enqueueTask } from '../../main/services/taskService';
 import { TaskEvent } from '../../main/models/TaskEvent';
 import {
@@ -10,18 +9,8 @@ import {
   runTaskStep,
 } from '../../main/services/taskSequencer';
 
-// Sequencer primitives: history reassembly, step parsing, one raced step.
-// @see #254
-const model = (overrides: Partial<RosterModel> = {}): RosterModel => ({
-  modelId: 'm-primary',
-  label: 'Primary',
-  tools: true,
-  contextLength: 1048576,
-  inputPrice: 0.2,
-  outputPrice: 0.6,
-  providers: [{ provider: 'deepinfra', modelId: 'di-primary' }],
-  ...overrides,
-});
+// Sequencer primitives: history reassembly, step parsing, one pinned step.
+// @see #254 #387
 
 const events = async (taskId: unknown) => TaskEvent.find({ taskId }).sort({ seq: 1 });
 
@@ -168,16 +157,13 @@ describe('assembleTaskHistory (#254)', () => {
 describe('parseStepOutcome (#254)', () => {
   it('maps text, model/provider, tool chips, and usage', () => {
     const outcome = parseStepOutcome({
-      result: {
-        model: model({ modelId: 'winner' }),
-        provider: { provider: 'deepinfra', modelId: 'di-winner' },
-        completion: {
-          choices: [{ message: { content: '' } }],
-          toolResults: [{ name: 'read_file', result: { content: 'hi' } }],
-          usage: { inputTokens: 1, outputTokens: 2, totalTokens: 3 },
-        },
+      model: 'winner',
+      provider: 'deepinfra',
+      completion: {
+        choices: [{ message: { content: '' } }],
+        toolResults: [{ name: 'read_file', result: { content: 'hi' } }],
+        usage: { inputTokens: 1, outputTokens: 2, totalTokens: 3 },
       },
-      attempts: 1,
     });
     expect(outcome.model).toBe('winner');
     expect(outcome.provider).toBe('deepinfra');
@@ -188,17 +174,14 @@ describe('parseStepOutcome (#254)', () => {
 
   it('recovers the chip query from the call args (D10)', () => {
     const outcome = parseStepOutcome({
-      result: {
-        model: model(),
-        provider: { provider: 'deepinfra', modelId: 'di' },
-        completion: {
-          choices: [{ message: { content: '' } }],
-          toolResults: [
-            { name: 'web_search', result: { results: [] }, args: { query: 'groq pricing' } },
-          ],
-        },
+      model: 'm',
+      provider: 'deepinfra',
+      completion: {
+        choices: [{ message: { content: '' } }],
+        toolResults: [
+          { name: 'web_search', result: { results: [] }, args: { query: 'groq pricing' } },
+        ],
       },
-      attempts: 1,
     });
     // Without the args passthrough the chip silently loses its query.
     expect(outcome.tools[0]).toMatchObject({
@@ -210,22 +193,19 @@ describe('parseStepOutcome (#254)', () => {
 
   it('omits the query when the call carried no string query arg', () => {
     const outcome = parseStepOutcome({
-      result: {
-        model: model(),
-        provider: { provider: 'deepinfra', modelId: 'di' },
-        completion: {
-          choices: [{ message: { content: '' } }],
-          toolResults: [{ name: 'read_file', result: {}, args: { fileId: 'abc' } }],
-        },
+      model: 'm',
+      provider: 'deepinfra',
+      completion: {
+        choices: [{ message: { content: '' } }],
+        toolResults: [{ name: 'read_file', result: {}, args: { fileId: 'abc' } }],
       },
-      attempts: 1,
     });
     expect(outcome.tools[0].query).toBeUndefined();
   });
 });
 
-describe('runTaskStep (#254)', () => {
-  it('pins maxSteps: 1, sizes max_tokens, and carries userId on the race', async () => {
+describe('runTaskStep (#254/#387)', () => {
+  it('pins DeepInfra/TASK_MODEL, toolUse required, maxSteps 1, and the userId', async () => {
     const task = await enqueueTask({
       userId: '0000000000000000000042ab',
       instruction: 'do it',
@@ -233,10 +213,8 @@ describe('runTaskStep (#254)', () => {
       maxCostUsd: 5,
     });
     const seen: Array<Record<string, unknown>> = [];
-    const deps: RaceDeps = {
-      roster: [model()],
-      now: () => 1,
-      startCompletion: async (options): Promise<NeutralCompletion> => {
+    const deps = {
+      startCompletion: async (options: CompletionOptions): Promise<NeutralCompletion> => {
         seen.push(options as unknown as Record<string, unknown>);
         return { choices: [{ message: { content: 'answer' } }] };
       },
@@ -245,6 +223,11 @@ describe('runTaskStep (#254)', () => {
     const outcome = await runTaskStep(task, await events(task._id), deps);
 
     expect(outcome.text).toBe('answer');
+    expect(outcome.model).toBe(TASK_MODEL);
+    expect(outcome.provider).toBe(TASK_PROVIDER);
+    expect(seen[0].model).toBe(TASK_MODEL);
+    expect(seen[0].provider).toBe(TASK_PROVIDER);
+    expect(seen[0].toolUse).toBe('required');
     expect(seen[0].maxSteps).toBe(1);
     expect(seen[0].userId).toBe('0000000000000000000042ab');
     expect(seen[0].max_tokens).toBeGreaterThan(0);

@@ -17,7 +17,7 @@ jest.mock('@mastra/core/agent', () => {
 const MOCK_ROUTING = {
   model: 'mock-small-model',
   provider: 'deepinfra',
-  reason: 'roster-pick',
+  reason: 'fixed-model',
 };
 
 // Routing uses the fixed-roster racing path; the mock stays the seam.
@@ -26,17 +26,14 @@ const mockRacingState: { routing: typeof MOCK_ROUTING | null; error?: unknown } 
   routing: MOCK_ROUTING,
 };
 
-jest.mock('../../main/services/racingService', () => {
+jest.mock('../../main/services/chatRace', () => {
   const { inferenceService } = jest.requireActual('../../main/services/inferenceService');
   const failIfSet = () => {
     if (mockRacingState.error) throw mockRacingState.error;
   };
   return {
-    pickRosterRoute: async () => {
-      failIfSet();
-      return mockRacingState.routing;
-    },
-    routeAndComplete: async (opts: Record<string, unknown>) => {
+    chatRoute: () => mockRacingState.routing,
+    raceChatCompletion: async (opts: Record<string, unknown>) => {
       failIfSet();
       const routing = mockRacingState.routing;
       const completion = await inferenceService.createCompletion({
@@ -44,9 +41,9 @@ jest.mock('../../main/services/racingService', () => {
         model: routing?.model,
         provider: routing?.provider,
       });
-      return { routing, outcome: { result: { completion } } };
+      return { routing, completion };
     },
-    routeAndStream: async (opts: Record<string, unknown>) => {
+    raceChatStream: async (opts: Record<string, unknown>) => {
       failIfSet();
       const routing = mockRacingState.routing;
       const stream = await inferenceService.createStreamingCompletion({
@@ -54,7 +51,7 @@ jest.mock('../../main/services/racingService', () => {
         model: routing?.model,
         provider: routing?.provider,
       });
-      return { routing, outcome: { result: { stream } } };
+      return { routing, stream };
     },
   };
 });
@@ -168,7 +165,7 @@ describe('Chat route routing metadata', () => {
     // The DeepInfra path must be exercised at the route level too.
     mockRacingState.routing = {
       model: 'Qwen/Qwen2.5-72B-Instruct',
-      reason: 'roster-pick',
+      reason: 'fixed-model',
       provider: 'deepinfra',
     } as typeof MOCK_ROUTING;
     const app = createApp();
@@ -750,7 +747,7 @@ describe('pre-stream 429 surfacing (#117)', () => {
     expect(res.body.detail).toMatch(/Rate limited/);
   });
 
-  it('the stream route surfaces the rate-limit detail when it fails before any SSE event', async () => {
+  it('the stream route surfaces the rate-limit detail as an SSE error event', async () => {
     const app = createApp();
     mockGenerate.mockResolvedValue({ text: 'e2e-ok' });
     mockRacingState.error = Object.assign(
@@ -761,41 +758,43 @@ describe('pre-stream 429 surfacing (#117)', () => {
     const res = await request(app).post('/api/chat/stream').set('Cookie', cookie).send({
       content: 'Give me restaurant ideas near Bandra in Mumbai',
     });
-    expect(res.status).toBe(500);
-    expect(res.body.message).toBe('Error processing chat');
-    expect(res.body.detail).toMatch(/Rate limited/);
+    // SSE headers precede the race; failures surface as an error event.
+    // @see #387
+    expect(res.status).toBe(200);
+    const errorEvent = res.text.split('\n\n').find((part) => part.includes('event: error'));
+    expect(errorEvent).toContain('Rate limited');
   });
 });
 
-describe('#168 all-cooling-off surfacing', () => {
+describe('all-backends-failed surfacing (#387)', () => {
   beforeEach(() => {
     mockGenerate.mockReset().mockResolvedValue({
       text: 'e2e-ok',
     });
-    // An empty roster is surfaced as the all-disabled error.
-    mockRacingState.routing = null;
+    // Every backend failing surfaces the actionable error, not a 503.
+    mockRacingState.error = new Error('All chat backends failed');
   });
 
-  it('the non-stream route returns 503 with the friendly message as the primary text', async () => {
+  it('the non-stream route returns 500 with the failure as the detail', async () => {
     const app = createApp();
-    const cookie = await registerUser(app, 'all-disabled-nonstream@example.com');
+    const cookie = await registerUser(app, 'all-failed-nonstream@example.com');
     const res = await request(app).post('/api/chat').set('Cookie', cookie).send({
       content: 'Give me restaurant ideas near Bandra in Mumbai',
     });
-    expect(res.status).toBe(503);
-    expect(res.body.message).toMatch(/temporarily unavailable/);
-    expect(res.body.detail).toMatch(/temporarily unavailable/);
+    expect(res.status).toBe(500);
+    expect(res.body.message).toBe('Error processing chat');
+    expect(res.body.detail).toMatch(/Error streaming from model/);
   });
 
-  it('the stream route returns 503 with the friendly message before any SSE event', async () => {
+  it('the stream route surfaces the failure as an SSE error event', async () => {
     const app = createApp();
-    const cookie = await registerUser(app, 'all-disabled-stream@example.com');
+    const cookie = await registerUser(app, 'all-failed-stream@example.com');
     const res = await request(app).post('/api/chat/stream').set('Cookie', cookie).send({
       content: 'Give me restaurant ideas near Bandra in Mumbai',
     });
-    expect(res.status).toBe(503);
-    expect(res.body.message).toMatch(/temporarily unavailable/);
-    expect(res.body.detail).toMatch(/temporarily unavailable/);
+    expect(res.status).toBe(200);
+    const errorEvent = res.text.split('\n\n').find((part) => part.includes('event: error'));
+    expect(errorEvent).toContain('Error streaming from model');
   });
 });
 

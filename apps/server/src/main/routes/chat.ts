@@ -9,11 +9,12 @@ import { buildAttachmentEnvelope } from '../services/attachmentEnvelope';
 import { isImageContentType } from '../services/assetLimits';
 import { spacesWorkspaceStorage } from '../services/workspaceStorage';
 import {
-  pickRosterRoute,
-  routeAndComplete,
-  routeAndStream,
-  type RosterRoutingResult,
-} from '../services/racingService';
+  raceChatCompletion,
+  raceChatStream,
+  chatRoute,
+  type FixedRoutingResult,
+} from '../services/chatRace';
+import { contextLengthFor, CHAT_MODEL } from '../services/modelDefaults';
 import { generateChatTitle } from '../services/titleService';
 import { reviseSessionSubtitle, type SubtitleTurn } from '../services/subtitleService';
 import { hasPermission, ROUTING_PERMISSION } from '../services/userService';
@@ -32,7 +33,6 @@ import {
 import { zdrHistorySchema } from '../validation';
 import { redactForLog } from '../services/logRedaction';
 import { decideTurn } from '../services/zdrTurn';
-import { AllModelsDisabledError } from '../services/modelConfigService';
 import { workspaceGateFrom, workspaceTraceMetadata } from '../services/workspaceTraceFacts';
 import {
   isWorkspaceMemoryEnabled,
@@ -228,9 +228,6 @@ const toolCallEvent = (call: NonNullable<NeutralStreamChunk['toolCall']>) => ({
 export const streamingErrorMessage = (err: unknown): string => {
   const message = err instanceof Error ? err.message : '';
   const statusCode = (err as { statusCode?: unknown } | null | undefined)?.statusCode;
-  // All models cooled off: the message is the end-user text, verbatim.
-  // @see #168
-  if (err instanceof AllModelsDisabledError) return message;
   if (statusCode === 413 || /Request too large/.test(message)) {
     return (
       'Request too large for this deployment’s current rate limit — connected connectors ' +
@@ -748,16 +745,14 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
         appendAssetBlock(turnMessages, attachedAsset);
         return turnMessages;
       };
-      // ZDR turns never carry image parts; empty roster = all-disabled.
-      const zdrPrePick = await pickRosterRoute();
-      if (!zdrPrePick) throw new AllModelsDisabledError();
-      const raced = await routeAndComplete({
+      // ZDR turns never carry image parts; the race picks the provider.
+      const raced = await raceChatCompletion({
         messages: zdrMessages(),
         userId,
         abortSignal: abortController.signal,
       });
-      const routingResult: RosterRoutingResult = raced.routing;
-      const chatCompletion = raced.outcome.result.completion;
+      const routingResult: FixedRoutingResult = raced.routing;
+      const chatCompletion = raced.completion;
       const zdrAssistantContent = chatCompletion.choices[0]?.message?.content ?? '';
       // A tool-only ZDR turn still ends with a short confirmation.
       // @see #195
@@ -839,12 +834,8 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
       return next;
     };
 
-    /* Race the fixed roster; budget sized to the pre-race pick's window. */
-    // @see #232 #310
-    const rosterPrePick = await pickRosterRoute();
-    if (!rosterPrePick) throw new AllModelsDisabledError();
-    // Drained tasks ride the context; notified after the assistant saves.
-    // @see #255
+    /* Fixed model, hedged across its known backends. */
+    // @see #387
     const taskCompletion = await taskCompletionBlockFor(userId as string, String(session!._id));
     const turnMessages = await withSystemAndAsset(
       buildSystemContent(
@@ -855,9 +846,9 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
         taskCompletion.block,
       ),
     );
-    const raced = await routeAndComplete({
+    const raced = await raceChatCompletion({
       messages: turnMessages,
-      max_tokens: outputTokensFor(rosterPrePick.contextLength, promptCharsFrom(turnMessages)),
+      max_tokens: outputTokensFor(contextLengthFor(CHAT_MODEL), promptCharsFrom(turnMessages)),
       userId,
       abortSignal: abortController.signal,
       // Tool-execution session so generate_file can stamp provenance.
@@ -865,8 +856,8 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
       sessionId: String(session!._id),
       trace: { sessionId: String(session!._id), metadata: workspaceMetadata },
     });
-    const routingResult: RosterRoutingResult = raced.routing;
-    const chatCompletion = raced.outcome.result.completion;
+    const routingResult: FixedRoutingResult = raced.routing;
+    const chatCompletion = raced.completion;
 
     // Empty responses persist as '' (fail-visibility); UI shows a hint.
     // @see #4
@@ -939,11 +930,8 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
     // ZDR failures still erase throwaway attachments; no-op otherwise.
     // @see #116
     await cleanupEphemeralAsset(attachedAsset);
-    // All models cooled off: the friendly message is the primary error.
-    // @see #168
-    const allDisabled = err instanceof AllModelsDisabledError;
-    res.status(allDisabled ? 503 : 500).json({
-      message: allDisabled ? streamingErrorMessage(err) : 'Error processing chat',
+    res.status(500).json({
+      message: 'Error processing chat',
       detail: streamingErrorMessage(err),
     });
   }
@@ -1035,7 +1023,10 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
       session = await createSessionWithUser(userId as string, content, { incognito: false });
     }
 
-    let routingResult: RosterRoutingResult;
+    // Fixed model; the provider named here is the primary backend until the
+    // race crowns the winner that actually serves the turn.
+    // @see #387
+    let routingResult: FixedRoutingResult = chatRoute();
     let messages: {
       role: 'system' | 'user' | 'assistant';
       content: string | MessageContentPart[];
@@ -1044,11 +1035,6 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
     // Image turns: gate on content type AND a configured presign path.
     // @see #115
     const hasImage = turnsWithImage(attachedAsset);
-
-    /* Pre-race pick sizes the budget; the flat race decides the winner. */
-    // @see #232 #316
-    const rosterRoute = await pickRosterRoute();
-    if (!rosterRoute) throw new AllModelsDisabledError();
 
     await ensureUserLocation(streamUserDoc, req.ip);
     /* Workspace block read unconditionally; ZDR read-only, images skip. */
@@ -1062,7 +1048,6 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
       // Continuity comes from the client replay; nothing is read back.
       // @see #116
       messages = buildZdrMessages(zdrHistory, content);
-      routingResult = rosterRoute;
       streamWorkspaceBlock = await workspaceBlockFor(content, userId as string);
     } else {
       // Save user message
@@ -1097,7 +1082,6 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
 
       // Same image-turn gating as the non-streaming route.
       // @see #115
-      routingResult = rosterRoute;
       messages = messagesFromPersistedHistory(
         history as {
           role: string;
@@ -1196,13 +1180,13 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
           routing: routingResult,
         });
 
-        /* Flat race keeps the first token's stream; losers record TTFT. */
-        // @see #232 #316
-        const raced = await routeAndStream({
+        /* Hedged race keeps the first token's stream; TTFT rides the reason. */
+        // @see #387
+        const raced = await raceChatStream({
           messages,
-          // Budget sized against the picked model's window.
+          // Budget sized against the fixed model's window.
           // @see #104
-          max_tokens: outputTokensFor(routingResult.contextLength, promptCharsFrom(messages)),
+          max_tokens: outputTokensFor(contextLengthFor(CHAT_MODEL), promptCharsFrom(messages)),
           userId,
           abortSignal: abortController.signal,
           // Attach the session to the trace; ZDR turns have none.
@@ -1223,7 +1207,7 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
           ...(zdr ? {} : { sessionId: String(session!._id) }),
         });
         routingResult = raced.routing;
-        const stream = raced.outcome.result.stream;
+        const stream = raced.stream;
 
         /* Tool between text runs: render as a paragraph break. */
         // @see #262
@@ -1404,11 +1388,8 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
     // @see #116
     await cleanupEphemeralAsset(attachedAsset);
     if (!res.headersSent) {
-      // Cooloff before the stream: friendly message is primary, on 503.
-      // @see #168
-      const allDisabled = err instanceof AllModelsDisabledError;
-      res.status(allDisabled ? 503 : 500).json({
-        message: allDisabled ? streamingErrorMessage(err) : 'Error processing chat',
+      res.status(500).json({
+        message: 'Error processing chat',
         detail: streamingErrorMessage(err),
       });
     } else {

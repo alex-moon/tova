@@ -23,7 +23,7 @@ jest.mock('../../main/services/metricsService', () => ({
   isTriviallyNeutral: (content: string) => content.trim().length === 0,
 }));
 
-const MOCK_ROUTING = { model: 'mock-small-model', provider: 'deepinfra', reason: 'roster-pick' };
+const MOCK_ROUTING = { model: 'mock-small-model', provider: 'deepinfra', reason: 'fixed-model' };
 
 // Routing uses the fixed-roster racing path; `mockRacingState` stays the seam.
 // @see #233
@@ -31,25 +31,25 @@ const mockRacingState: {
   routing: typeof MOCK_ROUTING | null;
 } = { routing: MOCK_ROUTING };
 
-jest.mock('../../main/services/racingService', () => {
+jest.mock('../../main/services/chatRace', () => {
   const { inferenceService } = jest.requireMock('../../main/services/inferenceService');
   return {
-    pickRosterRoute: async () => mockRacingState.routing,
-    routeAndComplete: async (opts: Record<string, unknown>) => {
+    chatRoute: () => mockRacingState.routing,
+    raceChatCompletion: async (opts: Record<string, unknown>) => {
       const completion = await inferenceService.createCompletion({
         ...opts,
         model: mockRacingState.routing?.model,
         provider: mockRacingState.routing?.provider,
       });
-      return { routing: mockRacingState.routing, outcome: { result: { completion } } };
+      return { routing: mockRacingState.routing, completion };
     },
-    routeAndStream: async (opts: Record<string, unknown>) => {
+    raceChatStream: async (opts: Record<string, unknown>) => {
       const stream = await inferenceService.createStreamingCompletion({
         ...opts,
         model: mockRacingState.routing?.model,
         provider: mockRacingState.routing?.provider,
       });
-      return { routing: mockRacingState.routing, outcome: { result: { stream } } };
+      return { routing: mockRacingState.routing, stream };
     },
   };
 });

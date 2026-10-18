@@ -1,8 +1,7 @@
 import 'dotenv/config';
-import { MongoClient } from 'mongodb';
 import { readFile } from 'node:fs/promises';
 import * as path from 'node:path';
-import { buildMongoUri } from '../../../shared/src/main/mongoUri';
+import { chatBackends } from './services/modelDefaults';
 
 // Django-style management commands: flat registry + argv router.
 // @see #322
@@ -15,62 +14,6 @@ export interface ManageCommand {
 export const formatSeconds = (ms: number | undefined | null): string => {
   if (ms === undefined || ms === null || !Number.isFinite(ms)) return '-';
   return `${(ms / 1000).toFixed(1)}s`;
-};
-
-interface RosterProviderRow {
-  provider: string;
-  modelId?: string;
-  enabled?: boolean;
-  ttftMs?: number;
-  ttftSamples?: number;
-  disabledUntil?: Date | string | null;
-}
-
-interface RosterRow {
-  modelId: string;
-  label?: string;
-  eligible?: boolean;
-  providers?: RosterProviderRow[];
-}
-
-const pad = (value: string, width: number): string => value.padEnd(width, ' ');
-
-export const formatRosterRow = (row: RosterRow): string[] =>
-  (row.providers ?? []).map((p) =>
-    [
-      pad(row.modelId, 34),
-      pad(row.eligible === false ? 'no' : 'yes', 9),
-      pad(p.provider, 11),
-      pad(p.enabled === false ? 'no' : 'yes', 8),
-      pad(formatSeconds(p.ttftMs), 10),
-      pad(String(p.ttftSamples ?? 0), 8),
-      pad(
-        p.disabledUntil && new Date(p.disabledUntil).getTime() > Date.now()
-          ? `until ${new Date(p.disabledUntil).toISOString().slice(0, 16).replace('T', ' ')}`
-          : '-',
-        24,
-      ),
-    ].join(''),
-  );
-
-export const ROSTER_HEADER = `${pad('MODEL', 34)}${pad('ELIGIBLE', 9)}${pad('PROVIDER', 11)}${pad('ENABLED', 8)}${pad('TTFT', 10)}${pad('SAMPLES', 8)}${pad('COOLOFF', 24)}`;
-
-export const rosterCommand: ManageCommand = {
-  description: 'Print the live model roster: eligibility, per-provider windowed TTFT, cool-offs',
-  run: async () => {
-    const client = new MongoClient(buildMongoUri());
-    try {
-      await client.connect();
-      const rows = await client.db('tova').collection<RosterRow>('modelrosters').find({}).toArray();
-      console.log(ROSTER_HEADER);
-      for (const row of rows) for (const line of formatRosterRow(row)) console.log(line);
-      console.log(
-        `\n${rows.length} model(s), ${rows.reduce((n, r) => n + (r.providers?.length ?? 0), 0)} provider entr(ies)`,
-      );
-    } finally {
-      await client.close();
-    }
-  },
 };
 
 // Probe fixtures: PNGs assert color, kitten.jpg asserts real photo OCR.
@@ -90,22 +33,28 @@ interface ProbeTarget {
   toolImageExpected: boolean;
 }
 
-const PROBE_TARGETS: ProbeTarget[] = [
-  {
-    name: 'deepinfra',
+/* Probe targets ride the chat model's known backends. */
+// @see #387
+const PROBE_URLS: Record<string, { url: string; keyEnvVar: string; toolImageExpected: boolean }> = {
+  deepinfra: {
     url: 'https://api.deepinfra.com/v1/openai/chat/completions',
-    model: 'zai-org/GLM-5.3-Flash',
     keyEnvVar: 'DEEPINFRA_API_KEY',
     toolImageExpected: false,
   },
-  {
-    name: 'fireworks',
+  fireworks: {
     url: 'https://api.fireworks.ai/inference/v1/chat/completions',
-    model: 'accounts/fireworks/models/glm-5p3-flash',
     keyEnvVar: 'FIREWORKS_API_KEY',
     toolImageExpected: true,
   },
-];
+};
+
+const PROBE_TARGETS: ProbeTarget[] = chatBackends()
+  .filter(({ provider }) => provider in PROBE_URLS)
+  .map(({ provider, modelId }) => ({
+    name: provider,
+    model: modelId,
+    ...PROBE_URLS[provider],
+  }));
 
 const toolCall = {
   id: 'call_1',
@@ -290,6 +239,5 @@ export const probeImageToolsCommand: ManageCommand = {
 };
 
 export const commands: Record<string, ManageCommand> = {
-  roster: rosterCommand,
   'probe:image-tools': probeImageToolsCommand,
 };

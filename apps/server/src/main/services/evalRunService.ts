@@ -9,13 +9,12 @@ import { clearEvalSource, seedEvalSource, evalUserId } from '../evals/mongoSourc
 import { runCase } from '../evals/runCase';
 import type { Assertion, AssertionResult } from '../evals/types';
 import { groqConnector, deepinfraConnector, fireworksConnector } from './mastraService';
-import { sweepModels } from './modelConfigService';
-import { ROSTER_SEED, type RosterProvider } from './rosterConfig';
+import { sweepModels, CHAT_MODEL } from './modelDefaults';
 import { EvalRunRecord } from '../models/EvalRunRecord';
 
-/* Wired providers; the roster sweep enumerates deepinfra/fireworks rows. */
-// @see #233 #232 #236
-export type WiredProvider = 'groq' | RosterProvider;
+/* Wired providers; the sweep enumerates the fixed models' backends. */
+// @see #233 #232 #236 #387
+export type WiredProvider = 'groq' | 'deepinfra' | 'fireworks';
 
 export const connectorsByProvider = {
   groq: groqConnector,
@@ -120,15 +119,16 @@ export const parseModelsFlag = (
 ): { provider: WiredProvider; model: string }[] | null => {
   if (value === undefined) return null;
   if (value === 'all') {
-    // Wired roster providers only; the rest are excluded, not hidden.
-    // @see #158
+    // Wired fixed-model backends only; the rest are excluded, not hidden.
+    // @see #158 #387
     warned?.(
-      'sweep universe: the fixed roster on wired providers (deepinfra, fireworks); ' +
-        'other providers are excluded.',
+      'sweep universe: the fixed models (CHAT_MODEL/TASK_MODEL) on wired providers ' +
+        '(deepinfra, fireworks); other providers are excluded.',
     );
-    return sweepModels(Object.keys(connectorsByProvider) as RosterProvider[]).map(
-      ({ provider, model }) => ({ provider, model }),
-    );
+    return sweepModels().map(({ provider, model }) => ({
+      provider: provider as WiredProvider,
+      model,
+    }));
   }
   return value
     .split(',')
@@ -332,12 +332,14 @@ export const startEvalRun = async (
   return { id, results };
 };
 
-/* Scheduled default: cheapest roster model, sourced from ROSTER_SEED. */
-// @see #236
-const defaultEvalRef = (): { provider: RosterProvider; model: string } => {
-  const model = ROSTER_SEED.find((m) => m.modelId === 'zai-org/GLM-5.3-Flash') ?? ROSTER_SEED[0];
-  const provider = model.providers.find((p) => p.provider === 'deepinfra') ?? model.providers[0];
-  return { provider: provider.provider, model: provider.modelId };
+/* Scheduled default: CHAT_MODEL on its deepinfra backend. */
+// @see #236 #387
+const defaultEvalRef = (): { provider: WiredProvider; model: string } => {
+  const backend = sweepModels().find((m) => m.provider === 'deepinfra' && m.model === CHAT_MODEL);
+  return {
+    provider: 'deepinfra',
+    model: backend?.model ?? CHAT_MODEL,
+  };
 };
 
 /* Scheduled run models: TOVA_EVAL_MODELS csv, else the single default. */
