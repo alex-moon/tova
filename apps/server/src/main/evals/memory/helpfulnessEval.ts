@@ -1,4 +1,5 @@
 import { buildSystemContent } from '../../services/promptAssembly';
+import { sleep } from '../../services/sleep';
 import { inferenceService } from '../../services/inferenceService';
 import { resolveScheduledModels } from '../../services/evalRunService';
 import {
@@ -213,8 +214,6 @@ export const defaultJudge = async (
   });
   return completion.object.verdict;
 };
-
-const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
 // Config-sourced inter-call pacing to avoid provider RPM trips.
 const defaultPace = async (): Promise<void> => {

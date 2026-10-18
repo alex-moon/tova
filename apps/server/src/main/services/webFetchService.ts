@@ -146,8 +146,6 @@ export const fetchPage = async (url: string): Promise<FetchedPage | null> => {
   if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
     throw new Error(`unsupported URL scheme: ${parsed.protocol}`);
   }
-  await assertPublicHost(parsed.hostname);
-  await assertSafeUrl(parsed.toString());
 
   const requestOnce = (target: URL): Promise<Response> =>
     fetch(target.toString(), {

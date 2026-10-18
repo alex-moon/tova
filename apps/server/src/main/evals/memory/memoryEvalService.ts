@@ -7,6 +7,7 @@ import {
   type WorkspaceSlice,
 } from '../../services/workspaceRetrievalService';
 import { embedWorkspaceUser } from '../../services/workspaceEmbeddingIngest';
+import { asDatasetClient, ensureDataset } from '../../services/langsmithDataset';
 import { evalUserId } from '../mongoSource';
 import { GATE_CASES, MEMORY_SCENARIOS } from './corpus';
 import { clearMemoryCorpus, seedMemoryScenario, type SeedIdMap } from './memorySource';
@@ -217,20 +218,8 @@ export const pushMemoryCorpusToLangSmith = async (
   scenarios: MemoryScenario[] = MEMORY_SCENARIOS,
   gateCases: GateCase[] = GATE_CASES,
 ): Promise<void> => {
-  const ls = client as unknown as {
-    hasDataset: (params: { datasetName: string }) => Promise<boolean>;
-    createDataset: (name: string) => Promise<{ id: string }>;
-    createExample: (
-      input: unknown,
-      output: unknown,
-      opts?: { datasetName: string },
-    ) => Promise<unknown>;
-    listExamples?: (params: { datasetName: string }) => AsyncIterable<{ id: string }>;
-    deleteExample?: (id: string) => Promise<unknown>;
-  };
-  if (!(await ls.hasDataset({ datasetName: MEMORY_DATASET_NAME }))) {
-    await ls.createDataset(MEMORY_DATASET_NAME);
-  }
+  const ls = asDatasetClient(client);
+  await ensureDataset(ls, MEMORY_DATASET_NAME);
   // The corpus is static: replace, don't append, or re-runs grow it forever.
   // @see #394
   if (ls.listExamples && ls.deleteExample) {

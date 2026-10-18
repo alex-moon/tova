@@ -6,6 +6,7 @@ import { collectWorkspaceSlices } from './workspaceRetrievalService';
 import {
   existingEmbeddingHashes,
   planEmbeddingWrites,
+  type EmbeddableKind,
   type EmbeddableSlice,
 } from './workspaceEmbeddingBackfill';
 import {
@@ -20,8 +21,6 @@ import {
 
 // Batch size for the backfill; keeps one request well under provider limits.
 export const EMBED_BATCH = 64;
-
-export type EmbeddableKind = 'chat' | 'file' | 'task';
 
 export interface EmbedWorkspaceSliceInput {
   userId: string;

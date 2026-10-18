@@ -1,6 +1,7 @@
 import type { Types } from 'mongoose';
 import { Asset } from '../models/Asset';
 import { AssetJob, type AssetJobDocument } from '../models/AssetJob';
+import { clampError } from './clampError';
 
 /* Mongo-backed conversion queue with idempotent enqueue and atomic claim. */
 // @see #67
@@ -9,14 +10,7 @@ export const MAX_JOB_ATTEMPTS = 3;
 
 const POLL_INTERVAL_MS = 5000;
 
-const MAX_STORED_ERROR_CHARS = 500;
-
 export type AssetJobProcessor = (job: AssetJobDocument) => Promise<void>;
-
-const clampError = (err: unknown): string => {
-  const message = err instanceof Error ? err.message : String(err);
-  return message.slice(0, MAX_STORED_ERROR_CHARS);
-};
 
 // Idempotent enqueue: a live-status job is reused; a failed chain gets fresh.
 export const enqueueAssetJob = async (

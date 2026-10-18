@@ -1,7 +1,9 @@
 import { config } from '../config';
+import { headersFor, queryRuns, resolveProject } from './langsmithTracesService';
 
-/* Best-effort LangSmith trace deletion by session id; never throws. */
-// @see #143 #224
+/* Best-effort LangSmith trace deletion by session id; never throws.
+ * Runs on the shared admin plumbing (retries, project resolution). */
+// @see #143 #224 #398
 
 const BASE_URL = 'https://api.smith.langchain.com';
 const PAGE_SIZE = 100;
@@ -26,29 +28,17 @@ const purgeSessionTraces = async (
     throw new Error('session id is not an ObjectId hex string');
   }
   const traceIds = new Set<string>();
-  let offset = 0;
   for (let page = 0; page < MAX_PAGES; page++) {
-    const queryRes = await fetch(`${BASE_URL}/api/v1/runs/query`, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify({
-        session: [projectId],
-        filter: sessionMetadataFilter(sessionId),
-        limit: PAGE_SIZE,
-        offset,
-      }),
-      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+    const body = await queryRuns(headers, projectId, {
+      filter: sessionMetadataFilter(sessionId),
+      limit: PAGE_SIZE,
+      offset: page * PAGE_SIZE,
     });
-    if (!queryRes.ok) {
-      throw new Error(`run query failed: HTTP ${queryRes.status}`);
-    }
     // The endpoint answers an object; a non-array must throw, not read empty.
-    const body = (await queryRes.json()) as { runs?: { trace_id?: string }[] };
     const runs = body.runs;
     if (!Array.isArray(runs)) throw new Error('unexpected run query response shape');
     for (const run of runs) if (run.trace_id) traceIds.add(run.trace_id);
     if (runs.length < PAGE_SIZE) break;
-    offset += PAGE_SIZE;
   }
 
   const ids = [...traceIds];
@@ -73,23 +63,10 @@ export const purgeUserTraces = async (sessionIds: string[]): Promise<void> => {
   const project = config.langsmith.project;
   if (!apiKey || !project || sessionIds.length === 0) return;
 
-  const headers = { 'x-api-key': apiKey, 'Content-Type': 'application/json' };
+  const headers = headersFor(apiKey);
 
   try {
-    const res = await fetch(
-      `${BASE_URL}/api/v1/sessions?name=${encodeURIComponent(project)}&limit=1`,
-      { headers, signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) },
-    );
-    if (!res.ok) {
-      throw new Error(`project lookup failed: HTTP ${res.status}`);
-    }
-    const sessions = (await res.json()) as { id?: string; name?: string }[];
-    // Name-match only; a fallback could hit the wrong project.
-    const projectId = sessions.find((s) => s.name === project)?.id;
-    if (!projectId) {
-      throw new Error(`project "${project}" not found`);
-    }
-
+    const { id: projectId } = await resolveProject(headers, project);
     for (const sessionId of sessionIds) {
       try {
         await purgeSessionTraces(sessionId, headers, projectId);

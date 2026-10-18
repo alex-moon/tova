@@ -14,7 +14,7 @@ import { enqueueWorkspaceEmbedding } from './workspaceEmbeddingIngest';
 // @see #67 #208 #209
 
 // Mirrors the asset upload cap; keeps route modules free of worker deps.
-export const MAX_CONVERSION_INPUT_BYTES = 15 * 1024 * 1024;
+const MAX_CONVERSION_INPUT_BYTES = 15 * 1024 * 1024;
 
 /* OCR a raster buffer, normalised through the store-time cap. */
 // @see #209

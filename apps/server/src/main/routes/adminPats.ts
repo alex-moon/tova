@@ -1,17 +1,16 @@
 import express from 'express';
 import mongoose from 'mongoose';
 import crypto from 'crypto';
-import { authenticateBearerOrSession, requireRole, AuthRequest } from '../middleware/auth';
+import { adminGuard, AuthRequest } from '../middleware/auth';
 import { Pat } from '../models/Pat';
 import { User } from '../models/User';
-import { createPatSchema } from '../validation';
+import { zodMessage, createPatSchema } from '../validation';
 import type { AdminPatsPayload } from '@tova/shared';
 
 const router = express.Router();
 
 // admin.ts's guard, plus a PAT-bearer leg so agents and cookies share it.
 // @see #184
-const adminGuard = [authenticateBearerOrSession, requireRole('admin')];
 
 router.get('/pats', ...adminGuard, async (_req, res) => {
   try {
@@ -39,7 +38,7 @@ router.get('/pats', ...adminGuard, async (_req, res) => {
 router.post('/pats', ...adminGuard, async (req: AuthRequest, res) => {
   const parsed = createPatSchema.safeParse(req.body ?? {});
   if (!parsed.success) {
-    return res.status(400).json({ message: parsed.error.issues[0]?.message ?? 'Invalid payload' });
+    return res.status(400).json({ message: zodMessage(parsed, 'Invalid payload') });
   }
 
   try {

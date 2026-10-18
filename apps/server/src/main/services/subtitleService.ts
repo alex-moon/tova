@@ -1,11 +1,5 @@
-import { redactForLog } from './logRedaction';
-import { inferenceService } from './inferenceService';
-import { config } from '../config';
+import { auxCompletion, stripSurroundingQuotes } from './auxCompletion';
 import { z } from 'zod';
-
-// A soft, revisable scope signal; the aux model is low-stakes here.
-// @see #359
-const subtitleModel = (): string => config.aux.model;
 
 const SUBTITLE_PROMPT =
   'You maintain the one-line summary of what a chat is about. You are given ' +
@@ -33,35 +27,29 @@ export const reviseSessionSubtitle = async (
     .slice(-3)
     .map((t) => `${t.role}: ${(t.content ?? '').replace(/\s+/g, ' ').slice(0, TURN_CHAR_CAP)}`)
     .join('\n');
-  try {
-    const completion = await inferenceService.createStructuredCompletion({
-      provider: config.aux.provider,
-      model: subtitleModel(),
-      messages: [
-        { role: 'system', content: SUBTITLE_PROMPT },
-        {
-          role: 'user',
-          content: `Current summary: ${current ? `"${current}"` : '(none yet)'}\n\nLatest turns:\n${recent}`,
-        },
-      ],
-      temperature: 0.3,
-      // Reasoning tokens come out of this budget before subtitle text.
-      max_tokens: 512,
-      structuredOutput: {
-        schema: SUBTITLE_SCHEMA,
-        fallbackValue: { subtitle: current ?? '' },
-        jsonPromptInjection: 'auto',
-        errorStrategy: 'fallback',
+  const completion = await auxCompletion<z.infer<typeof SUBTITLE_SCHEMA>>('Subtitle revision', {
+    messages: [
+      { role: 'system', content: SUBTITLE_PROMPT },
+      {
+        role: 'user',
+        content: `Current summary: ${current ? `"${current}"` : '(none yet)'}\n\nLatest turns:\n${recent}`,
       },
-    });
-    const subtitle = (completion.object.subtitle ?? '').trim().replace(/^["'“”]+|["'“”]+$/g, '');
-    // A failed/empty revision keeps the current subtitle.
-    if (!subtitle) return current;
-    return subtitle.length > MAX_SUBTITLE_LENGTH
-      ? `${subtitle.slice(0, MAX_SUBTITLE_LENGTH)}…`
-      : subtitle;
-  } catch (err) {
-    console.error('Subtitle revision error:', redactForLog(err));
-    return current;
-  }
+    ],
+    temperature: 0.3,
+    // Reasoning tokens come out of this budget before subtitle text.
+    max_tokens: 512,
+    structuredOutput: {
+      schema: SUBTITLE_SCHEMA,
+      fallbackValue: { subtitle: current ?? '' },
+      jsonPromptInjection: 'auto',
+      errorStrategy: 'fallback',
+    },
+  });
+  if (!completion) return current;
+  const subtitle = stripSurroundingQuotes((completion.object.subtitle ?? '').trim());
+  // A failed/empty revision keeps the current subtitle.
+  if (!subtitle) return current;
+  return subtitle.length > MAX_SUBTITLE_LENGTH
+    ? `${subtitle.slice(0, MAX_SUBTITLE_LENGTH)}…`
+    : subtitle;
 };

@@ -8,18 +8,22 @@ import { CASES, resolveExpectedContent, type EvalCase } from '../evals/cases';
 import { clearEvalSource, seedEvalSource, evalUserId } from '../evals/mongoSource';
 import { runCase } from '../evals/runCase';
 import type { Assertion, AssertionResult } from '../evals/types';
-import { groqConnector, deepinfraConnector, fireworksConnector } from './mastraService';
+import { inferenceService } from './inferenceService';
 import { sweepModels, CHAT_MODEL } from './modelDefaults';
 import { EvalRunRecord } from '../models/EvalRunRecord';
+import { clampError } from './clampError';
+import { asDatasetClient, ensureDataset } from './langsmithDataset';
 
 /* Wired providers; the sweep enumerates the fixed models' backends. */
 // @see #233 #232 #236 #387
 export type WiredProvider = 'groq' | 'deepinfra' | 'fireworks';
 
+/* Streaming entry per wired provider, routed through the shared tally
+ * so eval runs record ModelRouteError like every other caller. @see #398 */
 export const connectorsByProvider = {
-  groq: groqConnector,
-  deepinfra: deepinfraConnector,
-  fireworks: fireworksConnector,
+  groq: { createStreamingCompletion: inferenceService.createStreamingCompletion },
+  deepinfra: { createStreamingCompletion: inferenceService.createStreamingCompletion },
+  fireworks: { createStreamingCompletion: inferenceService.createStreamingCompletion },
 } as const;
 
 /** Eval score as the runner produces it; `error` is a run-level crash. */
@@ -63,16 +67,8 @@ export const resolveAssertions = (
 
 /* Best-effort LangSmith export; failures degrade to a warning. */
 export const pushToLangSmith = async (client: Client, results: EvalResult[]): Promise<void> => {
-  const ls = client as unknown as {
-    hasDataset: (params: { datasetName: string }) => Promise<boolean>;
-    createDataset: (name: string) => Promise<{ id: string }>;
-    createExample: (
-      input: unknown,
-      output: unknown,
-      opts?: { datasetName: string },
-    ) => Promise<unknown>;
-  };
-  if (!(await ls.hasDataset({ datasetName: DATASET_NAME }))) await ls.createDataset(DATASET_NAME);
+  const ls = asDatasetClient(client);
+  await ensureDataset(ls, DATASET_NAME);
   // Examples address the dataset by name; re-runs append fresh results.
   const examples: Record<string, string> = {};
   for (const result of results) {
@@ -291,7 +287,6 @@ export class EvalRunBusyError extends Error {
   }
 }
 
-export const MAX_STORED_ERROR_CHARS = 500;
 /** Lease seams shared by both suite runners; the memory runner adds `run`. */
 export interface EvalLeaseDeps {
   createRecord?: typeof EvalRunRecord.create;
@@ -372,10 +367,7 @@ export const executeEvalRun = async (
     });
     return results;
   } catch (error) {
-    const message = (error instanceof Error ? error.message : String(error)).slice(
-      0,
-      MAX_STORED_ERROR_CHARS,
-    );
+    const message = clampError(error);
     await updateRecord(id, { $set: { status: 'error', finishedAt: new Date(), error: message } });
     return [];
   }

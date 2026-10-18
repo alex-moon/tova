@@ -110,5 +110,5 @@ const confirmAsset = async (asset: AssetDocument): Promise<ConfirmResult> => {
   return { status: 'ok', asset: safeAsset(asset) };
 };
 
-export { confirmAsset, CONFIRM_MAX_AGE_MS, MAX_EXTRACT_BYTES };
+export { confirmAsset };
 export type { ConfirmResult };

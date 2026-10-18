@@ -2,6 +2,13 @@ import { z } from 'zod';
 import { CONNECTOR_TYPES } from '@tova/shared';
 import { MAX_BULK_TOTAL_SIZE } from './services/assetLimits';
 
+// First zod issue message, else the caller's fallback.
+// @see #398
+export const zodMessage = (
+  parsed: { success: false; error: { issues: { message?: string }[] } },
+  fallback: string,
+): string => parsed.error.issues[0]?.message ?? fallback;
+
 // Canonical IANA zones + UTC/GMT aliases, computed once at import.
 const supportedZones: string[] =
   (Intl as { supportedValuesOf?: (kind: 'timeZone') => string[] }).supportedValuesOf?.(
