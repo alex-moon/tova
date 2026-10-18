@@ -79,28 +79,10 @@ describe('Inference Service provider dispatch', () => {
     );
   });
 
-  /* 'typesafe' has no connector yet; a caller passing it must fail loudly. */
-  // @see #151
-  describe('typesafe provider before its connector lands', () => {
-    it('rejects with the unknown-provider error during dispatch', async () => {
-      await expect(
-        inferenceService.createCompletion({ provider: 'typesafe', model: 'jev', messages: [] }),
-      ).rejects.toThrow('Unknown LLM provider: typesafe');
-    });
-
-    it('does not silently fall back to the un-tagged default', async () => {
-      await inferenceService
-        .createCompletion({ provider: 'typesafe', model: 'jev', messages: [] })
-        .catch(() => {});
-      expect(mockGroqCompletion).not.toHaveBeenCalled();
-      expect(mockDeepinfraCompletion).not.toHaveBeenCalled();
-    });
-
-    it('the un-tagged default is still groq (flip is a later, guarded step)', async () => {
-      mockGroqCompletion.mockResolvedValueOnce({ choices: [] });
-      await inferenceService.createCompletion({ model: 'x', messages: [] });
-      expect(mockGroqCompletion).toHaveBeenCalled();
-    });
+  it('the un-tagged default is still groq (flip is a later, guarded step)', async () => {
+    mockGroqCompletion.mockResolvedValueOnce({ choices: [] });
+    await inferenceService.createCompletion({ model: 'x', messages: [] });
+    expect(mockGroqCompletion).toHaveBeenCalled();
   });
 
   describe('unknown provider (corrupt/unsupported config data)', () => {

@@ -8,10 +8,6 @@ const listUsers = vi.fn();
 const updatePermissions = vi.fn();
 const updateRole = vi.fn();
 const listModels = vi.fn();
-const createModel = vi.fn();
-const updateModel = vi.fn();
-const deleteModel = vi.fn();
-const lookupModel = vi.fn();
 const listLogs = vi.fn();
 const compareModels = vi.fn();
 const listPats = vi.fn();
@@ -29,11 +25,7 @@ vi.mock('../../main/services/admin', async (importOriginal) => {
     },
     AdminModelsService: {
       listModels: (...args: unknown[]) => listModels(...args),
-      createModel: (...args: unknown[]) => createModel(...args),
-      updateModel: (...args: unknown[]) => updateModel(...args),
-      deleteModel: (...args: unknown[]) => deleteModel(...args),
       compareModels: (...args: unknown[]) => compareModels(...args),
-      lookupModel: (...args: unknown[]) => lookupModel(...args),
     },
     AdminLogsService: { listLogs: (...args: unknown[]) => listLogs(...args) },
     AdminPatsService: {
@@ -114,84 +106,38 @@ describe('AdminView', () => {
   });
 });
 
-describe('AdminView models table (issue #33/#104)', () => {
+describe('AdminView models table (#387)', () => {
   afterEach(cleanup);
 
-  const sampleRow = () => ({
-    id: 'r1',
-    modelId: 'test-large',
-    label: 'Test Large',
-    eligible: true,
-    tools: true,
-    vision: false,
-    contextLength: 131072,
-    providers: [
-      {
-        provider: 'deepinfra',
-        modelId: 'test-large',
-        enabled: true,
-        ttftMs: 420,
-        ttftSamples: 12,
-        disabledUntil: null,
-      },
-      {
-        provider: 'fireworks',
-        modelId: 'accounts/fireworks/models/test-large',
-        enabled: true,
-        disabledUntil: null,
-      },
-    ],
+  const fixedRow = (overrides: Record<string, unknown> = {}) => ({
+    model: 'zai-org/GLM-5.3-Flash',
+    provider: 'deepinfra',
+    contextLength: 1048576,
+    ...overrides,
   });
 
   beforeEach(() => {
     listUsers.mockReset().mockResolvedValue([admin()]);
     updatePermissions.mockReset().mockResolvedValue(admin());
     updateRole.mockReset().mockResolvedValue(admin());
-    updateModel.mockReset().mockResolvedValue({ id: 'r1' });
-    createModel.mockReset().mockResolvedValue({ id: 'r2' });
-    deleteModel.mockReset().mockResolvedValue(undefined);
   });
 
   const setup = () => {
-    listModels.mockReset().mockResolvedValueOnce(modelsPayload([sampleRow()]));
+    listModels.mockReset().mockResolvedValueOnce(modelsPayload([fixedRow()]));
     return render(<AdminView />);
   };
 
-  it('renders one roster row per model with its providers and live TTFT', async () => {
+  it('renders one read-only row per fixed serving model', async () => {
     setup();
     await screen.findByTestId('admin-view');
     fireEvent.click(screen.getByTestId('admin-tab-models'));
     expect(await screen.findByTestId('admin-models')).toBeInTheDocument();
-    expect(screen.getByTestId('admin-model-r1')).toHaveTextContent('Test Large');
-    expect(screen.getByTestId('admin-models')).toHaveTextContent('131,072');
-    const providers = screen.getByTestId('admin-model-providers-r1');
-    expect(providers).toHaveTextContent('deepinfra');
-    expect(providers).toHaveTextContent('fireworks');
-    expect(screen.getByTestId('provider-ttft-r1-deepinfra')).toHaveTextContent('TTFT 420 ms (12)');
-    // A provider with no observation reads as unknown, not 0.
-    expect(screen.getByTestId('provider-ttft-r1-fireworks')).toHaveTextContent('TTFT —');
-    expect(screen.queryByText('Loading users...')).not.toBeInTheDocument();
-  });
-
-  // Providers are edited independently.
-  // @see #234
-  it('disables a single provider and preserves the other via the API', async () => {
-    setup();
-    fireEvent.click(await screen.findByTestId('admin-tab-models'));
-    fireEvent.click(await screen.findByTestId('provider-enabled-r1-deepinfra'));
-    await waitFor(() =>
-      expect(updateModel).toHaveBeenCalledWith('r1', {
-        providers: [
-          { provider: 'deepinfra', modelId: 'test-large', enabled: false },
-          {
-            provider: 'fireworks',
-            modelId: 'accounts/fireworks/models/test-large',
-            enabled: true,
-          },
-        ],
-      }),
+    expect(screen.getByTestId('admin-model-zai-org/GLM-5.3-Flash')).toHaveTextContent(
+      'zai-org/GLM-5.3-Flash',
     );
-    await waitFor(() => expect(listModels).toHaveBeenCalledTimes(2));
+    expect(screen.getByTestId('admin-models')).toHaveTextContent('deepinfra');
+    expect(screen.getByTestId('admin-models')).toHaveTextContent('1,048,576');
+    expect(screen.queryByText('Loading users...')).not.toBeInTheDocument();
   });
 
   it('shows an empty state when no models are configured', async () => {
@@ -201,275 +147,31 @@ describe('AdminView models table (issue #33/#104)', () => {
     expect(await screen.findByText('No models configured.')).toBeInTheDocument();
   });
 
-  // Capabilities are surfaced as read-only badges per row.
-  // @see #115
-  it('renders vision/tools capability badges with the context length', async () => {
-    listModels.mockResolvedValue(
-      modelsPayload([
-        sampleRow(),
-        {
-          id: 'r2',
-          modelId: 'Qwen/Qwen3-VL-8B-Instruct',
-          label: 'Qwen3 VL 8B',
-          eligible: true,
-          tools: true,
-          vision: true,
-          contextLength: 262144,
-          providers: [
-            {
-              provider: 'deepinfra',
-              modelId: 'Qwen/Qwen3-VL-8B-Instruct',
-              enabled: true,
-              disabledUntil: null,
-            },
-          ],
-        },
-      ]),
-    );
-    render(<AdminView />);
-    expect(await screen.findByTestId('admin-view')).toBeInTheDocument();
-    fireEvent.click(screen.getByTestId('admin-tab-models'));
-    const plain = await screen.findByTestId('admin-model-caps-r1');
-    expect(plain.querySelector('[data-testid="admin-model-vision-r1"]')).toHaveTextContent(
-      'vision ✗',
-    );
-    expect(plain).toHaveTextContent('tools ✓');
-    expect(plain).toHaveTextContent('131,072 tok');
-    const vl = screen.getByTestId('admin-model-caps-r2');
-    expect(vl.querySelector('[data-testid="admin-model-vision-r2"]')).toHaveTextContent('vision ✓');
-  });
-
-  it('disables a model via the eligibility checkbox and refetches', async () => {
+  it('exposes no routing controls — the table is read-only', async () => {
     setup();
     fireEvent.click(await screen.findByTestId('admin-tab-models'));
-    const checkbox = await screen.findByTestId('model-eligible-r1');
-    expect(checkbox).toBeChecked();
-    fireEvent.click(checkbox);
-    await waitFor(() => expect(updateModel).toHaveBeenCalledWith('r1', { eligible: false }));
-    await waitFor(() => expect(listModels).toHaveBeenCalledTimes(2));
+    await screen.findByTestId('admin-models');
+    expect(screen.queryByTestId('model-form-model')).not.toBeInTheDocument();
+    expect(screen.queryAllByRole('checkbox')).toHaveLength(0);
   });
 
-  it('deletes a model and refetches', async () => {
+  it('names CHAT_MODEL / TASK_MODEL env as the routing surface', async () => {
     setup();
     fireEvent.click(await screen.findByTestId('admin-tab-models'));
-    fireEvent.click(await screen.findByTestId('model-delete-r1'));
-    await waitFor(() => expect(deleteModel).toHaveBeenCalledWith('r1'));
-    await waitFor(() => expect(listModels).toHaveBeenCalledTimes(2));
-  });
-
-  // Add = search both catalogs, review summary, post the resolved providers.
-  // @see #217 #234
-  it('searches both provider catalogs and adds a model with the resolved providers', async () => {
-    setup();
-    lookupModel.mockImplementation((provider: string) =>
-      Promise.resolve(
-        provider === 'deepinfra'
-          ? {
-              found: true,
-              provider: 'deepinfra',
-              model: 'XiaomiMiMo/MiMo-V2.6-Flash',
-              contextLength: 1048576,
-              inputPrice: 0.14,
-              outputPrice: 0.28,
-              vision: true,
-            }
-          : {
-              found: true,
-              provider: 'fireworks',
-              model: 'accounts/fireworks/models/mimo-v2p6-flash',
-              contextLength: 1048576,
-              vision: true,
-            },
-      ),
-    );
-    fireEvent.click(await screen.findByTestId('admin-tab-models'));
-    fireEvent.change(screen.getByTestId('model-form-model'), {
-      target: { value: 'XiaomiMiMo/MiMo-V2.6-Flash' },
-    });
-    fireEvent.click(screen.getByTestId('model-form-search'));
-    await waitFor(() =>
-      expect(lookupModel).toHaveBeenCalledWith('deepinfra', 'XiaomiMiMo/MiMo-V2.6-Flash'),
-    );
-    expect(lookupModel).toHaveBeenCalledWith('fireworks', 'XiaomiMiMo/MiMo-V2.6-Flash');
-
-    const summary = await screen.findByTestId('model-form-result');
-    expect(summary).toHaveTextContent('XiaomiMiMo/MiMo-V2.6-Flash');
-    expect(screen.getByTestId('model-form-result-context')).toHaveTextContent('1,048,576');
-    expect(screen.getByTestId('model-form-result-input-price')).toHaveTextContent('$0.140');
-    expect(screen.getByTestId('model-form-result-output-price')).toHaveTextContent('$0.280');
-    expect(screen.getByTestId('model-form-result-caps')).toHaveTextContent('vision');
-    expect(screen.getByTestId('model-form-result-providers')).toHaveTextContent(
-      'deepinfra, fireworks',
-    );
-
-    fireEvent.click(screen.getByTestId('model-form-submit'));
-    await waitFor(() =>
-      expect(createModel).toHaveBeenCalledWith({
-        modelId: 'XiaomiMiMo/MiMo-V2.6-Flash',
-        label: 'XiaomiMiMo/MiMo-V2.6-Flash',
-        providers: [
-          { provider: 'deepinfra', modelId: 'XiaomiMiMo/MiMo-V2.6-Flash' },
-          {
-            provider: 'fireworks',
-            modelId: 'accounts/fireworks/models/mimo-v2p6-flash',
-          },
-        ],
-        contextLength: 1048576,
-        inputPrice: 0.14,
-        outputPrice: 0.28,
-        vision: true,
-      }),
-    );
-    await waitFor(() => expect(listModels).toHaveBeenCalledTimes(2));
-  });
-
-  it('adds a model resolved on only one provider', async () => {
-    setup();
-    lookupModel.mockImplementation((provider: string) =>
-      Promise.resolve(
-        provider === 'deepinfra'
-          ? {
-              found: true,
-              provider: 'deepinfra',
-              model: 'XiaomiMiMo/MiMo-V2.6-Flash',
-              contextLength: 1048576,
-              inputPrice: 0.14,
-              outputPrice: 0.28,
-            }
-          : { found: false },
-      ),
-    );
-    fireEvent.click(await screen.findByTestId('admin-tab-models'));
-    fireEvent.change(screen.getByTestId('model-form-model'), {
-      target: { value: 'XiaomiMiMo/MiMo-V2.6-Flash' },
-    });
-    fireEvent.click(screen.getByTestId('model-form-search'));
-    fireEvent.click(await screen.findByTestId('model-form-submit'));
-    await waitFor(() =>
-      expect(createModel).toHaveBeenCalledWith({
-        modelId: 'XiaomiMiMo/MiMo-V2.6-Flash',
-        label: 'XiaomiMiMo/MiMo-V2.6-Flash',
-        providers: [{ provider: 'deepinfra', modelId: 'XiaomiMiMo/MiMo-V2.6-Flash' }],
-        contextLength: 1048576,
-        inputPrice: 0.14,
-        outputPrice: 0.28,
-      }),
-    );
-  });
-
-  it('shows "Model not found" and does not offer Add on a miss', async () => {
-    setup();
-    lookupModel.mockResolvedValue({ found: false });
-    fireEvent.click(await screen.findByTestId('admin-tab-models'));
-    fireEvent.change(screen.getByTestId('model-form-model'), { target: { value: 'org/absent' } });
-    fireEvent.click(screen.getByTestId('model-form-search'));
-    expect(await screen.findByTestId('model-form-not-found')).toHaveTextContent('Model not found');
-    expect(screen.queryByTestId('model-form-submit')).not.toBeInTheDocument();
-    expect(createModel).not.toHaveBeenCalled();
-  });
-
-  it('shows a lookup error inline when both provider calls fail', async () => {
-    setup();
-    lookupModel.mockRejectedValue(new AdminError('Failed to look up model.'));
-    fireEvent.click(await screen.findByTestId('admin-tab-models'));
-    fireEvent.change(screen.getByTestId('model-form-model'), { target: { value: 'org/x' } });
-    fireEvent.click(screen.getByTestId('model-form-search'));
-    expect(await screen.findByTestId('model-form-error')).toHaveTextContent(
-      'Failed to look up model.',
-    );
-    expect(screen.queryByTestId('model-form-not-found')).not.toBeInTheDocument();
-    expect(screen.queryByTestId('model-form-submit')).not.toBeInTheDocument();
-  });
-
-  // Refresh re-pulls provider-owned values and updates the row in place.
-  // @see #217
-  it('refreshes a row from the provider catalog', async () => {
-    setup();
-    lookupModel.mockResolvedValue({
-      found: true,
-      provider: 'deepinfra',
-      model: 'test-large',
-      contextLength: 262144,
-      inputPrice: 0.2,
-      outputPrice: 0.6,
-      vision: true,
-    });
-    fireEvent.click(await screen.findByTestId('admin-tab-models'));
-    fireEvent.click(screen.getByTestId('model-refresh-r1'));
-    await waitFor(() => expect(lookupModel).toHaveBeenCalledWith('deepinfra', 'test-large'));
-    await waitFor(() =>
-      expect(updateModel).toHaveBeenCalledWith('r1', {
-        contextLength: 262144,
-        inputPrice: 0.2,
-        outputPrice: 0.6,
-        vision: true,
-      }),
-    );
-    await waitFor(() => expect(listModels).toHaveBeenCalledTimes(2));
-  });
-
-  it('does not clobber a row when Refresh finds no catalog entry', async () => {
-    setup();
-    lookupModel.mockResolvedValue({ found: false });
-    fireEvent.click(await screen.findByTestId('admin-tab-models'));
-    fireEvent.click(screen.getByTestId('model-refresh-r1'));
-    expect(await screen.findByTestId('admin-error')).toHaveTextContent(
-      /not found in the \w+ catalog/,
-    );
-    expect(updateModel).not.toHaveBeenCalled();
-  });
-
-  // Price is a soft score input now — no hard cap/over-cap badge.
-  // @see #234
-  it('renders the in/out price pair and a dash when unpriced, with no over-cap badge', async () => {
-    listModels.mockResolvedValue(
-      modelsPayload([
-        {
-          ...sampleRow(),
-          id: 'cheap',
-          modelId: 'cheap-model',
-          label: 'Cheap',
-          inputPrice: 0.2,
-          outputPrice: 0.6,
-        },
-        {
-          ...sampleRow(),
-          id: 'pricey',
-          modelId: 'pricey-model',
-          label: 'Pricey',
-          inputPrice: 2.85,
-          outputPrice: 14.25,
-        },
-        { ...sampleRow(), id: 'unpriced', modelId: 'unpriced-model', label: 'Unpriced' },
-      ]),
-    );
-    render(<AdminView />);
-    fireEvent.click(await screen.findByTestId('admin-tab-models'));
-    expect(await screen.findByTestId('admin-model-price-cheap')).toHaveTextContent(
-      '$0.200 / $0.600',
-    );
-    expect(screen.getByTestId('admin-model-price-pricey')).toHaveTextContent('$2.850 / $14.250');
-    // Unpriced rows show a dash, not $0.000.
-    expect(screen.getByTestId('admin-model-price-unpriced')).toHaveTextContent('—');
-    expect(screen.queryByTestId('admin-model-overcap-cheap')).not.toBeInTheDocument();
-    expect(screen.queryByTestId('admin-model-overcap-pricey')).not.toBeInTheDocument();
+    expect(await screen.findByTestId('admin-models-section')).toHaveTextContent('CHAT_MODEL');
+    expect(screen.getByTestId('admin-models-section')).toHaveTextContent('TASK_MODEL');
   });
 });
 
-// Cool-off badge on the inventory rows and per-model error diagnostics.
-// @see #168 #175
-describe('AdminView cool-off badge and error diagnostics (#168)', () => {
+// Per-model error diagnostics remain on the read-only models tab.
+// @see #168 #387
+describe('AdminView error diagnostics (#168)', () => {
   afterEach(cleanup);
 
-  const coolingRow = (disabledUntil: string | null, overrides: Record<string, unknown> = {}) => ({
-    id: 'r1',
-    modelId: 'test-cooling',
-    label: 'Test Cooling',
-    eligible: true,
-    tools: true,
-    vision: false,
+  const fixedRow = (overrides: Record<string, unknown> = {}) => ({
+    model: 'test-model',
+    provider: 'deepinfra',
     contextLength: 131072,
-    providers: [{ provider: 'deepinfra', modelId: 'test-cooling', enabled: true, disabledUntil }],
     ...overrides,
   });
 
@@ -477,51 +179,12 @@ describe('AdminView cool-off badge and error diagnostics (#168)', () => {
     listUsers.mockReset().mockResolvedValue([admin()]);
     updatePermissions.mockReset();
     updateRole.mockReset();
-    updateModel.mockReset().mockResolvedValue({ id: 'r1' });
-    createModel.mockReset().mockResolvedValue({ id: 'r2' });
-    deleteModel.mockReset().mockResolvedValue(undefined);
-  });
-
-  it('shows a cooling-off badge with approximate hours left for a future disabledUntil', async () => {
-    listModels.mockResolvedValue(
-      modelsPayload([coolingRow(new Date(Date.now() + 3 * 60 * 60 * 1000).toISOString())]),
-    );
-    render(<AdminView />);
-    fireEvent.click(await screen.findByTestId('admin-tab-models'));
-    const badge = await screen.findByTestId('admin-model-cooloff-r1-deepinfra');
-    expect(badge).toHaveTextContent(/Cooling off · ~\d+h left/);
-  });
-
-  it('renders no badge when the provider is not cooling off (null or expired)', async () => {
-    listModels.mockResolvedValue(
-      modelsPayload([
-        coolingRow(null),
-        coolingRow(new Date(Date.now() - 60_000).toISOString(), {
-          id: 'r2',
-          modelId: 'test-expired',
-          label: 'Test Expired',
-          providers: [
-            {
-              provider: 'deepinfra',
-              modelId: 'test-expired',
-              enabled: true,
-              disabledUntil: new Date(Date.now() - 60_000).toISOString(),
-            },
-          ],
-        }),
-      ]),
-    );
-    render(<AdminView />);
-    fireEvent.click(await screen.findByTestId('admin-tab-models'));
-    await screen.findByTestId('admin-model-r1');
-    expect(screen.queryByTestId('admin-model-cooloff-r1-deepinfra')).not.toBeInTheDocument();
-    expect(screen.queryByTestId('admin-model-cooloff-r2-deepinfra')).not.toBeInTheDocument();
   });
 
   it('renders the per-model error diagnostics table with statuses, categories and counts', async () => {
     listModels.mockResolvedValue(
       modelsPayload(
-        [coolingRow(null)],
+        [fixedRow()],
         [
           {
             provider: 'deepinfra',
@@ -561,34 +224,11 @@ describe('AdminView cool-off badge and error diagnostics (#168)', () => {
   });
 
   it('hides the errors table when no diagnostics are recorded', async () => {
-    listModels.mockResolvedValue(modelsPayload([coolingRow(null)], []));
+    listModels.mockResolvedValue(modelsPayload([fixedRow()], []));
     render(<AdminView />);
     fireEvent.click(await screen.findByTestId('admin-tab-models'));
     await screen.findByTestId('admin-models');
     expect(screen.queryByTestId('admin-model-errors')).not.toBeInTheDocument();
-  });
-
-  it('highlights error rows whose endpoint is currently cooling off', async () => {
-    listModels.mockResolvedValue(
-      modelsPayload(
-        [coolingRow(new Date(Date.now() + 60 * 60 * 1000).toISOString())],
-        [
-          {
-            provider: 'deepinfra',
-            model: 'test-cooling',
-            status: 502,
-            category: 'server_error',
-            count: 2,
-            lastMessage: 'Error: bad gateway',
-            lastSeenAt: '2026-09-26T08:00:00.000Z',
-          },
-        ],
-      ),
-    );
-    render(<AdminView />);
-    fireEvent.click(await screen.findByTestId('admin-tab-models'));
-    const row = await screen.findByTestId('admin-model-error-deepinfra-test-cooling-502');
-    expect(row.querySelector('td')!.className).toContain('text-warning');
   });
 });
 
@@ -743,17 +383,10 @@ describe('AdminView logs section (#179)', () => {
 describe('AdminView model comparison (issue #129)', () => {
   afterEach(cleanup);
 
-  const sampleRow = (overrides: Record<string, unknown> = {}) => ({
-    id: 'r1',
-    modelId: 'Qwen/Qwen3-14B',
-    label: 'Qwen3 14B',
-    eligible: true,
-    tools: true,
-    vision: false,
+  const fixedRow = (overrides: Record<string, unknown> = {}) => ({
+    model: 'Qwen/Qwen3-14B',
+    provider: 'deepinfra',
     contextLength: 131072,
-    providers: [
-      { provider: 'deepinfra', modelId: 'Qwen/Qwen3-14B', enabled: true, disabledUntil: null },
-    ],
     ...overrides,
   });
 
@@ -761,13 +394,10 @@ describe('AdminView model comparison (issue #129)', () => {
     listUsers.mockReset().mockResolvedValue([admin()]);
     updatePermissions.mockReset();
     updateRole.mockReset();
-    updateModel.mockReset();
-    createModel.mockReset();
-    deleteModel.mockReset();
     compareModels.mockReset();
   });
 
-  const setup = (rows = [sampleRow()]) => {
+  const setup = (rows = [fixedRow()]) => {
     listModels.mockResolvedValue(modelsPayload(rows));
     render(<AdminView />);
     return screen.findByTestId('admin-view');
@@ -779,7 +409,7 @@ describe('AdminView model comparison (issue #129)', () => {
     await screen.findByTestId('compare-run');
   };
 
-  it('lists roster provider entries with checkboxes', async () => {
+  it('lists the fixed serving models with checkboxes', async () => {
     await switchToCompare();
     expect(screen.getByTestId('compare-model-deepinfra-Qwen/Qwen3-14B')).not.toBeChecked();
   });
@@ -813,17 +443,8 @@ describe('AdminView model comparison (issue #129)', () => {
       ],
     });
     await setup([
-      sampleRow({
-        providers: [
-          { provider: 'deepinfra', modelId: 'Qwen/Qwen3-14B', enabled: true, disabledUntil: null },
-          {
-            provider: 'fireworks',
-            modelId: 'accounts/fireworks/models/qwen3-14b',
-            enabled: true,
-            disabledUntil: null,
-          },
-        ],
-      }),
+      fixedRow(),
+      fixedRow({ provider: 'fireworks', model: 'accounts/fireworks/models/qwen3-14b' }),
     ]);
     fireEvent.click(screen.getByTestId('admin-tab-compare'));
     fireEvent.click(screen.getByTestId('compare-model-deepinfra-Qwen/Qwen3-14B'));

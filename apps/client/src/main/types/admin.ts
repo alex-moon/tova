@@ -1,15 +1,12 @@
 // Public admin user record, re-exported from the shared contract.
 // @see #20
 export type { AdminUser } from '@shared/contracts';
-// Read-only admin models row; re-exported from the shared contract.
-// @see #33
-export type { AdminModel, AdminModelProvider } from '@shared/contracts';
+// Read-only fixed serving-model row; re-exported from the shared contract.
+// @see #387
+export type { AdminFixedModel } from '@shared/contracts';
 // Per-model error diagnostics rows and the full models payload.
 // @see #168
 export type { AdminModelError, AdminModelsPayload } from '@shared/contracts';
-// Provider catalog lookup response.
-// @see #217
-export type { AdminModelLookup } from '@shared/contracts';
 // Log row and logs response; re-exported from the shared contract.
 // @see #76
 export type { AdminLogEntry, AdminLogsPayload } from '@shared/contracts';

@@ -3,15 +3,11 @@ import type { TaskEventDocument, TaskToolEvent } from '../models/TaskEvent';
 import { toolResultEvent } from '../routes/chat';
 import type { CompletionOptions, NeutralCompletion } from './llmTypes';
 import { outputTokensFor, promptCharsFrom } from './outputTokenCap';
-import {
-  pickRosterRoute,
-  raceRosterCompletion,
-  type CompletionOutcome,
-  type RaceDeps,
-} from './racingService';
+import { inferenceService } from './inferenceService';
+import { contextLengthFor, TASK_MODEL, TASK_PROVIDER } from './modelDefaults';
 
-/* Driver's turn loop: one step = one roster race on a single model. */
-// @see #254 #251 #196 #298
+/* Driver's turn loop: one step = one DeepInfra completion on TASK_MODEL. */
+// @see #254 #251 #196 #298 #387
 
 // One step's model/provider and parsed result, ready to persist.
 export interface TaskStepOutcome {
@@ -20,6 +16,12 @@ export interface TaskStepOutcome {
   text: string;
   tools: TaskToolEvent[];
   usage?: NeutralCompletion['usage'];
+}
+
+/* Injectable completion transport (tests). */
+// @see #387
+export interface TaskStepDeps {
+  startCompletion?: (options: CompletionOptions) => Promise<NeutralCompletion>;
 }
 
 const MAX_STEP_TEXT_CHARS = 2000;
@@ -62,42 +64,53 @@ export const assembleTaskHistory = (events: TaskEventDocument[]): CompletionOpti
 
 /* Parse a completed step into its persistable shape (chip-shaped tools). */
 // @see #196
-export const parseStepOutcome = (outcome: CompletionOutcome): TaskStepOutcome => {
-  const completion = outcome.result.completion;
+export const parseStepOutcome = (outcome: {
+  model: string;
+  provider: string;
+  completion: NeutralCompletion;
+}): TaskStepOutcome => {
+  const { completion } = outcome;
   const tools: TaskToolEvent[] = (completion.toolResults ?? []).map((r) => ({
     ...toolResultEvent({ name: r.name, result: r.result, ...(r.args ? { args: r.args } : {}) }),
     // The raw result rides the chip so the next step can replay it.
     ...(r.result !== undefined ? { result: r.result } : {}),
   }));
   return {
-    model: outcome.result.model.modelId,
-    provider: outcome.result.provider.provider,
+    model: outcome.model,
+    provider: outcome.provider,
     text: completion.choices[0]?.message?.content ?? '',
     tools,
     ...(completion.usage ? { usage: completion.usage } : {}),
   };
 };
 
-/* One driver step: assemble history, size max_tokens, race the roster. */
+/* One driver step: assemble history, size max_tokens, complete on DeepInfra. */
 export const runTaskStep = async (
   task: TaskDocument,
   events: TaskEventDocument[],
-  deps: RaceDeps = {},
+  deps: TaskStepDeps = {},
 ): Promise<TaskStepOutcome> => {
   const messages = assembleTaskHistory(events);
-  // Size the output budget against the model's window, like chat.
-  // @see #298
-  const picking = await pickRosterRoute(deps);
-  const options: Omit<CompletionOptions, 'provider' | 'model'> = {
+  const options: CompletionOptions = {
+    provider: TASK_PROVIDER,
+    model: TASK_MODEL,
+    // A task step must act; the agent's toolChoice is forced. @see #387
+    toolUse: 'required',
     messages,
     userId: String(task.userId),
     // Files this step generates attribute to the task (kind 'task').
     // @see #298
     taskId: String(task._id),
     maxSteps: 1,
-    max_tokens: outputTokensFor(picking?.contextLength, promptCharsFrom(messages)),
+    max_tokens: outputTokensFor(contextLengthFor(TASK_MODEL), promptCharsFrom(messages)),
     trace: { tags: ['task', `task:${String(task._id)}`], metadata: { taskId: String(task._id) } },
   };
-  const outcome = await raceRosterCompletion(options, deps);
-  return parseStepOutcome(outcome);
+  const start =
+    deps.startCompletion ?? ((o: CompletionOptions) => inferenceService.createCompletion(o));
+  const started = Date.now();
+  const completion = await start(options);
+  // TTFT diagnostics for a non-streaming path: total step latency.
+  // @see #387
+  console.info(`task step ${TASK_PROVIDER}/${TASK_MODEL} latency ${Date.now() - started}ms`);
+  return parseStepOutcome({ model: TASK_MODEL, provider: TASK_PROVIDER, completion });
 };

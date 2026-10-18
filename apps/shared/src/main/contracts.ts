@@ -11,31 +11,12 @@ export interface AdminUser {
   updatedAt: string;
 }
 
-// Model inventory row: one roster document with its paired providers[].
-// @see #234 #115 #199
-export interface AdminModel {
-  id: string;
-  modelId: string;
-  label: string;
-  eligible: boolean;
-  tools: boolean;
-  vision: boolean;
-  contextLength?: number;
-  inputPrice?: number;
-  outputPrice?: number;
-  providers: AdminModelProvider[];
-}
-
-// One backend of a roster model: cool-off expiry, TTFT, enable switch.
-// @see #168 #213
-export interface AdminModelProvider {
+// Fixed serving model row (read-only): the env-pinned per-function model.
+// @see #387
+export interface AdminFixedModel {
+  model: string;
   provider: string;
-  modelId: string;
-  enabled: boolean;
-  ttftMs?: number;
-  ttftSamples?: number;
-  ttftUpdatedAt?: string;
-  disabledUntil: string | null;
+  contextLength?: number;
 }
 
 // Per-model endpoint-error tallies: (provider, model, status, category).
@@ -52,21 +33,8 @@ export interface AdminModelError {
 
 // GET /api/admin/models payload. `errors` is keyed provider+model.
 export interface AdminModelsPayload {
-  models: AdminModel[];
+  models: AdminFixedModel[];
   errors: AdminModelError[];
-}
-
-// Provider catalog lookup; `found:false` is a successful answer.
-// @see #217 #234
-export interface AdminModelLookup {
-  found: boolean;
-  provider?: string;
-  model?: string;
-  contextLength?: number;
-  inputPrice?: number;
-  outputPrice?: number;
-  vision?: boolean;
-  description?: string;
 }
 
 // One retained log row from Grafana Cloud Loki.
@@ -194,7 +162,7 @@ export interface AdminLangsmithModelStats {
   totalTokens: number;
   inputTokens: number;
   outputTokens: number;
-  // Estimated USD spend from the roster price; null (unknown) ≠ $0.
+  // Estimated USD spend from the static price table; null (unknown) ≠ $0.
   // @see #224 #235 #199 #237
   estimatedCostUsd: number | null;
 }

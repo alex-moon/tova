@@ -36,7 +36,7 @@ jest.mock('../../main/services/storageService', () => ({
   deleteObject: (...args: unknown[]) => mockDeleteObject(...args),
 }));
 
-const MOCK_ROUTING = { model: 'mock-small-model', provider: 'deepinfra', reason: 'roster-pick' };
+const MOCK_ROUTING = { model: 'mock-small-model', provider: 'deepinfra', reason: 'fixed-model' };
 
 // Routing uses the fixed-roster racing path; `mockRacingState` stays the seam.
 // @see #233
@@ -45,17 +45,14 @@ const mockRacingState: {
   error?: unknown;
 } = { routing: MOCK_ROUTING };
 
-jest.mock('../../main/services/racingService', () => {
+jest.mock('../../main/services/chatRace', () => {
   const { inferenceService } = jest.requireMock('../../main/services/inferenceService');
   const failIfSet = () => {
     if (mockRacingState.error) throw mockRacingState.error;
   };
   return {
-    pickRosterRoute: async () => {
-      failIfSet();
-      return mockRacingState.routing;
-    },
-    routeAndComplete: async (opts: Record<string, unknown>) => {
+    chatRoute: () => mockRacingState.routing,
+    raceChatCompletion: async (opts: Record<string, unknown>) => {
       failIfSet();
       const routing = mockRacingState.routing;
       const completion = await inferenceService.createCompletion({
@@ -63,9 +60,9 @@ jest.mock('../../main/services/racingService', () => {
         model: routing?.model,
         provider: routing?.provider,
       });
-      return { routing, outcome: { result: { completion } } };
+      return { routing, completion };
     },
-    routeAndStream: async (opts: Record<string, unknown>) => {
+    raceChatStream: async (opts: Record<string, unknown>) => {
       failIfSet();
       const routing = mockRacingState.routing;
       const stream = await inferenceService.createStreamingCompletion({
@@ -73,7 +70,7 @@ jest.mock('../../main/services/racingService', () => {
         model: routing?.model,
         provider: routing?.provider,
       });
-      return { routing, outcome: { result: { stream } } };
+      return { routing, stream };
     },
   };
 });

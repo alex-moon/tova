@@ -235,7 +235,7 @@ export const config = {
     get models(): string | undefined {
       return process.env.TOVA_EVAL_MODELS;
     },
-    // Single-model fallback when models is unset; unset pair uses the roster.
+    // Single-model fallback when models is unset; unset pair uses CHAT_MODEL.
     get model(): string | undefined {
       return process.env.TOVA_EVAL_MODEL;
     },

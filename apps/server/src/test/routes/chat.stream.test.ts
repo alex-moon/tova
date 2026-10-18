@@ -30,7 +30,7 @@ jest.mock('@mastra/core/agent', () => {
 const MOCK_ROUTING = {
   model: 'mock-small-model',
   provider: 'deepinfra',
-  reason: 'roster-pick',
+  reason: 'fixed-model',
 };
 
 // Routing uses the fixed-roster racing path; `mockRacingState` stays the seam.
@@ -40,17 +40,14 @@ const mockRacingState: {
   error?: unknown;
 } = { routing: MOCK_ROUTING };
 
-jest.mock('../../main/services/racingService', () => {
+jest.mock('../../main/services/chatRace', () => {
   const { inferenceService } = jest.requireActual('../../main/services/inferenceService');
   const failIfSet = () => {
     if (mockRacingState.error) throw mockRacingState.error;
   };
   return {
-    pickRosterRoute: async () => {
-      failIfSet();
-      return mockRacingState.routing;
-    },
-    routeAndComplete: async (opts: Record<string, unknown>) => {
+    chatRoute: () => mockRacingState.routing,
+    raceChatCompletion: async (opts: Record<string, unknown>) => {
       failIfSet();
       const routing = mockRacingState.routing;
       const completion = await inferenceService.createCompletion({
@@ -58,9 +55,9 @@ jest.mock('../../main/services/racingService', () => {
         model: routing?.model,
         provider: routing?.provider,
       });
-      return { routing, outcome: { result: { completion } } };
+      return { routing, completion };
     },
-    routeAndStream: async (opts: Record<string, unknown>) => {
+    raceChatStream: async (opts: Record<string, unknown>) => {
       failIfSet();
       const routing = mockRacingState.routing;
       const stream = await inferenceService.createStreamingCompletion({
@@ -68,7 +65,7 @@ jest.mock('../../main/services/racingService', () => {
         model: routing?.model,
         provider: routing?.provider,
       });
-      return { routing, outcome: { result: { stream } } };
+      return { routing, stream };
     },
   };
 });
@@ -1575,10 +1572,10 @@ describe('Chat streaming route — #168 endpoint failures', () => {
     expect(errorEvent).toContain('Error streaming from model');
   });
 
-  it('returns 503 with the all-disabled message when the roster is empty before the stream opens (#168)', async () => {
-    // No pickable model: the all-disabled error surfaces pre-SSE.
-    // @see #168
-    mockRacingState.routing = null;
+  it('surfaces a total race failure as an SSE error event (#387)', async () => {
+    // Every backend failing surfaces the error on the opened stream.
+    // @see #387
+    mockRacingState.error = new Error('All chat backends failed');
 
     const cookies = await registerUser('stream-pool-empty@example.com');
     const app = createApp();
@@ -1587,9 +1584,9 @@ describe('Chat streaming route — #168 endpoint failures', () => {
       .set('Cookie', cookies)
       .send({ content: 'hello there' });
 
-    expect(response.status).toBe(503);
-    expect(response.body.message).toMatch(/temporarily unavailable/);
-    expect(response.body.detail).toMatch(/temporarily unavailable/);
+    expect(response.status).toBe(200);
+    const errorEvent = response.text.split('\n\n').find((part) => part.includes('event: error'));
+    expect(errorEvent).toContain('Error streaming from model');
   });
 });
 

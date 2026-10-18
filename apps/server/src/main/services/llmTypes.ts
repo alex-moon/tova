@@ -3,8 +3,8 @@
 import type { z } from 'zod';
 
 /* Provider toggle on options; un-tagged callers default to groq. */
-// @see #151 #4
-export type LlmProvider = 'groq' | 'deepinfra' | 'fireworks' | 'typesafe';
+// @see #151 #4 #387
+export type LlmProvider = 'groq' | 'deepinfra' | 'fireworks';
 
 /* LangSmith tracing context: identifiers only, never user content or PII. */
 // @see #5
@@ -40,6 +40,9 @@ export interface CompletionOptions {
   /* Cap on the agent's own tool loop (task path pins 1). */
   // @see #254 #251
   maxSteps?: number;
+  /* Force the agent to call tools; task steps pin 'required'. */
+  // @see #387
+  toolUse?: 'required';
   /* Client-disconnect signal wired by the chat routes. */
   abortSignal?: AbortSignal;
   trace?: TraceContext;

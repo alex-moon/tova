@@ -2,10 +2,37 @@ import request from 'supertest';
 import { createApp } from '../../main/index';
 import { User } from '../../main/models/User';
 import { TraceStatsCache } from '../../main/models/TraceStatsCache';
-import { ModelRoster } from '../../main/models/ModelRoster';
 import { Message } from '../../main/models/Message';
 import { Session } from '../../main/models/Session';
 import { listTraces, RETRY_WAIT_MS } from '../../main/services/langsmithTracesService';
+
+// Pin the static price table so HTTP cost tests keep their figures.
+// @see #387
+jest.mock('../../main/services/modelDefaults', () => {
+  const actual = jest.requireActual('../../main/services/modelDefaults');
+  return {
+    ...actual,
+    CHAT_MODEL: 'priced/cached',
+    TASK_MODEL: 'dual/session',
+    pricedModels: () => [
+      'priced/cached',
+      'priced/session',
+      'dual/session',
+      'deepseek-ai/DeepSeek-V4.1-Flash',
+    ],
+    priceRowsForModel: (modelId: string) =>
+      modelId === 'priced/cached' || modelId === 'priced/session'
+        ? { deepinfra: { inputPrice: 2, outputPrice: 4 } }
+        : modelId === 'dual/session'
+          ? {
+              deepinfra: { inputPrice: 1, outputPrice: 1 },
+              fireworks: { inputPrice: 10, outputPrice: 10 },
+            }
+          : modelId === 'deepseek-ai/DeepSeek-V4.1-Flash'
+            ? { deepinfra: { inputPrice: 0.2, outputPrice: 0.6 } }
+            : {},
+  };
+});
 
 /* Route coverage: guard wiring, unconfigured 503, 502s, fetch happy paths. */
 // @see #186
@@ -766,20 +793,6 @@ describe('admin langsmith (#186)', () => {
   it('prices a cached model from the in-DB price (#224)', async () => {
     const app = createApp();
     const cookie = await registerAdmin(app, 'ls-cache-cost@example.com');
-    await ModelRoster.create({
-      modelId: 'priced/cached',
-      label: 'priced/cached',
-      eligible: true,
-      providers: [
-        {
-          provider: 'deepinfra',
-          modelId: 'priced/cached',
-          enabled: true,
-          inputPrice: 2,
-          outputPrice: 4,
-        },
-      ],
-    });
     await TraceStatsCache.create({
       windowKey: 'days=7',
       days: 7,
@@ -902,21 +915,6 @@ describe('admin langsmith (#186)', () => {
     const app = createApp();
     const cookie = await registerAdmin(app, 'ls-sessions@example.com');
 
-    await ModelRoster.create({
-      modelId: 'priced/session',
-      label: 'priced/session',
-      eligible: true,
-      providers: [
-        {
-          provider: 'deepinfra',
-          modelId: 'priced/session',
-          enabled: true,
-          inputPrice: 2,
-          outputPrice: 4,
-        },
-      ],
-    });
-
     const sessionA = await Session.create({ userId: (await User.findOne())!._id, title: 'Chat A' });
     const sessionB = await Session.create({ userId: (await User.findOne())!._id, title: 'Chat B' });
 
@@ -977,28 +975,6 @@ describe('admin langsmith (#186)', () => {
   it('prices each turn by its persisted provider on a dual-priced model (#235)', async () => {
     const app = createApp();
     const cookie = await registerAdmin(app, 'ls-sessions-dual@example.com');
-
-    await ModelRoster.create({
-      modelId: 'dual/session',
-      label: 'dual/session',
-      eligible: true,
-      providers: [
-        {
-          provider: 'deepinfra',
-          modelId: 'dual/session',
-          enabled: true,
-          inputPrice: 1,
-          outputPrice: 1,
-        },
-        {
-          provider: 'fireworks',
-          modelId: 'dual/session',
-          enabled: true,
-          inputPrice: 10,
-          outputPrice: 10,
-        },
-      ],
-    });
 
     const session = await Session.create({ userId: (await User.findOne())!._id, title: 'Dual' });
     // DeepInfra turn: 1M in @ $1 = $1.

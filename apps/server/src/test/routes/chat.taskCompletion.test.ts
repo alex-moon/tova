@@ -29,19 +29,19 @@ jest.mock('../../main/services/workspaceTraceFacts', () =>
   jest.requireActual('../../main/services/workspaceTraceFacts'),
 );
 
-const MOCK_ROUTING = { model: 'mock-small-model', provider: 'deepinfra', reason: 'roster-pick' };
+const MOCK_ROUTING = { model: 'mock-small-model', provider: 'deepinfra', reason: 'fixed-model' };
 
-jest.mock('../../main/services/racingService', () => {
+jest.mock('../../main/services/chatRace', () => {
   const { inferenceService } = jest.requireMock('../../main/services/inferenceService');
   return {
-    pickRosterRoute: async () => MOCK_ROUTING,
-    routeAndComplete: async (opts: Record<string, unknown>) => {
+    chatRoute: () => MOCK_ROUTING,
+    raceChatCompletion: async (opts: Record<string, unknown>) => {
       const completion = await inferenceService.createCompletion(opts);
-      return { routing: MOCK_ROUTING, outcome: { result: { completion } } };
+      return { routing: MOCK_ROUTING, completion };
     },
-    routeAndStream: async (opts: Record<string, unknown>) => {
-      const completion = await inferenceService.createStreamingCompletion(opts);
-      return { routing: MOCK_ROUTING, outcome: { result: { completion } } };
+    raceChatStream: async (opts: Record<string, unknown>) => {
+      const stream = await inferenceService.createStreamingCompletion(opts);
+      return { routing: MOCK_ROUTING, stream };
     },
   };
 });

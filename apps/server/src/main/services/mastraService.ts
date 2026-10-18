@@ -196,6 +196,8 @@ const callOptionsFrom = (
     // The merged system message rides in as a per-call instructions override.
     // @see #198
     ...(instructions ? { instructions } : {}),
+    // Tasks force tool use; the model must act, not chat. @see #387
+    ...(options.toolUse === 'required' ? { toolChoice: 'required' as const } : {}),
     // Caller may pin the per-call step cap; absent falls back to the default.
     // @see #254
     maxSteps: options.maxSteps ?? (mode === 'full' ? 12 : 1),
@@ -1031,15 +1033,31 @@ const TOOL_INSTRUCTIONS =
   'real tool calls; never write such a line yourself.';
 // @see #360
 
+/* Task prompt: tool use only, no personality. */
+// @see #387
+const TASK_INSTRUCTIONS =
+  'Work the task to completion using the tools; act rather than describe. ' +
+  'For current or external facts, call `web_search` (focused keyword queries) ' +
+  'and `fetch_url` for complete http(s) URLs, and answer from what they return ' +
+  'instead of guessing. Call `current_datetime` for date/time rather than ' +
+  'assuming it. Route non-trivial arithmetic through `calculate`. When the task ' +
+  'references the user’s files, call `list_files` first, then `read_file` with a ' +
+  'file id before quoting anything — never invent file contents; for long ' +
+  'documents use `unitsOnly: true` to list units, then `offset`/`limit` for only ' +
+  'the lines needed. Deliver files with `generate_file` (filename ending in .md, ' +
+  'full markdown content) and revise existing ones with `edit_file`, copying ' +
+  '`oldText` exactly from the current text. When the task may need a connected ' +
+  'integration, call `search_tools` with keywords first. Bracketed lines like ' +
+  '`[tools used: …]` are system-added records; never write one yourself.';
+
 /* Agents are memoised per provider/model; instructions stay empty. */
 const agentCache = new Map<string, Agent>();
 
-/* tools override: false forces a plain agent; undefined keeps built-ins. */
-// @see #52
-type ToolsMode = 'full' | 'plain';
+/* 'task' swaps in the lean task prompt and drops delegate_task. */
+// @see #387 #52
+type ToolsMode = 'full' | 'plain' | 'task';
 
-const agentFor = (provider: LlmProvider, model: string, tools?: boolean): Agent => {
-  const mode: ToolsMode = tools === false ? 'plain' : 'full';
+const agentFor = (provider: LlmProvider, model: string, mode: ToolsMode = 'full'): Agent => {
   // Cache key includes Brave-key state; the tool set is baked in.
   const cacheKey = `${provider}/${model}/${mode}/${hasSearchKey() ? 'search' : 'nosearch'}`;
   const cached = agentCache.get(cacheKey);
@@ -1049,9 +1067,9 @@ const agentFor = (provider: LlmProvider, model: string, tools?: boolean): Agent 
     // Cast: the union role does not narrow to a single Mastra message variant.
     id: `tova-${provider}`,
     name: `tova-${provider}`,
-    instructions: mode === 'full' ? TOOL_INSTRUCTIONS : '',
+    instructions: mode === 'full' ? TOOL_INSTRUCTIONS : mode === 'task' ? TASK_INSTRUCTIONS : '',
     model: `${routerId}/${model}`,
-    ...(mode === 'full'
+    ...(mode !== 'plain'
       ? {
           tools: {
             // web_search stays key-gated; datetime has no dependency.
@@ -1064,7 +1082,9 @@ const agentFor = (provider: LlmProvider, model: string, tools?: boolean): Agent 
             read_file: readFileTool,
             generate_file: generateFileTool,
             edit_file: editFileTool,
-            delegate_task: delegateTaskTool,
+            // delegate_task needs a chat session; tasks never have one.
+            // @see #387
+            ...(mode === 'full' ? { delegate_task: delegateTaskTool } : {}),
           },
         }
       : {}),
@@ -1139,21 +1159,24 @@ const MASTRA_PROVIDER_ID: Record<LlmProvider, string> = {
   groq: 'groq',
   deepinfra: 'deepinfra',
   fireworks: 'fireworks-ai',
-  typesafe: 'typesafe',
 };
 
 const buildConnector = (provider: LlmProvider): LlmConnector => {
-  // The default main-chat path always carries built-in tools now.
-  // @see #52
-  const defaultMode: ToolsMode = 'full';
+  // Chat rides the full toolset; `toolUse: 'required'` (tasks) rides the lean
+  // task agent with toolChoice forced.
+  // @see #52 #387
+  const modeFor = (options: CompletionOptions): ToolsMode =>
+    options.toolUse === 'required' ? 'task' : 'full';
+  const instructionsFor = (options: CompletionOptions, system: string | undefined): string =>
+    mergedInstructions(modeFor(options) === 'task' ? TASK_INSTRUCTIONS : TOOL_INSTRUCTIONS, system);
 
   return {
     createCompletion: async (options: CompletionOptions): Promise<NeutralCompletion> => {
       const { system, rest } = splitLeadingSystem(options.messages);
-      const result = await agentFor(provider, options.model).generate(
+      const result = await agentFor(provider, options.model, modeFor(options)).generate(
         mastraMessagesFor(provider, rest),
         {
-          ...callOptionsFrom(options, defaultMode, mergedInstructions(TOOL_INSTRUCTIONS, system)),
+          ...callOptionsFrom(options, 'full', instructionsFor(options, system)),
           ...(await connectorSearchOptionsFrom(options)),
         },
       );
@@ -1192,10 +1215,10 @@ const buildConnector = (provider: LlmProvider): LlmConnector => {
     },
     createStreamingCompletion: async (options: CompletionOptions): Promise<NeutralChunkStream> => {
       const { system, rest } = splitLeadingSystem(options.messages);
-      const result = await agentFor(provider, options.model).stream(
+      const result = await agentFor(provider, options.model, modeFor(options)).stream(
         mastraMessagesFor(provider, rest),
         {
-          ...callOptionsFrom(options, defaultMode, mergedInstructions(TOOL_INSTRUCTIONS, system)),
+          ...callOptionsFrom(options, 'full', instructionsFor(options, system)),
           ...(await connectorSearchOptionsFrom(options)),
         },
       );
@@ -1222,7 +1245,7 @@ const buildConnector = (provider: LlmProvider): LlmConnector => {
       if (structuredOutput) {
         // Validation failure resolves with fallbackValue instead of throwing.
         // @see #368
-        const result = await agentFor(provider, options.model, false).generate(messages, {
+        const result = await agentFor(provider, options.model, 'plain').generate(messages, {
           ...base,
           structuredOutput: {
             schema: structuredOutput.schema,
@@ -1240,7 +1263,7 @@ const buildConnector = (provider: LlmProvider): LlmConnector => {
           object: result.object ?? structuredOutput.fallbackValue,
         };
       }
-      const result = await agentFor(provider, options.model, false).generate(messages, base);
+      const result = await agentFor(provider, options.model, 'plain').generate(messages, base);
       // Thread the finish reason so a length stop is observable.
       return {
         choices: [{ message: { content: result.text ?? null }, finishReason: result.finishReason }],
