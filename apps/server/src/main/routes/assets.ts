@@ -1,5 +1,6 @@
 import express from 'express';
 import archiver from 'archiver';
+import type { Readable } from 'stream';
 import { isValidObjectId } from 'mongoose';
 import { Asset, type AssetDocument } from '../models/Asset';
 import { AssetVersion } from '../models/AssetVersion';
@@ -28,6 +29,9 @@ const router = express.Router();
 const LIST_PAGE_SIZE = 20;
 
 const ownedAsset = async (req: AuthRequest): Promise<AssetDocument | null> => {
+  // Malformed ids are a 404, never a CastError 500.
+  // @see #396
+  if (!isValidObjectId(req.params.id)) return null;
   const asset = await Asset.findOne({
     _id: req.params.id,
     userId: req.user?.id,
@@ -93,19 +97,6 @@ router.post('/bulk-presign', authenticate, async (req: AuthRequest, res) => {
   try {
     if (!spacesWorkspaceStorage.isConfigured()) {
       return res.status(503).json({ message: 'File storage is not configured' });
-    }
-    // Coarse total-size guard pre-validation; finer checks run below.
-    if (Array.isArray(req.body)) {
-      const rawTotal = req.body.reduce(
-        (sum, item) =>
-          sum + (typeof item?.size === 'number' && Number.isFinite(item.size) ? item.size : 0),
-        0,
-      );
-      if (rawTotal > MAX_BULK_TOTAL_SIZE) {
-        return res
-          .status(413)
-          .json({ message: 'Combined file size exceeds the bulk upload limit' });
-      }
     }
     const parsed = assetBulkPresignSchema.safeParse(req.body);
     if (!parsed.success) {
@@ -277,17 +268,31 @@ router.get('/bulk-download', authenticate, async (req: AuthRequest, res) => {
     const archive = archiver('zip', { zlib: { level: 6 } });
     archive.on('warning', (err: archiver.ArchiverError) => console.error('Archive warning:', err));
 
+    // Appended Spaces streams must never outlive the response: every abort
+    // path destroys whatever is still feeding the archive.
+    // @see #396
+    const streams = new Set<Readable>();
+    const destroyStreams = () => {
+      for (const body of streams) body.destroy();
+      streams.clear();
+    };
+    archive.on('error', (err: archiver.ArchiverError) => {
+      console.error('Archive error:', err);
+      destroyStreams();
+      if (res.headersSent) res.destroy();
+      else res.status(500).json({ message: 'Error building download archive' });
+    });
+    // Client gave up: stop feeding the zip.
+    res.on('close', () => {
+      archive.abort();
+      destroyStreams();
+    });
+
     // First zip byte flushes before headers, so a failure can 500 cleanly.
     let started = false;
     const startResponse = () => {
       if (started) return;
       started = true;
-      archive.on('error', (err: archiver.ArchiverError) => {
-        console.error('Archive error:', err);
-        res.destroy();
-      });
-      // Client gave up: stop feeding the zip.
-      res.on('close', () => archive.abort());
       res.type('application/zip');
       res.setHeader(
         'Content-Disposition',
@@ -306,10 +311,14 @@ router.get('/bulk-download', authenticate, async (req: AuthRequest, res) => {
           continue;
         }
         startResponse();
+        streams.add(body);
+        body.on('end', () => streams.delete(body));
+        body.on('close', () => streams.delete(body));
         archive.append(body, { name: entryNames[i]! });
       } catch (err) {
         console.error('Asset bulk download stream error:', err);
         archive.abort();
+        destroyStreams();
         if (started && res.headersSent) {
           // Mid-stream: browsers see a truncated zip (accepted).
           // @see #69
@@ -428,7 +437,9 @@ router.post('/:id/restore', authenticate, async (req: AuthRequest, res) => {
             ? 413
             : result.code === 'unavailable'
               ? 503
-              : 400;
+              : result.code === 'conflict'
+                ? 409
+                : 400;
       return res.status(status).json({ message: result.message });
     }
     return res.json({ asset: safeAsset(result.asset) });
@@ -475,8 +486,9 @@ router.get('/:id/url', authenticate, async (req: AuthRequest, res) => {
   }
 });
 
-// Bulk delete via repeated `?id=`; Spaces objects stay resident.
-// @see #69
+// Bulk delete via repeated `?id=`; the rows carry the only key references,
+// so the Spaces objects and thumbnails go with them (best-effort).
+// @see #69 #396
 router.delete('/bulk-delete', authenticate, async (req: AuthRequest, res) => {
   const ids = req.query.id;
   const parsed = assetBulkDeleteQuerySchema.safeParse({ id: ids });
@@ -491,8 +503,19 @@ router.delete('/bulk-delete', authenticate, async (req: AuthRequest, res) => {
     if (requested.length === 0) {
       return res.status(400).json({ message: 'No valid asset ids in selection' });
     }
-    const result = await Asset.deleteMany({
+    const owned = await Asset.find({
       _id: { $in: requested },
+      userId: req.user?.id,
+    }).select('key thumbnailKey');
+    for (const asset of owned) {
+      for (const key of [asset.key, asset.thumbnailKey]) {
+        if (key && key !== 'pending') {
+          await Promise.resolve(spacesWorkspaceStorage.deleteByKey(key)).catch(() => undefined);
+        }
+      }
+    }
+    const result = await Asset.deleteMany({
+      _id: { $in: owned.map((asset) => asset._id) },
       userId: req.user?.id,
     });
     if (result.deletedCount === 0) {
@@ -505,13 +528,19 @@ router.delete('/bulk-delete', authenticate, async (req: AuthRequest, res) => {
   }
 });
 
-// Doc-only delete; the Spaces object stays for a possible restore.
-// @see #69
+// Doc-only delete kept the Spaces bytes for a possible restore — but the
+// row held the only keys, so they were unrecoverable. Delete them too.
+// @see #396
 router.delete('/:id', authenticate, async (req: AuthRequest, res) => {
   try {
     const asset = await ownedAsset(req);
     if (!asset) {
       return res.status(404).json({ message: 'Asset not found' });
+    }
+    for (const key of [asset.key, asset.thumbnailKey]) {
+      if (key && key !== 'pending') {
+        await Promise.resolve(spacesWorkspaceStorage.deleteByKey(key)).catch(() => undefined);
+      }
     }
     const deleted = await Asset.findByIdAndDelete(asset._id);
     if (!deleted) {

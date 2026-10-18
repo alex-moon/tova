@@ -1,6 +1,5 @@
 import { z } from 'zod';
 import { CONNECTOR_TYPES } from '@tova/shared';
-import { MAX_BULK_TOTAL_SIZE } from './services/assetLimits';
 
 // Canonical IANA zones + UTC/GMT aliases, computed once at import.
 const supportedZones: string[] =
@@ -194,9 +193,6 @@ export const assetBulkPresignSchema = z
   .min(1, { message: 'Bulk upload must include at least one file' })
   .max(MAX_BULK_FILES, {
     message: `Bulk upload is limited to ${MAX_BULK_FILES} files per batch`,
-  })
-  .refine((items) => items.reduce((sum, item) => sum + item.size, 0) <= MAX_BULK_TOTAL_SIZE, {
-    message: 'Combined file size exceeds the bulk upload limit',
   });
 
 export const assetBulkConfirmSchema = z

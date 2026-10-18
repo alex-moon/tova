@@ -76,7 +76,8 @@ export const getObjectStream = async (key: string): Promise<Readable | null> => 
 };
 
 // Buffers an object for text extraction; null = too big, not an error.
-// @see #34
+// The cap is enforced by accumulation when ContentLength is absent.
+// @see #34 #396
 export const getObjectBuffer = async (
   key: string,
   maxBytes = 1_000_000,
@@ -86,8 +87,21 @@ export const getObjectBuffer = async (
     (result.Body as unknown as { destroy?: () => void })?.destroy?.();
     return null;
   }
-  const bytes = await result.Body?.transformToByteArray?.();
-  return bytes ? Buffer.from(bytes) : null;
+  const body = result.Body as unknown as Readable | undefined;
+  if (!body) return null;
+  const chunks: Buffer[] = [];
+  let total = 0;
+  try {
+    for await (const chunk of body) {
+      const piece = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk as Uint8Array);
+      total += piece.byteLength;
+      if (total > maxBytes) return null;
+      chunks.push(piece);
+    }
+  } finally {
+    body.destroy?.();
+  }
+  return Buffer.concat(chunks);
 };
 
 // NoSuchKey/NotFound converge to true so deletes are idempotent.

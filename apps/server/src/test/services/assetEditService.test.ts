@@ -85,6 +85,15 @@ describe('applyEditsToContent (#325)', () => {
     });
   });
 
+  it('reports ambiguity for overlapping line-range matches (#396)', () => {
+    // Trailing whitespace defeats the exact path, so the per-line path
+    // matches at two overlapping offsets; collapsing them would apply.
+    expect(applyEditsToContent('x \nx \nx', [{ oldText: 'x\nx', newText: 'y' }])).toMatchObject({
+      ok: false,
+      code: 'ambiguous',
+    });
+  });
+
   it('reports no_change when an edit replaces text with itself', () => {
     expect(applyEditsToContent('abc', [{ oldText: 'abc', newText: 'abc' }])).toEqual({
       ok: false,
@@ -171,7 +180,29 @@ describe('writeAssetContent (#325)', () => {
     const reloaded = (await Asset.findById(asset._id))!;
     expect(reloaded.textExtracted).toBe('# draft');
     expect(reloaded.version).toBe(1);
-    expect(await AssetVersion.countDocuments({ assetId: asset._id })).toBe(0);
+    // The pre-PUT snapshot of the old content survives a failed write, so
+    // the prior bytes are always recoverable. @see #396
+    const versions = await AssetVersion.find({ assetId: asset._id }).lean();
+    expect(versions).toHaveLength(1);
+    expect(versions[0]?.textExtracted).toBe('# draft');
+    expect(mockEnqueueEmbedding).not.toHaveBeenCalled();
+  });
+
+  it('surfaces conflict and restores the winner when the version moved (#396)', async () => {
+    const asset = await createGenerated('# draft');
+    // The row moved on after this doc was read: an edit is now stale.
+    await Asset.updateOne({ _id: asset._id }, { $set: { textExtracted: '# winner', version: 2 } });
+    const result = await writeAssetContent(asset, '# loser');
+    expect(result).toMatchObject({ ok: false, code: 'conflict' });
+    // The loser's PUT is rolled back to the surviving row's bytes.
+    expect(mockPutObject).toHaveBeenLastCalledWith(
+      asset.key,
+      Buffer.from('# winner', 'utf8'),
+      'text/markdown',
+    );
+    const reloaded = (await Asset.findById(asset._id))!;
+    expect(reloaded.textExtracted).toBe('# winner');
+    expect(reloaded.version).toBe(2);
     expect(mockEnqueueEmbedding).not.toHaveBeenCalled();
   });
 });

@@ -23,6 +23,15 @@ const assetJobSchema = new mongoose.Schema(
       type: String,
       default: null,
     },
+    // Claim ownership: a stale-swept twin writes nothing after rotation.
+    // @see #396
+    leaseToken: {
+      type: String,
+      default: null,
+    },
+    // TTL moment, set when the job settles; terminal rows are reclaimed.
+    // @see #396
+    expiresAt: { type: Date },
   },
   {
     timestamps: true,
@@ -31,6 +40,10 @@ const assetJobSchema = new mongoose.Schema(
 
 // Poll query: oldest pending first.
 assetJobSchema.index({ status: 1, createdAt: 1 });
+
+// Native TTL: terminal jobs are reclaimed at their own `expiresAt`.
+// @see #396
+assetJobSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
 
 export type AssetJobDocument = mongoose.HydratedDocument<
   mongoose.InferSchemaType<typeof assetJobSchema>

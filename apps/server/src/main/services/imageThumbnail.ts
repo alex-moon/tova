@@ -6,6 +6,14 @@ import { createCanvas, loadImage } from '@napi-rs/canvas';
 // Longest-edge cap; aspect ratio preserved, never upscaled.
 export const THUMBNAIL_MAX_EDGE = 512;
 
+// Decode-dimension ceiling: a 15 MB PNG can declare hundreds of megapixels
+// and wedge the worker at canvas allocation.
+// @see #396
+export const THUMBNAIL_MAX_PIXELS = 64_000_000;
+
+export const exceedsPixelCap = (width: number, height: number): boolean =>
+  width * height > THUMBNAIL_MAX_PIXELS;
+
 // Hard ceiling per attempt so a pathological image cannot wedge the poller.
 export const THUMBNAIL_TIMEOUT_MS = 15_000;
 
@@ -50,6 +58,9 @@ export const makeThumbnail = async (
       const image = await loadImage(buffer);
       if (!image.width || !image.height) {
         throw new Error('image could not be decoded');
+      }
+      if (exceedsPixelCap(image.width, image.height)) {
+        throw new Error('image dimensions exceed the thumbnail limit');
       }
       const { width, height } = thumbnailDimensions(image.width, image.height, maxEdge);
       const canvas = createCanvas(width, height);

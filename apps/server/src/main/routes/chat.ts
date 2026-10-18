@@ -1373,6 +1373,10 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
 // Soft-delete a session
 router.delete('/sessions/:id', authenticate, async (req: AuthRequest, res) => {
   try {
+    // Malformed ids are a 404, never a CastError 500. @see #396
+    if (!isValidObjectId(req.params.id)) {
+      return res.status(404).json({ message: 'Session not found' });
+    }
     const updated = await Session.findOneAndUpdate(
       { _id: req.params.id, userId: req.user?.id, deletedAt: null },
       { deletedAt: new Date() },
@@ -1393,6 +1397,9 @@ router.patch('/sessions/:id', authenticate, async (req: AuthRequest, res) => {
     const title = typeof req.body?.title === 'string' ? req.body.title.trim() : '';
     if (!title || title.length > 120) {
       return res.status(400).json({ message: 'Title must be 1-120 characters' });
+    }
+    if (!isValidObjectId(req.params.id)) {
+      return res.status(404).json({ message: 'Session not found' });
     }
     const session = await Session.findOneAndUpdate(
       { _id: req.params.id, userId: req.user?.id, deletedAt: null },
@@ -1427,6 +1434,9 @@ router.get('/sessions', authenticate, async (req: AuthRequest, res) => {
 // Get messages for a session
 router.get('/sessions/:id', authenticate, async (req: AuthRequest, res) => {
   try {
+    if (!isValidObjectId(req.params.id)) {
+      return res.status(404).json({ message: 'Session not found' });
+    }
     const userId = req.user?.id;
     const session = await Session.findOne({ _id: req.params.id, userId, deletedAt: null });
     if (!session) {

@@ -118,8 +118,11 @@ describe('finalizeOcrText (#209)', () => {
 });
 
 describe('rasterizePdf (#209)', () => {
-  it('renders each page of an image-only PDF to a PNG buffer', async () => {
-    const { pages, totalPages } = await rasterizePdf(fixture('scanned.pdf'));
+  it('hands each page of an image-only PDF to the callback as a PNG buffer', async () => {
+    const pages: Buffer[] = [];
+    const { totalPages } = await rasterizePdf(fixture('scanned.pdf'), async (page) => {
+      pages.push(page);
+    });
     expect(totalPages).toBe(1);
     expect(pages).toHaveLength(1);
     // PNG magic number.
@@ -129,7 +132,14 @@ describe('rasterizePdf (#209)', () => {
   }, 30_000);
 
   it('enforces the page cap without throwing', async () => {
-    const { pages, totalPages } = await rasterizePdf(fixture('scanned.pdf'), 0);
+    const pages: Buffer[] = [];
+    const { totalPages } = await rasterizePdf(
+      fixture('scanned.pdf'),
+      async (page) => {
+        pages.push(page);
+      },
+      0,
+    );
     expect(totalPages).toBe(1);
     expect(pages).toHaveLength(0);
   }, 30_000);
@@ -148,7 +158,10 @@ describe('recognizeImage (#209)', () => {
   }, 120_000);
 
   it('OCRs a scanned PDF page end to end', async () => {
-    const { pages } = await rasterizePdf(fixture('scanned.pdf'));
+    const pages: Buffer[] = [];
+    await rasterizePdf(fixture('scanned.pdf'), async (page) => {
+      pages.push(page);
+    });
     const text = finalizeOcrText(await recognizeImage(pages[0]!));
     expect(text.toUpperCase()).toContain('SCANNED');
     expect(text).toContain('555');

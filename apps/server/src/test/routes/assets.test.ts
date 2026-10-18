@@ -1054,6 +1054,7 @@ describe('Assets ownership isolation', () => {
   let cookieA: string;
   let cookieB: string;
   let assetId: string;
+  let assetKey: string;
 
   beforeEach(async () => {
     jest.resetAllMocks();
@@ -1074,6 +1075,7 @@ describe('Assets ownership isolation', () => {
       textExtracted: 'top secret',
     });
     assetId = String(id);
+    assetKey = `${String(userA?._id)}/${String(id)}/secret.txt`;
 
     mockPresignGet.mockResolvedValue('https://signed.example.com/get');
     mockDeleteObject.mockResolvedValue(true);
@@ -1114,13 +1116,13 @@ describe('Assets ownership isolation', () => {
     expect(await Asset.findById(assetId)).not.toBeNull();
   });
 
-  it('deletes the doc without touching storage', async () => {
+  it('deletes the doc together with its Spaces objects (#396)', async () => {
     const response = await request(app).delete(`/api/assets/${assetId}`).set('Cookie', [cookieA]);
     expect(response.status).toBe(200);
     expect(await Asset.findById(assetId)).toBeNull();
-    // Spaces objects stay resident (doc-only delete), so nothing deletes.
-    // @see #69
-    expect(mockDeleteObject).not.toHaveBeenCalled();
+    // The row held the only key references; the bytes must go too.
+    // @see #396
+    expect(mockDeleteObject).toHaveBeenCalledWith(assetKey);
   });
 
   it('rejects guest requests entirely', async () => {

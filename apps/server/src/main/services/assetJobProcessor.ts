@@ -1,9 +1,14 @@
 import type { AssetJobDocument } from '../models/AssetJob';
 import { Asset } from '../models/Asset';
 import { spacesWorkspaceStorage } from './workspaceStorage';
-import { convertToMarkdown, extensionOf, isConvertible } from './markdownConversion';
+import {
+  convertToMarkdown,
+  extensionOf,
+  isConvertible,
+  isEmptyConversion,
+} from './markdownConversion';
 import { extractUnits } from './documentUnits';
-import { isImageContentType } from './assetLimits';
+import { MAX_ASSET_SIZE, isImageContentType } from './assetLimits';
 import { makeThumbnail } from './imageThumbnail';
 import { thumbnailKeyFor } from './assetThumbnails';
 import { OCR_MAX_INPUT_BYTES, finalizeOcrText, isNearEmpty, recognizeImage } from './ocr';
@@ -11,10 +16,7 @@ import { rasterizePdf } from './pdfRasterize';
 import { enqueueWorkspaceEmbedding } from './workspaceEmbeddingIngest';
 
 /* Real processor for the asset-job queue: conversion, OCR, thumbnails. */
-// @see #67 #208 #209
-
-// Mirrors the asset upload cap; keeps route modules free of worker deps.
-export const MAX_CONVERSION_INPUT_BYTES = 15 * 1024 * 1024;
+// @see #67 #208 #209 #396
 
 /* OCR a raster buffer, normalised through the store-time cap. */
 // @see #209
@@ -26,13 +28,12 @@ const ocrBuffer = async (buffer: Buffer): Promise<string> => {
 
 /* Assemble per-page OCR text into the pdf-parse `-- n of n --` shape. */
 const ocrPdfBuffer = async (buffer: Buffer): Promise<string> => {
-  const { pages, totalPages } = await rasterizePdf(buffer);
-  if (pages.length === 0) throw new Error('no pages rasterised for OCR');
   const parts: string[] = [];
-  for (let i = 0; i < pages.length; i++) {
-    const text = finalizeOcrText(await recognizeImage(pages[i]!));
-    parts.push(`${text}\n-- ${i + 1} of ${totalPages} --`);
-  }
+  await rasterizePdf(buffer, async (page, index, totalPages) => {
+    const text = finalizeOcrText(await recognizeImage(page));
+    parts.push(`${text}\n-- ${index + 1} of ${totalPages} --`);
+  });
+  if (parts.length === 0) throw new Error('no pages rasterised for OCR');
   const text = finalizeOcrText(parts.join('\n'));
   if (text.length === 0) throw new Error('no text found by OCR');
   return text;
@@ -50,7 +51,7 @@ const processConversion = async (
   }
 
   const buffer = await spacesWorkspaceStorage.getByKey(asset.key, {
-    maxBytes: MAX_CONVERSION_INPUT_BYTES,
+    maxBytes: MAX_ASSET_SIZE,
   });
   if (!buffer) {
     throw new Error('input-not-readable: object missing or too large');
@@ -65,11 +66,9 @@ const processConversion = async (
     markdown = await ocrBuffer(buffer);
   } else if (isPdf) {
     // Text layer first: born-digital PDFs skip OCR; near-empty means scanned.
-    const extracted = await convertToMarkdown(asset.filename, buffer).catch((err: unknown) => {
-      const message = err instanceof Error ? err.message : String(err);
-      if (message.includes('empty markdown')) return null;
-      throw err;
-    });
+    const extracted = await convertToMarkdown(asset.filename, buffer).catch((err: unknown) =>
+      isEmptyConversion(err) ? null : Promise.reject(err),
+    );
     if (extracted !== null && !isNearEmpty(extracted)) {
       markdown = extracted;
     } else {
@@ -114,7 +113,7 @@ const processThumbnail = async (
   }
 
   const buffer = await spacesWorkspaceStorage.getByKey(asset.key, {
-    maxBytes: MAX_CONVERSION_INPUT_BYTES,
+    maxBytes: MAX_ASSET_SIZE,
   });
   if (!buffer) {
     throw new Error('input-not-readable: object missing or too large');
@@ -130,7 +129,7 @@ const processThumbnail = async (
 
 const loadAsset = (assetId: AssetJobDocument['assetId']) =>
   Asset.findById(assetId).select(
-    'userId filename key contentType status textExtracted markdownExtracted markdownStatus markdownFailureReason thumbnailKey thumbnailStatus size units',
+    'userId filename key contentType status textExtracted markdownExtracted markdownStatus markdownFailureReason thumbnailKey thumbnailStatus size units ephemeral origin',
   );
 
 export const processAssetConversionJob = async (job: AssetJobDocument): Promise<void> => {
@@ -141,22 +140,26 @@ export const processAssetConversionJob = async (job: AssetJobDocument): Promise<
   const needsThumbnail = asset.thumbnailStatus === 'pending';
   if (!needsConversion && !needsThumbnail) return;
 
-  // Lifecycles run independently so one failure cannot deny the other.
-  // @see #209
-  const errors: unknown[] = [];
+  // Lifecycles run independently so one failure cannot deny the other; the
+  // markdown error wins the throw so the stored reason is never the
+  // thumbnail's.
+  // @see #209 #396
+  let markdownErr: unknown = null;
+  let thumbnailErr: unknown = null;
   if (needsThumbnail) {
     try {
       await processThumbnail(asset);
     } catch (err) {
-      errors.push(err);
+      thumbnailErr = err;
     }
   }
   if (needsConversion) {
     try {
       await processConversion(asset);
     } catch (err) {
-      errors.push(err);
+      markdownErr = err;
     }
   }
-  if (errors.length > 0) throw errors[0];
+  if (markdownErr !== null) throw markdownErr;
+  if (thumbnailErr !== null) throw thumbnailErr;
 };
