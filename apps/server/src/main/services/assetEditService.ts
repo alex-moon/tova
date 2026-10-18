@@ -250,6 +250,15 @@ export const writeAssetContent = async (
   }
 
   const currentVersion = asset.version ?? 1;
+  // Legacy rows can predate the version field; seed it so the OCC filter
+  // below can match. Concurrent seeds converge on the same value.
+  // @see #396
+  const seeded = await Asset.updateOne(
+    { _id: asset._id, version: { $exists: false } },
+    { $set: { version: currentVersion } },
+  );
+  if (seeded.modifiedCount) asset.version = currentVersion;
+
   // Snapshot the old content BEFORE the PUT: a crash mid-write leaves the
   // prior bytes recoverable from history.
   // @see #396
@@ -271,11 +280,14 @@ export const writeAssetContent = async (
     { $set: { textExtracted: content, size: buffer.length, version: currentVersion + 1 } },
   );
   if (!updated.modifiedCount) {
-    // Storage was clobbered by the loser: restore the surviving row's bytes.
-    const winner = await Asset.findById(asset._id).select('textExtracted contentType');
-    if (winner) {
+    // Storage was clobbered by the loser: restore the surviving row's bytes,
+    // but only while this edit is the immediate predecessor — a newer
+    // winner's PUT is already authoritative, and a null text would blank it.
+    // @see #396
+    const winner = await Asset.findById(asset._id).select('textExtracted contentType version');
+    if ((winner?.version ?? 1) === currentVersion + 1 && winner?.textExtracted != null) {
       await spacesWorkspaceStorage
-        .putByKey(asset.key, Buffer.from(winner.textExtracted ?? '', 'utf8'), winner.contentType)
+        .putByKey(asset.key, Buffer.from(winner.textExtracted, 'utf8'), winner.contentType)
         .catch(() => undefined);
     }
     return {

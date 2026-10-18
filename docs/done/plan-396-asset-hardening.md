@@ -61,6 +61,32 @@ unless noted under Follow-ups.
 - [x] Small dead surfaces (item 16)
 - [x] `npm run ci` green
 
+## Review round
+
+Break-then-harden pass over the batch; four holes found and closed:
+
+- **Sweeper byte-loss race**: `sweepStalePendingAssets` deleted the Spaces object
+  before the status-guarded row delete, so a confirm landing between the sweep's
+  find and its deleteOne kept the row but lost the object (404 downloads). Now the
+  guarded row delete runs first and the object is deleted only when the row went.
+- **Pending-quota TOCTOU**: `presignItemForUser` counted before creating, so
+  concurrent presigns overshot `MAX_PENDING_ASSETS` without bound (verified 60 > 40
+  in a race test). Now create-then-count-then-rollback: the row is rolled back when
+  the live pool is over the cap; no object exists yet at that point.
+- **OCC vs legacy rows**: `writeAssetContent`'s version filter never matched rows
+  missing the `version` field (pre-#325 or tool-written), so every edit on such a
+  row was a permanent 409 with storage PUT churn. The field is now seeded before
+  the OCC check.
+- **Conflict-restore clobber**: the OCC loser's restore PUT was unconditional, so a
+  restore racing a newer winner could overwrite the winner's newer bytes (and a
+  null winner text would have blanked the object). The restore now only applies
+  when the surviving row is exactly the loser's immediate predecessor and its text
+  is non-null.
+
+A confirm now also pins that `expiresAt` is truly `$unset` on confirm — if it ever
+regressed to staying set, the TTL index would silently reap confirmed assets 2h
+after presign.
+
 ## Follow-ups
 
 - Multi-instance asset workers remain coordination-light (single-instance deployment

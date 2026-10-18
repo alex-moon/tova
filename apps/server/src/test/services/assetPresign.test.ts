@@ -86,6 +86,23 @@ describe('presignItemForUser (#396)', () => {
     const ttl = (row?.expiresAt?.getTime() ?? 0) - new Date(row!.createdAt).getTime();
     expect(ttl).toBeGreaterThanOrEqual(CONFIRM_MAX_AGE_MS);
   });
+
+  it('bounds concurrent presigns to the pending quota (#396)', async () => {
+    const userId = new Types.ObjectId().toString();
+    // All pass a pre-create count check together; the quota must still hold.
+    await Promise.all(
+      Array.from({ length: MAX_PENDING_ASSETS + 20 }, (_, i) =>
+        presignItemForUser(userId, {
+          filename: `race-${i}.txt`,
+          contentType: 'text/plain',
+          size: 10,
+        }),
+      ),
+    );
+    expect(await Asset.countDocuments({ userId, status: 'pending' })).toBeLessThanOrEqual(
+      MAX_PENDING_ASSETS,
+    );
+  });
 });
 
 describe('sweepStalePendingAssets (#396)', () => {
@@ -142,5 +159,40 @@ describe('sweepStalePendingAssets (#396)', () => {
     await Asset.updateOne({ _id: id }, { status: 'ready' });
     expect(await sweepStalePendingAssets()).toBe(0);
     expect(await Asset.findById(id)).not.toBeNull();
+  });
+
+  it('keeps the object when a confirm lands mid-sweep (#396)', async () => {
+    const email = 'presign-sweep-interleave@example.com';
+    await registerUser(email);
+    const user = await User.findOne({ email });
+    const id = new Types.ObjectId();
+    const key = `u/${String(id)}/raced.txt`;
+    await Asset.create({
+      _id: id,
+      userId: user?._id,
+      filename: 'raced.txt',
+      key,
+      contentType: 'text/plain',
+      size: 10,
+      status: 'pending',
+      createdAt: new Date(Date.now() - CONFIRM_MAX_AGE_MS - 1000),
+    });
+    // The confirm lands after the sweep's find captured the key but before
+    // the row delete: the row survives, so its object must survive too.
+    const realDeleteOne = Asset.deleteOne.bind(Asset);
+    const confirmWinsFirst = async (...args: Parameters<typeof Asset.deleteOne>) => {
+      await Asset.updateOne({ _id: id }, { status: 'ready' });
+      return realDeleteOne(...args);
+    };
+    const spy = jest
+      .spyOn(Asset, 'deleteOne')
+      .mockImplementationOnce(confirmWinsFirst as unknown as typeof Asset.deleteOne);
+    try {
+      expect(await sweepStalePendingAssets()).toBe(0);
+      expect(mockDeleteObject).not.toHaveBeenCalled();
+      expect(await Asset.findById(id)).not.toBeNull();
+    } finally {
+      spy.mockRestore();
+    }
   });
 });

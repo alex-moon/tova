@@ -331,6 +331,21 @@ describe('Assets confirm', () => {
 
     expect(confirm.status).toBe(409);
   });
+
+  it('clears the pending TTL on confirm so the backstop cannot reap it (#396)', async () => {
+    const cookie = await registerUser('assets-ttl-user@example.com');
+    const assetId = await presignOk(cookie, 'notes.txt');
+
+    mockHead.mockResolvedValue(headerForObject(11, 'text/plain'));
+    const confirm = await confirmFor(cookie, assetId);
+    expect(confirm.status).toBe(200);
+
+    // The TTL index deletes any row carrying a past expiresAt — a confirmed
+    // asset must not keep one. Raw check: mongoose must $unset, not $set null.
+    const raw = await Asset.collection.findOne({ _id: new Types.ObjectId(assetId) });
+    expect(raw).not.toBeNull();
+    expect((raw as Record<string, unknown> | null)?.expiresAt ?? null).toBeNull();
+  });
 });
 
 describe('Assets bulk upload', () => {

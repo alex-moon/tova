@@ -205,6 +205,42 @@ describe('writeAssetContent (#325)', () => {
     expect(reloaded.version).toBe(2);
     expect(mockEnqueueEmbedding).not.toHaveBeenCalled();
   });
+
+  it('seeds a missing version on legacy rows so the OCC check can match (#396)', async () => {
+    const userId = oid();
+    const id = new mongoose.Types.ObjectId();
+    // Raw insert bypasses the schema default, like a pre-#325 row.
+    await Asset.collection.insertOne({
+      _id: id,
+      userId: new mongoose.Types.ObjectId(userId),
+      filename: 'legacy.md',
+      key: `${userId}/${String(id)}/legacy.md`,
+      contentType: 'text/markdown',
+      size: 6,
+      status: 'ready',
+      origin: 'system-generated',
+      textExtracted: 'legacy',
+    });
+    const asset = (await Asset.findById(id))!;
+    const result = await writeAssetContent(asset, 'next');
+    expect(result).toMatchObject({ ok: true });
+    expect((await Asset.findById(id))?.version).toBe(2);
+  });
+
+  it('skips the restore PUT once a newer edit superseded the loser (#396)', async () => {
+    const asset = await createGenerated('# draft');
+    // The winner won twice: the row is already past the loser's next version,
+    // so its bytes are authoritative and no rollback may clobber them.
+    await Asset.updateOne({ _id: asset._id }, { $set: { textExtracted: '# newer', version: 3 } });
+    const result = await writeAssetContent(asset, '# loser');
+    expect(result).toMatchObject({ ok: false, code: 'conflict' });
+    expect(mockPutObject).not.toHaveBeenCalledWith(
+      asset.key,
+      Buffer.from('# newer', 'utf8'),
+      'text/markdown',
+    );
+    expect(mockEnqueueEmbedding).not.toHaveBeenCalled();
+  });
 });
 
 describe('applyAssetEdits (#325)', () => {

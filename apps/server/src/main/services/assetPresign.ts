@@ -39,14 +39,6 @@ const presignItemForUser = async (
   if (!isSafeFilename(safeName)) {
     return { status: 'rejected', code: 400, message: 'Filename is invalid' };
   }
-  const pending = await Asset.countDocuments({ userId, status: 'pending' });
-  if (pending >= MAX_PENDING_ASSETS) {
-    return {
-      status: 'rejected',
-      code: 429,
-      message: 'Too many pending uploads; confirm or remove existing ones first',
-    };
-  }
 
   const asset = await Asset.create({
     userId,
@@ -67,6 +59,20 @@ const presignItemForUser = async (
     expiresAt: new Date(Date.now() + PENDING_TTL_MS),
   });
 
+  // Counting before the create would race across concurrent presigns and
+  // overshoot without bound; create first, then roll this row back if the
+  // live pool is over the cap. No object exists yet to clean up.
+  // @see #396
+  const pending = await Asset.countDocuments({ userId, status: 'pending' });
+  if (pending > MAX_PENDING_ASSETS) {
+    await Asset.deleteOne({ _id: asset._id, status: 'pending' });
+    return {
+      status: 'rejected',
+      code: 429,
+      message: 'Too many pending uploads; confirm or remove existing ones first',
+    };
+  }
+
   const key = `${userId}/${asset._id}/${safeName}`;
   asset.key = key;
   await asset.save();
@@ -76,8 +82,9 @@ const presignItemForUser = async (
 };
 
 // Delete pending rows past the confirm window together with their Spaces
-// objects; rows re-confirmed concurrently lose the race via the status
-// guard. The TTL index covers rows this sweep misses.
+// objects. Row delete first, object only when the row went: a confirm
+// winning the race between find and delete keeps both. The TTL index
+// covers rows this sweep misses.
 // @see #396
 export const sweepStalePendingAssets = async (
   maxAgeMs: number = CONFIRM_MAX_AGE_MS,
@@ -91,11 +98,12 @@ export const sweepStalePendingAssets = async (
     .limit(limit);
   let swept = 0;
   for (const asset of stale) {
+    const removed = await Asset.deleteOne({ _id: asset._id, status: 'pending' });
+    if (!removed.deletedCount) continue;
     if (asset.key !== 'pending') {
       await Promise.resolve(spacesWorkspaceStorage.deleteByKey(asset.key)).catch(() => undefined);
     }
-    const removed = await Asset.deleteOne({ _id: asset._id, status: 'pending' });
-    swept += removed.deletedCount ?? 0;
+    swept += 1;
   }
   return swept;
 };
