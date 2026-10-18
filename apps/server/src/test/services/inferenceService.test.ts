@@ -1,6 +1,6 @@
 import { inferenceService } from '../../main/services/inferenceService';
 
-/* Pins provider dispatch in the delegating service: options dispatch to the right connector and un-tagged callers default to groq. */
+/* Pins dispatch: options reach the right connector; default is groq. */
 const mockGroqCompletion = jest.fn();
 const mockGroqStream = jest.fn();
 const mockDeepinfraCompletion = jest.fn();
@@ -79,7 +79,7 @@ describe('Inference Service provider dispatch', () => {
     );
   });
 
-  /* 'typesafe' is a valid type-level provider but no connector exists yet; a caller passing it must fail loudly, never silently ride groq. */
+  /* 'typesafe' has no connector yet; a caller passing it must fail loudly. */
   // @see #151
   describe('typesafe provider before its connector lands', () => {
     it('rejects with the unknown-provider error during dispatch', async () => {

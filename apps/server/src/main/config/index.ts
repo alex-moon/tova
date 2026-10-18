@@ -1,7 +1,7 @@
 import { getJwtSecret } from './jwt';
 import type { LlmProvider } from '../services/llmTypes';
 
-// Central typed config surface; lazy accessors because env loads after import in some entrypoints and tests mutate process.env.
+// Typed config surface; lazy accessors because env loads after import.
 // @see #142
 
 export { getJwtSecret, JWT_SECRET_ENV_VAR } from './jwt';
@@ -55,7 +55,7 @@ export const config = {
     },
   },
 
-  // Firecrawl web-data API, the fetch_url fallback for blocked pages; unset keeps native-only behaviour.
+  // Firecrawl web-data API, the fetch_url fallback for blocked pages.
   // @see #340
   firecrawl: {
     get apiKey(): string | undefined {
@@ -63,7 +63,7 @@ export const config = {
     },
   },
 
-  // TTL in days for agent-side scraped assets — a staleness policy for reuse vs re-scrape; 0 disables expiry.
+  // TTL in days for agent-side scraped assets; 0 disables expiry.
   // @see #340
   agentAssets: {
     get ttlDays(): number {
@@ -74,20 +74,20 @@ export const config = {
     },
   },
 
-  // Provider API keys surfaced here so consumers have one place to read credentials.
+  // Provider API keys surfaced here; one place for consumers to read them.
   // @see #217
   providers: {
     get deepinfraApiKey(): string | undefined {
       return process.env.DEEPINFRA_API_KEY;
     },
-    // Surfaced for parity with the DeepInfra key; Mastra reads it implicitly for inference.
+    // Surfaced for parity with the DeepInfra key; Mastra reads it implicitly.
     // @see #232
     get fireworksApiKey(): string | undefined {
       return process.env.FIREWORKS_API_KEY;
     },
   },
 
-  // Grafana Cloud hosted Loki for retained logs; url is the push URL and the read side derives the query API host.
+  // Grafana Cloud hosted Loki for retained logs; url is the push URL.
   // @see #179
   loki: {
     get url(): string | undefined {
@@ -107,7 +107,7 @@ export const config = {
     },
   },
 
-  // Workspace-memory retrieval across chats and files; off by default until the gate evals exist.
+  // Workspace-memory retrieval across chats and files; off by default.
   // @see #253
   workspaceMemory: {
     get enabled(): boolean {
@@ -117,7 +117,7 @@ export const config = {
     },
   },
 
-  // Aux model for small latency-insensitive calls; default keeps the retired guard model's wire behaviour.
+  // Aux model for small latency-insensitive calls.
   // @see #238
   aux: {
     get model(): string {
@@ -128,7 +128,7 @@ export const config = {
     },
   },
 
-  // Helpfulness eval models: judge is a different family than the gate; responder and paces pinned so sweeps are config changes.
+  // Helpfulness eval models: judge is a different family than the gate.
   // @see #289
   memoryEval: {
     get judgeModel(): string {
@@ -173,7 +173,7 @@ export const config = {
     },
   },
 
-  // Workspace-memory semantic retrieval; dim is fixed by the Atlas index so a model switch is config plus re-index.
+  // Workspace-memory semantic retrieval; dim is pinned by the Atlas index.
   // @see #294
   embeddings: {
     get model(): string {
@@ -196,7 +196,7 @@ export const config = {
     },
   },
 
-  // Rerank budget knob; tall enough for cross-encoder latency that shares no floor with the embedding call.
+  // Rerank budget knob; tall enough for cross-encoder latency.
   // @see #305
   rerank: {
     get timeoutMs(): number {
@@ -206,13 +206,13 @@ export const config = {
     },
   },
 
-  // Task sequencer budget knobs; a malformed env degrades to the default rather than a NaN budget.
+  // Task sequencer budget knobs; malformed env degrades to the default.
   // @see #254 #251
   task: {
     get maxSteps(): number {
       const raw = process.env.TASK_MAX_STEPS;
       const parsed = raw === undefined || raw === '' ? NaN : Number(raw);
-      // Floor before the positivity guard: 0.5 floors to zero, which must degrade to the default, not become 0.
+      // Floor before the positivity guard: 0.5 must degrade, not become 0.
       const floored = Math.floor(parsed);
       return Number.isFinite(parsed) && floored > 0 ? floored : 25;
     },
@@ -223,7 +223,7 @@ export const config = {
     },
   },
 
-  // Scheduled eval suite; off by default so a fresh deploy makes no unattended provider calls.
+  // Scheduled eval suite; off by default so deploys make no unattended calls.
   // @see #225
   evals: {
     get schedule(): string {
@@ -235,7 +235,7 @@ export const config = {
     get models(): string | undefined {
       return process.env.TOVA_EVAL_MODELS;
     },
-    // Single-model fallback when models is unset; an unset pair resolves to a roster default.
+    // Single-model fallback when models is unset; unset pair uses the roster.
     get model(): string | undefined {
       return process.env.TOVA_EVAL_MODEL;
     },

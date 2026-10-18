@@ -1,7 +1,7 @@
 import axios from 'axios';
 import type { ToolEvent } from '../App';
 
-// Task API client: a task is a first-class stream (a twin of a chat, not a child); shapes must track the server serializers.
+// Task API client: a task is a first-class stream, a twin of a chat.
 // @see #254 #251
 
 export type TaskStatus = 'queued' | 'running' | 'paused' | 'done' | 'failed' | 'cancelled';
@@ -17,7 +17,7 @@ export interface TaskBudget {
   spentUsd: number;
 }
 
-// The task header without its stream (the list payload); mirrors `serializeTask`.
+// The task header without its stream; the list payload.
 export interface TaskSummary {
   id: string;
   status: TaskStatus;
@@ -29,7 +29,7 @@ export interface TaskSummary {
   updatedAt: string;
 }
 
-// One stream event: the chat turn shape plus the task stream's `seq`/`step`; `system` rows carry no model.
+// One stream event: chat turn shape plus the task stream's seq/step.
 export interface TaskStreamEvent {
   seq: number;
   role: 'user' | 'assistant' | 'tool' | 'system';
@@ -53,7 +53,7 @@ export interface TaskDetail {
 }
 
 export class TaskError extends Error {
-  // The HTTP status when the failure came from a response; lets callers treat a 404 differently.
+  // HTTP status when the failure came from a response; 404 special-casing.
   readonly status?: number;
 
   constructor(
@@ -82,7 +82,7 @@ const toTaskError = (err: unknown): TaskError => {
 export const isTaskNotFound = (err: unknown): err is TaskError =>
   err instanceof TaskError && err.status === 404;
 
-// A status is "active" while the worker can still make progress; `paused` waits for a steering instruction.
+// A status is active while the worker can still make progress.
 export const TERMINAL_TASK_STATUSES: readonly TaskStatus[] = ['done', 'failed', 'cancelled'];
 export const isTerminalTask = (status: TaskStatus): boolean =>
   TERMINAL_TASK_STATUSES.includes(status);
@@ -95,7 +95,7 @@ const TaskService = {
     return res.data;
   },
 
-  // The tasks a given chat started — the embedded card's data, filtered server-side.
+  // The tasks a given chat started; filtered server-side.
   // @see #255
   async listForSession(sessionId: string): Promise<TaskSummary[]> {
     const res = await axios.get<TaskListPage>('/api/tasks', {
@@ -104,7 +104,7 @@ const TaskService = {
     return res.data.tasks;
   },
 
-  // The manual "send to worker" path: create a task from the composer with this chat as origin.
+  // Manual "send to worker": create a task with this chat as origin.
   // @see #255
   async create(instruction: string, origin?: TaskOrigin): Promise<TaskSummary> {
     try {
@@ -127,7 +127,7 @@ const TaskService = {
     }
   },
 
-  // Queue a steering turn (or resume a paused task); a terminal task is refused with a 409 surfacing verbatim.
+  // Queue a steering turn; a terminal task is refused with a 409.
   async instruct(taskId: string, instruction: string): Promise<TaskSummary> {
     try {
       const res = await axios.post<{ task: TaskSummary }>(`/api/tasks/${taskId}/instruction`, {

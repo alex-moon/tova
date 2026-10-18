@@ -1,6 +1,6 @@
 import { User, UserDocument } from '../models/User';
 
-// Coarse, country-level geolocation: only country + countryCode are ever persisted; both providers failing degrades to null — chat never depends on this succeeding.
+// Country-level geolocation; only country + countryCode ever persist.
 // @see #50
 
 export interface CoarseLocation {
@@ -18,10 +18,10 @@ const PROVIDER_TIMEOUT_MS = 2000;
 // @see #50
 const RESOLVE_INTERVAL_MS = 7 * 24 * 60 * 60 * 1000;
 
-// After a failed lookup, an in-process cooldown suppresses repeats (Mongo is NOT written on failure, so a success right after a transient outage still lands).
+// In-process cooldown after a failed lookup suppresses repeat attempts.
 const FAILURE_COOLDOWN_MS = 60 * 60 * 1000;
 
-// Timestamps of last failed resolve per user; never stores successes (those go to Mongo).
+// Last failed resolve per user; successes go to Mongo instead.
 const failureCooldown = new Map<string, number>();
 
 // Accept 2-letter ASCII in any case; normalized at the boundary.
@@ -59,7 +59,7 @@ const rangeContains = (ip: string, range: [string, string]): boolean => {
   return value >= lo && value <= hi;
 };
 
-// Empty/unparsable/local/private/link-local addresses resolve as "private" so dev and CI never hit live providers.
+// Local/private/unparsable addresses resolve as "private" for dev and CI.
 export const isPrivateIp = (ip: string | undefined): boolean => {
   if (!ip || typeof ip !== 'string') return true;
   const trimmed = ip.trim();
@@ -76,7 +76,7 @@ export const isPrivateIp = (ip: string | undefined): boolean => {
   // IPv4-mapped IPv6 — check the embedded v4 part.
   const v4 = trimmed.startsWith('::ffff:') ? trimmed.slice(7) : trimmed;
   if (v4.includes(':')) {
-    // Any other IPv6 address: treat as non-private so public v6 clients geo resolve; link-local/ULA prefixes are caught above.
+    // Other IPv6: non-private so public v6 clients geo resolve.
     return false;
   }
   return privateRanges.some((range) => rangeContains(v4, range));
@@ -107,7 +107,7 @@ const fetchProvider = async (
   }
 };
 
-// Primary: country.is — requiring the echoed IP to match defends against a wrong/proxied answer.
+// Primary: country.is — the echoed IP must match, guarding proxies.
 const resolveCountryIs = (ip: string | undefined): Promise<CoarseLocation | null> =>
   fetchProvider(COUNTRY_IS_URL, (data) => {
     if (typeof data.ip !== 'string' || data.ip !== ip) return null;
@@ -118,7 +118,7 @@ const resolveCountryIs = (ip: string | undefined): Promise<CoarseLocation | null
     return { country: code, countryCode: code };
   });
 
-// Fallback: ip-api.com — keeping only country/countryCode bounds what can be persisted.
+// Fallback: ip-api.com — only country/countryCode are requested.
 const resolveIpApi = (): Promise<CoarseLocation | null> =>
   fetchProvider(IP_API_URL, (data) => {
     if (!isCoarseLocation(data)) return null;
@@ -140,7 +140,7 @@ const isFresh = (location: UserDocument['location']): boolean =>
     Date.now() - new Date(location.resolvedAt).getTime() < RESOLVE_INTERVAL_MS,
   );
 
-// Single entry point: read cached state, resolve only when missing/stale, persist a success in place so the same request can build the prompt from it; failures return silently.
+// Single entry point: resolve only when missing/stale, persist on success.
 // @see #50
 export const ensureUserLocation = async (
   user: UserDocument,

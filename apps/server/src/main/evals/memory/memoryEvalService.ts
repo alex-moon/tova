@@ -12,7 +12,7 @@ import { GATE_CASES, MEMORY_SCENARIOS } from './corpus';
 import { clearMemoryCorpus, seedMemoryScenario, type SeedIdMap } from './memorySource';
 import type { GateCase, MemoryScenario, ScenarioCategory } from './types';
 
-// Memory-eval runner over the corpus: stage 2 scores retrieval hit-rate; dependencies injectable for tests.
+// Memory-eval runner: stage 2 scores retrieval hit-rate; injectable deps.
 // @see #289 #310 #305
 
 export interface RetrievalCaseResult {
@@ -24,7 +24,7 @@ export interface RetrievalCaseResult {
   pass: boolean;
   expectedSliceId: string;
   surfacedIds: string[];
-  /** Candidates existed but the rerank cut removed every one (graceful-refusal path). */
+  /** Candidates existed but the rerank cut removed every one. */
   // @see #305
   cutEmpty?: boolean;
 }
@@ -94,19 +94,19 @@ export interface MemoryEvalReport {
   retrieval?: {
     results: RetrievalCaseResult[];
     metrics: RetrievalMetrics;
-    /** Whether the workspace-memory flag was on; false is the BM25 baseline, degradation shows in the delta. */
+    /** Workspace-memory flag was on; false is the BM25 baseline. */
     // @see #293
     vectorEnabled: boolean;
   };
 }
 
-// Default per-scenario embedding: backfills the seeded slices when the flag is on (no-op off); best-effort.
+// Default per-scenario embedding: backfills seeded slices when enabled.
 const defaultEmbedUser = async (userId: string): Promise<void> => {
   if (!isWorkspaceMemoryEnabled()) return;
   await embedWorkspaceUser(userId);
 };
 
-// Live default reports cut diagnostics so the run can count empty-after-cut cases.
+// Live default reports cut diagnostics so the run can count empty cuts.
 // @see #305
 let lastCutDiagnostics: { candidateCount: number } | null = null;
 const defaultLiveRetrieve = async (query: string, userId: string): Promise<WorkspaceSlice[]> => {
@@ -130,13 +130,13 @@ export const runRetrievalEval = async (
   const embed = deps.embed ?? defaultEmbedUser;
   const vectorEnabled = isWorkspaceMemoryEnabled();
   const results: RetrievalCaseResult[] = [];
-  // Clear in a `finally`: a thrown error must not leak seeded rows into the next run.
+  // Clear in a `finally`: an error must not leak rows into the next run.
   try {
     for (const scenario of scenarios) {
-      // Reseed per scenario so one scenario's slices cannot contaminate another.
+      // Reseed per scenario so one scenario's slices cannot leak in.
       await clear();
       const idMap = await seed(scenario);
-      // Embed after seed and before retrieve: the next scenario's clear would wipe a one-off embedding.
+      // Embed between seed and retrieve: the next clear would wipe it.
       try {
         await embed(evalUserId.toHexString());
       } catch (err) {
@@ -146,7 +146,7 @@ export const runRetrievalEval = async (
       const surfacedIds = picks.map((slice) => slice.id);
       const expectedId = idMap[scenario.expectedSliceId];
       const surfaced = expectedId !== undefined && surfacedIds.includes(expectedId);
-      // Empty-after-cut diagnostic; only measurable on the default live retrieve.
+      // Empty-after-cut diagnostic; only measurable on the live default.
       // @see #305
       let cutEmpty: boolean | undefined;
       if (retrieve === defaultLiveRetrieve) {
@@ -173,7 +173,7 @@ export const runRetrievalEval = async (
 /** The deterministic memory stages the runner can execute. */
 export type MemoryEvalStage = 'retrieval';
 
-/** Runs the requested deterministic stages; stage 3 is manual-only and not part of this runner. */
+/** Runs the requested deterministic stages; stage 3 is manual-only. */
 // @see #310
 export const runMemoryEvals = async (
   deps: MemoryEvalDeps = {},
@@ -184,7 +184,7 @@ export const runMemoryEvals = async (
   return report;
 };
 
-/** Deterministic JSON with recursively sorted object keys, so hashes are property-order independent. */
+/** Deterministic JSON with recursively sorted keys, hash-stable. */
 const canonicalJson = (value: unknown): string => {
   if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
   if (value && typeof value === 'object') {
@@ -197,7 +197,7 @@ const canonicalJson = (value: unknown): string => {
   return JSON.stringify(value);
 };
 
-/** SHA-256 over the canonical gate + retrieval corpus, so corpus changes are visible, not silent. */
+/** SHA-256 over the gate + retrieval corpus; changes stay visible. */
 export const memoryCorpusHash = (
   gateCases: GateCase[] = GATE_CASES,
   scenarios: MemoryScenario[] = MEMORY_SCENARIOS,
@@ -205,7 +205,7 @@ export const memoryCorpusHash = (
 
 export const MEMORY_DATASET_NAME = 'tova-memory-evals';
 
-// Load the corpus into LangSmith as a dataset (created when absent, one example per case); best-effort.
+// Load the corpus into LangSmith as a dataset; created when absent.
 export const pushMemoryCorpusToLangSmith = async (
   client: Client,
   scenarios: MemoryScenario[] = MEMORY_SCENARIOS,
@@ -226,7 +226,7 @@ export const pushMemoryCorpusToLangSmith = async (
   for (const testCase of gateCases) {
     await ls.createExample(
       { stage: 'gate', prompt: testCase.prompt, history: testCase.history ?? [] },
-      // `subtype` rides the example so consumers can stratify recall per subtype.
+      // `subtype` rides the example so recall can be stratified.
       { refersBack: testCase.refersBack, subtype: testCase.subtype },
       { datasetName: MEMORY_DATASET_NAME },
     );

@@ -1,4 +1,4 @@
-/* The persisted rollup for the workspace-memory eval: mirrors evalRunService but writes kind 'memory' with continuous metrics; the lease stays global because both suites share one reserved evalUserId. */
+/* Memory-eval rollup: mirrors evalRunService but writes kind 'memory'. */
 // @see #289
 import type { AdminEvalMemoryMetrics } from '@tova/shared';
 import { config } from '../config';
@@ -15,7 +15,7 @@ import { EvalRunBusyError, resolveScheduledModels } from './evalRunService';
 const MAX_STORED_ERROR_CHARS = 500;
 
 export interface StartMemoryEvalRunOptions {
-  /** Which deterministic stages to run; a scheduled run passes `['retrieval']`. */
+  /** Which deterministic stages to run; scheduled runs pass 'retrieval'. */
   stages: MemoryEvalStage[];
   trigger: 'scheduled' | 'manual';
 }
@@ -36,7 +36,7 @@ const resolveRunDeps = (deps: MemoryEvalRunDeps) => ({
   run: deps.run ?? ((stages: MemoryEvalStage[]) => runMemoryEvals({}, stages)),
 });
 
-/* The per-case drill-down: `score` is the closest pass/fail reading of the case's assertion; the authoritative rates live in `metrics`. */
+/* Per-case drill-down: score is the pass/fail proxy; rates live in metrics. */
 const retrievalRow = (r: RetrievalCaseResult) => ({
   caseId: `retrieval:${r.scenarioId}`,
   model: 'memory',
@@ -62,7 +62,7 @@ const buildMetrics = (
   return metrics;
 };
 
-/** Writes the `running` lease for a memory run; rejects with EvalRunBusyError when ANY run is live (global lease). */
+/** Writes the running lease; rejects with EvalRunBusyError when busy. */
 export const beginMemoryEvalRun = async (
   options: StartMemoryEvalRunOptions,
   deps: MemoryEvalRunDeps = {},
@@ -79,7 +79,7 @@ export const beginMemoryEvalRun = async (
   return String((record as { _id: unknown })._id);
 };
 
-/** Runs the requested stages for an existing lease and settles the document to done/error; a crash is recorded, never thrown. */
+/** Runs the stages and settles the lease; a crash is recorded, not thrown. */
 export const executeMemoryEvalRun = async (
   id: string,
   options: StartMemoryEvalRunOptions,
@@ -110,7 +110,7 @@ export const executeMemoryEvalRun = async (
   }
 };
 
-/** Persists and executes one memory run (global lease + kind-scoped record). */
+/** Persists and executes one memory run (global lease, kind-scoped). */
 export const startMemoryEvalRun = async (
   options: StartMemoryEvalRunOptions,
   deps: MemoryEvalRunDeps = {},

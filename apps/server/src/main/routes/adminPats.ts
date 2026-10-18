@@ -9,7 +9,7 @@ import type { AdminPatsPayload } from '@tova/shared';
 
 const router = express.Router();
 
-// Same guard as admin.ts, but the first leg also accepts PAT bearer auth so agent/CLI and cookie paths share these routes.
+// admin.ts's guard, plus a PAT-bearer leg so agents and cookies share it.
 // @see #184
 const adminGuard = [authenticateBearerOrSession, requireRole('admin')];
 
@@ -26,7 +26,7 @@ router.get('/pats', ...adminGuard, async (_req, res) => {
         createdAt: p.createdAt.toISOString(),
         lastUsedAt: p.lastUsedAt ? p.lastUsedAt.toISOString() : null,
         expiresAt: p.expiresAt ? p.expiresAt.toISOString() : null,
-        // Null only for a deleted creator; the middleware already refuses such tokens — a display edge case.
+        // Null only for a deleted creator; tokens for one are refused.
         creatorEmail: emailOf.get(p.userId.toString()) ?? null,
       })),
     };
@@ -43,7 +43,7 @@ router.post('/pats', ...adminGuard, async (req: AuthRequest, res) => {
   }
 
   try {
-    // The plaintext is shown exactly once here, never persisted (only the sha256 digest) and never logged.
+    // Plaintext shown once, never persisted (digest only) nor logged.
     const token = `tova_pat_${crypto.randomBytes(32).toString('base64url')}`;
     const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
     const pat = await Pat.create({
@@ -64,7 +64,7 @@ router.post('/pats', ...adminGuard, async (req: AuthRequest, res) => {
   }
 });
 
-// Deleting the row makes the very next request with the token 401 — the middleware looks the hash up per request.
+// Deleting the row 401s the very next request with the token.
 // @see #184
 router.delete('/pats/:id', ...adminGuard, async (req, res) => {
   const id = String(req.params.id);

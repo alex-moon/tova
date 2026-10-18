@@ -1,4 +1,4 @@
-// Zip-entry helpers: names come from stored Asset.filename with a defensive second pass; collisions get `name (2).ext`.
+// Zip-entry helpers: stored filenames, defensively; collisions dedupe.
 
 const sanitizeZipEntryName = (filename: string): string => {
   const cleaned = filename

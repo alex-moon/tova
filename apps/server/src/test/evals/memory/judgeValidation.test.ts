@@ -8,7 +8,7 @@ import {
 import type { JudgeVerdict } from '../../../main/evals/memory/helpfulnessEval';
 import type { MemoryScenario } from '../../../main/evals/memory/types';
 
-/* Judge-validation logic with an injected fake judge: constructed-pair construction, three-class accuracy/kappa arithmetic, error exclusion, absent-class null. */
+/* Judge-validation logic with an injected fake judge. */
 // @see #289
 
 const label = (id: string, better: JudgeLabelClass): JudgeLabel => ({

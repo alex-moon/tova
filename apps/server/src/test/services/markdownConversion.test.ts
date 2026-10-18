@@ -22,10 +22,10 @@ jest.mock('../../main/services/storageService', () => ({
   putObject: (...args: unknown[]) => mockPutObject(...args),
 }));
 
-// Real JS-native converters exercised against fixture files, plus the failure and cap paths of the conversion service.
+// Real JS-native converters against fixture files, plus failure and cap paths.
 // @see #67
 
-// Hardcoded fixture names only (a test has no user input), joined with a template so no unbounded value feeds path.join().
+// Hardcoded fixture names only; no unbounded value feeds path.join().
 const FIXTURE_DIR = path.join(__dirname, '..', '..', 'main', 'services', 'fixtures');
 const fixture = (file: 'sample.pdf' | 'sample.docx' | 'sample.html'): Buffer =>
   readFileSync(`${FIXTURE_DIR}/${file}`);
@@ -87,7 +87,7 @@ describe('convertToMarkdown (#67)', () => {
   });
 
   it('truncates stored markdown at the storage cap', async () => {
-    // The cap is enforced on the raw output length; exercise the trim through an oversized HTML doc.
+    // The cap is enforced on the raw output length; exercise via a big doc.
     const big = Buffer.from(`<p>${'word '.repeat(MAX_MARKDOWN_CHARS)}</p>`);
     const markdown = await convertToMarkdown('big.html', big);
     expect(markdown.length).toBeLessThanOrEqual(MAX_MARKDOWN_CHARS);
@@ -140,7 +140,7 @@ describe('conversion job end-to-end (#67)', () => {
     const stored = await Asset.findById(asset._id).select('markdownStatus markdownExtracted units');
     expect(stored?.markdownStatus).toBe('ready');
     expect(stored?.markdownExtracted).toContain('Hello Tova');
-    // Units persist alongside the markdown, one per PDF page; the real pdf-parse separator is `\n-- n of n --\n`, and trailing blank lines produce no phantom page.
+    // Units persist per PDF page; blank-line tails produce no phantom page.
     // @see #159
     expect(stored?.toObject().units).toEqual([{ index: 1, label: 'Page 1', text: 'Hello Tova' }]);
   });

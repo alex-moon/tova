@@ -4,7 +4,7 @@ import { defineConfig } from '@playwright/test';
 
 process.env.E2E_BASE_URL ??= 'http://localhost:5173';
 process.env.E2E_EMAIL ??= process.env.ADMIN_EMAIL ?? 'formsatz@gmail.com';
-// Fixture password only — shadowing ADMIN_PASSWORD broke specs after a db:password reset.
+// Fixture password only — shadowing ADMIN_PASSWORD broke specs after reset.
 process.env.E2E_PASSWORD ??= 'password';
 
 export default defineConfig({

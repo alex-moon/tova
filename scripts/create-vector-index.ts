@@ -1,4 +1,4 @@
-/* Create the Atlas Vector Search index over `workspace_embeddings`; Atlas-only and safe to re-run. */
+/* Create the Atlas Vector Search index over `workspace_embeddings`. */
 // @see #294
 import 'dotenv/config';
 import { MongoClient } from 'mongodb';
@@ -18,7 +18,7 @@ const main = async (): Promise<void> => {
   const client = new MongoClient(url);
   try {
     await client.connect();
-    // `db()` with no name uses the connection string's database, honouring a non-`tova` Atlas/eval target.
+    // `db()` with no name uses the connection string's database.
     const collection = client
       .db()
       .collection('workspace_embeddings') as unknown as SearchIndexManager;

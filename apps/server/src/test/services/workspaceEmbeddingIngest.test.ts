@@ -7,7 +7,7 @@ import {
   embedWorkspaceUser,
 } from '../../main/services/workspaceEmbeddingIngest';
 
-/* Ingest/backfill core: `embedWorkspaceSlice` is the hooks' write path, `embedWorkspaceUser` the backfill/eval path; the flag gate and the idempotency rule are the two invariants worth pinning. */
+/* Ingest/backfill core: flag gate and idempotency are the invariants. */
 // @see #294
 describe('workspaceEmbeddingIngest (#294)', () => {
   const original = process.env.WORKSPACE_MEMORY_ENABLED;

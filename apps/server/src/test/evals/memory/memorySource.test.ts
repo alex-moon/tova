@@ -6,7 +6,7 @@ import {
 import { MEMORY_SCENARIOS } from '../../../main/evals/memory/corpus';
 import { clearMemoryCorpus, seedMemoryScenario } from '../../../main/evals/memory/memorySource';
 
-/* Retrieval integration: seed real Mongo rows, run the real read, check whether the expected slice surfaced — pinning the deterministic outcomes the current ranker produces so a later ranking change has a diff to show. */
+/* Retrieval integration: seed real rows, run the real read, pin outcomes. */
 // @see #289 #293 #294
 describe('memory corpus retrieval (#289)', () => {
   afterAll(async () => {
@@ -36,7 +36,7 @@ describe('memory corpus retrieval (#289)', () => {
   });
 
   it('materialises file and task slices at the seed date (deterministic fixtures)', async () => {
-    // `Asset`/`Task` are `timestamps: true`, so without pinning, wall-clock now would silently override the corpus's `at` — a trap for future recency-ordering scenarios.
+    // Without pinning, wall-clock now would override the corpus's `at`.
     for (const id of ['retrieval-file-lease-pets', 'retrieval-task-budget']) {
       const scenario = MEMORY_SCENARIOS.find((s) => s.id === id)!;
       const seed = scenario.seeds.find((s) => s.id === scenario.expectedSliceId)!;
@@ -46,7 +46,7 @@ describe('memory corpus retrieval (#289)', () => {
     }
   });
 
-  // Baseline gap: the paraphrase shares no content word, so lexical overlap scores zero — the case BM25/embeddings are measured against.
+  // Baseline gap: no content word is shared, so lexical overlap is zero.
   // @see #293 #294
   it('does not surface a paraphrase (lexical baseline)', async () => {
     expect((await retrieve('retrieval-paraphrase-partner')).surfaced).toBe(false);
@@ -61,7 +61,7 @@ describe('memory corpus retrieval (#289)', () => {
   });
 
   it('carries the expected fact into the block exactly when the slice surfaces', async () => {
-    // The block is built by `matchSnippet` under a 1200-char cap, so a fact outside the window would make stage 3's backbone unreachable (a fixture defect masquerading as a stage-3 failure); on a by-construction miss the block must be empty. Assert both agree for every scenario.
+    // The block must carry the fact exactly when the slice surfaces.
     for (const scenario of MEMORY_SCENARIOS) {
       await clearMemoryCorpus();
       const idMap = await seedMemoryScenario(scenario);

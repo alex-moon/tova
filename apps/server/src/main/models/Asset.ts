@@ -24,13 +24,13 @@ const assetSchema = new mongoose.Schema(
       type: Number,
       required: true,
     },
-    // Light extraction: deterministic UTF-8 decode for txt/md/csv, null otherwise.
+    // Light extraction: deterministic UTF-8 decode for txt/md/csv, else null.
     // @see #34
     textExtracted: {
       type: String,
       default: null,
     },
-    // Markdown conversion produced by the asset-job worker; `markdownStatus` tracks the lifecycle for the UI.
+    // Markdown conversion by the asset-job worker; `markdownStatus` tracks it.
     // @see #67
     markdownExtracted: {
       type: String,
@@ -45,7 +45,7 @@ const assetSchema = new mongoose.Schema(
       type: String,
       default: null,
     },
-    // Bounded thumbnail derived by the asset-job worker so the viewer never loads the original.
+    // Bounded thumbnail by the asset-job worker; viewer never loads the file.
     // @see #208
     thumbnailKey: {
       type: String,
@@ -56,11 +56,11 @@ const assetSchema = new mongoose.Schema(
       enum: ['none', 'pending', 'ready', 'failed'],
       default: 'none',
     },
-    // Per-unit extracted text so the agent can walk long documents unit by unit; `select: false` keeps queries light.
+    // Per-unit text so the agent can walk long docs unit by unit.
     // @see #159
     units: {
       select: false,
-      // `_id: false`: units are regenerated every job run; per-unit ObjectIds are pure noise.
+      // `_id: false`: units regenerate every run; per-unit ids are noise.
       type: [
         {
           _id: false,
@@ -76,20 +76,20 @@ const assetSchema = new mongoose.Schema(
       enum: ['pending', 'ready', 'failed'],
       default: 'pending',
     },
-    // Origin flag ("did Tova make it?"); legacy rows apply the default at read time, no backfill.
+    // Origin flag ("did Tova make it?"); legacy rows default at read time.
     // @see #66 #340
     origin: {
       type: String,
       enum: ['user-upload', 'system-generated', 'system-side'],
       default: 'user-upload',
     },
-    // Current content version; bumped by every edit/restore, snapshotting into `AssetVersion`.
+    // Current content version; bumped per edit/restore, snapshotting below.
     // @see #325
     version: {
       type: Number,
       default: 1,
     },
-    // Where the file came from; absent (never faked) means unknown, so no default by design.
+    // Where the file came from; absent (never faked) means unknown.
     // @see #252 #251 #199
     provenance: {
       required: false,
@@ -112,13 +112,13 @@ const assetSchema = new mongoose.Schema(
       type: String,
       default: null,
     },
-    // TTL expiry moment; only agent-side rows carry it, so nothing else is TTL-eligible.
+    // TTL expiry moment; only agent-side rows are TTL-eligible.
     // @see #340
     expiresAt: { type: Date },
-    // The URL a system-side row was scraped from: the cache key for re-use instead of a re-scrape.
+    // The URL a system-side row was scraped from: reuse vs re-scrape key.
     // @see #340
     sourceUrl: { type: String, default: null },
-    // Zero-data retention: ZDR composer uploads are removed once the turn completes; library uploads never.
+    // ZDR: composer uploads removed once the turn ends; library uploads never.
     // @see #116
     ephemeral: {
       type: Boolean,
@@ -133,7 +133,7 @@ const assetSchema = new mongoose.Schema(
 // Cursor-paged per-user listing (`{ userId, _id }` ascending).
 assetSchema.index({ userId: 1, _id: 1 });
 
-// Filename resolution for the agent tools (read/edit by name, duplicate-name versioning).
+// Filename resolution for the agent tools (read/edit by name, versioning).
 // @see #369
 assetSchema.index({ userId: 1, filename: 1 });
 
@@ -141,7 +141,7 @@ assetSchema.index({ userId: 1, filename: 1 });
 // @see #67
 assetSchema.index({ markdownExtracted: 1 });
 
-// Native TTL: expires system-side rows at exactly their own `expiresAt`; no Spaces object to outlive.
+// Native TTL: expires system-side rows at their own `expiresAt`.
 // @see #340
 assetSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
 

@@ -2,7 +2,8 @@ import 'dotenv/config';
 import { Agent } from '@mastra/core/agent';
 import { z } from 'zod';
 
-/* One-off #368 capability probe: structuredOutput support per aux-candidate model, via the same Mastra model-router ids the server uses. */
+/* One-off #368 probe: structuredOutput support per aux-candidate model. */
+// @see #368
 
 const flagsSchema = z.object({
   emotional: z.boolean(),

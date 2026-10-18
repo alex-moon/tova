@@ -10,7 +10,7 @@ import {
   type RaceDeps,
 } from './racingService';
 
-/* Task sequencer: the driver's turn loop — one step = one roster race pinned to a single model turn, with steering drained at the step boundary; ZDR users get no tasks. */
+/* Driver's turn loop: one step = one roster race on a single model. */
 // @see #254 #251 #196 #298
 
 // One step's model/provider and parsed result, ready to persist.
@@ -24,7 +24,7 @@ export interface TaskStepOutcome {
 
 const MAX_STEP_TEXT_CHARS = 2000;
 
-/* Render one executed tool exchange as assistant narration for history replay; the authoritative record stays the structured TaskEvent. */
+/* Render a tool exchange as narration for history replay. */
 export const renderToolReplay = (tool: TaskToolEvent): string => {
   const name = tool.name ?? 'tool';
   const query = tool.query ? ` (${tool.query})` : '';
@@ -34,7 +34,7 @@ export const renderToolReplay = (tool: TaskToolEvent): string => {
   return `[tool ${name}${query}]${clipped ? ` → ${clipped}` : ''}`;
 };
 
-/* Reassemble the model message list from the full task stream; system rows are notices, never context. */
+/* Reassemble the message list from the stream; system rows are notices. */
 export const assembleTaskHistory = (events: TaskEventDocument[]): CompletionOptions['messages'] => {
   const messages: CompletionOptions['messages'] = [];
   for (const event of events) {
@@ -55,18 +55,18 @@ export const assembleTaskHistory = (events: TaskEventDocument[]): CompletionOpti
       if (replay) messages.push({ role: 'assistant', content: replay });
       continue;
     }
-    // A driver-executed `tool` row is reserved for a future path; skipped rather than mis-replayed.
+    // A driver-executed tool row is a future path; skip, don't mis-replay.
   }
   return messages;
 };
 
-/* Parse a completed step into its persistable shape; tool results map to the chip shape, forwarding args so the chip keeps its query. */
+/* Parse a completed step into its persistable shape (chip-shaped tools). */
 // @see #196
 export const parseStepOutcome = (outcome: CompletionOutcome): TaskStepOutcome => {
   const completion = outcome.result.completion;
   const tools: TaskToolEvent[] = (completion.toolResults ?? []).map((r) => ({
     ...toolResultEvent({ name: r.name, result: r.result, ...(r.args ? { args: r.args } : {}) }),
-    // The raw result rides the chip so the next step can replay what the tool returned.
+    // The raw result rides the chip so the next step can replay it.
     ...(r.result !== undefined ? { result: r.result } : {}),
   }));
   return {
@@ -78,20 +78,20 @@ export const parseStepOutcome = (outcome: CompletionOutcome): TaskStepOutcome =>
   };
 };
 
-/* Run exactly one driver step: assemble history, size max_tokens against the picked model's window, race the roster. */
+/* One driver step: assemble history, size max_tokens, race the roster. */
 export const runTaskStep = async (
   task: TaskDocument,
   events: TaskEventDocument[],
   deps: RaceDeps = {},
 ): Promise<TaskStepOutcome> => {
   const messages = assembleTaskHistory(events);
-  // Size the output budget against the picked model's window, mirroring the chat path; unknown window sends the base budget.
+  // Size the output budget against the model's window, like chat.
   // @see #298
   const picking = await pickRosterRoute(deps);
   const options: Omit<CompletionOptions, 'provider' | 'model'> = {
     messages,
     userId: String(task.userId),
-    // Attribute any file this step generates to the task (provenance.kind 'task', distinct from chat files).
+    // Files this step generates attribute to the task (kind 'task').
     // @see #298
     taskId: String(task._id),
     maxSteps: 1,

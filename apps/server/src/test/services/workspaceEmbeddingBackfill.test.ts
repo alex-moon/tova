@@ -10,7 +10,7 @@ import {
   workspaceSliceText,
 } from '../../main/services/workspaceEmbeddingText';
 
-/* The backfill's idempotency rule: the plan is pure, so the skip/embed decision is pinned without a database or provider call. */
+/* Backfill idempotency: the plan is pure; skip/embed decided without I/O. */
 // @see #294
 const MODEL = 'BAAI/bge-base-en-v1.5';
 
@@ -85,7 +85,7 @@ describe('planEmbeddingWrites (#294)', () => {
   });
 
   it('normalises whitespace so the backfill hashes exactly what ingest writes (#294)', () => {
-    // collectWorkspaceSlices returns chat/task text untrimmed; the ingest helper trims. Without normalising, the two paths would hash different text and never agree on "already embedded".
+    // Without normalising, backfill and ingest would hash different text.
     // @see #294
     const cases: { slice: EmbeddableSlice; source: Parameters<typeof workspaceSliceText>[0] }[] = [
       {
@@ -93,7 +93,7 @@ describe('planEmbeddingWrites (#294)', () => {
         source: { kind: 'chat', content: '  hello world  ' },
       },
       {
-        // collectWorkspaceSlices joins non-blank events verbatim, so trailing whitespace survives into the collected text.
+        // Non-blank events join verbatim, so trailing whitespace survives.
         slice: slice({ kind: 'task', id: 't1', text: 'do it\nworking  ' }),
         source: {
           kind: 'task',
@@ -145,7 +145,7 @@ describe('planEmbeddingWrites (#294)', () => {
   });
 
   it('keys an existing row by the run model even when the projection omits `model` (#294)', () => {
-    // Regression: the backfill projected `kind sourceId textHash` only, so `row.model` was undefined and the skip never matched — every run re-embedded the whole corpus. The row here has no `model`, as such a projection would return.
+    // Regression: the projection omitted `model` so the skip never matched.
     // @see #294
     const text = 'hello world';
     const hashes = existingEmbeddingHashes(
@@ -159,7 +159,7 @@ describe('planEmbeddingWrites (#294)', () => {
   });
 
   it('keys a row by its own model, so a foreign-model row never satisfies the run model', () => {
-    // Multi-model rows coexist and each stores its own `model`; a foreign-model row must never satisfy the run model's skip lookup.
+    // A foreign-model row must never satisfy the run model's skip lookup.
     const text = 'hello world';
     const hashes = existingEmbeddingHashes(
       [

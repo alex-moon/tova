@@ -11,12 +11,12 @@ import AssetService, {
   type AssetVersionInfo,
 } from '@/services/assets';
 
-// Master/detail files view: library list plus a rendered preview (thumbnail for images, extracted text otherwise) with a version-history toggle.
+// Master/detail files view: library list plus a preview with version history.
 // @see #197 #208 #325
 const isImageAsset = (asset: AssetSummary | null): boolean =>
   Boolean(asset?.contentType?.startsWith('image/'));
 
-// Re-read interval while the selected asset's worker job (thumbnail, conversion) is in flight.
+// Re-read interval while the selected asset's worker job is in flight.
 // @see #208 #67
 const PENDING_POLL_MS = 3000;
 
@@ -35,7 +35,7 @@ const AssetsView: React.FC = () => {
   const [image, setImage] = useState<ImagePreview>({ state: 'loading' });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  // `versions === null` means not fetched; `viewingVersion` non-null shows that version read-only.
+  // versions === null means not fetched; a non-null version shows read-only.
   // @see #325
   const [historyOpen, setHistoryOpen] = useState(false);
   const [versions, setVersions] = useState<AssetVersionInfo[] | null>(null);
@@ -50,7 +50,7 @@ const AssetsView: React.FC = () => {
     setContent(null);
     try {
       if (isImageAsset(asset)) {
-        // The derived thumbnail is the preview; the endpoint reports lifecycle so pending can be polled, not read as failure.
+        // Derived thumbnail is the preview; the endpoint reports lifecycle.
         const thumb = await AssetService.thumbnailUrl(asset.id);
         setImage(
           thumb.url
@@ -84,7 +84,7 @@ const AssetsView: React.FC = () => {
     void loadContent(selected);
   }, [selected, loadContent]);
 
-  // Poll while the asset is settling (thumbnail or conversion); suspended while a past version is previewed.
+  // Poll while the asset settles; suspended while a version is previewed.
   // @see #208 #67 #325
   useEffect(() => {
     const pending =
@@ -147,7 +147,7 @@ const AssetsView: React.FC = () => {
     setRestoring(true);
     try {
       const restored = await AssetService.restore(selected.id, viewingVersion);
-      // Selecting the restored asset re-runs the selection effect, which reloads the content and closes the history view.
+      // Selecting the restored asset re-runs the effect, reloading content.
       setSelected(restored);
       toast.success('Version restored');
     } catch (err) {

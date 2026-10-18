@@ -10,7 +10,7 @@ import {
   runTaskStep,
 } from '../../main/services/taskSequencer';
 
-// Sequencer primitives: history reassembly from the task stream, step parsing, one driver step raced with injected roster deps.
+// Sequencer primitives: history reassembly, step parsing, one raced step.
 // @see #254
 const model = (overrides: Partial<RosterModel> = {}): RosterModel => ({
   modelId: 'm-primary',
@@ -103,7 +103,7 @@ describe('assembleTaskHistory (#254)', () => {
       maxSteps: 5,
       maxCostUsd: 5,
     });
-    // A step that chose a tool returns text: "" — the driver must replay the executed call's query and result or the model re-runs it blind.
+    // The driver must replay the executed call's query/result or it re-runs.
     await TaskEvent.create({
       taskId: task._id,
       seq: 1,

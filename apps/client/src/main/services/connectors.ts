@@ -6,7 +6,7 @@ import type {
   ConnectorOAuthStartInput,
 } from '@shared/connectors';
 
-// Normalised connector-registry failure: server message when one arrived, else the fallback.
+// Normalised connector failure: server message, else the fallback.
 // @see #329
 export class ConnectorError extends Error {
   constructor(message = 'Something went wrong.', options?: { cause?: unknown }) {
@@ -15,7 +15,7 @@ export class ConnectorError extends Error {
   }
 }
 
-// StrictMode double-fires the callback effect: two calls for one state must share one request (the provider's code is single-use).
+// StrictMode double-fires the effect; the provider's code is single-use.
 const inflightComplete = new Map<string, Promise<ConnectorInfo>>();
 
 const toConnectorError = (err: unknown, fallback: string): ConnectorError => {
@@ -26,7 +26,7 @@ const toConnectorError = (err: unknown, fallback: string): ConnectorError => {
   return new ConnectorError(fallback, { cause: err });
 };
 
-// Service separating views from axios; personal connectors writable, platform rows read-only.
+// Service separating views from axios; personal writable, platform read-only.
 // @see #329
 const ConnectorService = {
   async list(): Promise<ConnectorInfo[]> {
@@ -55,7 +55,7 @@ const ConnectorService = {
     }
   },
 
-  // OAuth connect flow: start returns the consent URL, complete exchanges the code, reauth restarts consent.
+  // OAuth flow: start returns the consent URL, complete exchanges the code.
   // @see #327
   async startOAuth(input: ConnectorOAuthStartInput): Promise<string> {
     try {

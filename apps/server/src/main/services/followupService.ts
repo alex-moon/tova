@@ -13,7 +13,7 @@ const SUGGESTION_PROMPT =
 
 const MAX_SUGGESTIONS = 3;
 
-// Schema-enforced suggestions; a validation failure resolves with an empty list, the same shape as a parse failure.
+// Schema-enforced suggestions; validation failure falls back to empty.
 // @see #368
 const SUGGESTIONS_SCHEMA = z.object({ suggestions: z.array(z.string()) });
 
@@ -27,7 +27,7 @@ export const generateFollowups = async (
     .trim()
     .substring(0, 1000);
   try {
-    // Tool-free path: the suggestion model rejects tool-carrying requests, so this call goes to a plain agent even when the Brave key is set; sessionId threads the run under the chat's trace thread.
+    // Tool-free path: the suggestion model rejects tool-carrying requests.
     // @see #41 #308
     const completion = await inferenceService.createStructuredCompletion({
       provider: config.aux.provider,
@@ -53,7 +53,7 @@ export const generateFollowups = async (
   }
 };
 
-/* Shared item normalisation: trim, strip wrapping quotes, keep phraselike strings, drop duplicates, cap the list — model-supplied strings still need it. */
+/* Shared normalisation: trim, strip quotes, dedupe, cap the list. */
 // @see #41
 export const parseSuggestions = (items: unknown[]): string[] =>
   Array.from(

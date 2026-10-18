@@ -6,6 +6,7 @@
     "esModuleInterop": true,
     "forceConsistentCasingInFileNames": true,
     "strict": true,
+    "lib": ["es2022", "dom", "dom.iterable", "scripthost"],
     "skipLibCheck": true,
     "types": ["node", "jest"],
     "baseUrl": ".",

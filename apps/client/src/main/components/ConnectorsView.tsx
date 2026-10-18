@@ -11,13 +11,13 @@ import { Input } from '@/components/ui/input';
 import ConnectorService, { ConnectorError } from '../services/connectors';
 import ConnectorLogo from './ConnectorLogo';
 
-// Curated catalog grid with a connect modal and a custom-URL affordance; connected/not is a trailing-slash-insensitive url-join.
+// Curated catalog grid with a connect modal and a custom-URL affordance.
 // @see #331 #328 #326
 
-// The one place this normalization lives, so cards, modal, and custom list agree.
+// The one place this normalization lives, so all views agree.
 const normUrl = (url: string): string => url.replace(/\/+$/, '');
 
-// Grid shows live entries only; CATALOG_ENDPOINTS still covers the whole catalog so watchlisted custom rows surface under "Added by you".
+// Grid shows live entries only; CATALOG_ENDPOINTS covers everything.
 // @see #333
 const LIVE_CATALOG = CONNECTOR_CATALOG.filter((d) => d.state === 'live');
 const CATALOG_ENDPOINTS = new Set(CONNECTOR_CATALOG.map((d) => normUrl(d.endpoint)));
@@ -28,7 +28,7 @@ const findRowByUrl = (rows: ConnectorInfo[], url: string): ConnectorInfo | undef
 type ModalTarget =
   { kind: 'catalog'; entry: CatalogEntry } | { kind: 'custom'; connector: ConnectorInfo } | null;
 
-// Real steps when the ref resolves, generic honest copy when the entry has none.
+// Real steps when the ref resolves, honest copy when it has none.
 // @see #332
 const InstructionSteps = ({ instructions }: { instructions: ConnectorInstructions }) => (
   <div
@@ -416,7 +416,7 @@ const ConnectorModal = ({
   };
 
   const navigateToConsent = (authorizationUrl: string): boolean => {
-    // Defense in depth with the server's https-only guard: never navigate to a non-https consent screen.
+    // Defense in depth with the server's https guard: never non-https consent.
     if (!authorizationUrl.startsWith('https://')) {
       setError('The sign-in URL is not secure — this provider cannot be connected right now.');
       return false;
@@ -484,7 +484,7 @@ const ConnectorModal = ({
   const needsReauth = row?.authState === 'needs-reauth';
   const watchlisted = entry?.state === 'watchlisted';
   const entryInstructions = entry ? instructionsFor(entry) : undefined;
-  // A tokenless PAT row is a dead end (no update path), so the token is required up front.
+  // A tokenless PAT row is a dead end, so the token is required up front.
   const connectDisabled = pending || !entry || (entry.authType === 'mcp.pat' && !authToken.trim());
 
   return (

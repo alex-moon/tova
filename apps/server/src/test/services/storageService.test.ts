@@ -100,7 +100,7 @@ import { deleteObject, isStorageConfigured, putObject } from '../../main/service
 // Commands are jest.fn()s, so inputs are asserted via the constructor mocks.
 import { PutObjectCommand } from '@aws-sdk/client-s3';
 
-// The DeleteObjectCommand shape is swappable at this boundary: the mocked client routes every send() through one shared mock.
+// The DeleteObjectCommand shape is swappable: every send() hits one mock.
 jest.mock('@aws-sdk/client-s3', () => ({
   DeleteObjectCommand: jest.fn(),
   GetObjectCommand: jest.fn(),

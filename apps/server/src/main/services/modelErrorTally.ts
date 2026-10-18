@@ -2,7 +2,7 @@ import { redactForLog } from './logRedaction';
 import { ModelRouteError } from '../models/ModelRouteError';
 import { isOverloadError } from './providerErrors';
 
-/* Per-provider-route error tally: every completion failure is recorded with status, count and a coarse (intentionally rough) category. */
+/* Per-route error tally: status, count and a coarse category per failure. */
 // @see #175
 
 export type ModelErrorCategory =
@@ -35,7 +35,7 @@ export const statusOf = (err: unknown): number | null => {
     if (typeof raw === 'number' && Number.isInteger(raw) && raw >= 100 && raw <= 599) return raw;
   }
   const text = err instanceof Error ? err.message : String(err ?? '');
-  // Standard fetch failures name only the status-class phrase — map those too; low-confidence phrases leave null.
+  // Standard fetch failures name only the status-class phrase; map those.
   const match = STATUS_TEXT.exec(text);
   if (match) {
     const code = Number(match[1]);
@@ -44,7 +44,7 @@ export const statusOf = (err: unknown): number | null => {
   return null;
 };
 
-/* Categorisation is fail-closed: ambiguous input falls to the status-class fallback (or 'unknown'), never a confident wrong story. */
+/* Categorisation is fail-closed: ambiguity falls to the fallback category. */
 export const categorize = (err: unknown, status: number | null): ModelErrorCategory => {
   const text = (err instanceof Error ? err.message : String(err ?? '')).toLowerCase();
   const keyPhrasing = /\b(api|auth)\s*key\b|credentials?|unauthor|expired/i.test(text);
@@ -57,7 +57,7 @@ export const categorize = (err: unknown, status: number | null): ModelErrorCateg
     return status === 401 ? 'invalid_or_expired_key' : 'forbidden';
   }
   if (status === 404) return 'not_found';
-  // Endpoint overload can arrive as 429; distinguish it from an account rate limit so the tally matches the failover classifier.
+  // Overload can arrive as 429; distinguish it from an account rate limit.
   // @see #213
   if (status === 429 && isOverloadError(err)) return 'overloaded';
   if (status === 429) return 'rate_limit';
@@ -74,7 +74,7 @@ export const categorize = (err: unknown, status: number | null): ModelErrorCateg
   return 'unknown';
 };
 
-// Fire-and-forget: never let diagnostics traffic fail the request; the filter mirrors the unique index.
+// Fire-and-forget: diagnostics traffic must never fail the request.
 export const recordModelError = (provider: string, model: string, err: unknown): void => {
   if (process.env.NODE_ENV === 'test') return;
   try {

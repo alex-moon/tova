@@ -40,7 +40,7 @@ describe('chatScopedKey layout (#149)', () => {
   });
 
   it('is structurally disjoint from the asset layout <userId>/<assetId>/<filename>', () => {
-    // Chat keys carry the literal "chats" segment, so they can never collide with asset ObjectId keys.
+    // Chat keys carry the "chats" segment; they can never collide with assets.
     expect(chatScopedKey('6843ae4d2f', '6843bef77c', 'a.txt')).not.toMatch(
       /^6843ae4d2f\/[0-9a-f]{24}\//,
     );

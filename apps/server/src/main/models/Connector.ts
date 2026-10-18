@@ -1,10 +1,10 @@
 import mongoose from 'mongoose';
 
-// The model formerly known as McpServer; `type` is the discriminator. `api`/`sdk` are reserved names.
+// Formerly McpServer; `type` is the discriminator. `api`/`sdk` reserved.
 // @see #329 #328 #327
 const connectorSchema = new mongoose.Schema(
   {
-    // Default makes any row racing the 20261016 migration behave as a pat connector, not fail validation.
+    // Rows racing the 20261016 migration default to pat, not validation.
     type: {
       type: String,
       enum: ['mcp.pat', 'mcp.oauth'],
@@ -31,7 +31,7 @@ const connectorSchema = new mongoose.Schema(
       type: String,
       required: true,
       trim: true,
-      // SSRF guard: https-only, enforced at the model so no write path lets a bad URL through.
+      // SSRF guard: https-only, so no write path admits a bad URL.
       // @see #36
       validate: {
         validator: (value: string) => {
@@ -45,7 +45,7 @@ const connectorSchema = new mongoose.Schema(
         message: 'Connector url must be a valid https URL',
       },
     },
-    // mcp.pat auth material: AES-256-GCM envelope of the auth header set; toJSON strips it entirely.
+    // mcp.pat auth: AES-256-GCM envelope of the header set; toJSON strips.
     headers: {
       type: {
         iv: { type: String, required: true },
@@ -54,7 +54,7 @@ const connectorSchema = new mongoose.Schema(
       },
       default: null,
     },
-    // mcp.oauth token vault: same envelope shape over the OAuth token blob; toJSON strips it.
+    // mcp.oauth vault: same envelope over the token blob; toJSON strips.
     // @see #327
     oauth: {
       type: {
@@ -64,14 +64,14 @@ const connectorSchema = new mongoose.Schema(
       },
       default: null,
     },
-    // 'needs-reauth' when a proactive token refresh fails; cleared by a successful re-auth.
+    // Set when a proactive refresh fails; cleared by a re-auth.
     // @see #327
     authState: {
       type: String,
       enum: ['ok', 'needs-reauth'],
       default: 'ok',
     },
-    // Denormalized so the API can show "auth configured" without exposing the header itself.
+    // Denormalised so the API can show "auth configured" without secrets.
     headersConfigured: {
       type: Boolean,
       default: false,
@@ -101,7 +101,7 @@ const connectorSchema = new mongoose.Schema(
   },
 );
 
-// A user-scope connector must carry its owner; platform ones must be ownerless.
+// A user-scope connector needs its owner; platform ones are ownerless.
 const validateScopeOwnership = function (this: { scope?: string; userId?: unknown }): boolean {
   if (this.scope === 'user') return !!this.userId;
   if (this.scope === 'platform') return this.userId == null;
@@ -134,5 +134,5 @@ export type ConnectorDocument = mongoose.HydratedDocument<
   mongoose.InferSchemaType<typeof connectorSchema>
 >;
 
-// Collection name pinned explicitly: the 20261016 migration renames the legacy collection to exactly this.
+// Collection name pinned: the 20261016 migration renames to exactly this.
 export const Connector = mongoose.model('Connector', connectorSchema, 'connectors');

@@ -3,7 +3,7 @@ import AuthService from '../services/auth';
 import { applyUserTheme } from '../theme';
 import type { AuthUser } from '@shared/contracts';
 
-// `Intl` reports the exact zone offline; a browser without the API yields undefined and the server keeps UTC.
+// Intl reports the exact zone offline; no API yields undefined and UTC.
 // @see #261
 const browserTimezone = (): string | undefined => {
   try {
@@ -13,7 +13,7 @@ const browserTimezone = (): string | undefined => {
   }
 };
 
-// Drift: login/register return a narrower payload without `permissions`; the field is undefined until /me refreshes it.
+// Drift: login/register lack `permissions` until /me refreshes them.
 // @see #20
 export type User = AuthUser;
 
@@ -23,7 +23,7 @@ interface AuthContextType {
   login: (email: string, password: string) => Promise<void>;
   register: (email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
-  // Pushes an already-fetched updated user into context, keeping every consumer in sync.
+  // Pushes an already-fetched updated user into context, syncing consumers.
   updateUser: (user: User) => void;
 }
 
@@ -61,13 +61,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const updateUser = (next: User) => setUser(next);
 
-  // As soon as the account is known, its saved theme wins and mirrors into the cookie/storage fast path.
+  // Once the account is known, its saved theme wins and mirrors to storage.
   // @see #53
   useEffect(() => {
     applyUserTheme(user?.theme);
   }, [user]);
 
-  // Report the browser's zone once per session when it differs from the account's; failure is silent (falls back to UTC).
+  // Report the browser zone once when it differs from the account's.
   // @see #261
   const reportedZoneRef = useRef<string | undefined>(undefined);
   useEffect(() => {
@@ -77,7 +77,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     reportedZoneRef.current = zone;
     Promise.resolve(AuthService.updateProfile({ timezone: zone }))
       .then((updated) => {
-        // Only a real payload replaces the user (a bare mock resolves undefined and must not null the session).
+        // Only a real payload replaces the user; mocks must not null it.
         if (updated) setUser(updated);
       })
       .catch(() => {

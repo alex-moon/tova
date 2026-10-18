@@ -1,11 +1,11 @@
 import mongoose from 'mongoose';
 
-// Cached LangSmith per-model rollup computed by the background poller; cost is joined at read time.
+// Cached LangSmith per-model rollup from the background poller.
 // @see #224
 const modelStatSchema = new mongoose.Schema(
   {
     model: { type: String, required: true },
-    // Absent on rows written before the provider rollup; read back as null (model-only fallback).
+    // Pre-provider-rollup rows read back as null (model-only fallback).
     // @see #237
     provider: { type: String, default: null },
     calls: { type: Number, required: true },
@@ -18,7 +18,7 @@ const modelStatSchema = new mongoose.Schema(
     inputTokens: { type: Number, required: true },
     outputTokens: { type: Number, required: true },
   },
-  // `errors` collides with a Mongoose reserved pathname; keep the wire name, suppress the warning.
+  // `errors` is a Mongoose reserved pathname; wire name kept.
   { _id: false, suppressReservedKeysWarning: true },
 );
 

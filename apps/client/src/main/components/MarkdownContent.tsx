@@ -8,7 +8,7 @@ import { ExternalLink } from 'lucide-react';
 const isExternalHttp = (href?: string): href is string =>
   typeof href === 'string' && /^https?:\/\//i.test(href);
 
-// Outgoing link override: https/email targets open in a new tab with noopener; the override runs post-sanitize.
+// Link override: https/email targets open in a new tab, post-sanitize.
 // @see #33
 const MarkdownLink = ({ href, children }: { href?: string; children?: React.ReactNode }) => {
   if (!isExternalHttp(href)) return <a href={href}>{children}</a>;
@@ -32,7 +32,7 @@ const MarkdownTable = ({ children }: { children?: React.ReactNode }) => (
   </div>
 );
 
-// Shared renderer for chat and asset preview; rehype-raw paired with rehype-sanitize because stored markdown can contain raw HTML.
+// Shared renderer for chat and asset preview; raw HTML gets sanitized.
 // @see #197
 const MarkdownContent: React.FC<{ content: string; markdown: boolean }> = ({
   content,

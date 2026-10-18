@@ -1,6 +1,5 @@
-// One-off eval for #384: does structured tool-call history (arm B) reduce
-// narrate-instead-of-invoke vs the provenance-line summary (arm A)? Replays the real
-// "Review blog draft" session (formsatz@gmail.com) with a fresh read-back turn.
+// One-off eval: structured tool-call history vs prose summaries (arms A/B/C).
+// @see #384
 // Usage: npx tsx scripts/eval-tool-history-ab.ts [--reps 3]
 import 'dotenv/config';
 import mongoose from 'mongoose';
@@ -50,7 +49,8 @@ type WireMessage = {
   tool_call_id?: string;
 };
 
-// Draft body rehydrated from the transcript's own quotes (#382); shape-experiment substitute for Spaces content.
+// Draft body rehydrated from the transcript's own quotes.
+// @see #382
 const draftContent = [
   '# Does the grassroots murmur predict the enterprise default?',
   '',
@@ -136,7 +136,7 @@ type HistoryTurn = {
   tools?: { name: string }[];
 };
 
-/* Arm B/C: each assistant turn with tool summaries becomes tool_calls + tool result messages; the prose provenance line is dropped (structure replaces it). `resultChars` truncates replayed read results so the transcript shows the call without handing over the whole file. */
+/* Arm B/C: tool summaries become tool_calls + tool result messages. */
 const structuredMessages = (
   turns: HistoryTurn[],
   assets: (typeof Asset.prototype)[],
@@ -215,9 +215,7 @@ const runRep = async (
   const options: CompletionOptions = {
     provider: ref.provider,
     model: ref.model,
-    // Deliberate: no userId — tools answer 'unavailable' so the probe can never write
-    // to the user's real library; invocation, not payload, is the metric. No trace —
-    // probe runs stay out of the session's LangSmith thread.
+    // No userId: no real-library writes; invocation is the metric. No trace.
     messages: messages as unknown as CompletionOptions['messages'],
     max_tokens: outputTokensFor(ref.contextLength, promptCharsFrom(messages as never)),
   };
@@ -251,7 +249,7 @@ async function main() {
     .limit(HISTORY_MAX_MESSAGES)
     .lean()) as unknown as HistoryTurn[];
   const simulated: HistoryTurn = { role: 'user', content: NEW_CONTENT, timestamp: new Date() };
-  // Newest-first in, as the route passes it; windowed then reversed to conversation order for arm B.
+  // Newest-first in, as the route passes it; reversed for arm B.
   const newestFirst = [...windowedHistory([simulated, ...docs])];
   const turns = [...newestFirst].reverse();
 
@@ -351,7 +349,7 @@ async function main() {
             error: msg,
           });
           console.error(`[${arm}] ${refKey} #${i + 1}: ERROR ${msg}`);
-          // A backend that cannot serve the model at all will not recover mid-run.
+          // A backend that cannot serve the model will not recover mid-run.
           if (msg.includes('Model not found')) {
             deadRefs.add(refKey);
             console.error(`--- skipping ${refKey}: backend does not serve this model`);

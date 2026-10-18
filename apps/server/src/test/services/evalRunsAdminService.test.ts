@@ -6,7 +6,7 @@ import {
   MAX_LIMIT,
 } from '../../main/services/evalRunsAdminService';
 
-/* Read-side coverage for the admin Evals tab: limit clamping, newest-first ordering with per-score counts, the detail projection, and the prototype-chain score guard. */
+/* Admin Evals read side: clamping, ordering, projection, score guard. */
 // @see #225
 
 const seed = (startedAt: Date, results: Record<string, unknown>[] = [], over = {}) =>
@@ -92,7 +92,7 @@ describe('listEvalRuns / getEvalRun (#225)', () => {
   });
 
   it('counts a prototype-chain score name as an error, not a real key', async () => {
-    // "constructor" is `in` a plain object via Object.prototype; the counts rollup must not treat it as a real key.
+    // "constructor" comes via Object.prototype; the rollup must ignore it.
     const doc = await seed(new Date('2026-10-04T00:00:00Z'), [result('constructor')]);
     const runs = await listEvalRuns();
     expect(runs[0].counts).toEqual({ pass: 0, partial: 0, fail: 0, error: 1 });

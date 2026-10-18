@@ -8,7 +8,7 @@ import type {
   AdminEvalRunDetail,
 } from '../../main/types/admin';
 
-/* The Evals tab renders stored run rollups, drills into a run's per-case breakdown, and triggers a manual run; the service connector is mocked. */
+// The Evals tab renders run rollups, drills into cases, triggers a manual run.
 // @see #225
 
 const listEvalRuns = vi.fn();

@@ -1,7 +1,7 @@
 import request from 'supertest';
 import { createApp } from '../../main/index';
 
-/* Contract drift tests: pin the /register, /login and /me wire payloads to the exact field sets of the shared contracts; a shape change fails here. */
+/* Contract drift tests: pin /register, /login and /me payload field sets. */
 // @see #20
 describe('auth route contract drift', () => {
   it('register returns a user payload matching LoginUserPayload exactly', async () => {
@@ -61,7 +61,7 @@ describe('auth route contract drift', () => {
       .send({ email: 'contract-profile@example.com', password: 'password123' });
     const cookie = reg.headers['set-cookie'];
 
-    // Populate the fields directly on the model (PATCH /api/profile is task 3).
+    // Populate the fields directly on the model (PATCH /profile is task 3).
     const { User } = await import('../../main/models/User');
     const doc = await User.findOne({ email: 'contract-profile@example.com' });
     if (!doc) throw new Error('user not found');
@@ -77,7 +77,7 @@ describe('auth route contract drift', () => {
     expect(user.name).toBe('Alex Moon');
     expect(user.avatarUrl).toBe('https://example.com/a.png');
     expect(user.preferredName).toBe('Alex');
-    // The per-user prompt override ride-along on AuthUser is required by the profile modal prefill.
+    // AuthUser must ride the prompt override for profile modal prefill.
     expect(user.settings).toBeUndefined();
     expect(user.customInstructions).toBe('Be terse.');
   });
@@ -89,7 +89,7 @@ describe('auth route contract drift', () => {
       .send({ email: 'contract-location@example.com', password: 'password123' });
     const cookie = reg.headers['set-cookie'];
 
-    // Freshly registered: no location yet, and the loopback request IP skips resolution entirely.
+    // Freshly registered: no location; loopback IP skips resolution.
     const before = await request(app).get('/api/auth/me').set('Cookie', cookie);
     expect(before.body.user.location).toBeUndefined();
 

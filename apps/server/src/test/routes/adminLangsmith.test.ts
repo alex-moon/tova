@@ -7,7 +7,7 @@ import { Message } from '../../main/models/Message';
 import { Session } from '../../main/models/Session';
 import { listTraces, RETRY_WAIT_MS } from '../../main/services/langsmithTracesService';
 
-/* Route coverage: admin-guard wiring (cookie + PAT bearer), the unconfigured 503, upstream 502s, and fetch-level happy paths against mocked LangSmith responses. */
+/* Route coverage: guard wiring, unconfigured 503, 502s, fetch happy paths. */
 // @see #186
 
 const cookieOf = (res: request.Response) => {
@@ -122,7 +122,7 @@ describe('langsmithTracesService rate-limit handling (#186)', () => {
     queryStatuses = [429, 429, 429, 429];
 
     const result = listTraces();
-    // Attach the rejection handler up front: an unhandled rejection at the fake-timer checkpoint would fail the suite before the assertion below.
+    // Attach the handler up front: an unhandled rejection fails the suite.
     const expectation = expect(result).rejects.toThrow('HTTP 429');
     await jest.advanceTimersByTimeAsync(1000);
     await jest.advanceTimersByTimeAsync(2000);
@@ -252,7 +252,7 @@ describe('admin langsmith (#186)', () => {
       error: 'model exploded',
     });
     expect(failed.appPath).toBeUndefined();
-    // A root without the metadata surfaces neither field; a garbage value is dropped rather than passed through.
+    // Missing metadata surfaces neither field; garbage is dropped, not passed.
     // @see #308
     expect(failed.workspaceGate).toBeUndefined();
     expect(failed.workspaceHits).toBeUndefined();
@@ -324,7 +324,7 @@ describe('admin langsmith (#186)', () => {
     expect(errorsOnly.status).toBe(200);
 
     expect(rootFilters).toEqual(['and(eq(is_root, true), eq(status, "error"))']);
-    // The model filter cannot push into the root query (the model lives on the child run name); rows are filtered after the join.
+    // The model filter cannot reach the root query; rows filter after join.
     expect(errorsOnly.body.traces).toHaveLength(1);
     expect(errorsOnly.body.traces[0].model).toBe('openai/gpt-oss-20b');
 
@@ -343,7 +343,7 @@ describe('admin langsmith (#186)', () => {
       if (String(url).includes('/api/v1/sessions')) {
         return Promise.resolve(jsonResponse(200, [{ id: 'proj-1', name: 'tova-dev' }]));
       }
-      // The API rejects any per-query limit over 100 — the service must page, never ask for the whole tree at once.
+      // The API rejects limits over 100; the service must page, never bulk.
       const body = JSON.parse(init?.body ?? '{}');
       expect(body.limit).toBeLessThanOrEqual(100);
       runsBodies.push(body);
@@ -494,7 +494,7 @@ describe('admin langsmith (#186)', () => {
     const res = await request(app).get('/api/admin/langsmith/stats?days=7').set('Cookie', cookie);
     expect(res.status).toBe(200);
 
-    // One sweep, windowed by start_time over llm runs only — no children join, no root paging (the request-count lesson from the live smoke).
+    // One sweep, windowed by start_time over llm runs; no join, no paging.
     expect(sweepQueries).toHaveLength(1);
     expect(sweepQueries[0]).toMatchObject({ limit: 100, offset: 0 });
     const filter = (sweepQueries[0] as { filter: string }).filter;
@@ -555,7 +555,7 @@ describe('admin langsmith (#186)', () => {
       return Promise.resolve(
         jsonResponse(200, {
           runs: [
-            // Winner on deepinfra: a start/first_token gap of 700ms, duration 2000ms.
+            // Winner on deepinfra: 700ms to first token, 2000ms duration.
             {
               name: "llm: 'deepseek-ai/DeepSeek-V4.1-Flash'",
               run_type: 'llm',
@@ -568,7 +568,7 @@ describe('admin langsmith (#186)', () => {
               completion_tokens: 30,
               extra: { metadata: { ls_provider: 'deepinfra' } },
             },
-            // The aborted loser on fireworks: an errored run cancelled mid-race; it must not appear at all.
+            // Aborted loser on fireworks: cancelled mid-race, must not appear.
             // @see #237
             {
               name: "llm: 'deepseek-ai/DeepSeek-V4.1-Flash'",
@@ -587,7 +587,7 @@ describe('admin langsmith (#186)', () => {
 
     const res = await request(app).get('/api/admin/langsmith/stats?days=7').set('Cookie', cookie);
     expect(res.status).toBe(200);
-    // One row: the fireworks loser is dropped, so only the deepinfra winner remains; cost is priced from the ROW'S provider, not the model-only fallback.
+    // The fireworks loser is dropped; only the deepinfra winner remains.
     // @see #237
     expect(res.body.models).toEqual([
       {
@@ -646,7 +646,7 @@ describe('admin langsmith (#186)', () => {
       return Promise.resolve(
         jsonResponse(200, {
           runs: [
-            // A run shape with no split at all: the total must still count and the split contributes 0 (never NaN/undefined).
+            // No split: the total still counts and the split contributes 0.
             {
               name: "llm: 'openai/gpt-oss-20b'",
               run_type: 'llm',
@@ -917,8 +917,8 @@ describe('admin langsmith (#186)', () => {
       ],
     });
 
-    const sessionA = await Session.create({ userId: (await User.findOne())._id, title: 'Chat A' });
-    const sessionB = await Session.create({ userId: (await User.findOne())._id, title: 'Chat B' });
+    const sessionA = await Session.create({ userId: (await User.findOne())!._id, title: 'Chat A' });
+    const sessionB = await Session.create({ userId: (await User.findOne())!._id, title: 'Chat B' });
 
     await Message.create({
       sessionId: sessionA._id,
@@ -1000,7 +1000,7 @@ describe('admin langsmith (#186)', () => {
       ],
     });
 
-    const session = await Session.create({ userId: (await User.findOne())._id, title: 'Dual' });
+    const session = await Session.create({ userId: (await User.findOne())!._id, title: 'Dual' });
     // DeepInfra turn: 1M in @ $1 = $1.
     await Message.create({
       sessionId: session._id,
@@ -1030,7 +1030,7 @@ describe('admin langsmith (#186)', () => {
     const row = res.body.sessions.find(
       (s: { sessionId: string }) => s.sessionId === String(session._id),
     );
-    // Provider-accurate: $1 (deepinfra) + $10 (fireworks), not 2 × the same rate.
+    // Provider-accurate: $1 (deepinfra) + $10 (fireworks), not one rate × 2.
     expect(row.estimatedCostUsd).toBe(11);
     expect(res.body.totals.estimatedCostUsd).toBe(11);
   });
@@ -1039,7 +1039,7 @@ describe('admin langsmith (#186)', () => {
     const app = createApp();
     const cookie = await registerAdmin(app, 'ls-sessions-window@example.com');
 
-    const session = await Session.create({ userId: (await User.findOne())._id, title: 'Old' });
+    const session = await Session.create({ userId: (await User.findOne())!._id, title: 'Old' });
     await Message.create({
       sessionId: session._id,
       role: 'user',

@@ -33,7 +33,7 @@ const NULL_LLM: LlmMetrics = {
   openEnded: null,
 };
 
-// Schema-enforced classification; a validation failure resolves with NULL_LLM, which is exactly the parse-failure shape.
+// Validation failure resolves with NULL_LLM, the parse-failure shape.
 // @see #368
 const FLAGS_SCHEMA = z.object({
   emotional: z.boolean(),
@@ -43,20 +43,20 @@ const FLAGS_SCHEMA = z.object({
   openEnded: z.boolean(),
 });
 
-// Classify a prompt and report why flags could be missing: 'parse' = unusable output (the fallback all-null shape), 'error' = the call itself failed.
+// Classify a prompt and report why flags could be missing: parse or error.
 export const classifyPromptDimensions = async (
   content: string,
   sessionId?: string,
 ): Promise<{ llm: LlmMetrics; skipReason: 'parse' | 'error' | null }> => {
   try {
-    // Tool-free agent, same rationale as the guard classifier; sessionId threads the aux run under the chat's LangSmith thread.
+    // Tool-free agent; sessionId threads the aux run under the chat thread.
     // @see #77 #41 #308
     const completion = await inferenceService.createStructuredCompletion({
       provider: config.aux.provider,
       model: llmModel(),
       messages: [{ role: 'user', content: `${LLM_PROMPT}\n\nPrompt: ${content.trim()}` }],
       temperature: 0,
-      // Reasoning models spend hidden reasoning tokens from this budget before any flags text; too small and every classification is empty (starved-blind).
+      // Reasoning tokens come out of this budget before any flags text.
       // @see #378 #4
       max_tokens: 1024,
       ...(sessionId ? { trace: { sessionId } } : {}),
@@ -87,7 +87,7 @@ const isAllNullLlm = (llm: LlmMetrics): boolean =>
   llm.sentiment === null &&
   llm.openEnded === null;
 
-// Classify a user message and persist the flags into its metrics; never throws for classification problems; `metrics.llmSkipReason` records why flags are null.
+// Classify and persist flags; never throws; llmSkipReason records why null.
 // @see #238
 export const classifyAndPersistPromptDimensions = async (
   messageId: string,
@@ -100,7 +100,7 @@ export const classifyAndPersistPromptDimensions = async (
   });
 };
 
-/* Trivial-prompt skip gate: prompts confidently neutral on every LLM dimension skip the classification call; bounded and fail-closed — unsure input still gets classified. */
+/* Trivial-prompt skip gate: confident neutral prompts skip classification. */
 const TRIVIAL_MAX_WORDS = 6;
 const TRIVIAL_TOKEN_ONLY_MAX_WORDS = 3;
 
@@ -145,7 +145,7 @@ const TRIVIAL_PHRASES = new Set([
   'sounds great to me',
 ]);
 
-// Tokens that can only appear in a bare confirmation/continuation; any word outside makes the prompt fail closed.
+// Tokens only in a bare confirmation; any other word fails closed.
 const TRIVIAL_TOKENS = new Set([
   'yes',
   'yeah',
@@ -218,7 +218,7 @@ export const isTriviallyNeutral = (content: string): boolean => {
   const normalized = normalizeForTrivialMatch(content);
   if (TRIVIAL_PHRASES.has(normalized)) return true;
 
-  // Generic short-confirmation rule: a very short prompt made entirely of neutral tokens.
+  // Short-confirmation rule: a very short prompt of all neutral tokens.
   if (metrics.wordCount <= TRIVIAL_TOKEN_ONLY_MAX_WORDS) {
     const words = normalized.split(' ');
     if (words.length > 0 && words.every((w) => TRIVIAL_TOKENS.has(w))) return true;

@@ -7,7 +7,7 @@ import { Connector } from '../../main/models/Connector';
 import { encryptEnvelope, MCP_ENCRYPTION_KEY_ENV_VAR } from '../../main/services/crypto';
 import { purgeAllUserData } from '../../main/services/userDataPurge';
 
-// Data-level coverage for purgeAllUserData: every PII-bearing collection goes to zero for the purging user, user B untouched, Spaces sweeps attempted per key with failures collected; storage and trace purge are mocked (tracePurge.test.ts covers the LangSmith wire format).
+// Data-level purge coverage: storage and trace purge are mocked at the seam.
 // @see #143
 jest.mock('../../main/services/storageService', () => ({
   isStorageConfigured: jest.fn(),
@@ -87,7 +87,7 @@ describe('purgeAllUserData (issue #143: factory reset)', () => {
   it('sweeps every enumerated collection to zero for the purging user; user B is untouched', async () => {
     const owner = userId();
     const other = userId();
-    // A platform server is ownerless and must never be swept by any user's reset.
+    // A platform server is ownerless and must never be swept by a user reset.
     await Connector.create({
       scope: 'platform',
       name: 'platform-tools',
@@ -171,7 +171,7 @@ describe('purgeAllUserData (issue #143: factory reset)', () => {
     await seedAssetsAndMcp(uid);
     mockedIsConfigured.mockReturnValue(false);
 
-    // Storage never configured → no bucket could hold the user's files, so surface no failedObjects (a spurious warning would claim data remains when it cannot).
+    // Storage never configured: no bucket held files, so no failedObjects.
     await expect(purgeAllUserData(uid)).resolves.toEqual({ failedObjects: [] });
     expect(mockedDeleteByKey).not.toHaveBeenCalled();
     expect(mockedListKeys).not.toHaveBeenCalled();

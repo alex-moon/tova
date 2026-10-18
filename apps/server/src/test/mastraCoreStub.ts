@@ -1,8 +1,8 @@
-/* Jest stub for the `@mastra/core` root entry: the real build ships ESM-only transitive deps ts-jest cannot parse; these stubs exist only so module resolution of mastraService.ts succeeds offline. */
+/* Jest stub for `@mastra/core`: so module resolution succeeds offline. */
 
 export class Mastra {
   constructor(public readonly config: unknown) {}
 
-  /* The stub only needs addAgent to succeed; agent behaviour lives behind the mocked agent module. */
+  /* Only addAgent needs to succeed; behaviour lives behind the mock. */
   addAgent(): void {}
 }

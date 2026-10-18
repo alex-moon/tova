@@ -11,10 +11,10 @@ import { embedTexts } from './embeddingService';
 import { rerankQuery } from './rerankerService';
 import { withTimeout } from './markdownConversion';
 
-/* Workspace memory — retrieval over the user's past work: addressable views over existing rows (no eager copies), BM25-ranked at personal scale over one read-time candidate set; pure retrieval + layout, no gate. */
+/* Workspace memory: BM25-ranked retrieval over existing rows, pure. */
 // @see #253 #138 #251 #298 #293
 
-/* Keyword tokeniser for lexical scoring: lowercase, split on non-word chars, drop single characters and stopwords; returns terms with multiplicity for BM25. */
+/* Keyword tokeniser: lowercase, non-word split, drop stopwords; BM25 terms. */
 // @see #256
 const WORD_PATTERN = /[a-z0-9']+/g;
 
@@ -50,11 +50,11 @@ export const tokenize = (text: string): string[] => {
 
 export const promptWords = (prompt: string): Set<string> => new Set(tokenize(prompt));
 
-// Kill switch, default OFF: a wrong injection pollutes every turn, so the block ships opt-in until the gate evals exist.
+// Kill switch, default OFF: a wrong injection pollutes every turn.
 // @see #251
 export const isWorkspaceMemoryEnabled = (): boolean => config.workspaceMemory.enabled;
 
-// Injection budget (chars), sized so the block leaves room for the library index in the same prompt budget.
+// Injection budget (chars): leaves room for the library index.
 export const BLOCK_CAP = 1200;
 
 // Asset/task candidate pools: still bounded (see the corpus-read comment).
@@ -70,16 +70,16 @@ export type WorkspaceSlice = {
   at: Date;
 };
 
-/* BM25 ranking, replacing the naive overlap score; standard parameters exported so a tuning change is a visible diff; corpus-relative and pure (no Mongo, no Date.now()). */
+/* BM25 ranking replaces the naive overlap score; pure. */
 // @see #293
 export const BM25_K1 = 1.2;
 export const BM25_B = 0.75;
 
-/* Extra occurrences each title token contributes to a slice's document stream — the title carries terms the content cannot supply; exported/diffable like K1/B. */
+/* Extra occurrences per title token; title carries unsupplied terms. */
 // @see #309
 export const BM25_TITLE_BOOST = 2;
 
-// The doc token stream for one slice: content plus title tokens repeated `BM25_TITLE_BOOST` times, so tf and length derive from one stream.
+// Doc stream: content plus title tokens repeated BM25_TITLE_BOOST times.
 const sliceTokens = (slice: WorkspaceSlice): string[] => {
   const titleTokens = tokenize(slice.title);
   return [
@@ -98,7 +98,7 @@ export const pickTopSlices = (
   const queryTerms = [...promptWords(prompt)];
   if (queryTerms.length === 0) return [];
 
-  // Tokenise each document once into a term-frequency map plus its token count, so `df` is a `has` lookup per term rather than a re-scan per query term.
+  // Tokenise each document once; df becomes a has-lookup per term.
   const docs = slices.map((slice) => {
     const tf = new Map<string, number>();
     let length = 0;
@@ -109,7 +109,7 @@ export const pickTopSlices = (
     return { tf, length };
   });
   const avgdl = docs.reduce((sum, doc) => sum + doc.length, 0) / N;
-  // Every document tokenises to nothing (avgdl 0): the maths divides by zero and no term can overlap.
+  // All-empty docs (avgdl 0): division by zero, no overlaps possible.
   if (avgdl === 0) return [];
 
   const df = new Map<string, number>();
@@ -135,7 +135,7 @@ export const pickTopSlices = (
         return { slice, score };
       })
       .filter(({ score }) => score > 0)
-      // Total order: BM25 desc, then recency, then id asc — deterministic regardless of sort stability.
+      // Total order: BM25 desc, then recency, then id asc.
       .sort(
         (a, b) =>
           b.score - a.score ||
@@ -146,7 +146,7 @@ export const pickTopSlices = (
   );
 };
 
-/* A bounded snippet centred on where the prompt actually matched, so the model sees the region that caused the retrieval, not the head of the source; always <= cap so block accounting stays exact. */
+/* Snippet centred on the prompt match, bounded to cap for exact accounting. */
 export const matchSnippet = (text: string, prompt: string, cap = 160): string => {
   const line = text.replace(/\s+/g, ' ').trim();
   if (line.length <= cap) return line;
@@ -166,7 +166,7 @@ export const matchSnippet = (text: string, prompt: string, cap = 160): string =>
   return `${head}${line.slice(start, start + body)}${tail}`;
 };
 
-/* Slice title for a task: the first instruction line, collapsed and capped, with a stable placeholder when empty. */
+/* Task slice title: first instruction line, collapsed and capped. */
 export const TASK_TITLE_CAP = 60;
 export const taskTitle = (instruction: string): string => {
   const line = instruction.replace(/\s+/g, ' ').trim();
@@ -174,7 +174,7 @@ export const taskTitle = (instruction: string): string => {
   return line.length <= TASK_TITLE_CAP ? line : `${line.slice(0, TASK_TITLE_CAP - 1)}…`;
 };
 
-/* Layout: one bullet per slice under a hard character cap, empty-on-nothing so an empty block never shifts an otherwise identical prompt. */
+/* One bullet per slice under a hard cap; empty when nothing fits. */
 export const renderBlock = (
   prompt: string,
   picked: { slice: WorkspaceSlice }[],
@@ -201,7 +201,7 @@ export const renderBlock = (
   return lines.join('\n');
 };
 
-/* The BM25-only layout wrapper for pure callers; the retrieval read ranks through retrieveRankedSlices instead so it can fuse the vector ranking. */
+/* BM25-only wrapper for pure callers; retrieval ranks via rrfFuse. */
 // @see #294
 export const buildWorkspaceBlock = (
   prompt: string,
@@ -210,7 +210,7 @@ export const buildWorkspaceBlock = (
   cap = BLOCK_CAP,
 ): string => renderBlock(prompt, pickTopSlices(prompt, slices, n), cap);
 
-/* The corpus read: the user's whole non-deleted chat history (joined to session titles), asset text and task streams, as prompt-independent slices; pure data so scoring/layout happen in callers. The chat corpus is NOT recency-bounded (a bounded window made old relevant chats unreachable by construction); ownership is resolved session-first so other users' turns cannot starve this user's history. Excludes the current turn/attachment and ephemeral assets; tasks contribute one slice per stream in seq order (system notices skipped; the instruction header is not folded — it duplicates the first event). */
+/* Corpus read: chats, assets, task streams as pure prompt-slice data. */
 // @see #293 #298
 export const collectWorkspaceSlices = async (
   userId: string,
@@ -224,7 +224,7 @@ export const collectWorkspaceSlices = async (
   const sessionIds = sessions.map((s) => s._id as mongoose.Types.ObjectId);
 
   const [messages, assets, tasks] = await Promise.all([
-    // An empty `$in` yields no rows, so a user with files but no chats still gets file retrieval.
+    // An empty $in yields no rows; files still retrieve without chats.
     Message.find({
       role: 'user',
       sessionId: { $in: sessionIds },
@@ -308,7 +308,7 @@ export const collectWorkspaceSlices = async (
   return slices;
 };
 
-/* The top-ranked slices for a prompt, with their IDs (hit-rate matches on the slice ID); never throws — an eval or chat turn degrades to "nothing", not an error. */
+/* Top-ranked slices with IDs; never throws — retrieval degrades to []. */
 // @see #289
 export const retrieveWorkspaceSlices = async (
   prompt: string,
@@ -327,7 +327,7 @@ export const retrieveWorkspaceSlices = async (
   }
 };
 
-/* The rendered `<user:workspace>` block for a prompt; empty when nothing overlaps; never throws. */
+/* The rendered <user:workspace> block; empty when nothing overlaps. */
 export const retrieveWorkspaceBlock = async (
   prompt: string,
   userId: string,
@@ -349,7 +349,7 @@ export const retrieveWorkspaceBlock = async (
   }
 };
 
-/* The semantic half of retrieval: embed the query, then Atlas Vector Search over the same corpus BM25 searches; Atlas-only stage, everything injectable; never throws — every failure degrades to [] and BM25. */
+/* Semantic half: embed query, Atlas Vector Search; degrades to BM25. */
 // @see #294 #289
 
 export interface VectorHit {
@@ -373,7 +373,7 @@ export interface VectorSearchDeps {
   timeoutMs?: number;
 }
 
-/* Candidate headroom: vector hits are intersected with the collected set downstream, and orphaned rows still occupy the window — over-fetch before filtering; numCandidates must be >= limit. */
+/* Over-fetch: orphan rows still occupy the window; numCandidates >= limit. */
 export const VECTOR_CANDIDATE_MULTIPLIER = 4;
 export const VECTOR_CANDIDATE_FLOOR = 100;
 
@@ -386,7 +386,7 @@ const defaultVectorSearch = async (params: VectorSearchParams): Promise<VectorHi
         queryVector: params.queryVector,
         numCandidates: params.numCandidates,
         limit: params.limit,
-        // `userId` is an ObjectId and `$vectorSearch` filters compare exactly, so a string would silently match nothing.
+        // userId is an ObjectId; a string filter would match nothing.
         filter: { userId: new mongoose.Types.ObjectId(params.userId), model: params.model },
       },
     },
@@ -407,7 +407,7 @@ export const vectorCandidates = async (
   try {
     const embed = deps.embed ?? ((texts: string[]) => embedTexts(texts, { kind: 'query' }));
     const search = deps.search ?? defaultVectorSearch;
-    // One deadline over the whole stage (embed + ANN query): both set their own `AbortSignal` at the same `timeoutMs`, so the effective bound is ~`timeoutMs`, not twice it; the late result is discarded.
+    // One deadline over embed + ANN query; the late result is discarded.
     // @see #294
     const run = async (): Promise<VectorHit[]> => {
       const [queryVector] = await embed([query]);
@@ -421,7 +421,7 @@ export const vectorCandidates = async (
   }
 };
 
-/* Reciprocal rank fusion of the BM25 and vector rankings; rank-based so no score normalisation is needed; the intersection with the collected set is the correctness invariant (orphans dropped); pure. */
+/* Reciprocal rank fusion of BM25 and vector; orphans dropped; pure. */
 // @see #294
 export const RRF_K = 60;
 export const RRF_BM25_WEIGHT = 1;
@@ -463,7 +463,7 @@ export const rrfFuse = (
     .map((entry) => entry.slice);
 };
 
-/* The retrieval pipeline: BM25 fused with the semantic ranking through rrfFuse, intersected with the collected set; the vector stage shares the kill switch — flag off means exactly the BM25 ranking and no embedding call; degradation always falls back to BM25, never an error. */
+/* Pipeline: BM25 fused via rrfFuse; flag off means BM25 only. */
 // @see #294 #293
 export interface RetrievalDeps {
   vectorCandidates?: (
@@ -474,16 +474,16 @@ export interface RetrievalDeps {
     deps?: VectorSearchDeps,
   ) => Promise<VectorHit[]>;
   weights?: RrfWeights;
-  // Injectable rerank; defaults to the DeepInfra cross-encoder; null degrades to the un-cut fused ranking.
+  // Injectable rerank; null degrades to the un-cut fused ranking.
   // @see #305
   rerank?: (query: string, documents: string[]) => Promise<number[] | null>;
 }
 
-/* The post-retrieval relevance bar: candidates below the calibrated threshold are dropped — including all of them, which is the graceful refusal path (a paraphrase referent may fall below the bar; known trade-off). */
+/* Post-retrieval bar: dropping all candidates is the refusal path. */
 // @see #305 #289
 export const RERANK_CUT = 0.005;
 
-// The text a candidate is graded on: the title (the filename matters for reranking too) above the content.
+// The text a candidate is graded on: title above content.
 // @see #309
 const rerankDocText = (slice: WorkspaceSlice): string =>
   slice.title ? `${slice.title}\n${slice.text}` : slice.text;
@@ -527,7 +527,7 @@ export const rankWorkspaceSlicesWithCut = async (
     ? await (deps.vectorCandidates ?? vectorCandidates)(prompt, userId, config.embeddings.model, n)
     : [];
   const fused = rrfFuse(slices, bm25, vector, deps.weights);
-  // The rerank stage shares the kill switch — flag off means exactly the pre-#305 fused ranking and no reranker call.
+  // Rerank shares the kill switch; flag off means no reranker call.
   // @see #305
   if (!isWorkspaceMemoryEnabled()) {
     const ranked = fused.slice(0, n);

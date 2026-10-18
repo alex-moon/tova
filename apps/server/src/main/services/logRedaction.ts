@@ -1,6 +1,6 @@
-// Shared redaction for log emission: there is no central choke point, so call sites must redact before passing anything risky to console.*.
+// Shared redaction for log emission; no central choke point exists.
 // @see #145
-// Conservative heuristic: targets long/high-entropy segments, quoted request bodies and JSON blocks; quoted code-controlled paths survive narrowly; URLs and token-ish runs still redact.
+// Conservative heuristic: entropy runs, quoted bodies, JSON blocks redact.
 // @see #145 #358
 
 export const REDACTED = '[redacted]';
@@ -16,7 +16,7 @@ interface NonError {
 
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null;
 
-// A filesystem path as quoted in fs error messages; a deliberately narrow allowlist: POSIX-safe charset, no scheme, short extension-terminated final segment, bounded at 64 chars so opaque token runs still redact.
+// fs-quoted filesystem paths: narrow allowlist so tokens still redact.
 const PATH_SAFE_CHARS = /^[\w./@+~-]+$/;
 const FILE_EXTENSION_END = /\.[A-Za-z0-9]{1,16}$/;
 const PATH_MAX_CHARS = 64;
@@ -28,12 +28,12 @@ const isPathShaped = (text: string): boolean =>
   PATH_SAFE_CHARS.test(text) &&
   FILE_EXTENSION_END.test(text);
 
-// Extraction for the carve-out: a quoted path-shaped segment is swapped for a placeholder and restored verbatim at the end; without it the catch-all would redact the ENTIRE fs error message.
+// Carve-out: quoted paths are restored verbatim after redaction.
 // @see #358
 const QUOTED_SEGMENT = /'((?:\\.|[^']){1,300})'|"((?:\\.|[^"]){1,300})"/g;
 const PATH_PLACEHOLDER = (i: number): string => `\u0000${i}\u0000`;
 
-/** Redact user-shaped content from a single string: long quoted strings, JSON-esque blocks, and long whitespace-free token runs. */
+/** Redact user-shaped content: quoted strings, JSON, token runs. */
 export const redactString = (text: string): string => {
   if (!text) return text;
   const paths: string[] = [];
@@ -45,22 +45,22 @@ export const redactString = (text: string): string => {
       return PATH_PLACEHOLDER(paths.length - 1);
     },
   );
-  // JSON-ish objects/arrays spanning >= 40 chars (includes embedded request bodies).
+  // JSON-ish objects/arrays >= 40 chars (embedded request bodies).
   out = out.replace(/[{[][\s\S]{40,}[}\]]/g, REDACTED);
-  // Double-quoted payload text (>= 16 chars) — embedded prompt fragments in provider messages.
+  // Double-quoted payload text (>= 16 chars): prompt fragments.
   out = out.replace(/"((?:\\.|[^"]){16,})"/g, `"${REDACTED}"`);
-  // Single-quoted payload text, but not word-internal apostrophes (contractions would corrupt ordinary prose).
+  // Single-quoted payload text; word-internal apostrophes survive.
   out = out.replace(/(?<![\w'])'((?:\\.|[^']){16,})'/g, `'${REDACTED}'`);
-  // Secret-shaped assignments — short values survive the whitespace-free threshold, so they need a dedicated rule.
+  // Secret-shaped assignments; short values need a dedicated rule.
   out = out.replace(
     /((?:api[_-]?key|token|secret|password|authorization|bearer)["'\s:=]+\s*)(["']?)[\w./+-]{8,}\2/gi,
     `$1$2${REDACTED}$2`,
   );
   // Long whitespace-free runs — UUIDs/b64/keys/system dumps.
   out = out.replace(/[^\s'"{}[\]]{64,}/g, REDACTED);
-  // Catch-all: any remaining >= 64-char single-line run is treated as embedded prose; over-redaction is the conservative direction.
+  // Catch-all: any remaining >= 64-char run; over-redaction is safe.
   out = out.replace(/[^\n\r]{64,}/g, REDACTED);
-  // eslint-disable-next-line no-control-regex -- the \x00 sentinel is the point
+  // eslint-disable-next-line no-control-regex -- sentinel is the point
   return out.replace(/\u0000(\d+)\u0000/g, (_, i: string) => {
     const path = paths[Number(i)];
     return path === undefined ? '' : path;
@@ -86,7 +86,7 @@ const redactErrorBody = (body: NonError): string => {
     parts.push(redactString(serialize(body.message)));
   }
   if (typeof body.stack === 'string') {
-    // Stack frames are code-controlled; keep verbatim except the mirrored message, clipped anyway since raw stack text can embed message text.
+    // Stack frames are code-controlled; keep verbatim, clipped.
     const firstNewline = body.stack.indexOf('\n');
     if (firstNewline !== -1) {
       const frames = body.stack
@@ -100,7 +100,7 @@ const redactErrorBody = (body: NonError): string => {
   return parts.join(': ');
 };
 
-/** Format an unknown value into a string safe for console.error: message text redacted, error shape kept. */
+/** Format an unknown value into a string safe for console.error. */
 export const redactForLog = (value: unknown): string => {
   if (value === null || value === undefined) return String(value);
   if (typeof value === 'string') return redactString(value);

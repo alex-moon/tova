@@ -5,7 +5,7 @@ import {
   isRateLimitError,
 } from '../../main/services/modelFailover';
 
-/* Error classification the racing runtime reuses to decide abort vs cool-off vs loud failure. */
+/* Error classification the racing runtime reuses: abort, cool-off, or loud. */
 // @see #233
 describe('provider error classification (#168/#213)', () => {
   it('isClientAbort matches AbortError and CanceledError only', () => {
@@ -25,7 +25,7 @@ describe('provider error classification (#168/#213)', () => {
     expect(isPromptSizeError(Object.assign(new Error('quota'), { statusCode: 429 }))).toBe(false);
   });
 
-  // The rate-limit matcher must stay as broad as the 429 discrimination in streamingErrorMessage — a TPM/RPM body rethrown without a status code must not disable.
+  // The rate-limit matcher must stay as broad as streamingErrorMessage's.
   // @see #168
   it('a rate-limit message without a status code is matched in all message shapes', () => {
     for (const message of [
@@ -46,7 +46,7 @@ describe('provider error classification (#168/#213)', () => {
     );
   });
 
-  // Endpoint overload (`engine_overloaded`, HTTP 429) is a per-endpoint transient, distinct from a genuine account rate limit.
+  // Endpoint overload is a per-endpoint transient, not an account rate limit.
   // @see #213
   it('isOverloadError distinguishes overload from a genuine rate limit', () => {
     expect(

@@ -1,6 +1,6 @@
 import { generateChatTitle } from '../../main/services/titleService';
 import { muteConsoleError } from '../muteConsole';
-/* Title generation is a tool-free aux call: never the tool-attached streaming path, and it must degrade to the truncated fallback on failure. */
+/* Title generation is a tool-free aux call; it degrades on failure. */
 // @see #41 #117
 const mockCreateToolFree = jest.fn();
 const mockCreateCompletion = jest.fn();

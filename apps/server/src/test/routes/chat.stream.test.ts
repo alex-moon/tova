@@ -33,7 +33,7 @@ const MOCK_ROUTING = {
   reason: 'roster-pick',
 };
 
-// Routing runs through the fixed-roster racing path; `mockRacingState` delegates the provider call back through the real inferenceService so the mocked Mastra Agent stream stays observable.
+// Routing uses the fixed-roster racing path; `mockRacingState` stays the seam.
 // @see #233
 const mockRacingState: {
   routing: typeof MOCK_ROUTING | null;
@@ -77,7 +77,7 @@ jest.mock('../../main/services/titleService', () => ({
   generateChatTitle: jest.fn().mockResolvedValue('Hello'),
 }));
 
-// The enrichment aux call is stubbed out of the mocked inference-call slots; with the gate retired the trace-fact helpers stay real so route metadata derives from live retrieval.
+// Enrichment aux stubbed out; trace-fact helpers stay real for route metadata.
 // @see #238 #310
 jest.mock('../../main/services/workspaceTraceFacts', () =>
   jest.requireActual('../../main/services/workspaceTraceFacts'),
@@ -188,7 +188,7 @@ describe('Chat streaming route', () => {
     expect(session).not.toBeNull();
   });
 
-  // User turns are stamped so the model sees when each turn happened; the redundant date line is dropped on this path; assistant turns are NOT stamped (stamped examples made the model reproduce stamps in replies).
+  // User turns are stamped (models would echo stamps); assistants are not.
   // @see #261 #315
   it('stamps user turns only and drops the date line in the prompt (#261, #315)', async () => {
     const cookies = await registerUser('stream-timestamps@example.com');
@@ -196,7 +196,7 @@ describe('Chat streaming route', () => {
 
     const userId = (await User.findOne({ email: 'stream-timestamps@example.com' }))!._id;
     const session = await Session.create({ userId, title: 'timestamps' });
-    // Seeds are relative to now so the asserted relative gap does not rot as the wall clock advances.
+    // Seeds are relative to now so the asserted gap does not rot with time.
     const firstTurnAt = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000 - 60 * 1000);
     const firstReplyAt = new Date(firstTurnAt.getTime() + 60 * 1000);
     await Message.create({
@@ -225,7 +225,7 @@ describe('Chat streaming route', () => {
     ];
     // The date line is gone on the persisted path.
     expect(options.instructions).not.toContain("Today's date is");
-    // Seeded user turns carry absolute stamps; assistant turns ride bare. The new turn rides the live clock, so assert the shape, not a fixed value (the previous hard-coded gap rotted).
+    // Seeded user turns carry absolute stamps; assistant turns ride bare.
     // @see #315
     const stamp = (d: Date) =>
       `[${d.toISOString().slice(0, 10)} ${d.toISOString().slice(11, 16)} UTC]`;
@@ -246,7 +246,7 @@ describe('Chat streaming route', () => {
     );
   });
 
-  // The workspace-memory block is retrieved unconditionally when the flag is on, wired into the system content on the persisted path.
+  // With the flag on the block is retrieved unconditionally and wired in.
   // @see #253 #310
   it('injects the workspace-memory block when the flag is on (#253, #310)', async () => {
     const cookies = await registerUser('stream-workspace@example.com');
@@ -290,7 +290,7 @@ describe('Chat streaming route', () => {
     }
   });
 
-  // ZDR/incognito turns are untimestamped (the replay carries no clock), so they keep the date line as their only clock.
+  // ZDR/incognito turns keep the date line as their only clock.
   // @see #261
   it('keeps the date line and leaves ZDR replay turns unstamped (#261)', async () => {
     const cookies = await registerUser('stream-timestamps-zdr@example.com');
@@ -319,7 +319,7 @@ describe('Chat streaming route', () => {
     expect(turns.find((m) => m.role === 'assistant')?.content).toBe('first reply');
   });
 
-  // With a stored zone the prompt carries the user's local times — stamps, zone context line and (on ZDR) the date line; storage stays UTC.
+  // With a stored zone the prompt carries local times; storage stays UTC.
   // @see #261
   it('renders the prompt in the user’s local zone when settings.timezone is set (#261)', async () => {
     const cookies = await registerUser('stream-timestamps-tz@example.com');
@@ -349,7 +349,7 @@ describe('Chat streaming route', () => {
       { role: string; content: string }[],
       { instructions: string },
     ];
-    // The stored UTC instant renders as the user's wall clock, and the context line names the IANA zone so the label is unambiguous.
+    // The UTC instant renders as the user's wall clock; the zone is named.
     expect(turns.find((m) => m.role === 'user')?.content).toBe(
       '[2026-10-08 15:32 GMT+1]\nfirst turn',
     );
@@ -359,7 +359,8 @@ describe('Chat streaming route', () => {
     // The persisted path still drops the redundant date line.
     // @see #261
     expect(options.instructions).not.toContain("Today's date is");
-    // Storage is untouched: the persisted message keeps its raw content; explicit sort — natural order is not stable once the per-session index exists (#377).
+    // Storage is untouched: the message keeps raw content; sort explicitly.
+    // @see #377
     const stored = await Message.findOne({ sessionId: session._id, role: 'user' }).sort({
       timestamp: 1,
     });
@@ -369,7 +370,7 @@ describe('Chat streaming route', () => {
 
   it('persists the turn token usage on the assistant message (#224)', async () => {
     const cookies = await registerUser('stream-usage@example.com');
-    // The connector surfaces usage as a single trailing chunk: the agent result exposes `totalUsage`, mapped after the real stream chunks.
+    // Usage surfaces as one trailing chunk mapped from `totalUsage`.
     // @see #224
     mockAgentStream.mockImplementation(async () => ({
       fullStream: (async function* () {
@@ -441,7 +442,7 @@ describe('Chat streaming route', () => {
   });
 
   it('emits no delta event and persists an empty-content turn for empty-string deltas', async () => {
-    // The stream consumer skips falsy deltas: an empty text-delta must not surface as an SSE delta event, and an all-empty stream still sends done and persists content: '' (the UI shows the placeholder).
+    // Falsy deltas are skipped; an all-empty stream still persists ''.
     // @see #4
     const cookies = await registerUser('stream-empty-delta@example.com');
     mockAgentStream.mockImplementation(async () => ({
@@ -469,7 +470,7 @@ describe('Chat streaming route', () => {
 
   it('emits structured tool events when the agent calls web_search and persists deduped sources (#33)', async () => {
     const cookies = await registerUser('stream-search@example.com');
-    // The agent ran the tool during a searchable turn: the fullStream carries the tool call/result interleaved with answer deltas; duplicate URLs across two searches are deduped for persistence.
+    // Tool call/result interleaves with deltas; duplicate URLs are deduped.
     // @see #33
     mockAgentStream.mockImplementation(async () => ({
       fullStream: (async function* () {
@@ -561,7 +562,7 @@ describe('Chat streaming route', () => {
     // Titles ride the final done event so the client has them mid-stream.
     const done = events.find((e) => e.event === 'done');
     expect(done?.data.sourceTitles).toHaveLength(3);
-    // Reconciled tool summaries are persisted on the assistant message: the first call merges with its result, an unmatched second result stays standalone, and no entry remains phase 'call' (the stuck-throbber defect).
+    // Reconciled summaries persist: calls merge with results, none 'call'.
     // @see #196
     const tools = persisted?.toObject().tools;
     expect(tools).toEqual([
@@ -581,7 +582,7 @@ describe('Chat streaming route', () => {
 
   it('emits structured tool events when the agent calls fetch_url and persists the fetched page (#113)', async () => {
     const cookies = await registerUser('stream-fetch-url@example.com');
-    // A pasted URL turn: `fetch_url` mirrors web_search's `{ results: [...] }` shape so the same provenance extraction persists the URL + title as a source.
+    // `fetch_url` mirrors web_search's shape for provenance extraction.
     // @see #113
     mockAgentStream.mockImplementation(async () => ({
       fullStream: (async function* () {
@@ -654,7 +655,7 @@ describe('Chat streaming route', () => {
     ]);
   });
 
-  // A tool use between two text runs separates them as paragraphs; the separator is persisted (and rides the delta stream), so the live view and a refresh agree.
+  // A tool use between text runs separates them; live view and refresh agree.
   // @see #262
   it('separates text runs with a paragraph break when a tool use falls between them (#262)', async () => {
     const cookies = await registerUser('stream-paragraph-break@example.com');
@@ -690,7 +691,7 @@ describe('Chat streaming route', () => {
     expect(persisted?.content).toBe('Let me look that up.\n\nHere is the answer.');
   });
 
-  // A search-first turn must not gain a leading break, and a lone-newline tail is topped up to a single blank line.
+  // No leading break on search-first; a lone-newline tail is topped up.
   // @see #262
   it('paragraph break boundary cases (#262): no leading break, lone-newline tail topped up', () => {
     expect(paragraphBreakFor('')).toBe('\n\n');
@@ -801,7 +802,7 @@ describe('Chat streaming route', () => {
     ]);
     expect(toolEvents[0].domains).toBeUndefined();
     expect(toolEvents[2].resultCount).toBeUndefined();
-    // The persisted array mirrors the reconciled events — every entry is a resolved result, and the count-less entry keeps no resultCount.
+    // The persisted array mirrors the reconciled events, all resolved results.
     // @see #196
     const persisted = await Message.findOne({ role: 'assistant' });
     const tools = persisted?.toObject().tools;
@@ -849,7 +850,7 @@ describe('Chat streaming route', () => {
 
   it('emits a confirmation delta and persists it when a tool ran with no assistant text (#195)', async () => {
     const cookies = await registerUser('stream-confirm-tool-only@example.com');
-    // The Mastra-documented silent turn: the run ends on a tool call, so the stream carries the call/result but no text-delta.
+    // The run ends on a tool call: call/result but no text-delta.
     // @see #195
     mockAgentStream.mockImplementation(async () => ({
       fullStream: (async function* () {
@@ -1067,7 +1068,7 @@ describe('Chat streaming route', () => {
     mockAgentStream.mockImplementation(async () => ({
       fullStream: fullStreamFrom(['A thoughtful answer.']),
     }));
-    // The follow-up generator is the next plain completion call (the chat itself streams); classification also rides mockGenerate, so gate it. The tool-free connector folds the suggestion prompt into the per-call `instructions` override, so the follow-up call is identified by its instructions.
+    // The follow-up call is identified by its `instructions` override.
     // @see #198
     mockGenerate.mockImplementation(
       async (
@@ -1140,7 +1141,7 @@ describe('Chat streaming route', () => {
   });
 
   describe('honesty guard (#371, #381)', () => {
-    // The guard audits one user message embedding the assistant reply; flagged-ness keys off the reply text so per-attempt verdicts diverge.
+    // The guard audits one user message embedding the assistant reply.
     const mockGuard = (
       flaggedWhen: (reply: string) => boolean,
       reason = 'fabricated tool claim',
@@ -1205,12 +1206,12 @@ describe('Chat streaming route', () => {
         complete: true,
         message: { content: 'I cannot read files on my own.' },
       });
-      // Exactly one assistant message persists, carrying the restart's clean verdict.
+      // Exactly one assistant message persists with the clean verdict.
       const persisted = await Message.find({ role: 'assistant' });
       expect(persisted).toHaveLength(1);
       expect(persisted[0].content).toBe('I cannot read files on my own.');
       expect(persisted[0].honesty?.flagged).toBe(false);
-      // The restart's prompt carries the retry note and never the discarded reply.
+      // The restart's prompt carries the retry note, not the discarded reply.
       expect(mockAgentStream).toHaveBeenCalledTimes(2);
       const retryCall = mockAgentStream.mock.calls[1] as unknown as [
         { role: string; content: string }[],
@@ -1237,7 +1238,7 @@ describe('Chat streaming route', () => {
       const doneIdx = frames.findIndex((part) => part.includes('event: done'));
       expect(retryIdx).toBeGreaterThan(-1);
       expect(retryIdx).toBeLessThan(doneIdx);
-      // The post-done verdict frame carries no retry marker — the badge path took over.
+      // Post-done frame has no retry marker — the badge path took over.
       const lastHonesty = frames
         .map((part) => (part.includes('event: honesty') ? part : ''))
         .filter(Boolean)
@@ -1319,7 +1320,7 @@ describe('Chat streaming route', () => {
           .slice(6),
       ).sessionId as string;
 
-      // The guard resolves before the stream closes, so the flag is already persisted when the response returns.
+      // The guard resolves before the stream closes; the flag is persisted.
       const flagged = await Message.findOne({ role: 'assistant', 'honesty.flagged': true }).lean();
       expect(flagged).not.toBeNull();
 
@@ -1337,7 +1338,7 @@ describe('Chat streaming route', () => {
   });
 
   describe('per-user system prompt (issue #35)', () => {
-    // The connector strips the caller's leading system message(s) and folds them into the per-call `instructions` override, merged after the agent's tool instructions with exactly one blank line — dropping only that separator leaves the caller's content (which may contain blank lines) intact.
+    // Leading system message(s) fold into the `instructions` override.
     // @see #198
     const streamSystemContent = (): string => {
       const call = mockAgentStream.mock.calls[mockAgentStream.mock.calls.length - 1] as unknown as [
@@ -1414,7 +1415,7 @@ describe('Chat streaming route', () => {
 const CLASSIFIER_REPLY =
   '{"emotional": true, "technical": false, "abstract": false, "sentiment": "neutral", "openEnded": false}';
 
-// The mocked Agent bypasses Mastra's structured-output parsing, so aux mocks carry the validated object the real connector surfaces.
+// The mocked Agent bypasses Mastra's parsing; aux mocks carry the object.
 // @see #368
 const structured = (text: string) => ({ text, object: JSON.parse(text) });
 
@@ -1466,7 +1467,7 @@ describe('Chat streaming prompt metrics', () => {
     });
     expect((await Session.findById(sessionId)) ?? null).not.toBeNull();
 
-    // Re-fetch after the flush so the assertion cannot depend on stale pre-classification documents.
+    // Re-fetch after the flush to avoid stale pre-classification documents.
     await flush();
     const [userMessage, assistantMessage] = await Message.find({ sessionId }).sort({
       timestamp: 1,
@@ -1489,7 +1490,7 @@ describe('Chat streaming prompt metrics', () => {
   });
 
   it('skips classification for trivially neutral prompts on the streaming endpoint', async () => {
-    // Any classifier call here would fail the mock; the skip must avoid the call entirely.
+    // Any classifier call would fail the mock; the skip must avoid it.
     mockGenerate.mockImplementation(async () =>
       Promise.reject(new Error('classifier should not be called')),
     );
@@ -1527,7 +1528,7 @@ describe('Chat streaming prompt metrics', () => {
   });
 });
 
-/* Streaming failover: an endpoint failure with no deltas yet disables the model and re-routes; a rate limit fails loudly without disabling; a fully cooled-off pool returns 503 pre-stream. Mastra rethrows provider stream errors as plain Errors carrying the payload text. */
+/* Streaming failover: endpoint failures re-route; rate limits fail loudly. */
 // @see #168
 describe('Chat streaming route — #168 endpoint failures', () => {
   const errorStreamFrom = (message: string) =>
@@ -1575,7 +1576,7 @@ describe('Chat streaming route — #168 endpoint failures', () => {
   });
 
   it('returns 503 with the all-disabled message when the roster is empty before the stream opens (#168)', async () => {
-    // No pickable roster model at turn start: the route surfaces the all-disabled error pre-SSE — the user must see the friendly message, not a generic client failure.
+    // No pickable model: the all-disabled error surfaces pre-SSE.
     // @see #168
     mockRacingState.routing = null;
 

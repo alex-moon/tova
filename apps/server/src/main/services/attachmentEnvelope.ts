@@ -1,7 +1,7 @@
-/* Attachment envelope: an untrusted-data rule plus per-item <file> elements; closing tags in file content are escaped so a forged tag cannot pop the envelope; turns without an attachment produce '' (byte-identical prompt). */
+/* Attachment envelope: untrusted-data rule plus per-item <file> elements. */
 // @see #34 #47
 
-// Tag names that must not be popped early; the last alternative covers the per-namespace <user:...> envelopes.
+// Tag names that must not be popped early; covers <user:...> envelopes.
 // @see #35
 const CLEAR_TAG_NAMES = 'user_content|file|content|instructions|user:[a-z_]+';
 
@@ -46,7 +46,7 @@ const fileElement = (item: AttachmentItem): string => {
   ].join('\n');
 };
 
-// Builds the full block appended to the user turn when an asset is attached: rule first, then the data envelope; '' when there is no attachment.
+// The block appended to a user turn with an attachment; '' when none.
 export const buildAttachmentEnvelope = (item: AttachmentItem | null): string => {
   if (!item) return '';
   return [
@@ -60,7 +60,7 @@ export const buildAttachmentEnvelope = (item: AttachmentItem | null): string => 
   ].join('\n');
 };
 
-/* Generic user-data envelope wrapping user-controlled strings in namespace-tagged delimiters, with the same escaping hardening as attachments. */
+/* User-data envelope: user-controlled strings in tagged delimiters. */
 // @see #35 #46
 export interface UserEnvelopeItem {
   tagName: string;

@@ -44,7 +44,7 @@ export const requireRole =
     next();
   };
 
-// PAT bearer auth: an Authorization header opts into token auth, else cookie session; role loaded live.
+// PAT bearer auth: an Authorization header opts into token auth, else cookie.
 // @see #184
 export const authenticateBearerOrSession = async (
   req: AuthRequest,
@@ -67,7 +67,7 @@ export const authenticateBearerOrSession = async (
     if (!creator) return reject();
 
     req.user = { id: creator._id.toString(), email: creator.email, role: creator.role };
-    // Usage stamp for the Access tab: diagnostics only, never worth failing a request over.
+    // Usage stamp for the Access tab: diagnostics only, never fatal.
     pat.updateOne({ lastUsedAt: new Date() }).catch(() => {});
     next();
   } catch (_err) {

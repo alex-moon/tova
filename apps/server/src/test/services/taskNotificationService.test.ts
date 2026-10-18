@@ -5,7 +5,7 @@ import {
   pendingCompletionsFor,
 } from '../../main/services/taskNotificationService';
 
-// The completion-notification drain, Mongo-backed against the shared in-memory Mongo; the beforeEach wipe empties tasks between tests.
+// The completion-notification drain, Mongo-backed on the in-memory Mongo.
 // @see #255
 const UID = '000000000000000000000000';
 

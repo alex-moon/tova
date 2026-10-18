@@ -9,7 +9,7 @@ import { AssetJob } from '../../main/models/AssetJob';
 import { Connector } from '../../main/models/Connector';
 import { FACTORY_RESET_CONFIRM } from '../../main/validation';
 
-/* Route-level coverage for the factory reset: typed confirmation required, nothing PII-bearing survives, settings/account survive, other users untouched, and the removed first-enable auto-purge stays gone. */
+/* Factory reset route: typed confirmation, PII swept, account survives. */
 // @see #143
 
 const registerUser = async (email: string) => {
@@ -62,7 +62,7 @@ const expectNothingPIIBearingRemains = async (
   expect(await Asset.countDocuments({ userId: uid })).toBe(0);
   // AssetJob has no userId — it must have been swept via the user's asset ids.
   if (assetId) expect(await AssetJob.countDocuments({ assetId })).toBe(0);
-  // User-scoped connector configs carry urls + encrypted auth headers (secret material at rest) — they must be swept too.
+  // User-scoped connector configs carry secret material at rest — swept too.
   // @see #143
   expect(await Connector.countDocuments({ scope: 'user', userId: uid })).toBe(0);
 };
@@ -118,7 +118,7 @@ describe('POST /api/profile/factory-reset (issue #143)', () => {
       preReadIds.map((s) => s._id),
       seeded.assetId,
     );
-    // The account itself and its preferences survive — the user stays signed in from a clean state.
+    // The account and preferences survive — the user stays signed in, clean.
     const me = await request(app).get('/api/auth/me').set('Cookie', cookie);
     expect(me.status).toBe(200);
     expect(me.body.user.email).toBe('reset-ok@example.com');

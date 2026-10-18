@@ -11,9 +11,9 @@ import type {
   NeutralStreamChunk,
 } from '../../main/services/llmTypes';
 
-/* The racing runtime: a flat race across every live (model, provider) combo, first token wins, losers record TTFT and abort; every dependency injected so no Mongo/real provider is touched. */
+/* Racing runtime: flat race, first token wins, all dependencies injected. */
 // @see #316
-const mockRecordTtft = jest.fn(async () => {});
+const mockRecordTtft = jest.fn(async (..._args: unknown[]) => {});
 
 jest.mock('../../main/services/rosterConfig', () => {
   const actual = jest.requireActual('../../main/services/rosterConfig');
@@ -37,7 +37,7 @@ const model = (overrides: Partial<RosterModel> = {}): RosterModel => ({
   ...overrides,
 });
 
-// A stream that yields each chunk, tracking abort calls; the generator notices aborts between yields so a loser stops cleanly.
+// A stream yielding chunks; the generator notices aborts between yields.
 const streamOf = (
   chunks: NeutralStreamChunk[],
   onAbort?: () => void,
@@ -49,7 +49,7 @@ const streamOf = (
         onAbort?.();
         return;
       }
-      // Yield control so the concurrent providers interleave deterministically.
+      // Yield control so the concurrent providers interleave reliably.
       await Promise.resolve();
       yield chunk;
     }
@@ -94,14 +94,14 @@ describe('racingService (#316 flat race)', () => {
   });
 
   it('keeps the fastest combo even when it is not the first model', async () => {
-    // Mutable clock: advanced by the slow providers' first-token arrival so the fast provider wins with the smaller TTFT.
+    // Mutable clock: advanced so the fast provider wins with smaller TTFT.
     let clockMs = 0;
     const deps: RaceDeps = {
       roster: [model()],
       now: () => clockMs,
       startStream: async (options: CompletionOptions) => {
         if (options.provider === 'deepinfra') {
-          // Slow: resolves after a macrotask during which the fast provider has already produced the simulated clock advance.
+          // Slow: yields after a macrotask the fast provider has won during.
           return (async function* () {
             await new Promise((r) => setTimeout(r, 5));
             clockMs = 40;
@@ -145,7 +145,7 @@ describe('racingService (#316 flat race)', () => {
           return streamOf([{ delta: 'win' }]);
         }
         loserSignal = options.abortSignal;
-        // The loser: held mid-prefill until the test releases it, so its first chunk arrives AFTER the winner claimed the race.
+        // The loser is held mid-prefill; its first chunk comes after win.
         return (async function* () {
           await loserGate;
           clockMs = 40;
@@ -158,7 +158,7 @@ describe('racingService (#316 flat race)', () => {
     releaseLoser();
     await flush();
 
-    // The loser's observation landed (input was fully billed) and it aborted itself — nobody consumes its stream.
+    // The loser's observation landed and it aborted — nobody consumes it.
     expect(mockRecordTtft).toHaveBeenCalledWith('m-primary', 'fireworks', 40);
     expect(loserSignal?.aborted).toBe(true);
 
@@ -265,7 +265,7 @@ describe('racingService (#316 flat race)', () => {
     };
     const outcome = await raceRoster({ messages: [] }, deps);
     expect(outcome.result.model.modelId).toBe('m-second');
-    // Provider-fault failures cool off both combos of the dead model; the winning model is untouched.
+    // Provider faults cool off both dead-model combos; winner untouched.
     expect(disabled).toEqual(
       expect.arrayContaining([
         { model: 'm-primary', provider: 'deepinfra', ttl: undefined },
@@ -401,7 +401,7 @@ describe('racingService non-streaming (#232)', () => {
       modelId: 'm-second',
       label: 'Second',
       tools: true,
-      // Priced higher than the primary so the weighted pick still tries the primary first and exercises the fall-through.
+      // Priced higher so the weighted pick tries the primary first.
       inputPrice: 1,
       outputPrice: 1,
       providers: [{ provider: 'deepinfra', modelId: 'di-second' }],

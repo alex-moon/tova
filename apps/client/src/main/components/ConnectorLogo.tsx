@@ -13,7 +13,7 @@ import {
   siTrello,
 } from 'simple-icons';
 
-// Simple-icons SVG when the slug exists, a brand-colored letter tile otherwise (some brands are not in simple-icons).
+// Simple-icons SVG when the slug exists, a letter tile otherwise.
 // @see #331
 
 const BY_SLUG: Record<string, SimpleIcon> = {

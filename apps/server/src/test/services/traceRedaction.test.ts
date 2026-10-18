@@ -4,7 +4,7 @@ import {
   RedactedLangSmithExporter,
 } from '../../main/services/traceRedaction';
 
-// Real @mastra/langsmith does not play well with the jest node environment; the subclass behaviour under test is only the hook around the base call.
+// The package fails under jest's node env; only the hook around the base call.
 jest.mock('@mastra/langsmith', () => {
   class LangSmithExporter {
     protected async _preExportTracingEvent(event: {

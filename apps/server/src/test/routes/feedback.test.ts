@@ -41,7 +41,7 @@ const seedMessage = async (
     role: string;
   }> = {},
 ) => {
-  // Create a fresh owner per call so seed order never depends on registration side effects.
+  // Fresh owner per call so seed order never depends on side effects.
   const owner =
     overrides.ownerId ??
     String(

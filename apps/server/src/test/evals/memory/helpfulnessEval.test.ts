@@ -10,7 +10,7 @@ import {
 } from '../../../main/evals/memory/helpfulnessEval';
 import type { MemoryScenario } from '../../../main/evals/memory/types';
 
-/* Stage-3 logic with injected dependencies (no Mongo/provider/judge): the swap fold, blinded prompt, metric arithmetic, and the two-arm runner loop. */
+/* Stage-3 logic with injected dependencies (no Mongo/provider/judge). */
 // @see #289
 
 describe('resolveSwappedOutcome (#289)', () => {
@@ -124,7 +124,7 @@ describe('helpfulnessMetrics (#289)', () => {
   });
 
   it('counts a deterministic win when the block and answer carry the fact and the blank arm does not', () => {
-    // The backbone's positive case is the signal the judge is a backstop for — count it, not just the negative case above.
+    // The backbone positive is the primary signal; count it, not the miss.
     const metrics = helpfulnessMetrics([row({})]);
     expect(metrics.deterministicWins).toBe(1);
     expect(metrics.counterfactualHits).toBe(0);
@@ -164,7 +164,7 @@ describe('runHelpfulnessEval (#289)', () => {
       pace: noPace,
       judge: async (_query, a, b) => {
         judgeCalls.push([a, b]);
-        // First presentation (with-arm as A): pick A. Swapped: pick B (with-arm).
+        // First pass (with-arm as A): pick A; swapped: pick B.
         return a === responses.block ? 'A' : 'B';
       },
     });
@@ -200,7 +200,7 @@ describe('runHelpfulnessEval (#289)', () => {
   });
 
   it('flags a length-stopped arm as truncated (T14f/OQ34)', async () => {
-    // A truncated arm must be visible as its own count, not silently read as a backbone miss (a budget artefact, not a helpfulness one).
+    // A truncated arm is its own count, not a silent backbone miss.
     const { results, metrics } = await runHelpfulnessEval({
       scenarios: [scenario('s1', 'fact')],
       clear: async () => {},
@@ -237,7 +237,7 @@ describe('runHelpfulnessEval (#289)', () => {
   });
 
   it('does not pay for a second responder call when there is no block to inject', async () => {
-    // With no block the two arms are byte-identical, so the runner reuses the with-arm answer; a regression would double stage-3 cost.
+    // With no block the arms are identical; the runner reuses the answer.
     let respondCalls = 0;
     const { results } = await runHelpfulnessEval({
       scenarios: [scenario('s1', 'fact')],
@@ -286,7 +286,7 @@ describe('runHelpfulnessEval (#289)', () => {
         retrieve: async () => [slice('the fact')],
         respond: async () => {
           calls += 1;
-          // s1 makes two responder calls (with + blank); s2's first call throws.
+          // s1 makes two responder calls; s2's first call throws.
           if (calls === 3) throw new Error('provider down');
           return { content: 'the fact is here' };
         },
@@ -299,7 +299,7 @@ describe('runHelpfulnessEval (#289)', () => {
   });
 
   it('clears fixtures in a finally when seeding throws (T14e)', async () => {
-    // A thrown seed must not leak the partially-seeded scenario under the shared `evalUserId` — the same leak class as the responder-throw case.
+    // A thrown seed must not leak the partial scenario under `evalUserId`.
     let clears = 0;
     await expect(
       runHelpfulnessEval({

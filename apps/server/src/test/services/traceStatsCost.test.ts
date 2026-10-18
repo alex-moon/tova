@@ -9,14 +9,25 @@ import type { AdminLangsmithStatsPayload } from '@tova/shared';
 const basePayload = (models: AdminLangsmithStatsPayload['models']): AdminLangsmithStatsPayload => ({
   since: '2026-09-20T00:00:00.000Z',
   models,
-  totals: { calls: 0, errors: 0, totalTokens: 0, inputTokens: 0, outputTokens: 0 },
+  totals: {
+    calls: 0,
+    errors: 0,
+    totalTokens: 0,
+    inputTokens: 0,
+    outputTokens: 0,
+    estimatedCostUsd: null,
+  },
 });
 
-const row = (partial: Partial<AdminLangsmithStatsPayload['models'][number]>) => ({
+const row = (
+  partial: Partial<AdminLangsmithStatsPayload['models'][number]>,
+): AdminLangsmithStatsPayload['models'][number] => ({
   model: 'm',
+  provider: null,
   calls: 1,
   errors: 0,
   avgDurationMs: null,
+  avgTtftMs: null,
   totalTokens: 0,
   inputTokens: 0,
   outputTokens: 0,
@@ -116,7 +127,7 @@ describe('applyCostToStats (#224/#235)', () => {
   });
 
   it('uses the model-only fallback when the rollup names a dual-priced model (#235)', async () => {
-    // The rollup is model-keyed; with two priced providers the fallback prefers the fully-priced, alphabetically-first provider. The rollup cannot split by provider until the per-row export lands.
+    // The fallback prefers the fully-priced, alphabetically-first provider.
     // @see #235 #237
     await seedModel('dual/model', [
       { provider: 'fireworks', inputPrice: 10, outputPrice: 10 },

@@ -1,10 +1,10 @@
 import { PDFParse } from 'pdf-parse';
 import { OCR_MAX_PDF_PAGES } from './ocr';
 
-// PDF rasterisation for scanned PDFs: reuses pdf-parse's bundled pdf.js renderer (an ESM-only rasteriser would downlevel to a broken require() in this CommonJS build).
+// PDF rasterisation: reuses pdf-parse's bundled pdf.js renderer.
 // @see #209
 
-// Render scale: the main RAM/time lever; 2× is legible for OCR while keeping page images modest.
+// Render scale: the main RAM/time lever; 2× is legible for OCR.
 export const PDF_RASTER_SCALE = 2;
 
 export interface RasterizedPdf {
@@ -13,7 +13,7 @@ export interface RasterizedPdf {
   totalPages: number;
 }
 
-// Render a PDF buffer to one PNG per page (capped); throws on an unreadable/encrypted document so the job loop records a reason.
+// Render a PDF to one PNG per page (capped); throws on unreadable docs.
 export const rasterizePdf = async (
   buffer: Buffer,
   maxPages = OCR_MAX_PDF_PAGES,

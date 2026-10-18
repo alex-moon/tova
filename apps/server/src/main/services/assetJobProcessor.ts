@@ -10,13 +10,13 @@ import { OCR_MAX_INPUT_BYTES, finalizeOcrText, isNearEmpty, recognizeImage } fro
 import { rasterizePdf } from './pdfRasterize';
 import { enqueueWorkspaceEmbedding } from './workspaceEmbeddingIngest';
 
-/* Real processor for the asset-job queue: a job covers whatever the asset still needs — document conversion, OCR, thumbnails; gone assets settle as done untouched. */
+/* Real processor for the asset-job queue: conversion, OCR, thumbnails. */
 // @see #67 #208 #209
 
-// Matches the asset upload cap, declared here to keep the route module free of worker deps.
+// Mirrors the asset upload cap; keeps route modules free of worker deps.
 export const MAX_CONVERSION_INPUT_BYTES = 15 * 1024 * 1024;
 
-/* OCR: recover text from a raster buffer, normalise through the store-time cap; a blank result throws so the lifecycle reads honestly. */
+/* OCR a raster buffer, normalised through the store-time cap. */
 // @see #209
 const ocrBuffer = async (buffer: Buffer): Promise<string> => {
   const text = finalizeOcrText(await recognizeImage(buffer));
@@ -24,7 +24,7 @@ const ocrBuffer = async (buffer: Buffer): Promise<string> => {
   return text;
 };
 
-/* Assemble per-page OCR text into the pdf-parse `-- n of n --` shape so extractUnits splits a scanned PDF with no new read path; pages beyond the cap are not OCRed (best effort). */
+/* Assemble per-page OCR text into the pdf-parse `-- n of n --` shape. */
 const ocrPdfBuffer = async (buffer: Buffer): Promise<string> => {
   const { pages, totalPages } = await rasterizePdf(buffer);
   if (pages.length === 0) throw new Error('no pages rasterised for OCR');
@@ -41,7 +41,7 @@ const ocrPdfBuffer = async (buffer: Buffer): Promise<string> => {
 const processConversion = async (
   asset: NonNullable<Awaited<ReturnType<typeof loadAsset>>>,
 ): Promise<void> => {
-  // Images are not "convertible", yet they drive this lifecycle via OCR — branch on the image content type BEFORE the isConvertible guard, or every image job throws.
+  // Images drive this lifecycle via OCR; check before the isConvertible guard.
   // @see #209
   const isImage = isImageContentType(asset.contentType);
   const isPdf = extensionOf(asset.filename) === 'pdf';
@@ -58,13 +58,13 @@ const processConversion = async (
 
   let markdown: string;
   if (isImage) {
-    // A large image risks exhausting RAM once tesseract allocates its rasters; skip with an explicit reason the client already surfaces.
+    // Large images can exhaust RAM in tesseract; skip with a reason.
     if (buffer.byteLength > OCR_MAX_INPUT_BYTES) {
       throw new Error('too large for OCR');
     }
     markdown = await ocrBuffer(buffer);
   } else if (isPdf) {
-    // Try the text layer first: born-digital PDFs keep it and never pay the OCR cost; a (near-)empty result means scanned and needs rasterise + OCR.
+    // Text layer first: born-digital PDFs skip OCR; near-empty means scanned.
     const extracted = await convertToMarkdown(asset.filename, buffer).catch((err: unknown) => {
       const message = err instanceof Error ? err.message : String(err);
       if (message.includes('empty markdown')) return null;
@@ -89,7 +89,7 @@ const processConversion = async (
   asset.markdownStatus = 'ready';
   asset.markdownFailureReason = null;
   await asset.save();
-  // Embed the freshly converted text: fire-and-forget, flag-gated; jobs never run for ephemeral assets.
+  // Embed converted text: fire-and-forget, flag-gated, never ephemeral.
   // @see #294
   if (!asset.ephemeral) {
     enqueueWorkspaceEmbedding({
@@ -141,7 +141,7 @@ export const processAssetConversionJob = async (job: AssetJobDocument): Promise<
   const needsThumbnail = asset.thumbnailStatus === 'pending';
   if (!needsConversion && !needsThumbnail) return;
 
-  // Run each pending lifecycle independently so a failure in one does not deny the other; the first error still propagates for retry/terminal-fail.
+  // Lifecycles run independently so one failure cannot deny the other.
   // @see #209
   const errors: unknown[] = [];
   if (needsThumbnail) {

@@ -1,4 +1,4 @@
-// Shared API wire contracts: types/interfaces only (must typecheck under both server and client configs); shapes are HTTP wire types, not Mongo documents.
+// Shared API wire contracts: HTTP wire shapes, not Mongo documents.
 
 // Public shape of an admin-visible user record from GET /api/admin/users.
 export interface AdminUser {
@@ -11,7 +11,7 @@ export interface AdminUser {
   updatedAt: string;
 }
 
-// Model inventory row: one roster document with its paired providers[]; capability and pricing fields omitted when unknown.
+// Model inventory row: one roster document with its paired providers[].
 // @see #234 #115 #199
 export interface AdminModel {
   id: string;
@@ -26,7 +26,7 @@ export interface AdminModel {
   providers: AdminModelProvider[];
 }
 
-// One backend of a roster model: system-owned cool-off expiry, rolling TTFT, and an operator enable switch.
+// One backend of a roster model: cool-off expiry, TTFT, enable switch.
 // @see #168 #213
 export interface AdminModelProvider {
   provider: string;
@@ -38,7 +38,7 @@ export interface AdminModelProvider {
   disabledUntil: string | null;
 }
 
-// Per-model endpoint-error diagnostics: failures tallied at the inference choke point, one row per (provider, model, status, category).
+// Per-model endpoint-error tallies: (provider, model, status, category).
 // @see #168 #175
 export interface AdminModelError {
   provider: string;
@@ -56,7 +56,7 @@ export interface AdminModelsPayload {
   errors: AdminModelError[];
 }
 
-// Provider catalog lookup; `found:false` is a successful answer, provider failures surface as non-200.
+// Provider catalog lookup; `found:false` is a successful answer.
 // @see #217 #234
 export interface AdminModelLookup {
   found: boolean;
@@ -69,7 +69,7 @@ export interface AdminModelLookup {
   description?: string;
 }
 
-// One retained log row from Grafana Cloud Loki; `id` derives from the line's nanosecond timestamp for stable React keys.
+// One retained log row from Grafana Cloud Loki.
 // @see #179
 export interface AdminLogEntry {
   id: string;
@@ -78,7 +78,7 @@ export interface AdminLogEntry {
   msg: string;
 }
 
-// Admin PATs: metadata-only list shape (plaintext token returned exactly once at creation).
+// Admin PATs: metadata-only list shape; plaintext token shown once.
 // @see #184
 export interface AdminPat {
   id: string;
@@ -100,7 +100,7 @@ export interface AdminPatsPayload {
   pats: AdminPat[];
 }
 
-// Direct model comparison: one prompt against chosen routing rows; `answer` null with `error` set on failure.
+// Direct model comparison: one prompt against chosen routing rows.
 // @see #129
 export interface ModelComparisonResult {
   provider: string;
@@ -115,7 +115,7 @@ export interface ModelComparisonRun {
   results: ModelComparisonResult[];
 }
 
-// One time-window page of retained logs, newest first; no cursor — the view re-queries the window.
+// One time-window page of retained logs, newest first; no cursor.
 // @see #179
 export interface AdminLogsPayload {
   logs: AdminLogEntry[];
@@ -123,7 +123,7 @@ export interface AdminLogsPayload {
   error?: string;
 }
 
-// Admin LangSmith read view: trimmed server-side projections of LangSmith run documents.
+// Admin LangSmith read view: trimmed server-side run projections.
 // @see #186
 export interface AdminTraceRow {
   id: string;
@@ -131,7 +131,7 @@ export interface AdminTraceRow {
   name: string;
   status: string;
   model: string | null;
-  // The provider that served the trace's llm run, from `ls_provider` metadata; null when absent.
+  // Provider of the trace's llm run (`ls_provider`); null when absent.
   // @see #237
   provider: string | null;
   startedAt: string;
@@ -139,7 +139,7 @@ export interface AdminTraceRow {
   totalTokens: number | null;
   error: string | null;
   appPath?: string;
-  // Workspace-memory facts from the root run's metadata; absent on older traces.
+  // Workspace-memory facts from the root run; absent on older traces.
   // @see #308
   workspaceGate?: 'yes' | 'no' | 'timeout' | 'off';
   workspaceHits?: number;
@@ -150,7 +150,7 @@ export interface AdminTracesPayload {
   traces: AdminTraceRow[];
 }
 
-// One node of a trace detail tree; inputs/outputs are the raw LangSmith payloads.
+// One node of a trace detail tree; raw LangSmith payloads.
 export interface AdminTraceRun {
   id: string;
   parentId: string | null;
@@ -158,7 +158,7 @@ export interface AdminTraceRun {
   runType: string;
   status: string;
   model: string | null;
-  // Provider that served this llm run (`ls_provider` metadata), null on non-llm runs.
+  // Provider of this llm run (`ls_provider`); null on non-llm runs.
   // @see #237
   provider: string | null;
   startedAt: string;
@@ -178,11 +178,11 @@ export interface AdminTraceDetail {
   runs: AdminTraceRun[];
 }
 
-// Per-model rollup of llm runs in the stats window; input/output split prices a model (0 when the run reported no split).
+// Per-model rollup of llm runs in the stats window.
 // @see #186 #224
 export interface AdminLangsmithModelStats {
   model: string;
-  // The provider this row covers (`ls_provider` metadata); rows are keyed by (model, provider).
+  // Provider this row covers (`ls_provider`); keyed by (model, provider).
   // @see #237
   provider: string | null;
   calls: number;
@@ -194,7 +194,7 @@ export interface AdminLangsmithModelStats {
   totalTokens: number;
   inputTokens: number;
   outputTokens: number;
-  // Estimated USD spend joined from the roster price at read time; null (unknown) is distinct from $0.
+  // Estimated USD spend from the roster price; null (unknown) ≠ $0.
   // @see #224 #235 #199 #237
   estimatedCostUsd: number | null;
 }
@@ -217,7 +217,7 @@ export interface AdminLangsmithStatsPayload {
   stale?: boolean;
 }
 
-// Per-session cost breakdown computed from our own Message rows; usage covers only turns logged after #224.
+// Per-session cost breakdown computed from our own Message rows.
 // @see #224
 export interface AdminSessionCostRow {
   sessionId: string;
@@ -226,7 +226,7 @@ export interface AdminSessionCostRow {
   messagesOut: number;
   inputTokens: number;
   outputTokens: number;
-  // Estimated USD spend priced per turn by the serving (model, provider); null when no known price (distinct from $0).
+  // Estimated USD spend by (model, provider); null (unknown) ≠ $0.
   // @see #235 #199
   estimatedCostUsd: number | null;
   // Latest message timestamp in the session, used for ordering/display.
@@ -255,7 +255,7 @@ export interface AdminEvalScoreCounts {
   error: number;
 }
 
-// A run is either the tool-use golden suite or the workspace-memory eval, sharing the evalruns collection.
+// A run is the tool-use golden suite or the memory eval, same collection.
 // @see #289
 export type AdminEvalRunKind = 'tool-use' | 'memory';
 
@@ -275,7 +275,7 @@ export interface AdminEvalRunsPayload {
   runs: AdminEvalRunSummary[];
 }
 
-// One graded case row; `error` is a run-level crash, distinct from a graded `fail`.
+// One graded case row; `error` is a crash, distinct from a graded `fail`.
 export interface AdminEvalCaseResult {
   caseId: string;
   model: string;
@@ -284,7 +284,7 @@ export interface AdminEvalCaseResult {
   report: string;
 }
 
-// Memory-eval rollup: continuous metrics live here rather than per-case rows; stage fields optional.
+// Memory-eval rollup: continuous metrics here, not per-case rows.
 // @see #289
 export interface AdminEvalSubtypeRecall {
   total: number;
@@ -337,7 +337,7 @@ export interface AdminEvalHelpfulnessMetrics {
 export interface AdminEvalMemoryMetrics {
   /** Stages this run executed, so a partial run is self-describing. */
   stages: string[];
-  /** SHA-256 over the canonical corpus (D15), so a corpus change is visible. */
+  /** SHA-256 over the canonical corpus (D15). */
   corpusHash: string;
   /** The gate is retired; these are absent on runs after it. */
   // @see #310
@@ -366,7 +366,7 @@ export interface AuthUserLocation {
   countryCode: string;
 }
 
-// User payload from GET /api/auth/me; optional fields omitted from the wire until set.
+// User payload from GET /api/auth/me; optionals omitted until set.
 export interface AuthUser {
   id: string;
   email: string;
@@ -381,7 +381,7 @@ export interface AuthUser {
   // Zero-data-retention opt-in: omitted until enabled.
   // @see #116
   zdr?: boolean;
-  // 'Incognito by default' alias of `zdr`; new chats start incognito when either is set.
+  // 'Incognito by default' alias of `zdr`; new chats start incognito.
   // @see #144
   incognitoByDefault?: boolean;
   confirmDeletes?: { chat: boolean; file: boolean };
@@ -391,7 +391,7 @@ export interface AuthUser {
   timezone?: string;
 }
 
-// Login/register payload: narrower than AuthUser (no permissions); drift tracked on the issue.
+// Login/register payload: narrower than AuthUser (no permissions).
 // @see #20
 export interface LoginUserPayload {
   id: string;

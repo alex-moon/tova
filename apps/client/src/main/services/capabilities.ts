@@ -1,6 +1,6 @@
 import axios from 'axios';
 
-// Capabilities API client: the server's per-user capability state; the chat renders it verbatim.
+// Capabilities API client: per-user capability state; chat renders verbatim.
 // @see #366
 
 export interface CapabilityTool {

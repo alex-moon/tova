@@ -6,7 +6,7 @@ import {
   workspaceSliceText,
 } from '../../main/services/workspaceEmbeddingText';
 
-/* The shared embed-text derivation must match collectWorkspaceSlices exactly; the hash is what makes the backfill idempotent. */
+/* The embed-text derivation must match collectWorkspaceSlices exactly. */
 // @see #294
 describe('workspaceSliceText (#294)', () => {
   it('derives chat text from the message content', () => {
@@ -44,7 +44,7 @@ describe('workspaceSliceText (#294)', () => {
     expect(workspaceSliceText({ kind: 'task', events: [] })).toBe('');
   });
 
-  // The filename rides the embed text so title-only references ("that AGI file") are semantically retrievable.
+  // The filename rides the embed text so title-only references resolve.
   // @see #309
   it('folds the filename above the file content (#309)', () => {
     expect(

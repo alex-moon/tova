@@ -8,12 +8,12 @@ import { purgeAllUserData } from '../services/userDataPurge';
 
 const router = express.Router();
 
-// The first-enable auto-purge is removed: the toggle is forward-looking only; the escape hatch for existing data is the explicit factory reset below.
+// The toggle is forward-looking; wiping is the explicit factory reset.
 // @see #116 #143 #144
 
-// PATCH /api/profile — user-owned profile edits; absent keys leave fields untouched, trimmed-empty clears, unknown keys rejected by the strict zod schema.
+// PATCH /api/profile: absent keys untouched, empty clears, junk 400s.
 // @see #35
-// Only alphanumerics, spaces and name-typical punctuation survive so a preferred name cannot forge structured delimiters in the system prompt.
+// Preferred names can't forge structured delimiters in the prompt.
 const PREFERRED_NAME_STRIP = /[^a-zA-Z0-9 ,:'-]/g;
 
 export const sanitizePreferredName = (raw: string): string =>
@@ -50,10 +50,10 @@ router.patch('/', authenticate, async (req: AuthRequest, res) => {
       parsed.data.timezone !== undefined
     ) {
       if (!user.settings) {
-        // Mongoose applies the schema default for any field omitted from the literal, so a fresh settings doc needs no explicit theme.
+        // Schema defaults cover omitted fields; no explicit theme needed.
         user.settings = { customInstructions: null } as UserSettings;
       }
-      // TypeScript cannot narrow `user.settings` across the creation guard; both patch blocks use a locally narrowed variable.
+      // TS cannot narrow `user.settings` here; use the narrowed alias.
       const settings = user.settings;
       if (!settings) throw new Error('unreachable: settings were just ensured');
       if ('customInstructions' in parsed.data) {
@@ -61,24 +61,24 @@ router.patch('/', authenticate, async (req: AuthRequest, res) => {
         if (trimmedPrompt) {
           settings.customInstructions = trimmedPrompt;
         } else {
-          // Cleared prompts round-trip as null rather than '' — '' would block per-user prompt resolution downstream.
+          // Cleared prompts round-trip as null; '' would block resolution.
           settings.customInstructions = null;
         }
       }
       const themePatch = parsed.data.theme;
       if (themePatch !== undefined) {
-        // Enum-validated in profilePatchSchema; absence means "no explicit choice" and the client follows system preference then light.
+        // Enum-validated; absent means "no explicit choice".
         settings.theme = themePatch;
       }
       const startupChatPatch = parsed.data.startupChat;
       if (startupChatPatch !== undefined) {
-        // Enum-validated in profilePatchSchema; absent means "no explicit choice", resolved client-side to the product default.
+        // Enum-validated; absent resolves client-side to the default.
         // @see #96
         settings.startupChat = startupChatPatch;
       }
       const confirmDeletesPatch = parsed.data.confirmDeletes;
       if (confirmDeletesPatch !== undefined) {
-        // Merge per key: a single-key PATCH must leave the other key's persisted value intact (a schema default would re-enable confirmations the user turned off); never-written keys fall back to the default.
+        // Merge per key: a single-key PATCH leaves the other key alone.
         // @see #59
         const existing = settings.confirmDeletes;
         settings.confirmDeletes = {
@@ -86,7 +86,7 @@ router.patch('/', authenticate, async (req: AuthRequest, res) => {
           file: confirmDeletesPatch.file ?? existing?.file ?? true,
         };
       }
-      // `incognitoByDefault` shares the settings.zdr slot (`zdr` is the legacy alias); both present with different values is a conflict; the alias never re-triggers purges.
+      // `incognitoByDefault` shares the settings.zdr slot; alias kept.
       // @see #144 #116 #143
       if (
         parsed.data.zdr !== undefined &&
@@ -99,13 +99,13 @@ router.patch('/', authenticate, async (req: AuthRequest, res) => {
       }
       const zdrPatch = parsed.data.zdr ?? parsed.data.incognitoByDefault;
       if (zdrPatch !== undefined) {
-        // Boolean-validated; written only when the key is present; forward-looking only — nothing is ever deleted as a side effect.
+        // Written only when present; nothing is deleted as a side effect.
         // @see #143
         settings.zdr = zdrPatch;
       }
       const timezonePatch = parsed.data.timezone;
       if (timezonePatch !== undefined) {
-        // IANA-validated; the client reports it once per session and the prompt renders local times in it; written only when present.
+        // IANA-validated; written only when the key is present.
         // @see #261
         settings.timezone = timezonePatch;
       }
@@ -118,7 +118,7 @@ router.patch('/', authenticate, async (req: AuthRequest, res) => {
   }
 });
 
-// The user-deliberate escape hatch: a session-wide wipe of everything the account holds; requires the typed confirmation; `failedObjects` names keys the Spaces sweep could not delete.
+// User-deliberate wipe of the account's data; needs typed confirmation.
 // @see #143
 router.post('/factory-reset', authenticate, async (req: AuthRequest, res) => {
   try {

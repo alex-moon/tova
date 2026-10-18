@@ -8,12 +8,12 @@ export interface SearchResult {
   url: string;
 }
 
-// Throws when the search call itself fails so the tool wrapper owns graceful degradation; a missing key or blank query returns [] as "no results".
+// Throws on search failure so the wrapper degrades; no key/blank = [].
 // @see #82
 export const webSearch = async (query: string): Promise<SearchResult[]> => {
   const apiKey = process.env.BRAVE_SEARCH_API_KEY;
   if (!apiKey) return [];
-  // An empty query would hit the API pointlessly; treat it as "no results" without spending quota.
+  // An empty query would hit the API pointlessly; treat as none.
   if (!query.trim()) return [];
   try {
     const response = await fetch(`${BRAVE_ENDPOINT}?q=${encodeURIComponent(query)}`, {
@@ -40,7 +40,7 @@ export const webSearch = async (query: string): Promise<SearchResult[]> => {
       ];
     });
   } catch (err) {
-    // Rethrow: the tool wrapper performs the degradation, so the turn never fails but the failure stays distinguishable from a genuinely-empty search.
+    // Rethrow: the wrapper degrades; the failure stays distinguishable.
     // @see #82
     console.error('Web search error:', redactForLog(err));
     const message = err instanceof Error ? err.message : String(err);

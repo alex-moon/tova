@@ -1,6 +1,6 @@
 import { MigrationInterface, Db } from 'mongo-migrate-ts';
 
-// Backfills kind: 'tool-use' on pre-field rows and adds the kind-scoped idempotency index.
+// Backfills kind: 'tool-use' on pre-field rows; adds the kind index.
 // @see #289
 export class EvalRunsKind implements MigrationInterface {
   async up(db: Db): Promise<void> {

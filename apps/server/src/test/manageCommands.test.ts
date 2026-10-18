@@ -1,6 +1,6 @@
 import { commands, formatSeconds, formatRosterRow, ROSTER_HEADER } from '../main/manageCommands';
 
-/* Registry shape and the pure formatting helpers behind the roster readout; the commands themselves are thin live-infra wrappers exercised by running them. */
+/* Registry shape and the pure formatting helpers behind the roster readout. */
 // @see #322
 
 describe('manage command registry (#322)', () => {
@@ -28,7 +28,7 @@ describe('formatSeconds', () => {
 
 describe('formatRosterRow', () => {
   it('renders one line per provider entry with eligibility, TTFT and cool-off', () => {
-    // Relative to now: a hardcoded fixture date aged into the past and the formatter (correctly) drops expired cool-offs.
+    // Relative to now: a past fixture date would be (correctly) dropped.
     const coolOff = new Date(Date.now() + 60 * 60 * 1000);
     const lines = formatRosterRow({
       modelId: 'zai-org/GLM-5.3-Flash',

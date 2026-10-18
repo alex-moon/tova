@@ -97,7 +97,7 @@ describe('resolveSystemPrompt', () => {
   });
 
   it('introduces no mechanical trigger conditions (D7)', () => {
-    // The stance layer must stay free of "when the user …, then …" trigger constructions; the guard is deliberately narrow ("if they …" is ordinary prose) and rejects only the trigger-table opener pairing a subject with a consequent.
+    // The stance layer must stay free of "when the user …, then …" triggers.
     expect(resolveSystemPrompt()).not.toMatch(/\bwhen(ever)? the (user|person|human)\b/i);
   });
 });
@@ -151,7 +151,7 @@ describe('timestampHeader (#261)', () => {
     ).toBe('[2026-10-10 14:32 UTC — 2 days since the last message]');
   });
 
-  /* Local-zone rendering: with a stored zone the stamp renders the user's wall-clock time and short offset; without (or bad) it stays the UTC form. */
+  /* With a stored zone the stamp renders local time and offset; else UTC. */
   // @see #261
   it('renders the stamp in the user’s local zone with its offset (#261)', () => {
     const at = (iso: string) => new Date(iso);
@@ -274,7 +274,7 @@ describe('buildSystemContent / envelope-based profile data (issue #35, PR #46 re
     );
   });
 
-  // Persisted turns get a per-message timestamp header instead of the bare date line, so the date line is dropped when the caller opts out.
+  // Persisted turns get a timestamp header instead of the bare date line.
   // @see #261
   it('drops the date line when the caller opts out (persisted turns, #261)', () => {
     const content = buildSystemContent(null, false);

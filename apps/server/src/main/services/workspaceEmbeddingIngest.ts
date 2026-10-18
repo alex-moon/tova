@@ -15,7 +15,7 @@ import {
   type EmbeddingTextSource,
 } from './workspaceEmbeddingText';
 
-/* The write side of workspace semantic retrieval: per-slice ingest (fire-and-forget, never throws) and per-user backfill (shared with the eval runner so both paths derive identical text, keeping the hash skip rule idempotent); both gated by WORKSPACE_MEMORY_ENABLED. */
+/* Write side of workspace retrieval: ingest + backfill, hash-idempotent. */
 // @see #294 #289
 
 // Batch size for the backfill; keeps one request well under provider limits.
@@ -30,7 +30,7 @@ export interface EmbedWorkspaceSliceInput {
   source: EmbeddingTextSource;
 }
 
-/* Embed and upsert one slice; no write when the feature is off, the text is empty, or the provider fails — an ingest hook can never break the turn that triggered it. */
+/* Embed and upsert one slice; never throws, so ingest cannot break a turn. */
 export const embedWorkspaceSlice = async (
   input: EmbedWorkspaceSliceInput,
   deps: { embed?: (texts: string[]) => Promise<number[][]> } = {},
@@ -60,7 +60,7 @@ export const embedWorkspaceSlice = async (
   }
 };
 
-/* Fire-and-forget wrapper for the request/worker hot paths; the promise is intentionally not awaited. */
+/* Fire-and-forget wrapper; the promise is intentionally not awaited. */
 export const enqueueWorkspaceEmbedding = (input: EmbedWorkspaceSliceInput): void => {
   void embedWorkspaceSlice(input);
 };
@@ -84,7 +84,7 @@ export interface EmbedUserDeps {
   dryRun?: boolean;
 }
 
-/* Backfill one user's collected corpus; idempotent by textHash; best-effort per batch. */
+/* Backfill one user's corpus; idempotent by textHash. */
 export const embedWorkspaceUser = async (
   userId: string,
   deps: EmbedUserDeps = {},
@@ -93,7 +93,7 @@ export const embedWorkspaceUser = async (
   const model = config.embeddings.model;
 
   const collected = await collectWorkspaceSlices(userId);
-  // The slice title rides along so the planned embed text is byte-identical with the ingest path's folded text.
+  // Title rides along so planned text matches the ingest fold.
   // @see #309
   const slices: EmbeddableSlice[] = collected.map((slice) => ({
     kind: slice.kind,
@@ -120,7 +120,7 @@ export const embedWorkspaceUser = async (
   };
   if (deps.dryRun) return result;
 
-  // The backfill timeout, not the hot-path one: a 64-passage batch cold-embeds in seconds, which the hot-path budget cannot cover.
+  // Backfill timeout: a 64-passage batch outlives the hot-path budget.
   const embed =
     deps.embed ??
     ((texts: string[]) =>

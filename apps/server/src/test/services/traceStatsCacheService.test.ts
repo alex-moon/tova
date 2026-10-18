@@ -20,16 +20,25 @@ const payload = (): AdminLangsmithStatsPayload => ({
   models: [
     {
       model: 'openai/gpt-oss-20b',
+      provider: null,
       calls: 2,
       errors: 1,
       avgDurationMs: 2500,
+      avgTtftMs: null,
       totalTokens: 110,
       inputTokens: 78,
       outputTokens: 32,
       estimatedCostUsd: null,
     },
   ],
-  totals: { calls: 2, errors: 1, totalTokens: 110, inputTokens: 78, outputTokens: 32 },
+  totals: {
+    calls: 2,
+    errors: 1,
+    totalTokens: 110,
+    inputTokens: 78,
+    outputTokens: 32,
+    estimatedCostUsd: null,
+  },
 });
 
 describe('traceStatsCacheService (#224)', () => {
@@ -49,9 +58,10 @@ describe('traceStatsCacheService (#224)', () => {
 
     const docs = await TraceStatsCache.find({});
     expect(docs).toHaveLength(1);
-    expect(docs[0].windowKey).toBe('days=7');
-    expect(docs[0].totals.inputTokens).toBe(78);
-    expect(docs[0].computedAt).toBeInstanceOf(Date);
+    const doc = docs[0]!;
+    expect(doc.windowKey).toBe('days=7');
+    expect(doc.totals?.inputTokens).toBe(78);
+    expect(doc.computedAt).toBeInstanceOf(Date);
   });
 
   it('writes nothing when tracing is unconfigured', async () => {
@@ -78,7 +88,7 @@ describe('traceStatsCacheService (#224)', () => {
     expect(await TraceStatsCache.countDocuments()).toBe(0);
   });
 
-  // A rejected sweep must not escape the interval callback as an unhandled rejection; the poller must absorb it (and log) while still clearing `busy`.
+  // A failed sweep must be absorbed and logged, still clearing `busy`.
   // @see #248
   it('does not leak an unhandled rejection when a polled sweep fails', async () => {
     jest.useFakeTimers();

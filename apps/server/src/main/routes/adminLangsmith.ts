@@ -17,7 +17,7 @@ const router = express.Router();
 // @see #184
 const adminGuard = [authenticateBearerOrSession, requireRole('admin')];
 
-// Trace ids are uuid-shaped; the regex keeps filter injection out of the query string.
+// Trace ids are uuid-shaped; the regex keeps injection out of the query.
 const TRACE_ID_PATTERN = /^[A-Za-z0-9-]+$/;
 
 // 503 = tracing unconfigured, 502 = LangSmith upstream refused/failed.
@@ -61,7 +61,7 @@ router.get('/langsmith/stats', ...adminGuard, async (req, res) => {
   const rawDays = Number(req.query.days);
   const days = Number.isInteger(rawDays) ? Math.min(30, Math.max(1, rawDays)) : 7;
 
-  // Only the poller's default window is cached; other windows are a live sweep.
+  // Only the poller's default window is cached; others run live.
   // @see #224
   if (days === TRACE_STATS_WINDOW_DAYS) {
     try {
@@ -114,7 +114,7 @@ router.get('/langsmith/stats', ...adminGuard, async (req, res) => {
   }
 });
 
-// Per-session cost breakdown from our own Message rows; no LangSmith, no cache needed.
+// Per-session cost breakdown from Message rows; no LangSmith, no cache.
 // @see #224
 router.get('/langsmith/sessions', ...adminGuard, async (req, res) => {
   const rawDays = Number(req.query.days);

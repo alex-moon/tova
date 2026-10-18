@@ -2,12 +2,12 @@ import { Task, type TaskDocument } from '../models/Task';
 import { TaskEvent } from '../models/TaskEvent';
 import { appendTaskEvent } from './taskProcessor';
 
-/* Task sequencer runtime, generalised from assetJobService: enqueue, atomic oldest-first claim, single-consumer poll tick with retry-to-cap, and a stale-`running` requeue-on-boot sweep. The claim/retry pattern is mirrored, not extracted — the asset path owns asset-specific terminal side effects. */
+/* Sequencer runtime: enqueue, atomic claim, poll tick, boot sweep. */
 // @see #254 #251
 
 export const MAX_TASK_ATTEMPTS = 3;
 
-// Terminal statuses are never reopened; one shared predicate so the steer/cancel guards cannot drift from the model enum.
+// Terminal statuses never reopen; one shared guard predicate.
 const TERMINAL_TASK_STATUSES = ['done', 'failed', 'cancelled'] as const;
 const isTerminalTaskStatus = (status: string): boolean =>
   (TERMINAL_TASK_STATUSES as readonly string[]).includes(status);
@@ -16,7 +16,7 @@ const POLL_INTERVAL_MS = 5000;
 
 const MAX_STORED_ERROR_CHARS = 500;
 
-// The work a claim runs: the sequencer loop for one task; injectable so tests supply the driver.
+// The work a claim runs: the sequencer loop; injectable for tests.
 export type TaskProcessor = (task: TaskDocument) => Promise<void>;
 
 const clampError = (err: unknown): string => {
@@ -24,7 +24,7 @@ const clampError = (err: unknown): string => {
   return message.slice(0, MAX_STORED_ERROR_CHARS);
 };
 
-// Create a queued task; the budget is snapshotted at creation so a mid-task env change cannot move the goalposts; the instruction is also the stream's first `user` event (the stream is the source of truth).
+// Create a queued task; the budget is snapshotted at creation.
 export const enqueueTask = async (input: {
   userId: string;
   instruction?: string;
@@ -51,7 +51,7 @@ export const enqueueTask = async (input: {
   return task;
 };
 
-// Atomic claim: status + attempts bump in one findOneAndUpdate, oldest-queued first; multiple processes cannot double-claim.
+// Atomic claim: status + attempts bump in one findOneAndUpdate.
 export const claimNextTask = async (): Promise<TaskDocument | null> =>
   Task.findOneAndUpdate(
     { status: 'queued' },
@@ -59,18 +59,18 @@ export const claimNextTask = async (): Promise<TaskDocument | null> =>
     { sort: { createdAt: 1 }, new: true },
   );
 
-// One poll tick: claim, run, settle; a failure retries to cap, then terminal-fails with the stored error. Only a task the processor left `running` is settled either way, so a paused/done/failed outcome is never clobbered.
+// One poll tick: claim, run, settle; failures retry to cap then fail.
 export const runTaskTick = async (processor: TaskProcessor): Promise<void> => {
   const task = await claimNextTask();
   if (!task) return;
   try {
     await processor(task);
-    // The processor may have moved the task to paused/done/failed itself; only settle a still-`running` task to `done`.
+    // Only settle a still-running task; the processor may have settled it.
     await Task.updateOne({ _id: task._id, status: 'running' }, { $set: { status: 'done' } });
   } catch (err) {
     const message = clampError(err);
     const exhausted = task.attempts >= MAX_TASK_ATTEMPTS;
-    // Symmetric with the success path: only settle a task the processor left `running` — one that already recorded its own outcome must not be clobbered.
+    // Symmetric with success: never clobber a task that self-settled.
     await Task.updateOne(
       { _id: task._id, status: 'running' },
       {
@@ -87,7 +87,7 @@ let timer: ReturnType<typeof setInterval> | null = null;
 
 let busy = false;
 
-// A server crash mid-run strands a `running` task; the start sweep requeues stale ones (attempts not incremented — the processor never observed the loss).
+// Boot sweep requeues stale running tasks from a crashed server.
 export const STALE_RUNNING_MS = 5 * 60 * 1000;
 
 export const requeueStaleTasks = async (maxAgeMs: number = STALE_RUNNING_MS): Promise<number> => {
@@ -105,7 +105,7 @@ export const startTaskPoller = (
   if (timer) return timer;
   void requeueStaleTasks().catch(() => undefined);
   timer = setInterval(() => {
-    // One task per tick; skip while the previous run is in flight so a long sequencer run does not stack up.
+    // One task per tick; skip while the previous run is in flight.
     if (busy) return;
     busy = true;
     void runTaskTick(processor).finally(() => {
@@ -125,18 +125,18 @@ export const stopTaskPoller = (): void => {
 
 export const isTaskPollerRunning = (): boolean => timer !== null;
 
-/* Read/steer/cancel surface for the API: a second writer for steering `user` events (via the collision-retrying appendTaskEvent), a header-writer for cancel observed at the next step boundary. */
+/* Read/steer/cancel surface for the API: steering and cancel writers. */
 // @see #254
 
-// The outcome of appending a steering turn: accepted (queued, active or resumed), or refused because the stream is terminal.
+// Steering turn outcome: accepted, or refused when terminal.
 export type SteeringResult = { status: 'queued' } | { status: 'refused' };
 
-// Append a steering `user` event to an owned task and, from `paused`, re-queue it; ownership is the caller's job.
+// Append a steering user event and re-queue a paused task.
 export const steerTask = async (
   task: TaskDocument,
   instruction: string,
 ): Promise<SteeringResult> => {
-  // Re-read the live status: the poller may have settled or cancelled the task since the route's read; a terminal task is refused against the current status.
+  // Re-read live status: the poller may have settled it since the read.
   const current = await Task.findById(task._id);
   if (!current || isTerminalTaskStatus(current.status)) {
     return { status: 'refused' };
@@ -148,16 +148,16 @@ export const steerTask = async (
     step: current.stepCount,
   });
 
-  // From `paused` the instruction is the resume; the update is guarded on `paused` so a concurrent settle is never resurrected (the cancel-clobber race).
+  // Guarded on paused so a concurrent settle is never resurrected.
   if (current.status === 'paused') {
     await Task.updateOne({ _id: current._id, status: 'paused' }, { $set: { status: 'queued' } });
   }
   return { status: 'queued' };
 };
 
-// Cancel an owned task; terminal states left as-is (idempotent); a `running` processor observes the change at its next step boundary.
+// Cancel an owned task; terminal states left as-is (idempotent).
 export const cancelTask = async (task: TaskDocument): Promise<void> => {
-  // The write is guarded on non-terminal status: a task may settle itself to `done` between the route's read and here, and an unconditional write would clobber that completion; the `$nin` makes it idempotent and race-safe.
+  // Guarded on non-terminal status: never clobber a self-settled task.
   await Task.updateOne(
     { _id: task._id, status: { $nin: ['done', 'failed', 'cancelled'] } },
     { $set: { status: 'cancelled' } },

@@ -9,15 +9,15 @@ import { Connector } from '../models/Connector';
 import type { ConnectorDocument } from '../models/Connector';
 import { readConnectorVault } from './oauthConnectors';
 
-/* Factory reset: a full wipe of every user-owned, PII-bearing collection, enumerated explicitly so a future collection cannot silently escape; hard-deletes sessions/asset docs/bytes/workspace files/job rows/user connectors; settings and the account survive. */
+/* Factory reset: full wipe of every user-owned PII-bearing collection. */
 // @see #143 #327
 
 export interface UserDataPurgeResult {
-  // Spaces keys whose deletion failed; Mongo is authoritative, callers surface the count so the UI can warn.
+  // Spaces keys whose deletion failed; callers surface the count.
   failedObjects: string[];
 }
 
-/* RFC 7009 best-effort grant revocation: deleting the row kills tokens at rest but the grant stays live at the provider; a missing endpoint or any failure never blocks the sweep. */
+/* RFC 7009 best-effort grant revocation; never blocks the sweep. */
 // @see #333
 const revokeOAuthGrants = async (connectors: ConnectorDocument[]): Promise<void> => {
   await Promise.allSettled(
@@ -28,7 +28,7 @@ const revokeOAuthGrants = async (connectors: ConnectorDocument[]): Promise<void>
       try {
         const vault = readConnectorVault(connector);
         token = vault?.refreshToken ?? vault?.accessToken;
-        // The SDK's zod schema carries revocation_endpoint but its TS type omits it — read through the wire shape.
+        // revocation_endpoint is in the zod schema but not the TS type.
         revocationEndpoint = (vault?.metadata as { revocation_endpoint?: string } | undefined)
           ?.revocation_endpoint;
       } catch {
@@ -51,7 +51,7 @@ export const purgeAllUserData = async (
   const failedObjects: string[] = [];
   const uid = String(userId);
 
-  // Pre-reads: session ids and asset keys must be fetched before their documents are erased.
+  // Pre-reads: ids and keys must be fetched before erasure.
   const [sessions, assets] = await Promise.all([
     Session.find({ userId }).select('_id').lean(),
     Asset.find({ userId }).select('_id key').lean(),
@@ -60,7 +60,7 @@ export const purgeAllUserData = async (
   const assetIds = assets.map((a) => a._id);
   const assetKeys = assets.map((a) => a.key);
 
-  // Mongo sweep — every collection enumerated explicitly; OAuth grants are revoked at their providers first so the vault is read before the docs are gone.
+  // Mongo sweep — collections enumerated explicitly; grants revoked first.
   // @see #143 #333
   const oauthConnectors = await Connector.find({ scope: 'user', userId, type: 'mcp.oauth' });
   await revokeOAuthGrants(oauthConnectors);
@@ -73,7 +73,7 @@ export const purgeAllUserData = async (
     Session.deleteMany({ userId }),
   ]);
 
-  // Spaces sweep: asset bytes and chat-scoped workspace files (no Asset row — swept by session prefix); both gate on isConfigured so an unconfigured bucket never spuriously warns.
+  // Spaces sweep: asset bytes and chat-scoped workspace files.
   // @see #143
   if (spacesWorkspaceStorage.isConfigured()) {
     for (const key of assetKeys) {
@@ -91,11 +91,11 @@ export const purgeAllUserData = async (
     );
   } catch (err) {
     console.error('factory reset: workspace file sweep failed:', String(err));
-    // A wholesale sweep failure cannot name individual keys, but reporting zero failures would claim "everything erased" — surface a sentinel key instead.
+    // A wholesale failure cannot name keys; report a sentinel key.
     failedObjects.push(`${uid}/chats/*`);
   }
 
-  // Traces: best-effort LangSmith deletion, guarded once more so an unexpected rethrow cannot abort the reset.
+  // Traces: best-effort deletion, guarded so a rethrow cannot abort.
   // @see #143
   try {
     await purgeUserTraces(sessionIds.map(String));

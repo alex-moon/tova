@@ -11,7 +11,7 @@ import {
   startConnectorOAuth,
 } from '../../main/services/oauthConnectors';
 
-/* OAuth engine tests: the MCP SDK's auth module is mocked at the module boundary (what we own is the orchestration, the vault, and the refresh policy); flow: probe → DCR → PKCE start → exchange → encrypted vault. */
+/* OAuth engine tests: SDK auth mocked; we own orchestration and vault. */
 // @see #327
 jest.mock('@modelcontextprotocol/sdk/client/auth.js', () => ({
   discoverOAuthProtectedResourceMetadata: jest.fn(),
@@ -101,9 +101,9 @@ describe('probeConnectorOAuth', () => {
       discoverOAuthProtectedResourceMetadata.mockResolvedValue({
         authorization_servers: [bad],
       });
-      const err = await probeConnectorOAuth('https://mcp.example.com/mcp').catch(
+      const err = (await probeConnectorOAuth('https://mcp.example.com/mcp').catch(
         (e: ConnectorOAuthError) => e,
-      );
+      )) as ConnectorOAuthError;
       expect(err).toBeInstanceOf(ConnectorOAuthError);
       expect(err.status).toBe(422);
     }
@@ -191,7 +191,7 @@ describe('startConnectorOAuth', () => {
       'https://as.example.com',
       expect.objectContaining({
         clientInformation: { client_id: 'dcr-client', client_secret: 'dcr-secret' },
-        // RFC 8707 resource indicator + per-server scopes, verbatim from the endpoint's protected-resource doc.
+        // RFC 8707 resource indicator + per-server scopes, from the PRM doc.
         // @see #330
         resource: 'https://mcp.example.com/mcp',
         scope: 'read:things write:things',
@@ -204,7 +204,9 @@ describe('startConnectorOAuth', () => {
     registerClient.mockRejectedValue(
       new Error('Incompatible auth server: does not support dynamic client registration'),
     );
-    const err = await startConnectorOAuth(base).catch((e: ConnectorOAuthError) => e);
+    const err = (await startConnectorOAuth(base).catch(
+      (e: ConnectorOAuthError) => e,
+    )) as ConnectorOAuthError;
     expect(err).toBeInstanceOf(ConnectorOAuthError);
     expect(err.status).toBe(422);
     expect(err.message).toMatch(/automatic app registration/u);
@@ -339,12 +341,12 @@ describe('completeConnectorOAuth', () => {
 
   it('wraps exchange failures as 422 without echoing provider detail', async () => {
     const { state, userId } = await start();
-    // The SDK error can embed the raw response body — never echoed to the client (reflection guard).
+    // SDK errors can embed raw bodies — never echoed to the client.
     // @see #327
     exchangeAuthorization.mockRejectedValue(new Error('invalid_grant: Raw body: secret-thing'));
-    const err = await completeConnectorOAuth({ code: 'c', state, userId }).catch(
+    const err = (await completeConnectorOAuth({ code: 'c', state, userId }).catch(
       (e: ConnectorOAuthError) => e,
-    );
+    )) as ConnectorOAuthError;
     expect(err).toBeInstanceOf(ConnectorOAuthError);
     expect(err.status).toBe(422);
     expect(err.message).toMatch(/start again/iu);
@@ -369,7 +371,7 @@ describe('completeConnectorOAuth', () => {
 describe('oauthAuthHeaders (refresh policy)', () => {
   const userId = '507f1f77bcf86cd799439011';
   const createOauthConnector = async (vault: Record<string, unknown>) => {
-    // Vault is written as an already-encrypted-looking envelope for the mocked decrypt path; with real crypto, encrypt via the module under test's sibling.
+    // Vault written as an already-encrypted-looking envelope for the mock.
     const { encryptEnvelope } = await import('../../main/services/crypto');
     return Connector.create({
       type: 'mcp.oauth',
@@ -407,7 +409,7 @@ describe('oauthAuthHeaders (refresh policy)', () => {
     // The rotated vault is on the doc: a fresh read gets the new token.
     expect(doc.authState).toBe('ok');
     const { decryptEnvelope } = await import('../../main/services/crypto');
-    const vault = JSON.parse(decryptEnvelope(doc.oauth)) as { accessToken: string };
+    const vault = JSON.parse(decryptEnvelope(doc.oauth!)) as { accessToken: string };
     expect(vault.accessToken).toBe('at-2');
   });
 

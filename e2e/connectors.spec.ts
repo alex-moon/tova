@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 
-// Pins the connectors UI contract, fully page-mocked; the OAuth flow is verified server-side.
+// Pins the connectors UI contract, fully page-mocked (OAuth is server-side).
 // @see #331 #328 #327 #330
 
 const email = process.env.E2E_EMAIL ?? 'formsatz@gmail.com';

@@ -1,4 +1,4 @@
-/** Temporary Mongo source for the evals: a synthetic eval user with a seeded asset library. */
+/** Temporary Mongo eval source: synthetic eval user + seeded library. */
 // @see #112
 import mongoose from 'mongoose';
 import { Asset } from '../models/Asset';
@@ -10,7 +10,7 @@ const EVAL_USER_ID_HEX = '6f61e78155a5b2c0d3e1f7a2';
 export const evalUserId = new mongoose.Types.ObjectId(EVAL_USER_ID_HEX);
 export const evalUserEmail = 'eval-fixture@tova.local';
 
-// Content for the Bupa case: the fact must be discoverable only inside the seeded file.
+// Content for the Bupa case: discoverable only inside the seeded file.
 // @see #112
 const BUPA_POLICY_TEXT = `Bupa Health Insurance — policy schedule PROV-2026-00318
 Covered benefits:
@@ -33,7 +33,7 @@ const FIXTURE_FILES: { filename: string; contentType: string; text: string }[] =
   },
 ];
 
-// Case A fixture: the answer exists only on page 58; filler sized so a lazy whole-file read truncates first.
+// Case A fixture: the answer is on page 58; filler forces a truncation.
 // @see #159
 export const SUPPORT_PHONE = '+44 20 7946 0812';
 export const SUPPORT_PHONE_PAGE = 58;
@@ -69,7 +69,7 @@ const longManualUnits = (): AssetUnit[] => {
   return units;
 };
 
-// Case B fixture: six heading-2 sections (no H1), seeded through real `extractUnits`.
+// Case B fixture: six heading-2 sections (no H1), via real `extractUnits`.
 // @see #159
 const HANDBOOK_FILENAME = 'project-handbook.md';
 const HANDBOOK_SECTIONS = [

@@ -1,6 +1,6 @@
 import { MigrationInterface, Db } from 'mongo-migrate-ts';
 
-// Pre-creates the tracestatscaches collection and the windowKey unique index so the poller's upsert cannot race a lazy-create.
+// Pre-creates tracestatscaches + windowKey unique index for poller upserts.
 // @see #224
 export class CreateTraceStatsCache implements MigrationInterface {
   async up(db: Db): Promise<void> {

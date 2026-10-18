@@ -22,7 +22,7 @@ const registerUser = async (app: ReturnType<typeof createApp>, email: string) =>
   return cookieOf(res);
 };
 
-// Route-level coverage: PAT CRUD, the bearer middleware on the admin guard, one-time plaintext, revocation, live-role inheritance and expiry.
+// Route coverage: PAT CRUD, bearer on the admin guard, revocation, expiry.
 // @see #184
 describe('admin pats (#184)', () => {
   it('guards the endpoints like the rest of admin', async () => {
@@ -149,7 +149,7 @@ describe('admin pats (#184)', () => {
 
     await User.updateOne({ email: 'soon-demoted@example.com' }, { role: 'user' });
 
-    // Bearer auth succeeds but requireRole now 403s — the role came from the creator's live document, not the token.
+    // Bearer auth passes but requireRole 403s — role comes from the live doc.
     const after = await request(app)
       .get('/api/admin/users')
       .set('Authorization', `Bearer ${token}`);
@@ -180,7 +180,7 @@ describe('admin pats (#184)', () => {
       .send({ name: 'scoped' });
     const token: string = created.body.pat.token;
 
-    // /api/auth/me uses plain authenticate (cookie-only): a PAT grants no session there.
+    // /api/auth/me is cookie-only: a PAT grants no session there.
     const res = await request(app).get('/api/auth/me').set('Authorization', `Bearer ${token}`);
     expect(res.status).toBe(401);
   });

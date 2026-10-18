@@ -1,6 +1,6 @@
 import mongoose from 'mongoose';
 
-// Personal access tokens: only the sha256 digest stored; the creator's live role is loaded per request.
+// Personal access tokens: only the sha256 digest stored; role read live.
 // @see #184
 const patSchema = new mongoose.Schema({
   name: {

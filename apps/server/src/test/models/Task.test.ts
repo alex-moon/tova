@@ -57,7 +57,7 @@ describe('Task model (#254)', () => {
   });
 
   it('does not entangle the Message schema with tasks (slice invariant)', async () => {
-    // `Message` must never learn about tasks; assert against the *Message* schema, which must stay untouched.
+    // `Message` must never learn about tasks; its schema must stay untouched.
     expect(Message.schema.path('taskId')).toBeUndefined();
     const taskRef = Object.values(Message.schema.paths).some(
       (p) => (p as unknown as { options?: { ref?: string } }).options?.ref === 'Task',

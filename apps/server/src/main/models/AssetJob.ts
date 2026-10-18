@@ -1,6 +1,6 @@
 import mongoose from 'mongoose';
 
-// Mongo-backed conversion queue: single-consumer atomic `pending -> processing` claim is sufficient.
+// Mongo-backed conversion queue: atomic single-consumer claim suffices.
 // @see #67
 const assetJobSchema = new mongoose.Schema(
   {
@@ -14,7 +14,7 @@ const assetJobSchema = new mongoose.Schema(
       enum: ['pending', 'processing', 'done', 'failed'],
       default: 'pending',
     },
-    // Incremented on every claim; MAX_JOB_ATTEMPTS on a failure terminal-fails the job.
+    // Bumped per claim; MAX_JOB_ATTEMPTS failures terminal-fail the job.
     attempts: {
       type: Number,
       default: 0,

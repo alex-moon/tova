@@ -1,6 +1,6 @@
 import { create, all } from 'mathjs/number';
 
-/* The calculator behind the `calculate` tool: number-only mathjs under a lockdown + strict char allowlist + length/finite checks; pure, never throws. */
+/* The `calculate` tool's calculator: locked-down mathjs, never throws. */
 // @see #283 #263
 
 const math = create(all);
@@ -35,7 +35,7 @@ math.import(
   { override: true },
 );
 
-// Digits, letters, whitespace, arithmetic operators, decimal points and parentheses — nothing else.
+// Digits, letters, whitespace, arithmetic ops, dots, parentheses only.
 const ALLOWED_CHARS = /^[0-9a-zA-Z\s+\-*/%^().]+$/;
 const MAX_LENGTH = 200;
 

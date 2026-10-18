@@ -1,13 +1,13 @@
 import { AssetVersion } from '../models/AssetVersion';
 
-/* Daily prune of asset versions older than a year where a newer version of the same asset exists; keeps the snapshot store bounded without losing any current-file history. */
+/* Daily prune of versions older than a year with a newer version left. */
 // @see #369
 
 const PRUNE_AFTER_MS = 365 * 24 * 60 * 60 * 1000;
 
 export const pruneOldAssetVersions = async (now: Date = new Date()): Promise<number> => {
   const cutoff = new Date(now.getTime() - PRUNE_AFTER_MS);
-  // Max live version per asset that still has an old row; only those rows are prunable.
+  // Max live version per asset with an old row; only those are prunable.
   const stale = await AssetVersion.aggregate<{ _id: string; maxVersion: number }>([
     { $match: { createdAt: { $lt: cutoff } } },
     { $group: { _id: '$assetId', maxVersion: { $max: '$version' } } },

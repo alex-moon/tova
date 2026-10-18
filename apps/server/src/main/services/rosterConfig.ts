@@ -1,12 +1,12 @@
 import { ModelRoster } from '../models/ModelRoster';
 
-/* The fixed model roster and its weighted primary pick: the routing data layer for the racing runtime. */
+/* Fixed model roster + weighted primary pick; routing data layer. */
 // @see #232 #233
 
 /** Every provider the racing path can talk to. */
 export type RosterProvider = 'deepinfra' | 'fireworks';
 
-/* A roster model plus the provider entry selected as its primary; the race itself fans out over `providers`. */
+/* A roster model plus its selected primary; the race fans over providers. */
 export interface RosterProviderRef {
   provider: RosterProvider;
   modelId: string;
@@ -27,7 +27,7 @@ export interface RosterModel {
   providers: RosterProviderRef[];
 }
 
-/* Seed definition (owner-locked roster): every model >120B params, serverless on BOTH providers; dropped models stay out of recovery paths. */
+/* Owner-locked seed: every model >120B params, on BOTH providers. */
 // @see #232 #316
 export const ROSTER_SEED: RosterModel[] = [
   {
@@ -76,7 +76,7 @@ export const ROSTER_SEED: RosterModel[] = [
   },
 ];
 
-/* Summed routing price for a ref, or undefined when either component is missing (unknown ≠ 0); non-finite reads as unknown. */
+/* Summed routing price; undefined when either side is missing. */
 // @see #199 #233
 export const routingPrice = (ref: {
   inputPrice?: number;
@@ -87,16 +87,16 @@ export const routingPrice = (ref: {
   return (inputPrice as number) + (outputPrice as number);
 };
 
-/* Weighted score (lower is better): score = f(TTFT) * price penalty; env-tunable so the influence can be measured before it is fixed. */
+/* Weighted score (lower is better): TTFT * price penalty. */
 
-/* Neutral TTFT for a provider with no observation yet: neither starved nor favoured. */
+/* Neutral TTFT with no observation yet: neither starved nor favoured. */
 export const defaultTtftMs = (): number => {
   const raw = process.env.ROSTER_DEFAULT_TTFT_MS;
   const parsed = raw === undefined || raw === '' ? NaN : Number(raw);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : 1000;
 };
 
-/* Price-penalty slope `k` in `penalty = 1 + k * price`: price breaks near-ties without overwhelming a genuine latency gap. */
+/* Price-penalty slope k: price breaks near-ties, not latency gaps. */
 export const pricePenaltyK = (): number => {
   const raw = process.env.ROSTER_PRICE_PENALTY_K;
   const parsed = raw === undefined || raw === '' ? NaN : Number(raw);
@@ -109,7 +109,7 @@ export interface RosterScoreInput {
   outputPrice?: number;
 }
 
-/* Weighted score for one roster model; unknown price is neutral (penalty 1), not a differentiator. */
+/* Weighted score; unknown price is neutral (penalty 1). */
 // @see #199
 export const rosterScore = (input: RosterScoreInput): number => {
   const ttft =
@@ -120,7 +120,7 @@ export const rosterScore = (input: RosterScoreInput): number => {
   return ttft * (1 + pricePenaltyK() * price);
 };
 
-/* The best TTFT across a model's enabled providers — a model's effective latency is its fastest healthy backend. */
+/* Best TTFT across providers: latency is the fastest backend. */
 const bestTtft = (model: RosterModel): number | undefined => {
   const values = model.providers
     .filter((p) => p.ttftMs !== undefined && Number.isFinite(p.ttftMs))
@@ -128,7 +128,7 @@ const bestTtft = (model: RosterModel): number | undefined => {
   return values.length ? Math.min(...values) : undefined;
 };
 
-/* Pick the primary model by weighted score; ties keep roster order (the seed order is the owner's preference ranking). */
+/* Pick primary by weighted score; ties keep roster (seed) order. */
 export const pickPrimary = (models: RosterModel[]): RosterModel | null => {
   if (models.length === 0) return null;
   let best = models[0];
@@ -222,7 +222,7 @@ const ensureSeed = async (): Promise<void> => {
   );
 };
 
-/* Read the eligible roster in seed order; a DB failure falls back to the seed, an empty collection is seeded first. */
+/* Eligible roster in seed order; DB failure falls back to the seed. */
 export const listRoster = async (): Promise<RosterModel[]> => {
   try {
     let docs = (await ModelRoster.find({ eligible: true }).lean()) as unknown as RosterDoc[];
@@ -231,7 +231,7 @@ export const listRoster = async (): Promise<RosterModel[]> => {
       docs = (await ModelRoster.find({ eligible: true }).lean()) as unknown as RosterDoc[];
       if (docs.length === 0) return ROSTER_SEED;
     }
-    // Preserve seed order: sort by seed index; admin-added rows land after the known ones.
+    // Preserve seed order: sort by seed index; admin rows land last.
     const order = new Map(ROSTER_SEED.map((m, i) => [m.modelId, i]));
     docs.sort((a, b) => (order.get(a.modelId) ?? 99) - (order.get(b.modelId) ?? 99));
     return docs.map(toRosterModel);
@@ -241,18 +241,18 @@ export const listRoster = async (): Promise<RosterModel[]> => {
   }
 };
 
-/* The enabled, non-cooling-off providers of a model — the set the runtime actually races. */
+/* Enabled, non-cooling-off providers — the set the runtime races. */
 export const liveProviders = (model: RosterModel, now: Date = new Date()): RosterProviderRef[] =>
   model.providers.filter((p) => !isCoolingOff(p, now));
 
-/* Roster candidates for a turn: eligible models with at least one live provider; no vision gate remains. */
+/* Turn candidates: eligible models with at least one live provider. */
 // @see #316
 export const rosterModelsForTurn = (roster: RosterModel[], now: Date = new Date()): RosterModel[] =>
   roster
     .map((model) => ({ ...model, providers: liveProviders(model, now) }))
     .filter((model) => model.providers.length > 0);
 
-/* Record a winning TTFT as a windowed mean via a single Mongo pipeline update (no read-modify-write race); TTFT is load-dominated, so the mean must track RECENT latency. */
+/* Winning TTFT as a windowed mean via one pipeline update (no RMW race). */
 // @see #320
 const windowSize = (): number => {
   const raw = process.env.ROSTER_TTFT_WINDOW;
@@ -289,7 +289,7 @@ export const recordTtft = async (
                                 {
                                   $multiply: [
                                     { $ifNull: ['$$p.ttftMs', 0] },
-                                    // Cap the old mean's weight so the oldest observation decays out one sample at a time.
+                                    // Cap the old mean's weight (decay).
                                     { $min: [{ $ifNull: ['$$p.ttftSamples', 0] }, window - 1] },
                                   ],
                                 },
@@ -326,7 +326,7 @@ export const recordTtft = async (
   }
 };
 
-/* Per-provider cool-off; `ttlMs` overrides the default 6h for endpoint overload. Errors are logged, not thrown. */
+/* Per-provider cool-off; ttlMs overrides the default 6h. */
 // @see #213
 const coolOffHours = (): number => {
   const raw = process.env.MODEL_COOL_OFF_HOURS;

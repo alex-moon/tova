@@ -1,7 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 import { installChatStreamMock } from './helpers/chatMock';
 
-// Profile flows, fully page-mocked auth and mutations; no spec touches the real admin user.
+// Profile flows, fully page-mocked; no spec touches the real admin user.
 
 const email = process.env.E2E_EMAIL ?? 'formsatz@gmail.com';
 
@@ -43,7 +43,7 @@ const gotoChat = async (page: Page) => {
 test('profile save PATCHes the endpoint with the current fields and only changed toggles', async ({
   page,
 }) => {
-  // The stored zone matches the browser, so no timezone PATCH fires; only the save itself.
+  // Stored zone matches the browser: no timezone PATCH, only the save.
   // @see #261
   const zone = Intl.DateTimeFormat().resolvedOptions().timeZone;
   const user = { id: 'e2e-user-1', email, zdr: false, timezone: zone };
@@ -95,7 +95,7 @@ test('ZDR on: privacy note shows and the outgoing stream body replays history wi
   expect(firstBody.sessionId).toBeUndefined();
   expect(firstBody.content).toBe('ZDR question');
 
-  // Second turn replays the first turn as bounded history instead of a session id.
+  // Second turn replays turn one as bounded history, not a session id.
   await page.getByTestId('chat-input').fill('Second turn');
   await page.getByTestId('chat-input').press('Enter');
   await expect(page.locator('p').filter({ hasText: /^OK$/ }).nth(1)).toBeVisible();

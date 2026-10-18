@@ -3,14 +3,14 @@ import { inferenceService } from './inferenceService';
 import { config } from '../config';
 import { z } from 'zod';
 
-// Aux model source, read lazily so tests mutating the env after import still see it.
+// Aux model source, read lazily so late env mutations are seen.
 // @see #238
 const titleModel = (): string => config.aux.model;
 
 const TITLE_PROMPT =
   'Generate a short chat title (at most six words) summarising what the user asks about.';
 
-// Schema-enforced title; a validation failure resolves with the heuristic fallback computed below.
+// Validation failure resolves with the heuristic fallback.
 // @see #368
 const TITLE_SCHEMA = z.object({ title: z.string() });
 
@@ -26,7 +26,7 @@ export const generateChatTitle = async (content: string): Promise<string> => {
         { role: 'user', content: trimmed },
       ],
       temperature: 0.3,
-      // Reasoning models spend hidden reasoning tokens from this budget before any title text.
+      // Reasoning tokens come out of this budget before title text.
       // @see #4
       max_tokens: 512,
       structuredOutput: {

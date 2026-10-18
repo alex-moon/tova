@@ -2,7 +2,7 @@ import { RequestContext } from '@mastra/core/request-context';
 import { fetchUrlTool } from '../../main/services/mastraService';
 import { muteConsoleError } from '../muteConsole';
 
-// `fetch_url` falls back to Firecrawl when the native fetch fails; a long scraped page is saved agent-side for read_file; a fresh cached copy is reused instead of a re-scrape.
+// `fetch_url` falls back to Firecrawl; scraped pages cache for read_file.
 // @see #340
 jest.mock('../../main/services/webFetchService', () => ({
   fetchPage: jest.fn(),

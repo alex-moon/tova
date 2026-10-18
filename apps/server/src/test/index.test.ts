@@ -37,7 +37,7 @@ describe('Server bootstrap', () => {
       .post('/api/auth/register')
       .send({ email: 'oversized@example.com', password: big });
 
-    // Express's JSON parser rejects over-limit bodies (413), or routing already rejected them (400/401) — anything but a 201.
+    // Over-limit bodies 413, or routing rejects first — anything but a 201.
     expect(response.status).not.toBe(201);
   });
 

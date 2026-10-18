@@ -1,6 +1,6 @@
 import { MigrationInterface, Db } from 'mongo-migrate-ts';
 
-// Pre-creates the evalruns collection and its indexes so deployed instances have them before first write.
+// Pre-creates the evalruns collection and its indexes before first write.
 // @see #225
 export class CreateEvalRuns implements MigrationInterface {
   async up(db: Db): Promise<void> {

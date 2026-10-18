@@ -1,7 +1,7 @@
 import { MigrationInterface } from 'mongo-migrate-ts';
 import { Db } from 'mongodb';
 
-// Seeds the fixed model roster (mirroring ROSTER_SEED); $setOnInsert so an admin edit is never clobbered by a re-run.
+// Seeds the fixed model roster (mirrors ROSTER_SEED); $setOnInsert on re-run.
 // @see #232 #233 #316
 const ROWS = [
   {

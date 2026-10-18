@@ -9,7 +9,7 @@ import {
   type EvalSuiteDeps,
 } from '../../main/services/evalRunService';
 
-/* Service coverage: connectors, runCase, gradeRun, fixtures, repo reads and the LangSmith client are all injected so the flows are deterministic. */
+/* Service coverage: all collaborators injected so flows are deterministic. */
 // @see #225
 
 const model = { provider: 'deepinfra' as const, model: 'openai/gpt-oss-20b' };

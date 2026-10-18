@@ -3,10 +3,10 @@ import type { MemoryScenario } from './types';
 import type { JudgeVerdict } from './helpfulnessEval';
 import { config } from '../../config';
 
-// Judge-validation harness: the judge is measured against labelled pairs before its win-rate ratifies a bar.
+// Judge-validation harness: the judge is measured before its win-rate counts.
 // @see #289
 
-/** The three classes a pair can be labelled with (the judge's non-error verdicts). */
+/** The three classes a pair can be labelled with. */
 export type JudgeLabelClass = 'A' | 'B' | 'tie';
 
 export interface JudgeLabel {
@@ -16,11 +16,11 @@ export interface JudgeLabel {
   answerB: string;
   /** Which answer is more helpful, as the label asserts. */
   better: JudgeLabelClass;
-  /** Where the label came from; `constructed` is circular (smoke test only). */
+  /** Where the label came from; `constructed` is circular (smoke). */
   provenance: 'constructed' | 'agent-authored' | 'owner-confirmed';
 }
 
-/** expected → predicted counts, including the `error` column (excluded from kappa). */
+/** expected → predicted counts; the `error` column is outside kappa. */
 export type JudgeConfusion = Record<JudgeLabelClass, Record<JudgeVerdict, number>>;
 
 export interface JudgeAgreement {
@@ -35,7 +35,7 @@ export interface JudgeAgreement {
   confusion: JudgeConfusion;
 }
 
-/** Constructed validation pairs derived from the corpus; arm order alternates so position bias cannot pass. */
+/** Validation pairs derived from the corpus; arm order alternates. */
 export const constructedJudgeLabels = (
   scenarios: MemoryScenario[] = MEMORY_SCENARIOS,
 ): JudgeLabel[] =>
@@ -53,7 +53,7 @@ export const constructedJudgeLabels = (
     };
   });
 
-// Agent-authored seed, not independent evidence until owner-confirmed; classes balanced so kappa is defined.
+// Agent-authored seed, not evidence until owner-confirmed.
 export const handJudgeLabels: JudgeLabel[] = [
   {
     id: 'hand-arithmetic',
@@ -189,7 +189,7 @@ const cohenKappa = (confusion: JudgeConfusion, n: number): number | null => {
   if (n === 0) return null;
   const rowTotal = (c: JudgeLabelClass): number =>
     CLASSES.reduce((sum, p) => sum + confusion[c][p], 0);
-  // A class with no ground-truth label makes kappa undefined; report null rather than a misleading number.
+  // No ground-truth label makes kappa undefined; report null, not a guess.
   if (CLASSES.some((c) => rowTotal(c) === 0)) return null;
   let diagonal = 0;
   for (const c of CLASSES) diagonal += confusion[c][c];
@@ -205,13 +205,13 @@ const cohenKappa = (confusion: JudgeConfusion, n: number): number | null => {
 
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
-// One live judge call per pair can trip provider RPM; paced by the same config-sourced delay.
+// One live judge call per pair can trip RPM; paced by the config delay.
 export const defaultJudgePace = async (): Promise<void> => {
   const ms = config.memoryEval.judgePaceMs;
   if (ms > 0) await sleep(ms);
 };
 
-/** Score a judge against labelled pairs; errors are counted separately and excluded from agreement. */
+/** Score a judge against labelled pairs; errors excluded from agreement. */
 export const judgeAgreement = async (
   labels: JudgeLabel[],
   judgeFn: (query: string, answerA: string, answerB: string) => Promise<JudgeVerdict>,

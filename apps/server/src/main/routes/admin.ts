@@ -23,7 +23,7 @@ const adminGuard = [authenticateBearerOrSession, requireRole('admin')];
 
 const KNOWN_PERMISSIONS = ['routing'] as const;
 
-// Owner-protected account: cannot be demoted at all; module-level so a config move is one line.
+// Owner-protected account: cannot be demoted; module-level singleton.
 // @see #15
 export const PROTECTED_OWNER_EMAIL = 'formsatz@gmail.com';
 
@@ -59,12 +59,12 @@ router.get('/users', ...adminGuard, async (_req, res) => {
   }
 });
 
-/* Model inventory CRUD: each row is ONE modelrosters document with a paired providers[] list; read errors degrade to empty lists. */
+/* Model inventory CRUD: one modelrosters doc per row, providers[] list. */
 // @see #104 #234
-// The racing path only talks to the two roster providers; `typesafe` rides along in compare only.
+// The racing path only talks to the roster providers; compare-only extras.
 // @see #232 #151
 const ROSTER_PROVIDER_SET = ['deepinfra', 'fireworks'] as const;
-// Compare still accepts the legacy provider set so historic rows remain runnable.
+// Compare still accepts the legacy provider set for historic rows.
 // @see #151
 const PROVIDER_SET = ['groq', 'deepinfra', 'fireworks', 'typesafe'] as const;
 type CompareProvider = (typeof PROVIDER_SET)[number];
@@ -116,7 +116,7 @@ const isProvided = (v: unknown): boolean =>
 const isRosterProvider = (value: unknown): value is (typeof ROSTER_PROVIDER_SET)[number] =>
   typeof value === 'string' && (ROSTER_PROVIDER_SET as readonly string[]).includes(value);
 
-/* Validate a provider entry ({provider, modelId, enabled?}); returns the whitelisted entry or an error string. */
+/* Validate a provider entry ({provider, modelId, enabled?}); whitelist. */
 const validateProviderEntry = (value: unknown): ProviderMutation | { error: string } => {
   if (!value || typeof value !== 'object') return { error: 'Invalid provider entry' };
   const p = value as Record<string, unknown>;
@@ -136,7 +136,7 @@ const validateProviderEntry = (value: unknown): ProviderMutation | { error: stri
   };
 };
 
-/* Validate a create/update payload against the ModelRoster schema; omitted fields mean "leave unchanged". */
+/* Validate a payload against the ModelRoster schema; omit = unchanged. */
 const validateModelMutation = (
   body: unknown,
   forUpdate: boolean,
@@ -156,7 +156,7 @@ const validateModelMutation = (
     if (typeof b.label !== 'string' || !b.label.trim()) return { error: 'Invalid label' };
     out.label = b.label.trim();
   } else if (!forUpdate) {
-    // A label is required by the schema; default it to the model id so an operator adding seed models by hand need not name them.
+    // Label defaults to the model id so hand-added seeds need no name.
     out.label = (b.modelId as string | undefined)?.trim() ?? '';
   }
   if (b.eligible !== undefined) {
@@ -174,10 +174,10 @@ const validateModelMutation = (
     if (!Number.isInteger(n) || n <= 0) return { error: 'Invalid contextLength' };
     out.contextLength = n;
   } else if (forUpdate && (b.contextLength === '' || b.contextLength === null)) {
-    // `null` (not `undefined`) so mongoose passes the clear through; update casting silently drops undefined keys.
+    // `null` (not `undefined`) so mongoose passes the clear through.
     out.contextLength = null;
   }
-  /* Prices: USD per 1M tokens, non-negative finite; ''/null clears back to unknown; a soft score input, not a cap. */
+  /* Prices: USD/1M tokens, non-negative; ''/null clears to unknown. */
   // @see #199 #234
   for (const field of ['inputPrice', 'outputPrice'] as const) {
     if (b[field] !== undefined && isProvided(b[field])) {
@@ -199,7 +199,7 @@ const validateModelMutation = (
     for (const entry of b.providers) {
       const parsed = validateProviderEntry(entry);
       if ('error' in parsed) return { error: parsed.error };
-      // A duplicate provider would make the per-provider TTFT update target two entries; keep one entry per provider.
+      // Duplicate providers would double-target the TTFT update.
       if (seen.has(parsed.provider)) {
         return { error: `Duplicate provider entry: ${parsed.provider}` };
       }
@@ -237,7 +237,7 @@ const toAdminModel = (row: RosterRow) => ({
   tools: row.tools !== false,
   vision: row.vision === true,
   contextLength: row.contextLength,
-  // Pricing (USD per 1M tokens); undefined on unpriced models so the client only sees the key when a price is known.
+  // Pricing USD/1M; undefined on unpriced models hides the key.
   // @see #199
   inputPrice: row.inputPrice,
   outputPrice: row.outputPrice,
@@ -245,7 +245,7 @@ const toAdminModel = (row: RosterRow) => ({
     provider: p.provider,
     modelId: p.modelId,
     enabled: p.enabled !== false,
-    // Exactly the rolling figure the router scores on — no client-side recomputation.
+    // Exactly the rolling figure the router scores on.
     // @see #232
     ttftMs: p.ttftMs,
     ttftSamples: p.ttftSamples,
@@ -265,7 +265,7 @@ router.get('/models', ...adminGuard, async (_req, res) => {
     // @see #234 #175
     const [roster, routeErrors] = await Promise.all([
       ModelRoster.find({}).lean(),
-      // inferenceService records every completion failure into `modelrouteerrors`; the admin table reads that single mechanism.
+      // Completion failures are recorded by inferenceService alone.
       // @see #168 #175
       ModelRouteError.find({}).sort({ lastSeenAt: -1 }).lean(),
     ]);
@@ -298,7 +298,7 @@ router.get('/models', ...adminGuard, async (_req, res) => {
   }
 });
 
-/* Resolve a model's provider-owned details from the catalog; `found: false` with 200 is a normal miss, a provider failure is a 502. */
+/* Resolve provider details from the catalog; miss is 200, failure 502. */
 // @see #217 #234
 const LOOKUP_PROVIDERS = ['deepinfra', 'fireworks'] as const;
 
@@ -372,7 +372,7 @@ router.put('/models/:id', ...adminGuard, async (req, res) => {
     return res.status(400).json({ message: payload.error });
   }
   try {
-    /* Providers merge on the provider key: an incoming entry replaces modelId/enabled but preserves rolling TTFT and cool-off. */
+    /* Providers merge on the key: modelId/enabled replaced, TTFT kept. */
     const set: Record<string, unknown> = {};
     for (const field of [
       'modelId',
@@ -429,7 +429,7 @@ router.delete('/models/:id', ...adminGuard, async (req, res) => {
   }
 });
 
-// Direct model comparison: one prompt through the existing agent on chosen rows; shares runModelComparison with the CLI.
+// Direct model comparison: one prompt through the existing agent.
 // @see #129
 router.post('/model-compare', ...adminGuard, async (req, res) => {
   const b = req.body as { prompt?: unknown; models?: unknown };
@@ -471,7 +471,7 @@ router.post('/model-compare', ...adminGuard, async (req, res) => {
   }
 });
 
-// Retained logs from Grafana Cloud Loki; one time-window page, newest first, filters applied server-side.
+// Retained logs from Grafana Loki; one window page, newest first.
 // @see #179
 router.get('/logs', ...adminGuard, async (req, res) => {
   const level = req.query.level as LogLevel | undefined;

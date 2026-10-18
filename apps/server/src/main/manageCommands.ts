@@ -4,7 +4,7 @@ import { readFile } from 'node:fs/promises';
 import * as path from 'node:path';
 import { buildMongoUri } from '../../../shared/src/main/mongoUri';
 
-// Django-style management commands: flat registry + argv router on the raw mongodb driver.
+// Django-style management commands: flat registry + argv router.
 // @see #322
 
 export interface ManageCommand {
@@ -73,7 +73,7 @@ export const rosterCommand: ManageCommand = {
   },
 };
 
-// Probe fixtures: solid-color PNGs assert color perception, kitten.jpg a real photo content recognition.
+// Probe fixtures: PNGs assert color, kitten.jpg asserts real photo OCR.
 // @see #318
 const fixtureDataUrl = async (file: string, mediaType: string): Promise<string> => {
   const b64 = await readFile(path.join(__dirname, 'services', 'fixtures', file), 'base64');
@@ -120,7 +120,7 @@ type ProbeCase = {
   /** What a model that truly saw the image answers. */
   expect: RegExp;
   prompt: string;
-  /** Tool-message variant: the image rides the tool result instead of the user turn. */
+  /** Tool-message variant: the image rides the tool result. */
   viaTool?: boolean;
   /** Attempt allowance — hard perception cases flake more (default 2). */
   attempts?: number;
@@ -152,7 +152,7 @@ const PROBE_CASES: ProbeCase[] = [
     name: 'user message, whiteboard.jpg (handwriting)',
     fixture: ['whiteboard.jpg', 'image/jpeg'],
     seesImage: true,
-    // Distinctive menu items — unreadable without actually parsing the handwriting.
+    // Distinctive menu items — unreadable without parsing handwriting.
     expect: /\bcroissant|lemonade|barbeque|barbecue\b/i,
     prompt: 'Read the whiteboard. Name one food or drink item written on it.',
     attempts: 3,
@@ -161,7 +161,7 @@ const PROBE_CASES: ProbeCase[] = [
     name: 'user message, street.jpg (busy scene)',
     fixture: ['street.jpg', 'image/jpeg'],
     seesImage: true,
-    // Small sign text / salient vehicle — requires more than a vague scene guess.
+    // Small sign text / vehicle — needs more than a vague scene guess.
     expect: /\bone way\b|\bbus\b/i,
     prompt: 'Look at the street scene. What text is visible on a sign, and is there a bus?',
     attempts: 3,
@@ -228,7 +228,7 @@ export const probeImageToolsCommand: ManageCommand = {
                 content: [{ type: 'text', text: probeCase.prompt }, imagePart],
               },
             ];
-        // Live-model perception is noisy, so each case gets a retry before it counts as a failure.
+        // Live perception is noisy; each case gets one retry on failure.
         const attemptsAllowed = probeCase.attempts ?? 2;
         let status = 0;
         let answer = '';
@@ -242,7 +242,7 @@ export const probeImageToolsCommand: ManageCommand = {
               body: JSON.stringify({
                 model: target.model,
                 messages,
-                // Reasoning models emit long reasoning_content; a small cap reads as a perception failure.
+                // Reasoning models emit long reasoning_content; cap it hard.
                 max_tokens: 400,
               }),
             });
@@ -251,7 +251,7 @@ export const probeImageToolsCommand: ManageCommand = {
           } catch (err) {
             answer = String(err);
           }
-          // Pass = HTTP accepted; image cases must also answer with the expected perception.
+          // Pass = HTTP accepted; image cases must also perceive.
           const accepted = status === 200;
           saw = accepted && probeCase.seesImage && probeCase.expect.test(answer);
           ok = accepted && (!probeCase.seesImage || saw);
@@ -271,7 +271,7 @@ export const probeImageToolsCommand: ManageCommand = {
         console.log(
           `${target.name} | ${probeCase.name}: HTTP ${status} ${answer ? JSON.stringify(answer.slice(0, 80)) : ''} — ${why}`,
         );
-        // Documented provider limitation: DeepInfra rejects tool-message images; expected, not a regression.
+        // Documented DeepInfra limit: tool-message images rejected; not a bug.
         // @see #318
         if (!accepted && probeCase.viaTool) {
           console.log(

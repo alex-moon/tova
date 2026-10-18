@@ -27,7 +27,7 @@ const userSchema = new mongoose.Schema(
       type: [String],
       default: [],
     },
-    // Profile fields; optional, populated by Google login or PATCH /api/profile.
+    // Profile fields; filled by Google login or PATCH /api/profile.
     // @see #35
     name: {
       type: String,
@@ -55,34 +55,34 @@ const userSchema = new mongoose.Schema(
             maxlength: 4000,
             default: null,
           },
-          // null = no explicit choice; the client follows prefers-color-scheme then light.
+          // null = no explicit choice; client follows prefers-color-scheme.
           // @see #53
           theme: {
             type: String,
             enum: ['light', 'dark'],
             default: null,
           },
-          // null = no explicit choice; the client starts from the most recent chat.
+          // null = no explicit choice; client starts from latest chat.
           // @see #96
           startupChat: {
             type: String,
             enum: ['recent', 'new'],
             default: null,
           },
-          // When true, chat turns and chat attachments are never persisted; stops new writes, no purge.
+          // When true, turns and attachments are never persisted.
           // @see #116
           zdr: {
             type: Boolean,
             default: false,
           },
-          // IANA timezone from the browser; absent = unknown, the prompt falls back to UTC.
+          // Browser IANA zone; absent = unknown, prompt falls back to UTC.
           // @see #266 #261
           timezone: {
             type: String,
             maxlength: 64,
             default: null,
           },
-          // Only `false` is ever written explicitly; absent keys default to true, no legacy backfill.
+          // Only `false` is written explicitly; absent defaults to true.
           // @see #59
           confirmDeletes: {
             type: new mongoose.Schema(
@@ -99,7 +99,7 @@ const userSchema = new mongoose.Schema(
       ),
       default: null,
     },
-    // Coarse country-level geolocation resolved server-side; no city or lat/lon data stored.
+    // Coarse country-level geolocation; no city or lat/lon stored.
     // @see #50
     location: {
       type: new mongoose.Schema(
@@ -136,7 +136,7 @@ userSchema.methods.comparePassword = async function (this: UserDocument, passwor
 
 export interface UserSettings {
   customInstructions: string | null;
-  // Optional so partial literals keep typechecking; runtime default null = no explicit preference.
+  // Optional so partial literals typecheck; runtime default null.
   // @see #53
   theme?: 'light' | 'dark';
   startupChat?: 'recent' | 'new';

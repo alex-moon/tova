@@ -1,7 +1,7 @@
-/** Types for the deterministic eval framework: code graders, not LLM judges. */
+/** Eval-framework types: code graders, not LLM judges. */
 // @see #112
 
-/** One observed tool call, shaped after FullOutput.toolResults plus stream args. */
+/** One observed tool call, shaped after FullOutput.toolResults. */
 export interface ToolCallRecord {
   name: string;
   /** Substring equality against a (stringified) tool result, when present. */
@@ -18,10 +18,10 @@ export interface EvalRun {
   prompt: string;
   /** Content extracted from generated files (README case), if any. */
   generatedContent?: string;
-  /** The assistant's final answer text, accumulated from `chunk.delta` while streaming. */
+  /** Final answer text, accumulated from `chunk.delta` while streaming. */
   // @see #158
   finalText?: string;
-  /** The assistant's final answer text, letting retrieval cases grade the answer itself. */
+  /** Final answer text, so retrieval cases can grade the answer itself. */
   // @see #159
   answer?: string;
   /** Every generated file emitted by the run, in call order. */
@@ -44,16 +44,16 @@ export type Assertion =
   /** The final answer must match the regex (case-insensitive by default). */
   // @see #158
   | { type: 'text_matches'; pattern: string; flags?: string }
-  /** The final answer must not claim a search happened without a `web_search` call in the run. */
+  /** The answer must not claim a search without a `web_search` call. */
   // @see #158
   | { type: 'text_not_claiming_search' }
-  /** A sourced answer must reference its sources inline as literal links in the final text. */
+  /** A sourced answer must reference its sources as literal links. */
   // @see #158
   | { type: 'text_inline_sources' }
-  /** Substring (case/whitespace-normalised) match on the assistant's final answer. */
+  /** Substring (case/whitespace-normalised) match on the answer. */
   // @see #159
   | { type: 'answer_contains'; text: string }
-  /** A generated file's content contains `text` with `filename` matched exactly. */
+  /** The generated file's content contains `text` for `filename`. */
   // @see #159
   | { type: 'file_content_contains'; filename: string; text: string };
 

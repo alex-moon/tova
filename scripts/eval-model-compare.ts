@@ -3,7 +3,7 @@ import type { LlmProvider } from '../apps/server/src/main/services/llmTypes';
 import { runModelComparison } from '../apps/server/src/main/services/modelCompare';
 import { ROSTER_SEED } from '../apps/server/src/main/services/rosterConfig';
 
-/* One-off eval: run a single prompt against several models side by side; routing rules change only after comparison here. */
+/* One-off eval: one prompt against several models side by side. */
 // @see #129 #236
 
 const DEFAULT_REFS = ROSTER_SEED.flatMap((model) =>

@@ -1,4 +1,4 @@
-/* Jest stub for `@mastra/langsmith`: `withLangsmithMetadata` returns an updater that nests the LangSmith fields under metadata.langsmith. */
+/* Jest stub for `@mastra/langsmith`: nests fields under metadata.langsmith. */
 
 export class LangSmithExporter {
   constructor(public readonly config: unknown) {}

@@ -8,7 +8,7 @@ export interface EncryptedEnvelope {
   ciphertext: string;
 }
 
-/* AES-256-GCM envelope encryption for user-supplied auth tokens: reversible encryption required (the server replays the plaintext per call), never stored in plaintext; the raw env key is stretched via SHA-256. */
+/* AES-256-GCM envelope encryption for stored auth tokens. */
 // @see #36 #80
 const derivedKey = (keyMaterial: string): Buffer =>
   crypto.createHash('sha256').update(keyMaterial, 'utf8').digest();
@@ -25,7 +25,7 @@ const resolveKey = (): Buffer => {
 
 export const encryptEnvelope = (plaintext: string): EncryptedEnvelope => {
   const iv = crypto.randomBytes(12);
-  // authTagLength pinned at construction: the decrypter must reject shorter-than-16-byte tags (semgrep gcm-no-tag-length).
+  // authTagLength pinned; short tags must be rejected (gcm-no-tag-length).
   const cipher = crypto.createCipheriv('aes-256-gcm', resolveKey(), iv, { authTagLength: 16 });
   const ciphertext = Buffer.concat([cipher.update(plaintext, 'utf8'), cipher.final()]);
   return {

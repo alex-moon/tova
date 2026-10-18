@@ -1,7 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 import { installChatStreamMock } from './helpers/chatMock';
 
-// Real-endpoint auth; shared SSE mock split into deltas to exercise incremental rendering.
+// Real-endpoint auth; SSE mock split into deltas for incremental rendering.
 
 const email = process.env.E2E_EMAIL ?? 'formsatz@gmail.com';
 const password = process.env.E2E_PASSWORD ?? 'password';
@@ -10,7 +10,7 @@ test.beforeEach(async ({ page }) => {
   await page.request.post('/api/auth/login', {
     data: { email, password },
   });
-  // Mock the sessions list so the turn below cannot land in a seeded session and flake.
+  // Mock the sessions list so the turn below cannot land in a seeded session.
   await page.route('**/api/chat/sessions', (route) =>
     route.fulfill({ status: 200, contentType: 'application/json', body: '[]' }),
   );

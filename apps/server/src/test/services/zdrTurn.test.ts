@@ -31,7 +31,7 @@ describe('decideTurn (#144)', () => {
     expect(decideTurn({ incognito: true, sessionId: 'abc' })).toEqual({ reject: true });
   });
 
-  // Only a truthy sessionId means "continuing a chat"; '' is the un-filled new-chat field.
+  // Only a truthy sessionId means "continuing a chat".
   // @see #144
   it('incognito turn with an empty-string sessionId is treated as a new chat', () => {
     expect(decideTurn({ incognito: true, sessionId: '' })).toEqual({

@@ -38,7 +38,7 @@ jest.mock('../../main/services/storageService', () => ({
 
 const MOCK_ROUTING = { model: 'mock-small-model', provider: 'deepinfra', reason: 'roster-pick' };
 
-// Routing runs through the fixed-roster racing path; `mockRacingState` delegates back through the mocked inferenceService so the completion mocks stay the seam.
+// Routing uses the fixed-roster racing path; `mockRacingState` stays the seam.
 // @see #233
 const mockRacingState: {
   routing: typeof MOCK_ROUTING | null;
@@ -82,7 +82,7 @@ jest.mock('../../main/services/titleService', () => ({
   generateChatTitle: jest.fn().mockResolvedValue('Hello'),
 }));
 
-// The enrichment aux call is stubbed out of the mocked inference-call slots; with the gate retired no vote exists and the trace-fact helpers stay real so route metadata derives from live retrieval.
+// Enrichment aux stubbed out; no vote exists and trace-fact helpers stay real.
 // @see #238 #310
 jest.mock('../../main/services/workspaceTraceFacts', () =>
   jest.requireActual('../../main/services/workspaceTraceFacts'),
@@ -106,7 +106,7 @@ const registerUser = async (email: string): Promise<string[]> => {
   return Array.isArray(cookies) ? cookies : [cookies];
 };
 
-// The "incognito by default" option reuses the settings.zdr slot, bridged per the decide-once semantics.
+// "Incognito by default" reuses the settings.zdr slot, decide-once semantics.
 // @see #144
 const setIncognitoByDefault = async (email: string) => {
   const doc = await User.findOne({ email });
@@ -272,7 +272,7 @@ describe('Per-chat incognito flag (issue #144)', () => {
     const email = 'incognito-leftover-session@example.com';
     const cookies = await registerUser(email);
     const user = await User.findOne({ email });
-    // No incognito session is ever created by the routes (write-nothing), so construct one directly to pin the stored-flag reject path.
+    // Routes write nothing; construct the session directly to pin rejection.
     // @see #144
     const session = await Session.create({
       userId: user?._id,

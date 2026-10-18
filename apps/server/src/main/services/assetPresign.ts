@@ -3,7 +3,7 @@ import { spacesWorkspaceStorage } from './workspaceStorage';
 import { ALLOWED_CONTENT_TYPES, MAX_ASSET_SIZE, sanitizeFilename } from './assetLimits';
 import { safeAsset } from './assetViews';
 
-/* Core of POST /presign and the bulk per-item loop: policy checks, then mint a pending Asset row and presign its direct PUT; typed rejection so bulk maps per-item outcomes. */
+/* Core of POST /presign and the bulk per-item loop; never throws. */
 // @see #68
 type PresignItem = { filename: string; contentType: string; size: number };
 type PresignResult =
@@ -29,10 +29,10 @@ const presignItemForUser = async (
     contentType,
     size,
     status: 'pending',
-    // Every upload is `kind: 'upload'`: presign runs before a session may exist, so there is no truthful session id to record (absent = unknown, never faked).
+    // Presign runs before a session may exist; no truthful session id.
     // @see #252 #144
     provenance: { kind: 'upload' },
-    // An ephemeral row is deleted with its Spaces object once the consuming turn completes.
+    // Ephemeral rows are deleted with their Spaces object after the turn.
     // @see #116
     ...(opts.ephemeral ? { ephemeral: true } : {}),
   });

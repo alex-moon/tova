@@ -16,7 +16,7 @@ vi.mock('../../main/services/auth', () => ({
   },
 }));
 
-// The browser zone is whatever this runner's Intl reports; the client must forward exactly that value.
+// The browser zone is this runner's Intl value; forward it verbatim.
 const zone = Intl.DateTimeFormat().resolvedOptions().timeZone;
 
 const userWithoutZone: User = {
@@ -49,7 +49,7 @@ describe('AuthContext timezone report (#261)', () => {
       expect(updateProfile).toHaveBeenCalledTimes(1);
     });
     expect(updateProfile).toHaveBeenCalledWith({ timezone: zone });
-    // The PATCH response replaces the context user so the report does not re-fire on the next effect run.
+    // The PATCH response replaces the user so the report does not re-fire.
     await waitFor(() => {
       expect(updateProfile).toHaveBeenCalledTimes(1);
     });

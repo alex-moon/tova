@@ -16,7 +16,7 @@ import type {
   AdminSessionsCostPayload,
 } from '../types/admin';
 
-// Normalised admin failure: server message when one arrived, else the fallback; views read .message without importing axios.
+// Admin failure normalisation: server message, else fallback; views read it.
 export class AdminError extends Error {
   constructor(message = 'Something went wrong.', options?: { cause?: unknown }) {
     super(message, options);
@@ -32,7 +32,7 @@ const toAdminError = (err: unknown, fallback: string): AdminError => {
   return new AdminError(fallback, { cause: err });
 };
 
-// Connector separating views from axios; all admin API traffic goes through this class.
+// Connector separating views from axios; all admin traffic goes through this.
 const AdminService = {
   async listUsers(): Promise<AdminUser[]> {
     try {
@@ -64,7 +64,7 @@ const AdminService = {
 
 export default AdminService;
 
-// Model inventory CRUD over roster rows; mutations return the row id, callers refetch; the list carries per-model error diagnostics.
+// Model inventory CRUD over roster rows; the list carries error diagnostics.
 // @see #104 #234 #168
 export type ModelInput = Partial<
   Omit<AdminModel, 'id' | 'providers' | 'contextLength' | 'inputPrice' | 'outputPrice'>
@@ -126,7 +126,7 @@ const lookupModel = async (
   }
 };
 
-// Direct model comparison: one prompt through the existing agent on chosen model rows.
+// Direct comparison: one prompt through the existing agent on chosen rows.
 // @see #129
 const compareModels = async (
   prompt: string,
@@ -172,7 +172,7 @@ const listLogs = async (params: ListLogsParams = {}): Promise<AdminLogsPayload> 
 
 const AdminLogsService = { listLogs };
 
-// PAT list/generate/revoke; the create response carries the plaintext token exactly once.
+// PAT list/generate/revoke; create response carries the plaintext once.
 // @see #184
 const listPats = async (): Promise<AdminPatsPayload> => {
   try {
@@ -202,7 +202,7 @@ const revokePat = async (id: string): Promise<void> => {
 
 const AdminPatsService = { listPats, createPat, revokePat };
 
-// LangSmith read view: recent traces with a drill-down tree, and the per-model stats rollup.
+// LangSmith read view: recent traces with drill-down, per-model stats rollup.
 // @see #186
 export interface ListTracesParams {
   errorsOnly?: boolean;
@@ -260,7 +260,7 @@ const listSessionCosts = async (days = 7): Promise<AdminSessionsCostPayload> => 
 
 const AdminLangsmithService = { listTraces, getTrace, listStats, listSessionCosts };
 
-// Eval rollup read view: recent suite runs, per-case breakdown, manual "Run now" (starts in the background).
+// Eval rollup read view: recent runs, per-case breakdown, manual run.
 // @see #225
 const listEvalRuns = async (limit?: number): Promise<AdminEvalRunsPayload> => {
   try {

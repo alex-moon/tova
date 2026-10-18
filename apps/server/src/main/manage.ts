@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { commands } from './manageCommands';
 
-// Django-style management command entrypoint; run bare (or unknown) to list commands.
+// Django-style management command entrypoint; bare run lists commands.
 // @see #322
 const [name, ...args] = process.argv.slice(2);
 

@@ -24,7 +24,7 @@ import {
   type WorkspaceSlice,
 } from '../../main/services/workspaceRetrievalService';
 
-/* Workspace memory retrieval: scoring is pure; the Mongo read never throws; the block is capped. */
+/* Retrieval: scoring pure, Mongo read never throws, block capped. */
 // @see #253
 
 const slice = (over: Partial<WorkspaceSlice> = {}): WorkspaceSlice => ({
@@ -76,7 +76,7 @@ describe('workspaceRetrievalService', () => {
     });
 
     it('returns no picks when every document tokenises to nothing', () => {
-      // Title tokens count as document tokens, so a truly empty doc needs an empty title too.
+      // Title tokens count as doc tokens; an empty doc needs an empty title.
       // @see #309
       expect(pickTopSlices('budget', [slice({ text: 'the a of', title: '' })])).toEqual([]);
     });
@@ -108,7 +108,7 @@ describe('workspaceRetrievalService', () => {
 
     // Non-negative IDF keeps a ubiquitous-but-relevant slice surfacing.
     it('still scores a term present in every document', () => {
-      // Pin `at` equal so the id-asc tie-break decides; the default `new Date()` can straddle a millisecond (latent flake).
+      // Pin `at` equal so the id-asc tie-break decides; no clock flake.
       // @see #293
       const at = new Date('2026-06-01');
       const picks = pickTopSlices('budget', [
@@ -120,7 +120,7 @@ describe('workspaceRetrievalService', () => {
     });
 
     it('ignores a query term absent from every document', () => {
-      // Pin `at` so the two runs differ only by the absent term; the default `new Date()` can straddle a millisecond.
+      // Pin `at` so the runs differ only by the absent term.
       // @see #293
       const at = new Date('2026-06-01');
       const withAbsent = pickTopSlices('budget zzzz', [slice({ id: 'A', text: 'budget', at })]);
@@ -336,7 +336,7 @@ describe('workspaceRetrievalService', () => {
     });
 
     it('is not starved by a busier other user (pool scoped session-first)', async () => {
-      // Regression: a global newest-first scan would fill the window with the other user's flood.
+      // Regression: a global scan would fill the window with their flood.
       const userId = String(new Types.ObjectId());
       const other = String(new Types.ObjectId());
       const session = await Session.create({ userId, title: 'Move' });
@@ -363,7 +363,7 @@ describe('workspaceRetrievalService', () => {
     });
 
     it('surfaces a seed buried beyond the old bounded pool (#293)', async () => {
-      // Regression: the old read kept only the newest 200 messages, hiding older matching chats.
+      // Regression: the old read kept only the newest 200 messages.
       // @see #293
       const userId = String(new Types.ObjectId());
       const session = await Session.create({ userId, title: 'Old policy' });
@@ -563,14 +563,14 @@ describe('workspaceRetrievalService', () => {
     });
   });
 
-  /* The semantic stage is Atlas-only, so inject embed/search to pin the degradation contract (every failure returns []). */
+  /* The semantic stage is Atlas-only; every failure must return []. */
   // @see #294
   describe('vectorCandidates (#294)', () => {
     const query = 'what do you know about my partner';
 
     it('embeds the query and returns the injected search hits', async () => {
       const embed = jest.fn(async () => [[0.1, 0.2, 0.3]]);
-      const search = jest.fn(async () => [{ sourceId: 'a', score: 0.9 }]);
+      const search = jest.fn(async (_opts: unknown) => [{ sourceId: 'a', score: 0.9 }]);
       const hits = await vectorCandidates(query, 'user', 'model-x', 6, { embed, search });
       expect(embed).toHaveBeenCalledWith([query]);
       expect(search).toHaveBeenCalledTimes(1);
@@ -578,14 +578,14 @@ describe('workspaceRetrievalService', () => {
     });
 
     it('sizes the ANN window with headroom (floor 100)', async () => {
-      const search = jest.fn(async () => []);
+      const search = jest.fn(async (_opts: unknown) => []);
       await vectorCandidates(query, 'user', 'model-x', 6, { embed: async () => [[1]], search });
       expect(search.mock.calls[0][0]).toMatchObject({ limit: 100, numCandidates: 100 });
     });
 
     it('passes the userId and model through to the search filter', async () => {
-      // The Atlas filter compares exactly; the stage must forward raw ids unchanged.
-      const search = jest.fn(async () => []);
+      // The Atlas filter compares exactly; forward raw ids unchanged.
+      const search = jest.fn(async (_opts: unknown) => []);
       await vectorCandidates(query, 'user-1', 'model-x', 6, {
         embed: async () => [[1]],
         search,
@@ -604,7 +604,7 @@ describe('workspaceRetrievalService', () => {
     });
 
     it('grows the ANN window with n so numCandidates stays >= limit', async () => {
-      const search = jest.fn(async () => []);
+      const search = jest.fn(async (_opts: unknown) => []);
       await vectorCandidates(query, 'user', 'model-x', 100, { embed: async () => [[1]], search });
       expect(search.mock.calls[0][0]).toMatchObject({ limit: 400, numCandidates: 400 });
     });
@@ -650,7 +650,7 @@ describe('workspaceRetrievalService', () => {
     });
   });
 
-  /* Reciprocal rank fusion: pure, so every branch is unit-tested with hand-built rankings. */
+  /* Reciprocal rank fusion: pure, hand-built rankings. */
   // @see #294
   describe('rrfFuse (#294)', () => {
     const a = slice({ id: 'a', at: new Date('2024-01-01') });
@@ -699,7 +699,7 @@ describe('workspaceRetrievalService', () => {
     it('weights change the order', () => {
       const bm25 = [{ slice: a, score: 9 }];
       const vector = [{ sourceId: 'b', score: 0.9 }];
-      // Equal weight: a and b tie on score, tiebreak by `at` desc -> b (newer).
+      // Equal weight: a and b tie on score, tiebreak by `at` desc -> b.
       expect(rrfFuse(slices, bm25, vector)[0].id).toBe('b');
       expect(rrfFuse(slices, bm25, vector, { bm25: 5, vector: 1 })[0].id).toBe('a');
       expect(rrfFuse(slices, bm25, vector, { bm25: 1, vector: 5 })[0].id).toBe('b');
@@ -740,7 +740,7 @@ describe('workspaceRetrievalService', () => {
     });
 
     it('matches a hand-computed RRF score', () => {
-      // k=60, weights 1/1. a is bm25 #1 and vector #2; b is bm25 #2 and vector #1.
+      // k=60, weights 1/1. a: bm25 #1, vector #2; b: bm25 #2, vector #1.
       const bm25 = [
         { slice: a, score: 9 },
         { slice: b, score: 8 },
@@ -749,13 +749,13 @@ describe('workspaceRetrievalService', () => {
         { sourceId: 'b', score: 0.9 },
         { sourceId: 'a', score: 0.8 },
       ];
-      // a: 1/61 + 1/62; b: 1/62 + 1/61 -> equal; tiebreak at desc -> b (newer).
+      // a: 1/61 + 1/62; b: 1/62 + 1/61 -> equal; tiebreak at desc -> b.
       const fused = rrfFuse(slices, bm25, vector);
       expect(fused.slice(0, 2).map((s) => s.id)).toEqual(['b', 'a']);
     });
   });
 
-  /* The fusion wiring is pinned without Mongo or a provider; the flag-off contract is explicit. */
+  /* Fusion wiring pinned without Mongo or a provider; flag-off explicit. */
   // @see #294
   describe('rankWorkspaceSlices (#294)', () => {
     const a = slice({
@@ -765,7 +765,7 @@ describe('workspaceRetrievalService', () => {
     });
     const b = slice({
       id: 'b',
-      // The title now carries BM25 weight, so a 'Budget chat' title would leak a match into the control.
+      // The title carries BM25 weight; a matching title would leak in.
       // @see #309
       title: 'Weather chat',
       text: 'an unrelated note about the weather',

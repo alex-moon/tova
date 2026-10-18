@@ -11,7 +11,7 @@ import type {
   AdminTracesPayload,
 } from '../types/admin';
 
-// Admin "Traces" tab: read-only recent-traces browser with a run tree and a per-model stats strip.
+// Admin "Traces" tab: read-only recent-traces browser with a stats strip.
 // @see #186
 
 const formatDuration = (ms: number | null): string =>
@@ -20,12 +20,12 @@ const formatDuration = (ms: number | null): string =>
 const formatTokens = (tokens: number | null): string =>
   tokens === null ? '—' : tokens.toLocaleString();
 
-// A stats row is per (model, provider); provider is null on a legacy no-provider rollup.
+// One row per (model, provider); null on a legacy no-provider rollup.
 // @see #237
 const modelLabel = (row: AdminLangsmithModelStats): string =>
   row.provider ? `${row.model} · ${row.provider}` : row.model;
 
-// Unknown price renders `—`, not $0 (unknown ≠ free); sub-cent spend keeps extra precision.
+// Unknown price renders —, not $0 (unknown ≠ free); sub-cent keeps precision.
 // @see #199
 const formatCost = (usd: number | null): string => {
   if (usd === null) return '—';
@@ -39,7 +39,7 @@ const formatTime = (iso: string): string => {
   return Number.isNaN(date.getTime()) ? iso : date.toLocaleString();
 };
 
-// Terse workspace-memory facts for the table cell; undefined on pre-metadata traces.
+// Workspace-memory facts for the cell; undefined on pre-metadata traces.
 // @see #308
 const memoryLabel = (trace: AdminTraceRow): string => {
   if (!trace.workspaceGate) return '—';
@@ -116,7 +116,7 @@ const RunBlock = ({ run, depth }: { run: AdminTraceRun; depth: number }) => (
   </div>
 );
 
-// Two sibling <tr> in a fragment: a stats row plus a muted cost-breakdown row, keeping a real table body.
+// Two sibling <tr> in a fragment: a stats row plus a muted cost row.
 // @see #224
 const ModelStatsRow = ({ row }: { row: AdminLangsmithModelStats }) => (
   <>
@@ -147,7 +147,7 @@ const ModelStatsRow = ({ row }: { row: AdminLangsmithModelStats }) => (
   </>
 );
 
-// Message counts and token/cost totals deliberately skew: only turns logged after #224 carry usage.
+// Totals skew: only turns logged after #224 carry usage.
 // @see #224
 const SessionCostRow = ({ row }: { row: AdminSessionCostRow }) => (
   <tr
@@ -191,7 +191,7 @@ const AdminLangsmithView = () => {
     }
   }, []);
 
-  // A stats/cost failure is non-fatal for the list; the banner covers it and refresh retries both.
+  // Stats/cost failure is non-fatal; the banner covers it, refresh retries.
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     load({});

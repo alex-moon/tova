@@ -84,7 +84,7 @@ export function isProfileRoute() {
   return typeof window !== 'undefined' && window.location.pathname.startsWith('/profile');
 }
 
-// `/files`, not `/assets`: the latter collides with Vite's static build directory.
+// `/files`: `/assets` would collide with Vite's static build directory.
 // @see #197
 export function isFilesRoute() {
   return typeof window !== 'undefined' && window.location.pathname.startsWith('/files');
@@ -125,10 +125,10 @@ function App() {
   const [taskRefreshSignal, setTaskRefreshSignal] = useState(0);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const streamingRef = useRef(false);
-  // null = profile incognito default; true/false is a deliberate per-chat override.
+  // null = profile incognito default; true/false is a deliberate override.
   // @see #144
   const [incognitoChoice, setIncognitoChoice] = useState<boolean | null>(null);
-  // Re-opens the newest session once per mount; later refetches never override a user selection.
+  // Opens the newest session once per mount; never overrides user selection.
   // @see #96
   const startupSessionRef = useRef(false);
 
@@ -163,7 +163,7 @@ function App() {
   useEffect(() => {
     if (startupSessionRef.current || sessions.length === 0) return;
     startupSessionRef.current = true;
-    // Incognito-default users (settings.zdr) never open a saved chat by default.
+    // Incognito-default users never open a saved chat by default.
     // @see #144
     if (user?.zdr) return;
     if ((user?.startupChat ?? 'recent') === 'recent') {
@@ -190,11 +190,11 @@ function App() {
     ]);
     const streamId = `stream-${Date.now()}`;
     setMessages((prev) => [...prev, { _id: streamId, role: 'assistant', content: '' }]);
-    // A stored chat's flag is fixed at creation; a new chat uses the toggle's choice, else the profile default.
+    // Stored chats keep their flag; a new chat uses the toggle or default.
     // @see #144
     const profileIncognito = Boolean(user?.incognitoByDefault ?? user?.zdr);
     const incognito = incognitoChoice ?? profileIncognito;
-    // New incognito chats send a bounded replay of recent turns so the server has context without storing anything.
+    // New incognito chats send a bounded recent-turn replay for context.
     const sessionIdPayload = activeSessionId;
     try {
       const res = await fetch('/api/chat/stream', {
@@ -229,7 +229,7 @@ function App() {
       if (!res.ok || !res.body) {
         if (res.body) {
           const msg = (await res.json().catch(() => null)) as { message?: string } | null;
-          // 503 (models cooling off) and 403 (geo block) surface the server's message verbatim.
+          // 503/403 errors surface the server's message verbatim.
           // @see #168
           if ((res.status === 403 || res.status === 503) && msg?.message) {
             setMessages((prev) =>
@@ -246,7 +246,7 @@ function App() {
       const decoder = new TextDecoder();
       let buffer = '';
       let currentSessionId = activeSessionId;
-      // The persisted id the settled bubble adopted at `done`; post-`done` frames must target it, not the stream placeholder.
+      // Persisted id adopted at done; post-done frames must target it.
       // @see #381
       let settledId: string | null = null;
 
@@ -278,7 +278,7 @@ function App() {
               setActiveSessionId(newSessionId);
               fetchSessions();
             }
-            // Show the serving provider as soon as the router resolves, including mid-stream.
+            // Show the serving provider as soon as the router resolves it.
             // @see #117
             const routing = data.routing as { provider?: string } | undefined;
             if (routing?.provider) {
@@ -307,7 +307,7 @@ function App() {
               ),
             );
           } else if (event === 'tool') {
-            // Reconciled in order so a result replaces its call in place, not a second chip.
+            // A result replaces its call in place, not a second chip.
             // @see #33 #196
             const toolEvent = data as unknown as ToolEvent;
             setMessages((prev) =>
@@ -318,7 +318,7 @@ function App() {
               ),
             );
           } else if (event === 'honesty') {
-            // `retrying` wipes the discarded pre-`done` attempt so the server's restart streams into a clean bubble; post-`done` the frame flags the settled message, whose id `done` already adopted.
+            // Retrying resets the bubble; post-done flags the settled message.
             // @see #371 #381
             const verdict = data as Message['honesty'] & { retrying?: boolean };
             if (verdict.retrying) {
@@ -354,7 +354,7 @@ function App() {
                       sourceTitles: saved.sourceTitles ?? sourceTitles,
                       suggestions: saved.suggestions,
                       honesty: saved.honesty,
-                      // Adopt the server-reconciled summaries so the settled turn matches a refresh.
+                      // Adopt server-reconciled summaries to match a refresh.
                       // @see #196
                       ...(saved.tools ? { tools: saved.tools } : {}),
                     }
@@ -376,13 +376,13 @@ function App() {
     } finally {
       streamingRef.current = false;
       setIsChatLoading(false);
-      // A turn bumps the session's last-message time; refetch so the sidebar reflects the new order.
+      // A turn bumps the session's last-message time; refetch the sidebar.
       // @see #226
       fetchSessions();
     }
   };
 
-  // Hand the composer text to the background worker; the chat stays untouched until the worker reports back.
+  // Hand composer text to the background worker; the chat stays untouched.
   // @see #255
   const handleSendToWorker = async (content: string) => {
     if (!activeSessionId) return;
@@ -419,7 +419,7 @@ function App() {
     setSidebarOpen(false);
   };
 
-  // User-owned title: the server marks the session 'user'-titled and the UI re-renders from the row.
+  // User-owned title: server marks the row 'user'-titled; UI renders from it.
   // @see #359
   const handleRenameSession = async (id: string, title: string) => {
     try {

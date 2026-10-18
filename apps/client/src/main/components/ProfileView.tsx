@@ -10,7 +10,7 @@ import { useAuth } from '../hooks/useAuth';
 
 const PREFERRED_NAME_LIMIT = 20;
 const CUSTOM_INSTRUCTIONS_LIMIT = 4000;
-// Must match the server-side literal exactly; a typo just disables the destructive button.
+// Must match the server literal exactly; a typo just disables the button.
 // @see #143
 const FACTORY_RESET_CONFIRM = 'RESET';
 
@@ -86,13 +86,13 @@ const ProfileView = () => {
     file: user?.confirmDeletes?.file ?? true,
   };
   const [confirmDeletes, setConfirmDeletes] = useState(initialConfirmDeletes);
-  // Profile alias of the account's incognito flag (settings.zdr); enabling is forward-looking — saved chats stay until deleted.
+  // Profile alias of the account's incognito flag; forward-looking.
   // @see #144
   const initialIncognito = Boolean(user?.incognitoByDefault ?? user?.zdr);
   const [incognito, setIncognito] = useState(initialIncognito);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  // Enabled only on the exact typed match; the server enforces it too — the client check is just UX.
+  // Enabled only on the exact typed match; the server enforces it too.
   // @see #143
   const [resetConfirm, setResetConfirm] = useState('');
   const [resetting, setResetting] = useState(false);
@@ -127,11 +127,11 @@ const ProfileView = () => {
       const next = await AuthService.updateProfile({
         preferredName: preferredName.trim(),
         customInstructions,
-        // Only patched when the choice actually moved, so a plain profile edit cannot pin the device's theme onto the account.
+        // Only patched when the choice moved, so an edit cannot pin the theme.
         ...(theme !== initialTheme ? { theme } : {}),
         // @see #96
         ...(startupChat !== initialStartupChat ? { startupChat } : {}),
-        // Only patched when a toggle moved, so an unrelated profile edit cannot touch delete-confirmation prefs.
+        // Only patched when a toggle moved; an edit can't touch delete prefs.
         // @see #59
         ...(confirmDeletes.chat !== initialConfirmDeletes.chat ||
         confirmDeletes.file !== initialConfirmDeletes.file
@@ -139,7 +139,7 @@ const ProfileView = () => {
           : {}),
         ...(incognito !== initialIncognito ? { incognitoByDefault: incognito } : {}),
       });
-      // The saved choice rides the mirror immediately so pre-auth pages and reloads paint it without waiting on the profile round-trip.
+      // The saved choice mirrors immediately so reloads paint it at once.
       if (theme !== initialTheme) persistTheme(theme);
       updateUser(next);
       toast.success('Profile saved');

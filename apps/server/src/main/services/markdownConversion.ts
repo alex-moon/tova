@@ -2,22 +2,22 @@ import mammoth from 'mammoth';
 import turndown from 'turndown';
 import { PDFParse } from 'pdf-parse';
 
-// Markdown conversion: JS-native toolchain (mammoth, pdf-parse, turndown) instead of a Python subprocess; unknown extensions and empty results throw so the job loop can retry/fail with a reason.
+// Markdown conversion: JS-native toolchain instead of a Python subprocess.
 // @see #67 #34
 
 export const CONVERTIBLE_EXTENSIONS = new Set(['pdf', 'docx', 'html', 'htm']);
 
-// Storage cap on the persisted markdown: trimmed at store time; the 12k prompt cap applies at use time.
+// Storage cap on the persisted markdown, applied at store time.
 // @see #67
 export const MAX_MARKDOWN_CHARS = 200_000;
 
-// Hard ceiling per conversion attempt: a hung parser must not wedge the poller.
+// Per-attempt ceiling: a hung parser must not wedge the poller.
 export const CONVERSION_TIMEOUT_MS = 30_000;
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const turndownInstance = new (turndown as any)({ headingStyle: 'atx', bulletListMarker: '-' });
 
-// Shared by asset ingestion and the `fetch_url` page fetcher: one owned turndown instance.
+// Shared by asset ingestion and the fetch_url fetcher: one owned instance.
 // @see #113
 export const htmlToMarkdown = (html: string): string => turndownInstance.turndown(html);
 
@@ -39,7 +39,7 @@ export const withTimeout = <T>(promise: Promise<T>, ms = CONVERSION_TIMEOUT_MS):
     }),
   ]);
 
-// Store-time normalisation shared by every producer of `markdownExtracted` (conversion, OCR), so the OCR stage applies exactly the same cap rather than duplicating it.
+// Store-time normalisation shared by every producer of markdownExtracted.
 // @see #67 #209
 export const finalizeMarkdown = (raw: string): string =>
   raw
@@ -48,7 +48,7 @@ export const finalizeMarkdown = (raw: string): string =>
     .trim()
     .slice(0, MAX_MARKDOWN_CHARS);
 
-// Convert a document buffer to markdown; throws on unsupported extension, converter error, or empty output.
+// Converts a document buffer to markdown; throws on failure or empty output.
 export const convertToMarkdown = async (
   filename: string,
   buffer: Buffer,
@@ -73,7 +73,7 @@ export const convertToMarkdown = async (
 const rawConvert = async (ext: string, buffer: Buffer): Promise<string | null | undefined> => {
   switch (ext) {
     case 'pdf': {
-      // PDF text comes out in reading order with plain page separators; keep it verbatim.
+      // PDF text comes out in reading order; keep it verbatim.
       const parser = new PDFParse({ data: new Uint8Array(buffer) });
       try {
         const result = await parser.getText();

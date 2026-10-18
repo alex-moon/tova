@@ -40,7 +40,7 @@ jest.mock('../../main/services/storageService', () => ({
 
 const MOCK_ROUTING = { model: 'mock-small-model', provider: 'deepinfra', reason: 'roster-pick' };
 
-// Routing runs through the fixed-roster racing path; `mockRacingState` delegates back through the mocked inferenceService so the completion mocks stay the seam.
+// Routing uses the fixed-roster racing path; `mockRacingState` stays the seam.
 // @see #233
 const mockRacingState: {
   routing: typeof MOCK_ROUTING | null;
@@ -84,7 +84,7 @@ jest.mock('../../main/services/titleService', () => ({
   generateChatTitle: jest.fn().mockResolvedValue('Hello'),
 }));
 
-// The enrichment aux call is stubbed out of the trace assertions; with the gate retired the trace-fact helpers stay real.
+// Enrichment aux stubbed out; the trace-fact helpers stay real.
 // @see #238 #310
 jest.mock('../../main/services/workspaceTraceFacts', () =>
   jest.requireActual('../../main/services/workspaceTraceFacts'),
@@ -175,14 +175,14 @@ describe('Zero-data retention chats (issue #116)', () => {
       complete: true,
       message: { role: 'assistant', content: 'Ephemeral answer', modelName: 'mock-small-model' },
     });
-    // A ZDR turn carries no reconciled tool summaries — the turn is not stored, so there is nothing to rehydrate.
+    // No reconciled tool summaries — the turn is not stored, nothing saved.
     // @see #196
     expect(done?.data.message.tools).toBeUndefined();
 
     expect(await Session.countDocuments()).toBe(0);
     expect(await Message.countDocuments()).toBe(0);
 
-    // A ZDR turn carries no trace session id — there is nothing durable to attribute the turn to.
+    // A ZDR turn carries no trace session id — nothing to attribute it to.
     // @see #224
     const [callOptions] = mockAgentStream.mock.calls[0] as unknown as [{ trace?: unknown }];
     expect(callOptions.trace).toBeUndefined();
@@ -241,7 +241,7 @@ describe('Zero-data retention chats (issue #116)', () => {
     const roles = messages.map((m) => m.role);
     expect(roles[roles.length - 1]).toBe('user');
     expect(messages[messages.length - 1]).toMatchObject({ role: 'user', content: 'and now?' });
-    // The replay is ordered oldest-first (mirrors the persisted read path), with the newest assistant reply adjacent to the candidate turn.
+    // The replay is oldest-first, newest assistant reply adjacent to the turn.
     // @see #116
     const assistantContents = messages.filter((m) => m.role === 'assistant').map((m) => m.content);
     expect(assistantContents).toEqual(['older reply', 'newer reply']);
@@ -284,7 +284,7 @@ describe('Zero-data retention chats (issue #116)', () => {
     const [callOptions] = mockAgentStream.mock.calls[0] as unknown as [
       { trace?: { sessionId?: string; metadata?: Record<string, unknown> } },
     ];
-    // The workspace facts ride alongside the session id (off here — workspace memory is disabled in the test env).
+    // The workspace facts ride the trace alongside the session id (off here).
     // @see #308
     expect(callOptions.trace?.sessionId).toBe(meta?.sessionId);
     expect(callOptions.trace?.metadata).toEqual({
@@ -413,7 +413,7 @@ describe('Zero-data retention chats (issue #116)', () => {
     expect(mockDeleteObject).not.toHaveBeenCalled();
   });
 
-  // A ZDR turn may READ the workspace (read-only) — the turn itself is absent from the corpus by construction; both routes must inject it identically.
+  // A ZDR turn may READ the workspace; both routes must inject it identically.
   // @see #253
   const forceWorkspaceBlock = (block: string) => {
     const retrieve = jest
@@ -436,7 +436,7 @@ describe('Zero-data retention chats (issue #116)', () => {
     const cookies = await registerUser(email);
     await enableZdr(email);
     const retrieve = forceWorkspaceBlock('- chat "Move" (2026-10-01) — budget is twelve thousand');
-    // The ingest hook lives in the non-ZDR save path, so a ZDR turn must never enqueue an embedding (which would persist derived data the user asked not to retain).
+    // The ingest hook lives in the non-ZDR save path; ZDR never enqueues.
     // @see #294
     const enqueue = jest.spyOn(
       jest.requireActual<typeof import('../../main/services/workspaceEmbeddingIngest')>(
@@ -544,7 +544,7 @@ describe('Zero-data retention chats (issue #116)', () => {
       const cookies = await registerUser(email);
       await enableZdr(email);
       const asset = await ephemeralAssetFor(email, 'leakerror.csv');
-      // Failover: every routing attempt fails, so the loop exhausts the pool and the error event fires on the final attempt.
+      // Failover: every attempt fails; the error event fires on the final one.
       // @see #168
       mockAgentStream.mockRejectedValue(new Error('provider down'));
 

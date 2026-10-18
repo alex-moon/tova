@@ -186,7 +186,7 @@ describe('ProfileView (issue #95)', () => {
 describe('ProfileView theme choice (issue #53)', () => {
   beforeEach(() => {
     updateProfile.mockReset();
-    // Theme cookie and localStorage persist across tests in this file (jsdom keeps them); reset them.
+    // Theme cookie and localStorage persist across tests here; reset them.
     localStorage.clear();
     document.cookie = `${COOKIE_NAME}=;path=/;max-age=0`;
   });
@@ -228,7 +228,7 @@ describe('ProfileView theme choice (issue #53)', () => {
     expect(scroller).toHaveClass('flex-1', 'min-h-0');
     expect(scroller).toContainElement(screen.getByTestId('profile-custom-instructions'));
 
-    // The save button is pinned outside the scroller so it stays reachable regardless of scroll.
+    // Save button is pinned outside the scroller so it stays reachable.
     // @see #191
     const saveButton = screen.getByTestId('profile-save');
     expect(scroller!.contains(saveButton)).toBe(false);

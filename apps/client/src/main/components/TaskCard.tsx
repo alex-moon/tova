@@ -4,12 +4,12 @@ import { ListTree } from 'lucide-react';
 import TaskStatusChip from './TaskStatusChip';
 import TaskService, { isTerminalTask, type TaskSummary } from '@/services/tasks';
 
-/* Embedded task card: a read-only pointer to the newest tasks a chat started, with a silent poll while any are active. */
+// Embedded task card: a read-only pointer to the newest tasks a chat started.
 // @see #255 #251
 
 const POLL_MS = 3000;
 
-// A chat shows only the newest few tasks so the composer is never pushed off a phone screen.
+// Only the newest few tasks show, so the composer stays on a phone screen.
 const MAX_CARDS = 3;
 
 const TaskCard: React.FC<{ sessionId: string; refreshSignal?: number }> = ({
@@ -32,13 +32,13 @@ const TaskCard: React.FC<{ sessionId: string; refreshSignal?: number }> = ({
     }
   }, [sessionId]);
 
-  // `refreshSignal` bumps when the composer creates a task, so the card refetches immediately instead of waiting for the poll.
+  // refreshSignal bumps when the composer creates a task; refetch at once.
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     void load();
   }, [load, refreshSignal]);
 
-  // Keyed on the derived boolean, not the tasks array: a fresh array per tick would tear down the interval every poll.
+  // Keyed on the boolean: a fresh array per tick would tear down the interval.
   const anyActive = tasks.some((t) => !isTerminalTask(t.status));
   useEffect(() => {
     if (!anyActive) return;
@@ -49,7 +49,7 @@ const TaskCard: React.FC<{ sessionId: string; refreshSignal?: number }> = ({
     };
   }, [anyActive, load]);
 
-  // Render nothing until the first poll lands; the pre-#255 chat stays byte-identical.
+  // Render nothing until the first poll lands.
   // @see #255
   if (!loaded || tasks.length === 0) return null;
 

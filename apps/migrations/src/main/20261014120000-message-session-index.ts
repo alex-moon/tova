@@ -1,6 +1,6 @@
 import { MigrationInterface, Db } from 'mongo-migrate-ts';
 
-// Adds the compound { sessionId, timestamp } index backing corpus-wide and per-session message reads.
+// Adds the compound { sessionId, timestamp } index for message reads.
 // @see #293 #226 #175
 export class MessageSessionIndex implements MigrationInterface {
   async up(db: Db): Promise<void> {

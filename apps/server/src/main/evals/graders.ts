@@ -1,6 +1,6 @@
 import type { Assertion, EvalRun, AssertionResult, Score } from './types';
 
-/** First-person claims of having searched without an actual `web_search` call; deliberately narrow. */
+/** Claims of searching without a `web_search` call; deliberately narrow. */
 // @see #158
 export const SEARCH_CLAIMS = [
   /\b(?:i|we)\s+(?:did|performed|ran|conducted|carried\s+out|executed)\b[^.!?;]{0,40}\bsearch(?:es|ed)?\b/i,
@@ -10,7 +10,7 @@ export const SEARCH_CLAIMS = [
   /\bsearch(?:es|ed|ing)?\s+(?:the\s+web|online|for\s+(?:recent|latest|current))\b/i,
 ] as const;
 
-/** Explicit no-sources refusal patterns; intentionally brittle (indirect refusals not caught). */
+/** Explicit no-sources refusal patterns; intentionally brittle. */
 // @see #158
 export const NO_SOURCES_PATTERNS = [
   /\bno\s+(?:relevant\s+|matching\s+|from\s+your\s+files[a-z ,]*)?sources?\s+(?:are|is|were|available|found|exist)\b/i,
@@ -24,18 +24,18 @@ export const NO_SOURCES_PATTERNS = [
   /\bno\s+(?:information|documents|sources)\s+(?:on|about)\s+.{0,40}\b(?:in|from)\s+your\s+files\b/i,
 ] as const;
 
-/** Joined so the case assertion and the guard stay a single source of truth. */
+/** Joined so the case assertion and guard stay one source of truth. */
 // @see #158
 export const noSourcesPattern = NO_SOURCES_PATTERNS.map((p) => `(?:${p.source})`).join('|');
 
-/** A sourced answer must reference its sources inline as literal links (bare URL or markdown). */
+/** A sourced answer must reference its sources as literal links. */
 // @see #158
 export const INLINE_SOURCE_PATTERN = /(?:\[[^\]]*\]\()?https?:\/\/[^\s)>"']+/i;
 
 const matchesFinalText = (run: EvalRun, pattern: RegExp): boolean =>
   typeof run.finalText === 'string' && pattern.test(run.finalText);
 
-/** Normalise numeric/numeric-string args on both sides of an `argsSubset` comparison. */
+/** Normalise args on both sides of an `argsSubset` comparison. */
 // @see #159 #350
 export const normalizeArgs = (args: Record<string, unknown>): Record<string, unknown> =>
   Object.fromEntries(
@@ -55,7 +55,7 @@ const argsMatch = (call: { args?: Record<string, unknown> }, subset?: Record<str
   );
 };
 
-/** Compare over a normalised form: all Unicode whitespace collapsed, case-folded. */
+/** Compare over a normalised form: whitespace collapsed, case-folded. */
 // @see #159
 const normaliseAnswer = (value: string): string => value.replace(/\s/g, ' ').toLowerCase();
 
@@ -88,7 +88,7 @@ const evaluateAssertion = (run: EvalRun, assertion: Assertion): boolean => {
       return run.prompt.includes(assertion.text);
     case 'text_matches':
       try {
-        // nosemgrep: javascript.lang.security.audit.detect-non-literal-regexp.detect-non-literal-regexp
+        // nosemgrep: detect-non-literal-regexp.detect-non-literal-regexp
         const pattern = new RegExp(assertion.pattern, assertion.flags ?? 'i');
         return matchesFinalText(run, pattern);
       } catch {
@@ -126,7 +126,7 @@ const evaluateAssertion = (run: EvalRun, assertion: Assertion): boolean => {
 export const assertRun = (run: EvalRun, assertions: Assertion[]): AssertionResult[] =>
   assertions.map((assertion) => ({ assertion, passed: evaluateAssertion(run, assertion) }));
 
-/** pass = every assertion holds; fail = none; partial = anything in between. */
+/** pass = all assertions hold; fail = none; partial = between. */
 export const aggregateScore = (results: AssertionResult[]): Score => {
   const passed = results.filter((r) => r.passed).length;
   if (passed === results.length) return 'pass';

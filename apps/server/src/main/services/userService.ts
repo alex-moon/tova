@@ -2,7 +2,7 @@ import crypto from 'crypto';
 import { User, UserDocument } from '../models/User';
 import { AuthUser } from '@tova/shared';
 
-// Single projection from a user document to the /me wire shape, shared with PATCH /api/profile so the endpoints cannot drift.
+// Single projection to the /me wire shape, shared with PATCH /api/profile.
 // @see #35
 export const toAuthUser = (user: UserDocument): AuthUser => {
   const payload: AuthUser = {
@@ -20,7 +20,7 @@ export const toAuthUser = (user: UserDocument): AuthUser => {
   if (user.settings?.startupChat) payload.startupChat = user.settings.startupChat;
   if (user.settings?.zdr) {
     payload.zdr = user.settings.zdr;
-    // 'Incognito by default' reads the same storage slot; the two wire names are aliases of one flag, exposed in lockstep.
+    // The two wire names are aliases of one flag, exposed in lockstep.
     // @see #144
     payload.incognitoByDefault = user.settings.zdr;
   }
@@ -45,7 +45,7 @@ export const hasPermission = async (userId: string, permission: string): Promise
   return Boolean(user?.permissions?.includes(permission));
 };
 
-// Resolve a user by email, linking the Google identity when provided; new users get no permissions; Google-owned fields overwrite on refresh, user-owned fields are never touched here.
+// Resolve by email, linking the Google identity when provided.
 // @see #35
 export const resolveOrCreateUser = async (
   email: string,

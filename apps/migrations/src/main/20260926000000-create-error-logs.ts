@@ -1,6 +1,6 @@
 import { MigrationInterface, Db } from 'mongo-migrate-ts';
 
-// Pre-creates the errorlogs collection and createdAt index so deployed instances have it before first write.
+// Pre-creates the errorlogs collection and createdAt index before first write.
 // @see #175
 export class CreateErrorLogs implements MigrationInterface {
   async up(db: Db): Promise<void> {

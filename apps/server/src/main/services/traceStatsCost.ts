@@ -1,7 +1,7 @@
 import type { AdminLangsmithModelStats, AdminLangsmithStatsPayload } from '@tova/shared';
 import { listRoster, type RosterModel } from './rosterConfig';
 
-/* Estimated cost for the admin Traces cache: the job stores tokens only; this joins them against roster prices at read time, keyed (model, provider) with a deterministic model-only fallback; unknown price is null, distinct from $0. */
+/* Cost for the Traces cache: joins stored tokens against roster prices. */
 // @see #224 #199 #235 #237
 
 export interface PriceLookup {
@@ -19,7 +19,7 @@ export const pickPriceRow = (rows: PriceLookup[]): PriceLookup | null => {
   return candidates[0];
 };
 
-/* A prebuilt (model, provider) price index plus model-only fallback candidates, built from the roster once per request. */
+/* Prebuilt (model, provider) price index plus model-only fallbacks. */
 export interface PriceIndex {
   byProvider: Map<string, Map<string, PriceLookup>>;
   fallback: Map<string, PriceLookup[]>;
@@ -39,7 +39,7 @@ export const buildPriceIndex = (roster: RosterModel[]): PriceIndex => {
     const candidates: PriceLookup[] = [];
     const modelDefault = priceOf(model);
     if (modelDefault) candidates.push(modelDefault);
-    // Sort provider entries by name so the model-only fallback is deterministic regardless of roster order.
+    // Sort by provider name so the fallback pick is deterministic.
     for (const p of model.providers.slice().sort((a, b) => a.provider.localeCompare(b.provider))) {
       const price = priceOf(p);
       if (!price) continue;
@@ -53,7 +53,7 @@ export const buildPriceIndex = (roster: RosterModel[]): PriceIndex => {
   return { byProvider, fallback };
 };
 
-/* Price for one (model, provider): the provider's entry when priced, else the deterministic model-only pick; null when the model has no known price. */
+/* Price for one (model, provider), with deterministic model-only fallback. */
 export const priceFor = (
   index: PriceIndex,
   modelId: string,
@@ -66,10 +66,10 @@ export const priceFor = (
   return pickPriceRow(index.fallback.get(modelId) ?? []);
 };
 
-// Load the roster price index once; mirrors listRoster's recovery and fallback semantics.
+// Load the roster price index; mirrors listRoster's fallback semantics.
 export const loadPriceIndex = async (): Promise<PriceIndex> => buildPriceIndex(await listRoster());
 
-/* Price one model's token split; null when either side's price is missing (rendered —, never a half figure); zero tokens price to 0 when the price is known. */
+/* Price one token split; null when either price is missing. */
 export const estimateCostUsd = (
   inputTokens: number,
   outputTokens: number,
@@ -83,7 +83,7 @@ export const estimateCostUsd = (
   );
 };
 
-// Load the price index, then stamp each row and the totals; a raced model prices from the winning provider's entry, with the model-only fallback for legacy rows.
+// Stamp each row and the totals; raced models price from the winner.
 // @see #237
 export const applyCostToStats = async (
   payload: AdminLangsmithStatsPayload,

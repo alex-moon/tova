@@ -1,6 +1,6 @@
 import { extensionOf } from './markdownConversion';
 
-// Document units: long documents stored as a sequence of units (PDF page / top-level section) so the agent can walk the text unit by unit; additive, derived by slicing the already-capped conversion.
+// Long documents stored as units (PDF page / section) the agent can walk.
 // @see #159
 
 export interface AssetUnit {
@@ -19,7 +19,7 @@ const isPdf = (filename: string): boolean => extensionOf(filename) === 'pdf';
 const isHeaded = (filename: string): boolean =>
   ['md', 'html', 'htm'].includes(extensionOf(filename));
 
-// PDFs: split on the `-- n of n --` separator lines pdf-parse appends; no separators fall back to a whole-doc unit.
+// PDFs: split on the `-- n of n --` separators; else whole-doc unit.
 const pdfUnits = (markdown: string): AssetUnit[] => {
   const matches = [...markdown.matchAll(PDF_PAGE_LINE)];
   if (matches.length === 0) return wholeDocUnit(markdown);
@@ -41,7 +41,7 @@ const pdfUnits = (markdown: string): AssetUnit[] => {
       text: markdown.slice(start, current.index ?? start).trim(),
     });
   }
-  // Text after the final separator has no page label of its own: keep it as an extra page rather than dropping it.
+  // Trailing text after the final separator becomes an extra page.
   const last = matches[matches.length - 1]!;
   const tail = markdown.slice((last.index ?? 0) + last[0].length).trim();
   if (tail.length > 0) {
@@ -55,10 +55,10 @@ const headingOf = (line: string): { level: number; title: string } | null => {
   return match ? { level: match[1]!.length, title: match[2]!.trim() } : null;
 };
 
-// Fence lines toggle an open fence; headings inside fenced code blocks are examples, not document structure, and must not drive the split.
+// Fences toggle; headings inside code blocks are not document structure.
 const isFenceLine = (line: string): boolean => /^(`{3,}|~{3,})/.test(line);
 
-// md/html arrive as markdown: split on ATX headings at the shallowest level present; a document with no (or a single) split-level heading stays whole.
+// md/html: split on ATX headings at the shallowest level; else whole.
 const headingUnits = (markdown: string): AssetUnit[] => {
   const lines = markdown.split('\n');
   const headings: { lineNo: number; level: number; title: string }[] = [];

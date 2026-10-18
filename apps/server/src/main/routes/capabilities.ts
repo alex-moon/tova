@@ -7,7 +7,7 @@ const router = express.Router();
 
 type CapabilityStatus = 'ready' | 'unconfigured';
 
-/* Built-in capability rows; `web_search` is the one config-gated tool, and it must report `unconfigured` rather than lie by absence. */
+/* Built-in capability rows; `web_search` must not lie by absence. */
 // @see #366
 export const builtInCapabilities = (): {
   name: string;
@@ -29,7 +29,7 @@ export const builtInCapabilities = (): {
   { name: 'delegate_task', label: 'Run background tasks', status: 'ready' },
 ];
 
-// The per-user capability state: built-ins plus the live connector toolsets, which are deferred behind `search_tools` discovery.
+// Per-user state: built-ins plus live toolsets, deferred to discovery.
 // @see #366
 router.get('/', authenticate, async (req: AuthRequest, res) => {
   try {

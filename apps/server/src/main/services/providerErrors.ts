@@ -1,7 +1,7 @@
-/* Provider error classification shared by the racing runtime and the diagnostics tally; leaf module (no service imports) so both callers avoid an import cycle. */
+/* Provider error classification; leaf module (no service imports). */
 // @see #213
 
-/* Endpoint overload is a per-endpoint transient, distinct from an account rate limit even though both can arrive as 429; detection is body-first with a narrow message fallback that must never match rate-limit wording. */
+/* Overload is a per-endpoint transient, not an account rate limit. */
 // @see #213
 const providerErrorCode = (err: unknown): string => {
   const carrier = err as

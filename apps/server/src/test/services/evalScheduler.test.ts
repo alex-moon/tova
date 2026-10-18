@@ -12,7 +12,7 @@ import {
   type EvalSuite,
 } from '../../main/services/evalScheduler';
 
-/* Scheduler coverage: the suites are injected so no real suite executes; the shared jest setup provides the in-memory Mongo. */
+/* Scheduler coverage: suites injected, no real suite executes. */
 // @see #225 #289
 
 const opts = { enabled: true, tickMs: 1000 };
@@ -154,7 +154,7 @@ describe('runEvalSchedulerTick (#225/#289)', () => {
   });
 
   it('#289 T8: a throwing idempotency check does not skip the next suite', async () => {
-    // A transient Mongo error in one suite's `hasRun` must not abort the whole tick (which would silently skip the next suite for the window).
+    // A transient `hasRun` error must not abort the tick or skip the next.
     // @see #289
     let memoryRuns = 0;
     await runEvalSchedulerTick(

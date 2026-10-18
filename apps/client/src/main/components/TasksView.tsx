@@ -15,11 +15,11 @@ import TaskService, {
 } from '@/services/tasks';
 import type { ToolEvent } from '@/App';
 
-// Chat view with queued turn-taking: the stream is read-only, the composer queues steering turns; on a phone list and detail swap on one surface.
+// Chat view with queued turn-taking; the stream is read-only.
 // @see #251
 const POLL_MS = 3000;
 
-// Reuse the chat chip presentation so a task's tool use reads identically to a chat's.
+// Reuse the chat chip presentation so tool use reads as in a chat.
 // @see #196
 const TaskToolChips: React.FC<{ tools: ToolEvent[] }> = ({ tools }) => {
   const [open, setOpen] = useState(false);
@@ -85,7 +85,7 @@ const TaskStreamRow: React.FC<{ event: TaskStreamEvent }> = ({ event }) => {
       </div>
     );
   }
-  // The reserved `tool` role never renders standalone — call+result ride the assistant event.
+  // Reserved tool role never renders standalone; call+result ride one event.
   return (
     <div className="mb-6 min-w-0 max-w-[92%] md:max-w-[85%]">
       <div className="mb-1 flex items-center gap-1.5 text-xs text-muted-foreground">
@@ -119,7 +119,7 @@ const budgetLine = (task: TaskSummary): string =>
   `${task.stepCount}/${task.budget.maxSteps} steps`;
 
 const TasksView: React.FC = () => {
-  // Keeping the id separate from the loaded header stops a polled response from re-triggering the loader (detail.task is fresh every fetch).
+  // Id kept separate from the header so polled responses don't re-trigger.
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [seed, setSeed] = useState<TaskSummary | null>(null);
   const [detail, setDetail] = useState<TaskDetail | null>(null);
@@ -128,10 +128,10 @@ const TasksView: React.FC = () => {
   const [instruction, setInstruction] = useState('');
   const [sending, setSending] = useState(false);
   const [cancelling, setCancelling] = useState(false);
-  // Held until a terminal state: the cancel response still reports `running`, and without this the button would invite a second tap.
+  // Held until terminal: the cancel response still reports running until then.
   const [cancelRequested, setCancelRequested] = useState(false);
 
-  // Compared after await so a stale response is discarded rather than painted over the newly selected task.
+  // Compared after await so a stale response is discarded, not painted over.
   const selectedIdRef = useRef<string | null>(null);
 
   const loadDetail = useCallback(async (taskId: string, opts: { silent?: boolean } = {}) => {
@@ -143,7 +143,7 @@ const TasksView: React.FC = () => {
       setError(null);
     } catch (err) {
       if (selectedIdRef.current !== taskId) return;
-      // A 404 surfaces and stops polling; non-404 silent failures are swallowed (the poll retries next tick).
+      // 404 surfaces and stops polling; silent non-404s are retried next tick.
       if (isTaskNotFound(err)) {
         setDetail(null);
         setError(err.message);
@@ -156,7 +156,7 @@ const TasksView: React.FC = () => {
     }
   }, []);
 
-  // Reset the per-task draft/stream so nothing leaks across tasks; the seed header renders immediately.
+  // Reset per-task draft/stream so nothing leaks across tasks.
   const select = useCallback((task: TaskSummary) => {
     setSelectedId(task.id);
     setSeed(task);
@@ -174,13 +174,13 @@ const TasksView: React.FC = () => {
     void loadDetail(selectedId);
   }, [selectedId, loadDetail]);
 
-  // The header is the freshly polled task, falling back to the seed row until the first detail response lands.
+  // The header is the polled task, else the seed row until detail lands.
   const summary = detail?.task ?? seed;
   const terminal = summary != null && isTerminalTask(summary.status);
   // A task reported gone (404) is not polled any more.
   const gone = error != null && detail == null;
 
-  // Poll while active so the stream advances in place; stop at a terminal state.
+  // Poll while active so the stream advances; stop at terminal states.
   const active = selectedId != null && summary != null && !terminal && !gone;
   useEffect(() => {
     if (!active || !selectedId) return;
@@ -214,10 +214,10 @@ const TasksView: React.FC = () => {
     setCancelRequested(true);
     try {
       await TaskService.cancel(selectedId);
-      // The server still reports `running` until the next step boundary, so the poll keeps the "Cancelling…" state.
+      // Server reports running until the next step boundary; keep Cancelling.
       await loadDetail(selectedId, { silent: true });
     } catch (err) {
-      // The cancel did not take; clear the pending state so the button is usable.
+      // The cancel did not take; clear pending so the button is usable.
       setCancelRequested(false);
       toast.error(err instanceof Error ? err.message : 'Could not cancel task');
     } finally {

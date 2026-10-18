@@ -30,7 +30,7 @@ interface SidebarProps {
   onSelectSession: (id: string) => void;
   onNewChat: () => void;
   onDeleteSession: (id: string) => void;
-  // The title is user-owned and renamable at any time — the row is the affordance on every viewport.
+  // Title is user-owned and renamable; the row is the affordance.
   // @see #359
   onRenameSession: (id: string, title: string) => void;
   onClose: () => void;
@@ -48,7 +48,7 @@ const Sidebar: React.FC<SidebarProps> = ({
 }) => {
   const { user, logout } = useAuth();
   const { armedId, arm, onYes, onAlways, onNo } = useConfirmDelete('chat', onDeleteSession);
-  // Inline rename: the row swaps to an input, Enter/blur commits, Escape cancels.
+  // Inline rename: row swaps to an input, Enter/blur commits, Escape cancels.
   // @see #359
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameDraft, setRenameDraft] = useState('');

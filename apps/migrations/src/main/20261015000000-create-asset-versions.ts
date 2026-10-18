@@ -1,6 +1,6 @@
 import { MigrationInterface, Db } from 'mongo-migrate-ts';
 
-// Pre-creates the assetversions collection and the unique { assetId, version } index that makes the write-path upsert idempotent.
+// Pre-creates assetversions and its unique { assetId, version } index upfront.
 // @see #325
 export class CreateAssetVersions implements MigrationInterface {
   async up(db: Db): Promise<void> {

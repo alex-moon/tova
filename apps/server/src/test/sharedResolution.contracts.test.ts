@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import ts from 'typescript';
 
-// Drift test: every @tova/shared source-resolution leg must point at shared src; the build config stays paths-free.
+// Drift test: every @tova/shared leg points at shared src; build paths-free.
 // @see #288
 const REPO_ROOT = join(__dirname, '..', '..', '..', '..');
 

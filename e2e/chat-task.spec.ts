@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 
-// Chat task card and send-to-worker, page-mocked (no sequencer or seeded tasks).
+// Chat task card and send-to-worker, page-mocked (no seeded tasks).
 // @see #255 #251
 
 const email = process.env.E2E_EMAIL ?? 'formsatz@gmail.com';

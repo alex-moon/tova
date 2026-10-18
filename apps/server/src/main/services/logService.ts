@@ -1,4 +1,4 @@
-/* The logging backbone: console capture for structured output, plus durable error persistence to MongoDB. */
+/* Logging backbone: console capture + durable error persistence. */
 // @see #179 #175
 
 import { format } from 'util';
@@ -8,7 +8,7 @@ export type LogLevel = 'info' | 'warn' | 'error';
 
 const MAX_MSG_LENGTH = 2000;
 
-// Mirror error entries into MongoDB as they are emitted; fire-and-forget (never re-logged through console, which would recurse).
+// Mirror error entries into MongoDB as emitted, fire-and-forget.
 // @see #175
 const persistErrorEntry = (ts: string, msg: string) => {
   if (process.env.NODE_ENV === 'test') return;
@@ -41,7 +41,7 @@ const record =
   (method: 'log' | 'info' | 'warn' | 'error', level: LogLevel) =>
   (...args: unknown[]) => {
     (originalConsole[method] ?? noop)(...args);
-    // util.format handles printf placeholders and object inspection, matching the original stdout call.
+    // util.format handles placeholders and inspection like the original call.
     if (level === 'error') persistErrorEntry(new Date().toISOString(), normalize(format(...args)));
   };
 

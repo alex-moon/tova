@@ -4,7 +4,7 @@ import { Task } from '../../main/models/Task';
 import { TaskEvent } from '../../main/models/TaskEvent';
 import { delegateTaskTool } from '../../main/services/mastraService';
 
-/* Tool-level test for `delegate_task`: createTool is the identity function under the module mapper, so the config is inspectable and `execute` is invoked directly with a constructed request context. */
+/* `delegate_task`: createTool is identity; `execute` runs direct. */
 // @see #255
 
 const execute = (

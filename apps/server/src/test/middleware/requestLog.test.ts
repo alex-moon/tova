@@ -3,7 +3,7 @@ import express from 'express';
 import { requestLog } from '../../main/middleware/requestLog';
 import { attachConsoleCapture, detachConsoleCapture } from '../../main/services/logService';
 
-// requestLog is observed via the console line it emits; retained viewing is covered by lokiLogs.test.ts.
+// Observed via its console line; retained viewing in lokiLogs.test.ts.
 // @see #179
 describe('requestLog middleware', () => {
   let info: jest.SpyInstance;

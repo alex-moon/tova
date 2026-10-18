@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
-// Depth tokens are parsed from the real stylesheet so a stray hex or missing token fails loudly.
+// Tokens parsed from the real stylesheet; a stray token fails loudly.
 // @see #191
 
 const CSS = readFileSync(
@@ -9,7 +9,7 @@ const CSS = readFileSync(
   'utf8',
 );
 
-/** Extract the body of the first rule whose selector list contains `selector`. */
+/** Body of the first rule whose selector list contains the selector. */
 const blockFor = (selector: string): string => {
   const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const match = new RegExp(`(?:^|\\n)\\s*[^{}]*${escaped}[^{}]*\\{([\\s\\S]*?)\\n\\}`).exec(CSS);
@@ -17,7 +17,7 @@ const blockFor = (selector: string): string => {
   return match[1];
 };
 
-/** The value of a custom property, from its name to the terminating semicolon. */
+/** Values of a custom property, name to terminating semicolon. */
 const declarationsFor = (css: string, token: string): string[] => {
   const pattern = new RegExp(`${token.replace(/[-]/g, '\\-')}\\s*:([\\s\\S]*?);`, 'g');
   return [...css.matchAll(pattern)].map((match) => match[1]);

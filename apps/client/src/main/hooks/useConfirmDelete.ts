@@ -12,7 +12,7 @@ type ConfirmState = {
   onNo: () => void;
 };
 
-// Inline destructive-confirmation plumbing; one instance per surface, a single armed id per surface, Escape resets.
+// Inline destructive-confirm plumbing; one instance per surface.
 // @see #59
 export const useConfirmDelete = (
   target: DeleteTarget,
@@ -47,7 +47,7 @@ export const useConfirmDelete = (
     runDelete(armedId);
   }, [armedId, runDelete]);
 
-  // "Always" persists the granular preference, mirrors it into auth state, then deletes; a failed PATCH falls back to a plain delete.
+  // "Always" persists the pref, mirrors auth state, then deletes.
   const onAlways = useCallback(async () => {
     if (armedId === null) return;
     const id = armedId;
@@ -65,7 +65,7 @@ export const useConfirmDelete = (
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') setArmedId(null);
     };
-    // Outside clicks reset the armed row without touching data; another row's trash click resets here, then arms the new row.
+    // Outside clicks reset the armed row without touching data.
     const onPointerDown = (e: PointerEvent) => {
       if (!(e.target instanceof Element)) return;
       const element = e.target.closest('[data-testid^="confirm-delete-"]');

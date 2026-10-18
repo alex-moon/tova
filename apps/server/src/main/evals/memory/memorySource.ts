@@ -7,7 +7,7 @@ import { WorkspaceEmbedding } from '../../models/WorkspaceEmbedding';
 import { evalUserId, ensureEvalUser } from '../mongoSource';
 import type { MemoryScenario, MemorySeed } from './types';
 
-// Scenario fixtures materialised into the reserved eval user's workspace; corpus ids map to real Mongo ids.
+// Scenario fixtures in the reserved eval user's workspace; ids map to Mongo.
 // @see #289
 
 export type SeedIdMap = Record<string, string>;
@@ -18,7 +18,7 @@ const seedChat = async (seed: MemorySeed): Promise<string> => {
     userId: evalUserId,
     title: seed.title,
     lastMessageAt: at,
-    // Soft-deleted seed: materialised, then excluded by `deletedAt` as a user-deleted chat is.
+    // Soft-deleted seed: excluded by `deletedAt` as a user-deleted chat.
     deletedAt: seed.deleted ? at : null,
   });
   const message = await Message.create({
@@ -31,7 +31,7 @@ const seedChat = async (seed: MemorySeed): Promise<string> => {
 };
 
 const seedFile = async (seed: MemorySeed): Promise<string> => {
-  // Explicit `createdAt` keeps fixtures deterministic; Mongoose would otherwise stamp wall-clock now.
+  // Explicit `createdAt` keeps fixtures deterministic; no wall-clock stamp.
   const at = new Date(seed.at);
   const asset = await Asset.create({
     userId: evalUserId,
@@ -48,7 +48,7 @@ const seedFile = async (seed: MemorySeed): Promise<string> => {
 };
 
 const seedTask = async (seed: MemorySeed): Promise<string> => {
-  // The task slice reads `updatedAt`, so pin both timestamps to `seed.at` for determinism.
+  // The task slice reads `updatedAt`, so pin both stamps to `seed.at`.
   const at = new Date(seed.at);
   const task = await Task.create({
     userId: evalUserId,
@@ -68,7 +68,7 @@ const seedOne = (seed: MemorySeed): Promise<string> => {
   return seedTask(seed);
 };
 
-// Bury the seed behind the old bounded pool with newer filler, proving the out-of-pool case is reachable.
+// Bury the seed behind the old bounded pool; out-of-pool stays reachable.
 // @see #293
 const fillPool = async (count: number): Promise<void> => {
   const start = Date.parse('2026-09-30T10:00:00.000Z');
@@ -110,7 +110,7 @@ export const clearMemoryCorpus = async (): Promise<void> => {
   await TaskEvent.deleteMany({ taskId: { $in: taskIds } });
   await Task.deleteMany({ userId: evalUserId });
 
-  // Stale embeddings would otherwise consume the `$vectorSearch` ANN budget for the next scenario.
+  // Stale embeddings would eat the next scenario's ANN budget.
   // @see #294
   await WorkspaceEmbedding.deleteMany({ userId: evalUserId });
 };

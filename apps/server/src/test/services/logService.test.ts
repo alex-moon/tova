@@ -5,7 +5,7 @@ jest.mock('../../main/models/ErrorLog', () => ({
   ErrorLog: { create: jest.fn().mockReturnValue(Promise.resolve({})) },
 }));
 
-// Console capture + durable error persistence only; retained viewing lives in lokiLogs.ts.
+// Console capture + durable errors only; retained viewing in lokiLogs.ts.
 // @see #179
 describe('logService', () => {
   beforeEach(() => {

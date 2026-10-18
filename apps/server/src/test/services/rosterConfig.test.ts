@@ -213,7 +213,7 @@ describe('recordTtft (#320 windowed mean)', () => {
     expect(entry?.ttftSamples).toBe(3);
     expect(entry?.ttftMs).toBeCloseTo((100 * 2 + 1000) / 3);
 
-    // Second fold-in: the old mean's weight is capped at W-1, so seeded history decays out instead of weighing in forever.
+    // Second fold-in: the old mean caps at W-1, so seeded history decays.
     await recordTtft(modelId, 'deepinfra', 1000);
     entry = await deepinfraEntry();
     expect(entry?.ttftSamples).toBe(3);

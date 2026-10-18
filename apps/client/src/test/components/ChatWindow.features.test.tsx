@@ -12,7 +12,7 @@ vi.mock('../../main/services/assets', async (importOriginal) => {
   };
 });
 
-// Mock the task service: the embedded TaskCard mounts and would otherwise hit axios.
+// Mock the task service: TaskCard mounts and would otherwise hit axios.
 // @see #255
 vi.mock('../../main/services/tasks', async (importOriginal) => {
   const original = await importOriginal<typeof import('../../main/services/tasks')>();
@@ -68,7 +68,7 @@ const renderChat = (
     />,
   );
 
-// Settled turns collapse the tool summary box; expand before asserting on individual chips.
+// Settled turns collapse the tool summary; expand before asserting on chips.
 // @see #196
 const expandTools = () => fireEvent.click(screen.getByTestId('tool-summary-toggle'));
 

@@ -1,9 +1,9 @@
 import type { GateCase, MemoryScenario } from './types';
 
-// Synthetic golden corpus: facts seeded in longer-lived chats, probed from fresh chats.
+// Synthetic golden corpus: facts seeded in old chats, probed from fresh chats.
 // @see #289
 
-// Hand-labelled gate set: positives are refer-backs; negatives are fresh asks and unresolvable deixis.
+// Hand-labelled gate set: positives are refer-backs; negatives are fresh asks.
 // @see #289
 export const GATE_CASES: GateCase[] = [
   {
@@ -258,7 +258,7 @@ export const GATE_CASES: GateCase[] = [
   },
 ];
 
-/** Retrieval + helpfulness scenarios. One seed world each, isolated by reseeding. */
+/** Retrieval + helpfulness scenarios, one seed world each. */
 export const MEMORY_SCENARIOS: MemoryScenario[] = [
   {
     id: 'retrieval-direct-partner-job',
@@ -370,7 +370,7 @@ export const MEMORY_SCENARIOS: MemoryScenario[] = [
     expectedFact: 'AX-4471',
     poolFill: 210,
   },
-  // Easy `direct` baseline so retrieval changes are not judged only by hard-category wins.
+  // Easy `direct` baseline so retrieval changes aren't judged on hard wins.
   // @see #293 #294
   {
     id: 'retrieval-direct-sister',
@@ -408,7 +408,7 @@ export const MEMORY_SCENARIOS: MemoryScenario[] = [
     expectSurfaced: true,
     expectedFact: 'Volvo',
   },
-  // Paraphrase cases: query and seed share no content word (asserted in corpus.test.ts).
+  // Paraphrase cases: query and seed share no content word.
   // @see #293 #294
   {
     id: 'retrieval-paraphrase-gardener',
@@ -689,7 +689,7 @@ export const MEMORY_SCENARIOS: MemoryScenario[] = [
     expectSurfaced: false,
     expectedFact: '4815',
   },
-  // Second out-of-pool case: buried by newer filler; reachable since the whole corpus is searched.
+  // Second out-of-pool case: buried by newer filler but still reachable.
   // @see #293
   {
     id: 'retrieval-out-of-pool-wheel',

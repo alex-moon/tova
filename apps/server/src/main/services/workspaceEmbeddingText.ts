@@ -1,9 +1,9 @@
 import { createHash } from 'crypto';
 
-/* The one place a workspace slice's embed text is derived, shared by ingest and backfill so the hashed text cannot diverge (which would silently break the hash-skip rule); derivations mirror collectWorkspaceSlices. */
+/* Single source of embed text, shared so hashes cannot diverge. */
 // @see #294 #309
 
-// Conservative cap for the 512-token window, so the provider never receives an over-length input.
+// Cap for the 512-token window; never an over-length input.
 export const EMBEDDING_MAX_CHARS = 1800;
 
 export type EmbeddingTextSource =
@@ -16,7 +16,7 @@ export type EmbeddingTextSource =
     }
   | { kind: 'task'; events: { role: string; content: string | null | undefined }[] };
 
-/* The metadata fold shared by ingest and backfill so the hashed text stays byte-identical; only a file slice's title carries terms the content cannot supply. */
+/* Metadata fold shared by ingest and backfill for byte-identical text. */
 // @see #309
 export const withEmbedTitle = (title: string | null | undefined, text: string): string => {
   const trimmed = (title ?? '').trim();
@@ -45,7 +45,7 @@ export const workspaceSliceText = (source: EmbeddingTextSource): string => {
   }
 };
 
-/* Truncate to the provider-safe cap; reports whether the text was cut so the backfill can report the truncation rate. */
+/* Truncate to the provider-safe cap; report whether cut. */
 export const truncateForEmbedding = (
   text: string,
   cap = EMBEDDING_MAX_CHARS,
@@ -54,6 +54,6 @@ export const truncateForEmbedding = (
   return { text: text.slice(0, cap), truncated: true };
 };
 
-/* Content identity for the skip decision: sha256 of the model plus the truncated embed text. */
+/* Skip identity: sha256 of model plus truncated embed text. */
 export const embeddingTextHash = (text: string, model: string): string =>
   createHash('sha256').update(`${model}\n${text}`).digest('hex');

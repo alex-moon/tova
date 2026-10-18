@@ -1,11 +1,11 @@
 import { useEffect, useState } from 'react';
 import ConnectorService, { ConnectorError } from '../services/connectors';
 
-// OAuth consent landing: relays ?code=&state= to the server callback, which completes the exchange and creates/updates the connector.
+// OAuth consent landing: relays ?code=&state= to the server callback.
 // @see #327 #331
 
 const ConnectorOAuthCallback = () => {
-  // The redirect's query is fixed for the page's lifetime, and the page remounts per redirect: read once at mount.
+  // Query is fixed for the page's lifetime; the page remounts per redirect.
   const params = new URLSearchParams(window.location.search);
   const redirectError = params.get('error');
   const redirectCode = params.get('code');

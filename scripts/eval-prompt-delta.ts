@@ -1,6 +1,5 @@
-// One-off eval for #384 follow-up: prompt-delta probe on DeepSeek. Same session, same
-// read-back turn, status-quo history in every arm; each arm changes exactly one thing
-// in the system prompt (or the history size, for P4). Usage:
+// One-off eval follow-up: prompt-delta probe, one change per arm.
+// @see #384
 //   npx tsx scripts/eval-prompt-delta.ts [--reps 5]
 import 'dotenv/config';
 import mongoose from 'mongoose';
@@ -45,7 +44,7 @@ type HistoryTurn = { role: string; content: string; timestamp?: Date };
 
 const EPISTEMICS_NEEDLE = 'Trust yourself for what lives in you';
 
-/* Wholesale paragraph rewrite (suggested in #384 review): principles → procedure. */
+/* Wholesale paragraph rewrite: principles → procedure. */
 const EPISTEMICS_REWRITE =
   'Finding things out is the tools’ job, not yours: to learn what a file says, what ' +
   'your past work found, or any current fact, call the tool that retrieves it and ' +
@@ -56,7 +55,7 @@ const EPISTEMICS_REWRITE =
   'unforgivable error. Arithmetic goes through the calculator, not your head. An ' +
   'honest “I couldn’t read it” is always better than a confident recollection.';
 
-/* Replaces the abstract epistemics paragraph wholesale; throws when the needle is missing so an inert arm can never pass silently. */
+/* Replaces the epistemics paragraph; throws when the needle is missing. */
 const rewriteEpistemics = (system: string): string => {
   const parts = system.split('\n\n');
   const idx = parts.findIndex((p) => p.startsWith(EPISTEMICS_NEEDLE));
@@ -88,8 +87,7 @@ const runRep = async (
   const options: CompletionOptions = {
     provider: ref.provider,
     model: ref.model,
-    // No userId: tools answer 'unavailable', so the probe cannot write to the real
-    // library; invocation is decided before the call, so the metric stays clean.
+    // No userId: tools answer 'unavailable'; the metric is invocation.
     messages,
     max_tokens: outputTokensFor(ref.contextLength, promptCharsFrom(messages)),
   };
@@ -180,7 +178,7 @@ async function main() {
     `session ${sessionId} · ${arms.length} arms · ${reps} reps each, interleaved · ${ref.provider}/${ref.model}\n`,
   );
   const results: RepResult[] = [];
-  // Interleaved: alternating reps so temporal drift (provider load etc.) hits both arms equally.
+  // Interleaved reps so temporal drift hits both arms equally.
   for (let i = 0; i < reps; i += 1) {
     for (const { name, messages } of arms) {
       try {

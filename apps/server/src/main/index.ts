@@ -41,7 +41,7 @@ import { redactForLog } from './services/logRedaction';
 
 attachConsoleCapture();
 
-// Process-level safety net: rejections logged and swallowed, uncaught exceptions exit, tesseract worker errors contained.
+// Process-level safety net: rejections logged, uncaught exceptions exit.
 // @see #248 #358
 export const isTesseractWorkerError = (err: unknown): boolean => {
   const stack =
@@ -80,18 +80,18 @@ export const connectToDatabase = async (mongoUri = buildMongoUri()) => {
 export const createApp = (): Express => {
   const app = express();
 
-  // Behind a proxy, trust only the last TRUST_PROXY_HOPS X-Forwarded-For entries; the outermost proxy must overwrite, not append.
+  // Behind a proxy, trust only the last TRUST_PROXY_HOPS XFF entries.
   // @see #50
   const hops = Number(process.env.TRUST_PROXY_HOPS ?? 1);
   if (Number.isInteger(hops) && hops > 0) {
     app.set('trust proxy', hops);
   }
 
-  // Strict clientside hardening headers; CSP tuning intentionally out of scope.
+  // Strict clientside hardening headers; CSP tuning out of scope.
   // @see #32
   app.use(helmet());
 
-  // Same-origin app in dev (Vite proxy) and prod (static build), so no CORS middleware.
+  // Same-origin app in dev (Vite) and prod (static), so no CORS middleware.
   // @see #32
   const isProduction = process.env.NODE_ENV === 'production';
 
@@ -163,7 +163,7 @@ export const startServer = async (): Promise<Server> => {
     console.error('MongoDB connection error:', err);
   });
 
-  // In-process conversion worker; no-op under test so route tests don't inherit background polling.
+  // In-process conversion worker; no-op under test to isolate route tests.
   // @see #67
   if (process.env.NODE_ENV !== 'test') {
     startAssetJobPoller(processAssetConversionJob);
@@ -172,7 +172,7 @@ export const startServer = async (): Promise<Server> => {
     // @see #254 #251
     startTaskPoller(processTaskJob);
 
-    // Daily eval suites, both kinds in one strictly sequential tick, off unless scheduled.
+    // Daily eval suites, both kinds in one sequential tick, off unless set.
     // @see #225 #289
     startEvalScheduler(
       [
@@ -199,7 +199,7 @@ export const startServer = async (): Promise<Server> => {
         {
           kind: 'memory',
           hasRun: (now) => hasRunForUtcDay(now, 'memory'),
-          // Retrieval stage only: gate and judge calls stay off the unattended schedule.
+          // Retrieval stage only: gate/judge stay off the unattended schedule.
           run: () => startMemoryEvalRun({ stages: ['retrieval'], trigger: 'scheduled' }),
         },
       ],
