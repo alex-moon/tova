@@ -1,0 +1,99 @@
+# Responsive e2e suite, split out of ci.yml: full-stack Playwright is the priciest job in CI
+# and runtime verification, not merge verification. Runs nightly on main and on demand.
+# @see #288
+name: E2E nightly
+
+on:
+  schedule:
+    # 02:30 UTC daily (deliberately not in ci.yml: a schedule there would trigger deploy.yml).
+    - cron: '30 2 * * *'
+  workflow_dispatch: {}
+
+concurrency:
+  group: e2e-nightly
+  cancel-in-progress: true
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+
+    env:
+      MONGODB_HOST: localhost
+      MONGODB_PASSWORD: tova
+      E2E_BASE_URL: http://localhost:5173
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Install Playwright browsers (cached)
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+
+      - run: npx playwright install --with-deps chromium
+
+      # Direct CLI docker login (no third-party actions); skipped when secrets are unset.
+      - name: Log in to Docker Hub
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          if [[ -n "$DOCKERHUB_USERNAME" && -n "$DOCKERHUB_TOKEN" ]]; then
+            printf '%s' "$DOCKERHUB_TOKEN" | docker login -u "$DOCKERHUB_USERNAME" --password-stdin
+          fi
+
+      - name: Start fixture Mongo
+        run: |
+          docker run -d --name mongodb -p 27017:27017 \
+            -e MONGO_INITDB_ROOT_USERNAME=tova \
+            -e MONGO_INITDB_ROOT_PASSWORD=tova \
+            mongo:latest
+          for i in $(seq 1 30); do
+            if (exec 3<>/dev/tcp/127.0.0.1/27017) 2>/dev/null; then
+              exec 3>&- 3<&-
+              echo "mongo is up"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "mongo did not come up" >&2
+          exit 1
+
+      - name: Migrate and set the test fixture password
+        run: |
+          npm run db:migrate
+          npm run db:password
+
+      - name: Start the dev stack
+        run: |
+          npm run dev &
+          for i in $(seq 1 60); do
+            if curl -sf http://localhost:5173 >/dev/null && curl -sf http://localhost:5000/api/health >/dev/null; then
+              echo "stack is up"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "dev stack failed to come up" >&2
+          exit 1
+
+      - name: Responsive e2e suite
+        run: npm run test:e2e
+
+      - name: Upload Playwright report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 5
