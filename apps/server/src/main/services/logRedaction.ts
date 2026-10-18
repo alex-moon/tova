@@ -7,6 +7,15 @@ export const REDACTED = '[redacted]';
 
 const MAX_STACK = 2000;
 
+// Partial mode keeps head/tail words of long prose for context (traces).
+const PARTIAL_CONTEXT_WORDS = 3;
+const PARTIAL_MIN_WORDS = 12;
+
+export interface RedactOptions {
+  /** Keep first/last words of long prose; full-redact secrets regardless. */
+  partial?: boolean;
+}
+
 interface NonError {
   name?: string;
   message?: string;
@@ -33,9 +42,21 @@ const isPathShaped = (text: string): boolean =>
 const QUOTED_SEGMENT = /'((?:\\.|[^']){1,300})'|"((?:\\.|[^"]){1,300})"/g;
 const PATH_PLACEHOLDER = (i: number): string => `\u0000${i}\u0000`;
 
+// Head/tail words survive with the middle blanked; full-blank when the
+// match has no words to keep (whitespace-free runs) or too few to hide.
+const partialRedact = (text: string): string => {
+  const words = text.trim().split(/\s+/);
+  if (words.length < PARTIAL_MIN_WORDS) return REDACTED;
+  const head = words.slice(0, PARTIAL_CONTEXT_WORDS).join(' ');
+  const tail = words.slice(-PARTIAL_CONTEXT_WORDS).join(' ');
+  return `${head} ${REDACTED} ${tail}`;
+};
+
 /** Redact user-shaped content: quoted strings, JSON, token runs. */
-export const redactString = (text: string): string => {
+export const redactString = (text: string, opts: RedactOptions = {}): string => {
   if (!text) return text;
+  const partial = opts.partial === true;
+  const softBlank = (inner: string): string => (partial ? partialRedact(inner) : REDACTED);
   const paths: string[] = [];
   let out = text.replace(
     QUOTED_SEGMENT,
@@ -45,21 +66,30 @@ export const redactString = (text: string): string => {
       return PATH_PLACEHOLDER(paths.length - 1);
     },
   );
-  // JSON-ish objects/arrays >= 40 chars (embedded request bodies).
+  // JSON-ish objects/arrays >= 40 chars (embedded request bodies); may
+  // carry keys, so partial mode still blanks them wholesale.
   out = out.replace(/[{[][\s\S]{40,}[}\]]/g, REDACTED);
   // Double-quoted payload text (>= 16 chars): prompt fragments.
-  out = out.replace(/"((?:\\.|[^"]){16,})"/g, `"${REDACTED}"`);
+  out = out.replace(/"((?:\\.|[^"]){16,})"/g, (_, inner: string) => `"${softBlank(inner)}"`);
   // Single-quoted payload text; word-internal apostrophes survive.
-  out = out.replace(/(?<![\w'])'((?:\\.|[^']){16,})'/g, `'${REDACTED}'`);
+  out = out.replace(
+    /(?<![\w'])'((?:\\.|[^']){16,})'/g,
+    (_, inner: string) => `'${softBlank(inner)}'`,
+  );
   // Secret-shaped assignments; short values need a dedicated rule.
   out = out.replace(
     /((?:api[_-]?key|token|secret|password|authorization|bearer)["'\s:=]+\s*)(["']?)[\w./+-]{8,}\2/gi,
     `$1$2${REDACTED}$2`,
   );
-  // Long whitespace-free runs — UUIDs/b64/keys/system dumps.
+  // Long whitespace-free runs — UUIDs/b64/keys/system dumps; no words to keep.
   out = out.replace(/[^\s'"{}[\]]{64,}/g, REDACTED);
-  // Catch-all: any remaining >= 64-char run; over-redaction is safe.
-  out = out.replace(/[^\n\r]{64,}/g, REDACTED);
+  // Catch-all: any remaining >= 64-char run; partial keeps head/tail words.
+  // Runs already carrying a marker were decided by an earlier rule — the
+  // backstop must not blank the context it kept. @see #383
+  out = out.replace(/[^\n\r]{64,}/g, (run) => {
+    if (!partial) return REDACTED;
+    return run.includes(REDACTED) ? run : partialRedact(run);
+  });
   // eslint-disable-next-line no-control-regex -- sentinel is the point
   return out.replace(/\u0000(\d+)\u0000/g, (_, i: string) => {
     const path = paths[Number(i)];

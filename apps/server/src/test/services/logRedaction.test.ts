@@ -1,4 +1,4 @@
-import { redactForLog, redactString } from '../../main/services/logRedaction';
+import { REDACTED, redactForLog, redactString } from '../../main/services/logRedaction';
 
 // Everything argued to console.* must come through redaction here.
 // @see #145
@@ -32,6 +32,11 @@ describe('redactString', () => {
 
   it('treats empty string as empty', () => {
     expect(redactString('')).toBe('');
+  });
+
+  it('blanks long prose lines wholesale by default (traces opt into partial)', () => {
+    const prose = Array.from({ length: 30 }, (_, i) => `word${i}`).join(' ');
+    expect(redactString(prose)).toBe(REDACTED);
   });
 
   it('does not corrupt prose containing apostrophes (critic finding)', () => {
