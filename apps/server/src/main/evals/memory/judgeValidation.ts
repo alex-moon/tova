@@ -2,6 +2,7 @@ import { MEMORY_SCENARIOS } from './corpus';
 import type { MemoryScenario } from './types';
 import type { JudgeVerdict } from './helpfulnessEval';
 import { config } from '../../config';
+import { sleep } from '../../services/sleep';
 
 // Judge-validation harness: the judge is measured before its win-rate counts.
 // @see #289
@@ -202,8 +203,6 @@ const cohenKappa = (confusion: JudgeConfusion, n: number): number | null => {
   if (expected >= 1) return null;
   return (observed - expected) / (1 - expected);
 };
-
-const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
 // One live judge call per pair can trip RPM; paced by the config delay.
 export const defaultJudgePace = async (): Promise<void> => {

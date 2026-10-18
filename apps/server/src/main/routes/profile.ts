@@ -3,7 +3,7 @@ import { User } from '../models/User';
 import type { UserSettings } from '../models/User';
 import { toAuthUser } from '../services/userService';
 import { authenticate, AuthRequest } from '../middleware/auth';
-import { profilePatchSchema, factoryResetSchema } from '../validation';
+import { zodMessage, profilePatchSchema, factoryResetSchema } from '../validation';
 import { purgeAllUserData } from '../services/userDataPurge';
 
 const router = express.Router();
@@ -23,9 +23,7 @@ router.patch('/', authenticate, async (req: AuthRequest, res) => {
   try {
     const parsed = profilePatchSchema.safeParse(req.body ?? {});
     if (!parsed.success) {
-      return res
-        .status(400)
-        .json({ message: parsed.error.issues[0]?.message ?? 'Invalid payload' });
+      return res.status(400).json({ message: zodMessage(parsed, 'Invalid payload') });
     }
 
     const user = await User.findById(req.user?.id);
@@ -124,9 +122,7 @@ router.post('/factory-reset', authenticate, async (req: AuthRequest, res) => {
   try {
     const parsed = factoryResetSchema.safeParse(req.body ?? {});
     if (!parsed.success) {
-      return res
-        .status(400)
-        .json({ message: parsed.error.issues[0]?.message ?? 'Invalid payload' });
+      return res.status(400).json({ message: zodMessage(parsed, 'Invalid payload') });
     }
     const { failedObjects } = await purgeAllUserData(req.user?.id ?? '');
     res.json({ reset: true, failedObjects });

@@ -11,12 +11,12 @@ import {
 } from '../evals/memory/memoryEvalService';
 import {
   EvalRunBusyError,
-  MAX_STORED_ERROR_CHARS,
   resolveLeaseDeps,
   resolveScheduledModels,
   writeEvalLease,
   type EvalLeaseDeps,
 } from './evalRunService';
+import { clampError } from './clampError';
 
 export interface StartMemoryEvalRunOptions {
   /** Which deterministic stages to run; scheduled runs pass 'retrieval'. */
@@ -100,10 +100,7 @@ export const executeMemoryEvalRun = async (
     });
     return report;
   } catch (error) {
-    const message = (error instanceof Error ? error.message : String(error)).slice(
-      0,
-      MAX_STORED_ERROR_CHARS,
-    );
+    const message = clampError(error);
     await updateRecord(id, { $set: { status: 'error', finishedAt: new Date(), error: message } });
     return {};
   }

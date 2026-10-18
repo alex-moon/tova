@@ -137,10 +137,6 @@ assetSchema.index({ userId: 1, _id: 1 });
 // @see #369
 assetSchema.index({ userId: 1, filename: 1 });
 
-// Search queries over converted markdown.
-// @see #67
-assetSchema.index({ markdownExtracted: 1 });
-
 // Native TTL: expires system-side rows at their own `expiresAt`.
 // @see #340
 assetSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });

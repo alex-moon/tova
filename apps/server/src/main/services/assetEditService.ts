@@ -1,4 +1,5 @@
 import type { AssetDocument } from '../models/Asset';
+import { Asset } from '../models/Asset';
 import { AssetVersion } from '../models/AssetVersion';
 import { spacesWorkspaceStorage } from './workspaceStorage';
 import { MAX_ASSET_SIZE } from './assetLimits';
@@ -18,6 +19,7 @@ export type AssetWriteCode =
   | 'no_match'
   | 'ambiguous'
   | 'no_change'
+  | 'conflict'
   | 'not_found'
   | 'not_editable'
   | 'unavailable';
@@ -84,12 +86,10 @@ const findLineOccurrences = (content: string, search: string) => {
     if (trailingNewline && !last.newline) return [];
     return [{ start: line.start, end: trailingNewline ? last.end : last.contentEnd }];
   });
-  return candidates.reduce<Match[]>((result, candidate) => {
-    if (result.some((match) => match.end > candidate.start && match.start < candidate.end))
-      return result;
-    result.push(candidate);
-    return result;
-  }, []);
+  // Overlapping candidates are distinct match starts, so they count for
+  // ambiguity — collapsing them would let an ambiguous edit apply.
+  // @see #396
+  return candidates;
 };
 
 /** The dominant line ending in text, or fallback when there is none. */
@@ -249,19 +249,54 @@ export const writeAssetContent = async (
     return { ok: false, code: 'too_large', message: 'Edited file is too large (max 15 MB)' };
   }
 
+  const currentVersion = asset.version ?? 1;
+  // Legacy rows can predate the version field; seed it so the OCC filter
+  // below can match. Concurrent seeds converge on the same value.
+  // @see #396
+  const seeded = await Asset.updateOne(
+    { _id: asset._id, version: { $exists: false } },
+    { $set: { version: currentVersion } },
+  );
+  if (seeded.modifiedCount) asset.version = currentVersion;
+
+  // Snapshot the old content BEFORE the PUT: a crash mid-write leaves the
+  // prior bytes recoverable from history.
+  // @see #396
+  await snapshotVersion(asset, currentVersion, asset.textExtracted ?? '');
+
   try {
     await spacesWorkspaceStorage.putByKey(asset.key, buffer, asset.contentType);
   } catch {
     return { ok: false, code: 'unavailable', message: 'Could not write the file to storage' };
   }
 
-  const currentVersion = asset.version ?? 1;
-  await snapshotVersion(asset, currentVersion, asset.textExtracted ?? '');
-
+  // Optimistic concurrency: the row update is conditioned on the version
+  // this edit was computed against; losing the race surfaces a conflict.
+  // @see #396
   asset.textExtracted = content;
   asset.size = buffer.length;
+  const updated = await Asset.updateOne(
+    { _id: asset._id, version: currentVersion },
+    { $set: { textExtracted: content, size: buffer.length, version: currentVersion + 1 } },
+  );
+  if (!updated.modifiedCount) {
+    // Storage was clobbered by the loser: restore the surviving row's bytes,
+    // but only while this edit is the immediate predecessor — a newer
+    // winner's PUT is already authoritative, and a null text would blank it.
+    // @see #396
+    const winner = await Asset.findById(asset._id).select('textExtracted contentType version');
+    if ((winner?.version ?? 1) === currentVersion + 1 && winner?.textExtracted != null) {
+      await spacesWorkspaceStorage
+        .putByKey(asset.key, Buffer.from(winner.textExtracted, 'utf8'), winner.contentType)
+        .catch(() => undefined);
+    }
+    return {
+      ok: false,
+      code: 'conflict',
+      message: 'The file changed while the edit was in flight. Re-read it and retry.',
+    };
+  }
   asset.version = currentVersion + 1;
-  await asset.save();
 
   await snapshotVersion(asset, currentVersion + 1, content);
 

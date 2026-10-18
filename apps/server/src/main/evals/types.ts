@@ -4,8 +4,6 @@
 /** One observed tool call, shaped after FullOutput.toolResults. */
 export interface ToolCallRecord {
   name: string;
-  /** Substring equality against a (stringified) tool result, when present. */
-  result?: unknown;
   /** Only the scalar args exposed by the neutral stream are compared. */
   args?: Record<string, unknown>;
 }
@@ -63,9 +61,3 @@ export interface AssertionResult {
 }
 
 export type Score = 'pass' | 'partial' | 'fail';
-
-export interface EvalResult {
-  caseId: string;
-  score: Score;
-  assertions: AssertionResult[];
-}

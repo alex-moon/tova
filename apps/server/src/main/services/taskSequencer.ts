@@ -1,6 +1,6 @@
 import type { TaskDocument } from '../models/Task';
 import type { TaskEventDocument, TaskToolEvent } from '../models/TaskEvent';
-import { toolResultEvent } from '../routes/chat';
+import { toolResultEvent } from './toolChips';
 import type { CompletionOptions, NeutralCompletion } from './llmTypes';
 import { outputTokensFor, promptCharsFrom } from './outputTokenCap';
 import { inferenceService } from './inferenceService';

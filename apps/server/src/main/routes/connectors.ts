@@ -7,6 +7,7 @@ import {
   connectorCreateSchema,
   connectorOAuthCallbackSchema,
   connectorOAuthStartSchema,
+  zodMessage,
 } from '../validation';
 import { authenticate, AuthRequest } from '../middleware/auth';
 import { encryptEnvelope } from '../services/crypto';
@@ -68,7 +69,7 @@ router.get('/', authenticate, async (req: AuthRequest, res) => {
 router.post('/', authenticate, async (req: AuthRequest, res) => {
   const parsed = connectorCreateSchema.safeParse(req.body ?? {});
   if (!parsed.success) {
-    return res.status(400).json({ message: parsed.error.issues[0]?.message ?? 'Invalid payload' });
+    return res.status(400).json({ message: zodMessage(parsed, 'Invalid payload') });
   }
   const { name, url } = parsed.data;
   const rawToken = parsed.data.authToken?.trim();
@@ -160,7 +161,7 @@ router.delete('/:id', authenticate, async (req: AuthRequest, res) => {
 router.post('/oauth/start', authenticate, async (req: AuthRequest, res) => {
   const parsed = connectorOAuthStartSchema.safeParse(req.body ?? {});
   if (!parsed.success) {
-    return res.status(400).json({ message: parsed.error.issues[0]?.message ?? 'Invalid payload' });
+    return res.status(400).json({ message: zodMessage(parsed, 'Invalid payload') });
   }
   const { name, url } = parsed.data;
   try {
@@ -223,7 +224,7 @@ router.post('/:id/reauth', authenticate, async (req: AuthRequest, res) => {
 router.post('/oauth/callback', authenticate, async (req: AuthRequest, res) => {
   const parsed = connectorOAuthCallbackSchema.safeParse(req.body ?? {});
   if (!parsed.success) {
-    return res.status(400).json({ message: parsed.error.issues[0]?.message ?? 'Invalid payload' });
+    return res.status(400).json({ message: zodMessage(parsed, 'Invalid payload') });
   }
   try {
     const doc = await completeConnectorOAuth({

@@ -4,16 +4,15 @@ import { Task, type TaskDocument } from '../models/Task';
 import { TaskEvent, type TaskEventDocument } from '../models/TaskEvent';
 import { User } from '../models/User';
 import { authenticate, AuthRequest } from '../middleware/auth';
-import { taskCreateSchema, taskInstructionSchema } from '../validation';
+import { zodMessage, taskCreateSchema, taskInstructionSchema } from '../validation';
 import { enqueueTask, steerTask, cancelTask } from '../services/taskService';
+import { cursorPage, LIST_PAGE_SIZE } from '../services/cursorPage';
 import { config } from '../config';
 
 const router = express.Router();
 
 /* Task API: a first-class stream; every route user-scoped, 404 no oracle. */
 // @see #254 #251
-
-const LIST_PAGE_SIZE = 20;
 
 // A list/summary view of a task — the header without its whole stream.
 const serializeTask = (task: TaskDocument) => ({
@@ -82,7 +81,7 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
   try {
     const parsed = taskCreateSchema.safeParse(req.body ?? {});
     if (!parsed.success) {
-      return res.status(400).json({ message: parsed.error.issues[0]?.message ?? 'Invalid task' });
+      return res.status(400).json({ message: zodMessage(parsed, 'Invalid task') });
     }
     const user = await User.findById(req.user?.id);
     if (!user) {
@@ -126,11 +125,10 @@ router.get('/', authenticate, async (req: AuthRequest, res) => {
       .sort({ _id: -1 })
       .limit(LIST_PAGE_SIZE + 1);
 
-    const hasMore = tasks.length > LIST_PAGE_SIZE;
-    const page = hasMore ? tasks.slice(0, LIST_PAGE_SIZE) : tasks;
+    const { page, nextCursor } = cursorPage(tasks);
     return res.json({
       tasks: page.map(serializeTask),
-      nextCursor: hasMore ? String(page[page.length - 1]._id) : null,
+      nextCursor,
     });
   } catch (err) {
     console.error('Task list error:', err);
@@ -158,9 +156,7 @@ router.post('/:id/instruction', authenticate, async (req: AuthRequest, res) => {
   try {
     const parsed = taskInstructionSchema.safeParse(req.body ?? {});
     if (!parsed.success) {
-      return res
-        .status(400)
-        .json({ message: parsed.error.issues[0]?.message ?? 'Invalid instruction' });
+      return res.status(400).json({ message: zodMessage(parsed, 'Invalid instruction') });
     }
     const task = await ownedTask(req);
     if (!task) {

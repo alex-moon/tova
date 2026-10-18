@@ -9,6 +9,7 @@ import { config } from '../config';
 import { VECTOR_INDEX_NAME } from './atlasVectorIndex';
 import { embedTexts } from './embeddingService';
 import { rerankQuery } from './rerankerService';
+import { withEmbedTitle } from './workspaceEmbeddingText';
 import { withTimeout } from './markdownConversion';
 
 /* Workspace memory: BM25-ranked retrieval over existing rows, pure. */
@@ -18,7 +19,7 @@ import { withTimeout } from './markdownConversion';
 // @see #256
 const WORD_PATTERN = /[a-z0-9']+/g;
 
-const STOPWORDS = new Set([
+const RETRIEVAL_STOPWORDS = new Set([
   'a',
   'an',
   'the',
@@ -45,7 +46,7 @@ const STOPWORDS = new Set([
 
 export const tokenize = (text: string): string[] => {
   const words = text.toLowerCase().replace(/\s+/g, ' ').trim().match(WORD_PATTERN) ?? [];
-  return words.filter((word) => word.length > 1 && !STOPWORDS.has(word));
+  return words.filter((word) => word.length > 1 && !RETRIEVAL_STOPWORDS.has(word));
 };
 
 export const promptWords = (prompt: string): Set<string> => new Set(tokenize(prompt));
@@ -358,12 +359,12 @@ export const retrieveWorkspaceBlock = async (
 /* Semantic half: embed query, Atlas Vector Search; degrades to BM25. */
 // @see #294 #289
 
-export interface VectorHit {
+interface VectorHit {
   sourceId: string;
   score: number;
 }
 
-export interface VectorSearchParams {
+interface VectorSearchParams {
   userId: string;
   model: string;
   queryVector: number[];
@@ -502,10 +503,9 @@ export const RERANK_CUT = 0.005;
 export const RERANK_MAX_CANDIDATES = 24;
 export const RERANK_DOC_CHARS = 2000;
 
-// The text a candidate is graded on: title above content.
-// @see #309
-const rerankDocText = (slice: WorkspaceSlice): string =>
-  slice.title ? `${slice.title}\n${slice.text}` : slice.text;
+// The text a candidate is graded on: title above content, byte-identical
+// to the embedded fold. @see #309 #398
+const rerankDocText = (slice: WorkspaceSlice): string => withEmbedTitle(slice.title, slice.text);
 
 export const rerankAndCut = async (
   prompt: string,

@@ -1,13 +1,11 @@
 // Zip-entry helpers: stored filenames, defensively; collisions dedupe.
+// @see #396
+
+import { isSafeFilename, sanitizeFilename } from './assetLimits';
 
 const sanitizeZipEntryName = (filename: string): string => {
-  const cleaned = filename
-    .split('')
-    .filter((char) => char.charCodeAt(0) >= 0x20 && char !== '\u007f')
-    .join('')
-    .replace(/[/\\]/g, '_')
-    .trim();
-  return cleaned || 'unnamed.bin';
+  const cleaned = sanitizeFilename(filename);
+  return isSafeFilename(cleaned) ? cleaned : 'unnamed.bin';
 };
 
 const dedupeEntryNames = (filenames: string[]): string[] => {

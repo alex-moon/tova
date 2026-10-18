@@ -1,15 +1,11 @@
 import { Asset, type AssetDocument } from '../models/Asset';
 import { spacesWorkspaceStorage } from './workspaceStorage';
-import { MAX_ASSET_SIZE, isImageContentType } from './assetLimits';
+import { CONFIRM_MAX_AGE_MS, MAX_ASSET_SIZE, isImageContentType } from './assetLimits';
 import { enqueueAssetJob } from './assetJobService';
 import { isConvertible } from './markdownConversion';
 import { extractText, isExtractable } from './textExtraction';
 import { safeAsset } from './assetViews';
 import { enqueueWorkspaceEmbedding } from './workspaceEmbeddingIngest';
-
-// Presign + confirm headroom: stale pending rows can never be confirmed.
-// @see #34
-const CONFIRM_MAX_AGE_MS = 60 * 60 * 1000;
 
 // Extraction stays light: only objects up to this size are pulled back.
 const MAX_EXTRACT_BYTES = 1_000_000;
@@ -20,15 +16,30 @@ type ConfirmResult =
   | { status: 'ok'; asset: ReturnType<typeof safeAsset> }
   | { status: 'rejected'; code: number; message: string };
 
+// Failure paths drop the Spaces bytes too: past this point the row is
+// unusable and the object would orphan.
+// @see #396
+const failAsset = async (
+  asset: AssetDocument,
+  reason: string,
+  code: number,
+  message: string,
+): Promise<{ status: 'rejected'; code: number; message: string }> => {
+  asset.status = 'failed';
+  asset.failureReason = reason;
+  await asset.save();
+  if (asset.key !== 'pending') {
+    await Promise.resolve(spacesWorkspaceStorage.deleteByKey(asset.key)).catch(() => undefined);
+  }
+  return { status: 'rejected', code, message };
+};
+
 const confirmAsset = async (asset: AssetDocument): Promise<ConfirmResult> => {
   if (asset.status !== 'pending') {
     return { status: 'rejected', code: 409, message: 'Asset was already confirmed' };
   }
   if (Date.now() - new Date(asset.createdAt).getTime() > CONFIRM_MAX_AGE_MS) {
-    asset.status = 'failed';
-    asset.failureReason = 'expired';
-    await asset.save();
-    return { status: 'rejected', code: 409, message: 'Upload window has expired' };
+    return failAsset(asset, 'expired', 409, 'Upload window has expired');
   }
 
   let head;
@@ -36,17 +47,11 @@ const confirmAsset = async (asset: AssetDocument): Promise<ConfirmResult> => {
     head = await spacesWorkspaceStorage.headByKey(asset.key);
   } catch (err) {
     console.error('Asset confirm HEAD error:', err);
-    asset.status = 'failed';
-    asset.failureReason = 'upload-not-found';
-    await asset.save();
-    return { status: 'rejected', code: 409, message: 'Upload was not found in storage' };
+    return failAsset(asset, 'upload-not-found', 409, 'Upload was not found in storage');
   }
 
   if (head.size <= 0 || head.size > MAX_ASSET_SIZE) {
-    asset.status = 'failed';
-    asset.failureReason = 'size';
-    await asset.save();
-    return { status: 'rejected', code: 413, message: 'Stored file size is invalid' };
+    return failAsset(asset, 'size', 413, 'Stored file size is invalid');
   }
 
   asset.size = head.size;
@@ -54,13 +59,16 @@ const confirmAsset = async (asset: AssetDocument): Promise<ConfirmResult> => {
 
   let text: string | null = null;
   if (isExtractable(asset.filename) && head.size <= MAX_EXTRACT_BYTES) {
-    const buf = await spacesWorkspaceStorage.getByKey(asset.key);
+    const buf = await spacesWorkspaceStorage.getByKey(asset.key, { maxBytes: MAX_EXTRACT_BYTES });
     // Store the FULL text — the 12k cap applies only at prompt-assembly time.
     if (buf) text = extractText(asset.filename, buf);
     if (text !== null) asset.textExtracted = text === '' ? null : text;
   }
 
   asset.status = 'ready';
+  // Confirmed rows live until deleted by their owner; no TTL.
+  // @see #396
+  asset.expiresAt = undefined;
   // Ephemeral assets never queue work; images queue one conversion+OCR job.
   // @see #116 #67 #208 #209
   const isImage = isImageContentType(asset.contentType);
@@ -110,5 +118,5 @@ const confirmAsset = async (asset: AssetDocument): Promise<ConfirmResult> => {
   return { status: 'ok', asset: safeAsset(asset) };
 };
 
-export { confirmAsset, CONFIRM_MAX_AGE_MS, MAX_EXTRACT_BYTES };
+export { confirmAsset };
 export type { ConfirmResult };

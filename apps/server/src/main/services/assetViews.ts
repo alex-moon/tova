@@ -1,6 +1,6 @@
 import type { AssetDocument, AssetProvenance } from '../models/Asset';
 
-const safeAsset = (asset: AssetDocument): unknown => ({
+const safeAsset = (asset: AssetDocument): Record<string, unknown> => ({
   id: String(asset._id),
   filename: asset.filename,
   contentType: asset.contentType,
@@ -44,32 +44,7 @@ const previewAsset = (asset: AssetDocument): unknown => {
     isMarkdownFile || (asset.textExtracted == null && asset.markdownExtracted != null)
       ? 'markdown'
       : 'text';
-  return {
-    id: String(asset._id),
-    filename: asset.filename,
-    contentType: asset.contentType,
-    size: asset.size,
-    status: asset.status,
-    // The viewer hides object-backed actions for agent-side rows.
-    // @see #340
-    origin: asset.origin,
-    // Current content version (see safeAsset).
-    // @see #325
-    version: asset.version ?? 1,
-    // Same contract as `safeAsset` — explicit null when unknown.
-    // @see #252
-    provenance: (asset.provenance as AssetProvenance | undefined) ?? null,
-    // null when nothing was extracted (viewer shows that state).
-    content,
-    // 'markdown' when the body is markdown (rendered), else 'text'.
-    format,
-    markdownStatus: asset.markdownStatus,
-    markdownFailureReason: asset.markdownFailureReason ?? null,
-    // The viewer renders a thumbnail, not the original; is it ready yet?
-    // @see #208
-    thumbnailStatus: asset.thumbnailStatus,
-    createdAt: asset.createdAt,
-  };
+  return { ...safeAsset(asset), content, format };
 };
 
 export { safeAsset, previewAsset };

@@ -1,4 +1,5 @@
 import { config } from '../config';
+import { sleep } from './sleep';
 import type {
   AdminLangsmithModelStats,
   AdminLangsmithStatsPayload,
@@ -57,8 +58,6 @@ export class LangsmithError extends Error {
   }
 }
 
-const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-
 const RETRY_WAITS_MS = [1000, 2000, 4000];
 
 // Minimal structural fetch options; RequestInit is not in scope here.
@@ -107,14 +106,18 @@ const fetchWithRetry = async (url: string, init: FetchInitLike): Promise<unknown
   }
 };
 
-const queryRuns = (headers: Record<string, string>, projectId: string, body: object) =>
+// Shared with tracePurge.
+// @see #398
+export const queryRuns = (headers: Record<string, string>, projectId: string, body: object) =>
   fetchWithRetry(`${BASE_URL}/api/v1/runs/query`, {
     method: 'POST',
     headers,
     body: JSON.stringify({ session: [projectId], ...body }),
   }) as Promise<{ runs?: RawRun[] }>;
 
-const resolveProject = async (headers: Record<string, string>, project: string) => {
+// Shared with tracePurge; the purge path adds no behaviour of its own.
+// @see #398
+export const resolveProject = async (headers: Record<string, string>, project: string) => {
   const res = (await fetchWithRetry(
     `${BASE_URL}/api/v1/sessions?name=${encodeURIComponent(project)}&limit=1`,
     { headers },
@@ -259,7 +262,9 @@ const toTraceRow = (run: RawRun, join: ModelJoin): AdminTraceRow | null => {
   };
 };
 
-const headersFor = (apiKey: string): Record<string, string> => ({
+// Shared with tracePurge.
+// @see #398
+export const headersFor = (apiKey: string): Record<string, string> => ({
   'x-api-key': apiKey,
   'Content-Type': 'application/json',
 });

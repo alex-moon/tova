@@ -228,10 +228,9 @@ describe('#158 text_inline_sources (positive-citation slice, OQ2 pinned)', () =>
   });
 
   it('does not accept a citation that only exists in tool results, never in text', () => {
-    const run_ = run(
-      [{ name: 'web_search', result: { results: [{ url: 'https://example.com/x' }] } }],
-      { finalText: 'Yes, there is striking movement on this topic lately.' },
-    );
+    const run_ = run([{ name: 'web_search' }], {
+      finalText: 'Yes, there is striking movement on this topic lately.',
+    });
     expect(assertRun(run_, [{ type: 'text_inline_sources' }]).map((r) => r.passed)).toEqual([
       false,
     ]);

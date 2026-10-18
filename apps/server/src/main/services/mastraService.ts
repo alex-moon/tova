@@ -1050,7 +1050,9 @@ const TASK_INSTRUCTIONS =
   'integration, call `search_tools` with keywords first. Bracketed lines like ' +
   '`[tools used: …]` are system-added records; never write one yourself.';
 
-/* Agents are memoised per provider/model; instructions stay empty. */
+/* Agents are memoised per provider/model; instructions stay empty.
+ * Insertion-order cap: a pathological model rotation cannot grow it. */
+const AGENT_CACHE_MAX = 50;
 const agentCache = new Map<string, Agent>();
 
 /* 'task' swaps in the lean task prompt and drops delegate_task. */
@@ -1063,10 +1065,13 @@ const agentFor = (provider: LlmProvider, model: string, mode: ToolsMode = 'full'
   const cached = agentCache.get(cacheKey);
   if (cached) return cached;
   const routerId = MASTRA_PROVIDER_ID[provider];
+  // Trace identity carries the model; ids are slug-safe, not model-raw.
+  // @see #398
+  const agentLabel = `tova-${provider}-${model.replace(/[^A-Za-z0-9._-]/g, '-')}`;
   const agent = new Agent({
     // Cast: the union role does not narrow to a single Mastra message variant.
-    id: `tova-${provider}`,
-    name: `tova-${provider}`,
+    id: agentLabel,
+    name: agentLabel,
     instructions: mode === 'full' ? TOOL_INSTRUCTIONS : mode === 'task' ? TASK_INSTRUCTIONS : '',
     model: `${routerId}/${model}`,
     ...(mode !== 'plain'
@@ -1092,6 +1097,10 @@ const agentFor = (provider: LlmProvider, model: string, mode: ToolsMode = 'full'
   // Register so the call context carries observability for the exporter.
   mastra.addAgent(agent, cacheKey);
   agentCache.set(cacheKey, agent);
+  if (agentCache.size > AGENT_CACHE_MAX) {
+    const oldest = agentCache.keys().next().value;
+    if (oldest !== undefined) agentCache.delete(oldest);
+  }
   return agent;
 };
 

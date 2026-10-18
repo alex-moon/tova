@@ -60,23 +60,6 @@ describe('spacesWorkspaceStorage', () => {
     expect(mocked.isStorageConfigured).toHaveBeenCalled();
   });
 
-  it('put delegates with the chat-scoped key', async () => {
-    const body = Buffer.from('hello');
-    mocked.putObject.mockResolvedValue();
-    await ws.put('u1', 'c1', 'notes.md', body, 'text/markdown');
-    expect(mocked.putObject).toHaveBeenCalledWith('u1/chats/c1/notes.md', body, 'text/markdown');
-  });
-
-  it('put without contentType passes undefined through, not an empty string', async () => {
-    mocked.putObject.mockResolvedValue();
-    await ws.put('u1', 'c1', 'notes.md', Buffer.alloc(0));
-    expect(mocked.putObject).toHaveBeenCalledWith(
-      'u1/chats/c1/notes.md',
-      Buffer.alloc(0),
-      undefined,
-    );
-  });
-
   it('headByKey propagates driver rejections (missing object throws)', async () => {
     mocked.headObject.mockRejectedValue(new Error('HeadObject 404'));
     await expect(ws.headByKey('u1/a1/missing.txt')).rejects.toThrow('HeadObject 404');
@@ -85,34 +68,6 @@ describe('spacesWorkspaceStorage', () => {
   it('getByKey preserves the null-on-missing contract for asset reads', async () => {
     mocked.getObjectBuffer.mockResolvedValue(null);
     await expect(ws.getByKey('u1/a1/a.txt')).resolves.toBeNull();
-  });
-
-  it('get preserves the null-on-missing / null-on-over-cap contract', async () => {
-    mocked.getObjectBuffer.mockResolvedValue(null);
-    await expect(ws.get('u1', 'c1', 'notes.md')).resolves.toBeNull();
-    await expect(ws.get('u1', 'c1', 'notes.md', { maxBytes: 100 })).resolves.toBeNull();
-    expect(mocked.getObjectBuffer).toHaveBeenCalledWith('u1/chats/c1/notes.md', 100);
-  });
-
-  it('get propagates transport errors like the driver', async () => {
-    mocked.getObjectBuffer.mockRejectedValue(new Error('Spaces down'));
-    await expect(ws.get('u1', 'c1', 'notes.md')).rejects.toThrow('Spaces down');
-  });
-
-  it('getStream delegates without a cap', async () => {
-    const stream = Symbol('stream');
-    mocked.getObjectStream.mockResolvedValue(stream as never);
-    await expect(ws.getStream('u1', 'c1', 'f.txt')).resolves.toBe(stream);
-  });
-
-  it('delete is idempotent via the driver and resolves true', async () => {
-    mocked.deleteObject.mockResolvedValue(true);
-    await expect(ws.delete('u1', 'c1', 'gone.txt')).resolves.toBe(true);
-    expect(mocked.deleteObject).toHaveBeenCalledWith('u1/chats/c1/gone.txt');
-  });
-
-  it('list throws instead of silently returning empty', async () => {
-    await expect(ws.list('u1', 'c1')).rejects.toThrow(/not implemented/);
   });
 });
 

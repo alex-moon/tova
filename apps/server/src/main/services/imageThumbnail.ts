@@ -1,10 +1,19 @@
 import { createCanvas, loadImage } from '@napi-rs/canvas';
+import { withTimeout } from './markdownConversion';
 
 // Thumbnails: the viewer must not pull a 15 MB original into the pane.
 // @see #208
 
 // Longest-edge cap; aspect ratio preserved, never upscaled.
 export const THUMBNAIL_MAX_EDGE = 512;
+
+// Decode-dimension ceiling: a 15 MB PNG can declare hundreds of megapixels
+// and wedge the worker at canvas allocation.
+// @see #396
+export const THUMBNAIL_MAX_PIXELS = 64_000_000;
+
+export const exceedsPixelCap = (width: number, height: number): boolean =>
+  width * height > THUMBNAIL_MAX_PIXELS;
 
 // Hard ceiling per attempt so a pathological image cannot wedge the poller.
 export const THUMBNAIL_TIMEOUT_MS = 15_000;
@@ -30,15 +39,6 @@ export const thumbnailDimensions = (
   };
 };
 
-const withTimeout = <T>(promise: Promise<T>, ms: number): Promise<T> =>
-  Promise.race([
-    promise,
-    new Promise<never>((_, reject) => {
-      const t = setTimeout(() => reject(new Error(`thumbnail timed out after ${ms}ms`)), ms);
-      t.unref?.();
-    }),
-  ]);
-
 // Decode and return a bounded PNG thumbnail; throws on failure.
 export const makeThumbnail = async (
   buffer: Buffer,
@@ -51,6 +51,9 @@ export const makeThumbnail = async (
       if (!image.width || !image.height) {
         throw new Error('image could not be decoded');
       }
+      if (exceedsPixelCap(image.width, image.height)) {
+        throw new Error('image dimensions exceed the thumbnail limit');
+      }
       const { width, height } = thumbnailDimensions(image.width, image.height, maxEdge);
       const canvas = createCanvas(width, height);
       const ctx = canvas.getContext('2d');
@@ -61,4 +64,5 @@ export const makeThumbnail = async (
       return { buffer: canvas.toBuffer('image/png'), width, height };
     })(),
     timeoutMs,
+    'thumbnail',
   );

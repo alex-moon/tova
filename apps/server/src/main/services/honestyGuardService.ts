@@ -1,12 +1,6 @@
-import { redactForLog } from './logRedaction';
+import { auxCompletion, AUX_INPUT_CHAR_CAP } from './auxCompletion';
 import { Message } from '../models/Message';
-import { inferenceService } from './inferenceService';
-import { config } from '../config';
 import { z } from 'zod';
-
-// Aux model source, read lazily.
-// @see #238
-const guardModel = (): string => config.aux.model;
 
 const GUARD_PROMPT =
   'You audit assistant replies for fabricated tool use. You get the assistant reply plus the ' +
@@ -34,49 +28,44 @@ export const classifyAssistantTurn = async (
   executedTools: string[],
   sessionId?: string,
 ): Promise<HonestyVerdict | null> => {
-  try {
-    // Tool-free agent; a single user message keeps the prompt intact.
-    // @see #77 #308 #198
-    const completion = await inferenceService.createStructuredCompletion({
-      provider: config.aux.provider,
-      model: guardModel(),
-      messages: [
-        {
-          role: 'user',
-          content: `${GUARD_PROMPT}\n\nTools that actually executed this turn: ${
+  // Tool-free agent; a single user message keeps the prompt intact.
+  // @see #77 #308 #198
+  const completion = await auxCompletion<z.infer<typeof VERDICT_SCHEMA>>('Honesty guard', {
+    messages: [
+      {
+        role: 'user',
+        content:
+          `${GUARD_PROMPT}\n\nTools that actually executed this turn: ${
             executedTools.length > 0 ? executedTools.join(', ') : '(none)'
-          }\n\nAssistant reply:\n${content.trim().substring(0, 4000)}`,
-        },
-      ],
-      temperature: 0,
-      // Reasoning tokens come from this budget; too small starves verdicts.
-      // @see #378 #4 #129
-      max_tokens: 1024,
-      ...(sessionId ? { trace: { sessionId } } : {}),
-      structuredOutput: {
-        schema: VERDICT_SCHEMA,
-        fallbackValue: { claimsToolUse: false, reason: '' },
-        jsonPromptInjection: 'auto',
-        errorStrategy: 'fallback',
+          }\n\nAssistant reply:\n` + content.trim().substring(0, AUX_INPUT_CHAR_CAP),
       },
-    });
-    // An empty reply is garbage, not a clean verdict: leave unassessed.
-    // @see #378
-    const raw = completion.choices[0]?.message?.content ?? '';
-    if (!raw.trim() || completion.choices[0]?.finishReason === 'length') {
-      console.warn(
-        `Honesty guard: unclassifiable verdict (finishReason=${completion.choices[0]?.finishReason ?? 'none'}) — turn left unassessed; check the aux model's token budget.`,
-      );
-      return null;
-    }
-    return {
-      flagged: completion.object.claimsToolUse,
-      reason: completion.object.reason?.trim() ? completion.object.reason.trim() : null,
-    };
-  } catch (err) {
-    console.error('Honesty guard error:', redactForLog(err));
+    ],
+    temperature: 0,
+    // Reasoning tokens come from this budget; too small starves verdicts.
+    // @see #378 #4 #129
+    max_tokens: 1024,
+    ...(sessionId ? { trace: { sessionId } } : {}),
+    structuredOutput: {
+      schema: VERDICT_SCHEMA,
+      fallbackValue: { claimsToolUse: false, reason: '' },
+      jsonPromptInjection: 'auto',
+      errorStrategy: 'fallback',
+    },
+  });
+  if (!completion) return null;
+  // An empty reply is garbage, not a clean verdict: leave unassessed.
+  // @see #378
+  const raw = completion.choices[0]?.message?.content ?? '';
+  if (!raw.trim() || completion.choices[0]?.finishReason === 'length') {
+    console.warn(
+      `Honesty guard: unclassifiable verdict (finishReason=${completion.choices[0]?.finishReason ?? 'none'}) — turn left unassessed; check the aux model's token budget.`,
+    );
     return null;
   }
+  return {
+    flagged: completion.object.claimsToolUse,
+    reason: completion.object.reason?.trim() ? completion.object.reason.trim() : null,
+  };
 };
 
 // Classify a settled turn, persist the verdict; never throws.

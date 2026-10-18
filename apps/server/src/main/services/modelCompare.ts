@@ -1,5 +1,5 @@
-import type { CompletionOptions, LlmConnector, LlmProvider } from './llmTypes';
-import { groqConnector, deepinfraConnector, fireworksConnector } from './mastraService';
+import type { CompletionOptions, LlmProvider } from './llmTypes';
+import { inferenceService, isWiredProvider } from './inferenceService';
 import { buildSystemContent } from './promptAssembly';
 import { outputTokensFor, promptCharsFrom } from './outputTokenCap';
 
@@ -28,14 +28,6 @@ export interface ComparisonRun {
 
 export const MAX_COMPARE_MODELS = 6;
 
-/* A missing connector resolves to undefined and surfaces an error row. */
-// @see #151 #232 #234
-const PROVIDERS: Record<string, LlmConnector | undefined> = {
-  groq: groqConnector,
-  deepinfra: deepinfraConnector,
-  fireworks: fireworksConnector,
-};
-
 /** Sequential on purpose: parallel fan-out makes comparisons flaky. */
 export const runModelComparison = async (
   prompt: string,
@@ -49,8 +41,7 @@ export const runModelComparison = async (
   const results: ModelComparisonResult[] = [];
   for (const ref of models) {
     const started = Date.now();
-    const connector = PROVIDERS[ref.provider];
-    if (!connector) {
+    if (!isWiredProvider(ref.provider)) {
       results.push({
         provider: ref.provider,
         model: ref.model,
@@ -70,7 +61,9 @@ export const runModelComparison = async (
           promptCharsFrom(messages),
         ),
       };
-      const completion = await connector.createCompletion(options);
+      // Through inferenceService so failures hit the ModelRouteError tally.
+      // @see #175 #398
+      const completion = await inferenceService.createCompletion(options);
       results.push({
         provider: ref.provider,
         model: ref.model,

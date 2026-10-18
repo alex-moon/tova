@@ -1,10 +1,11 @@
 import express from 'express';
 import mongoose from 'mongoose';
 import { User, UserDocument } from '../models/User';
-import { authenticateBearerOrSession, requireRole, AuthRequest } from '../middleware/auth';
+import { adminGuard, AuthRequest } from '../middleware/auth';
 import { AdminFixedModel, AdminModelError, AdminUser } from '@tova/shared';
 import { ModelRouteError } from '../models/ModelRouteError';
 import { CHAT_MODEL, TASK_MODEL, contextLengthFor } from '../services/modelDefaults';
+import { wiredProviders } from '../services/inferenceService';
 import { LogLevel } from '../services/logService';
 import { queryRetainedLogs } from '../services/lokiLogs';
 import {
@@ -17,7 +18,6 @@ const router = express.Router();
 
 // Bearer PATs and cookie sessions both pass through the first leg.
 // @see #184
-const adminGuard = [authenticateBearerOrSession, requireRole('admin')];
 
 const KNOWN_PERMISSIONS = ['routing'] as const;
 
@@ -66,9 +66,9 @@ const fixedModel = (model: string): AdminFixedModel => ({
 });
 const FIXED_MODELS: AdminFixedModel[] = [fixedModel(CHAT_MODEL), fixedModel(TASK_MODEL)];
 
-/* Compare still accepts the wired providers. */
-// @see #151 #387
-const PROVIDER_SET = ['groq', 'deepinfra', 'fireworks'] as const;
+/* Compare still accepts the wired providers; one registry. */
+// @see #151 #387 #398
+const PROVIDER_SET = wiredProviders;
 type CompareProvider = (typeof PROVIDER_SET)[number];
 
 const toModelError = (row: Record<string, unknown>): AdminModelError => ({
@@ -83,8 +83,8 @@ const toModelError = (row: Record<string, unknown>): AdminModelError => ({
 
 router.get('/models', ...adminGuard, async (_req, res) => {
   try {
-    // The fixed models plus the error tally; completion failures are
-    // recorded by inferenceService alone.
+    // The fixed models plus the error tally; every completion path records
+    // through inferenceService, compare and evals included. @see #398
     // @see #387 #168 #175
     const routeErrors = await ModelRouteError.find({}).sort({ lastSeenAt: -1 }).lean();
     res.json({
