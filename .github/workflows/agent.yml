@@ -28,7 +28,8 @@ jobs:
       (github.event_name == 'issue_comment' && startsWith(github.event.comment.body || '', '@agent')) ||
       (github.event_name == 'issues' && startsWith(github.event.issue.body || '', '@agent'))
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # Escape hatch only — anything longer belongs on the local agent machine (OpenCode).
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
         with:
