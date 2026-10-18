@@ -74,6 +74,24 @@ describe('enqueueTask (#254)', () => {
       spy.mockRestore();
     }
   });
+
+  it('keeps the header when a claim slipped in before the seed failed (#395)', async () => {
+    const spy = jest.spyOn(TaskEvent, 'create').mockImplementation(async () => {
+      // A poller claims between the header create and the failing seed.
+      await Task.updateOne(
+        { instruction: 'do claimed' },
+        { $set: { status: 'running', leaseToken: 'twin' } },
+      );
+      throw new Error('seed write failed');
+    });
+    try {
+      await expect(createTask('claimed')).rejects.toThrow('seed write failed');
+      // The queued-only compensation delete must not strand a running claim.
+      expect(await Task.countDocuments({ instruction: 'do claimed' })).toBe(1);
+    } finally {
+      spy.mockRestore();
+    }
+  });
 });
 
 describe('claimNextTask (#254)', () => {
@@ -88,6 +106,16 @@ describe('claimNextTask (#254)', () => {
     const second = await claimNextTask();
     expect(String(second?._id)).not.toBe(String(first._id));
     expect(await claimNextTask()).toBeNull();
+  });
+
+  it('stamps a distinct lease token on every claim (#395)', async () => {
+    await createTask('lease-a');
+    await createTask('lease-b');
+    const first = await claimNextTask();
+    const second = await claimNextTask();
+    expect(first?.leaseToken).toBeTruthy();
+    expect(second?.leaseToken).toBeTruthy();
+    expect(first?.leaseToken).not.toBe(second?.leaseToken);
   });
 });
 
@@ -150,6 +178,22 @@ describe('runTaskTick (#254)', () => {
     const settled = await latestTask(String(task._id));
     expect(settled?.status).toBe('paused');
     expect(settled?.lastError).toBe('budget breached');
+  });
+
+  it('a lease-losing run cannot clobber the twin via the tick error path (#395)', async () => {
+    const task = await createTask('tick-lease-lost');
+    const processor = jest.fn().mockImplementation(async (claimed: TaskDocument) => {
+      // The reclaiming twin rotates the lease mid-run; this run then fails.
+      await Task.updateOne({ _id: claimed._id }, { $set: { leaseToken: 'twin' } });
+      throw new Error('stale twin failure');
+    });
+    await runTaskTick(processor);
+    const settled = await latestTask(String(task._id));
+    // The tick's error writer missed; the twin still owns the task.
+    expect(String(settled?._id)).toBe(String(task._id));
+    expect(settled?.status).toBe('running');
+    expect(settled?.leaseToken).toBe('twin');
+    expect(settled?.lastError).toBeNull();
   });
 });
 
@@ -300,6 +344,18 @@ describe('steerTask / cancelTask (#254 routes slice)', () => {
     await cancelTask(task);
 
     expect(signal.aborted).toBe(true);
+  });
+
+  it('aborts every registered run for the task, stale twins included (#395)', async () => {
+    const task = await createTask('abort-both');
+    const taskProcessor = await import('../../main/services/taskProcessor');
+    const twin = taskProcessor.registerTaskAbort(String(task._id));
+    const owner = taskProcessor.registerTaskAbort(String(task._id));
+
+    await cancelTask(task);
+
+    expect(twin.aborted).toBe(true);
+    expect(owner.aborted).toBe(true);
   });
 
   // The processor finishes before the cancel lands; no clobbering.

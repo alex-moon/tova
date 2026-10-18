@@ -72,3 +72,31 @@ audit line items are partially addressed. This plan covers what still stands.
 ## Follow-ups
 
 - None created yet; residual risks are documented in the decisions above.
+
+## Hardening round (pre-review)
+
+Three holes found while re-attacking the draft, all fixed on this branch:
+
+1. **Frozen-process double-run.** The heartbeat only prevents the sweep from
+   requeuing a live task; it cannot fence a *frozen* one (laptop sleep,
+   container freeze): the sweep requeues, a twin processor claims, and the
+   woken original re-reads the header, sees `running` (now the twin's), and
+   keeps stepping alongside it. This reverses decision 1's "no new schema
+   fields": claims now stamp a `leaseToken`, and every processor re-read and
+   write (header, heartbeat, budget writes, settle, the poll tick's
+   settle/error paths) is scoped on it — a stale twin's reads miss and it
+   exits. Residual: a step already in flight appends its event before
+   noticing; the settle it attempts is fenced, so the twin stays authoritative.
+2. **Abort registry race.** One controller per task meant a second
+   registration orphaned the first and a release dropped the survivor's entry
+   — cancel could end up aborting nothing. The registry is now a Set per task:
+   cancel aborts every live run, release removes only its own controller.
+3. **Cancel window before step start.** Cancel landing between the loop-top
+   header read and the abort registration (spanning the cost check and the
+   stream fetch) ran a full billed step on a cancelled task. The processor now
+   re-verifies ownership (`_id` + lease + `running`) after registering, before
+   `runStep`.
+
+Also hardened: `enqueueTask`'s seed-failure compensation deletes the header
+only while it is still `queued`, so a claim that slipped in during the window
+is never stranded with a deleted header.

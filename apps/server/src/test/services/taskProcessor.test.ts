@@ -138,6 +138,46 @@ describe('processTaskJob sequencer loop (#254)', () => {
     expect(signals[0].aborted).toBe(false);
   });
 
+  it('a frozen twin with a rotated lease exits without stepping or writing (#395)', async () => {
+    const task = await enqueue();
+    const claimed = await claimNextTask();
+    // The sweep requeued and a twin reclaimed, rotating the lease token.
+    await Task.collection.updateOne({ _id: task._id }, { $set: { leaseToken: 'twin-token' } });
+    const runStep: TaskStepRunner = jest.fn();
+
+    await makeTaskProcessor(runStep)(claimed!);
+
+    expect(runStep).not.toHaveBeenCalled();
+    const settled = await Task.findById(task._id);
+    expect(settled?.status).toBe('running');
+    expect(settled?.stepCount).toBe(0);
+    expect(await eventsOf(task._id)).toHaveLength(1);
+  });
+
+  it('does not run a billed step when cancel lands before step start (#395)', async () => {
+    const task = await enqueue();
+    const claimed = await claimNextTask();
+    // Cancel races in during the stream fetch, before the step-start re-check.
+    const realCount = Task.countDocuments.bind(Task);
+    const spy = jest.spyOn(Task, 'countDocuments').mockImplementation((async (
+      ...args: Parameters<typeof realCount>
+    ) => {
+      await Task.updateOne({ _id: claimed!._id }, { $set: { status: 'cancelled' } });
+      return realCount(...args);
+    }) as never);
+    const runStep: TaskStepRunner = jest.fn();
+    try {
+      await makeTaskProcessor(runStep)(claimed!);
+    } finally {
+      spy.mockRestore();
+    }
+
+    expect(runStep).not.toHaveBeenCalled();
+    const settled = await Task.findById(task._id);
+    expect(settled?.status).toBe('cancelled');
+    expect(await eventsOf(task._id)).toHaveLength(1);
+  });
+
   it('charges reported step usage to the cost budget (#395)', async () => {
     const task = await enqueue();
     const claimed = await claimNextTask();

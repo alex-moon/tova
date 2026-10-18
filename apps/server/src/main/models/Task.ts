@@ -57,6 +57,12 @@ const taskSchema = new mongoose.Schema(
       type: Number,
       default: 0,
     },
+    // Claim ownership: a frozen twin holding a rotated token writes nothing.
+    // @see #395
+    leaseToken: {
+      type: String,
+      default: null,
+    },
     lastError: {
       type: String,
       default: null,

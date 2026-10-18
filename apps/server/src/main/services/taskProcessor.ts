@@ -15,22 +15,33 @@ const MAX_NOTICE_CHARS = 500;
 // Heartbeat period; the sweep cutoff is 5 min, so 60s keeps a live step safe.
 const TASK_HEARTBEAT_MS = 60_000;
 
-// Abort registry: one controller per in-flight step; cancel aborts mid-step.
+// Abort registry: a Set per task, since a stale twin may still hold a run;
+// cancel must reach every live controller, release removes only its own.
 // @see #395
-const activeAborts = new Map<string, AbortController>();
+const activeAborts = new Map<string, Set<AbortController>>();
 
 export const registerTaskAbort = (taskId: string): AbortSignal => {
   const controller = new AbortController();
-  activeAborts.set(taskId, controller);
+  const controllers = activeAborts.get(taskId) ?? new Set<AbortController>();
+  controllers.add(controller);
+  activeAborts.set(taskId, controllers);
   return controller.signal;
 };
 
 export const abortTaskRun = (taskId: string): void => {
-  activeAborts.get(taskId)?.abort();
+  for (const controller of activeAborts.get(taskId) ?? []) controller.abort();
 };
 
-const releaseTaskAbort = (taskId: string): void => {
-  activeAborts.delete(taskId);
+const releaseTaskAbort = (taskId: string, signal: AbortSignal): void => {
+  const controllers = activeAborts.get(taskId);
+  if (!controllers) return;
+  for (const controller of controllers) {
+    if (controller.signal === signal) {
+      controllers.delete(controller);
+      break;
+    }
+  }
+  if (controllers.size === 0) activeAborts.delete(taskId);
 };
 
 // Step cost from reported usage; absent usage or an unpriced model is null.
@@ -102,11 +113,17 @@ export const makeTaskProcessor =
     const claimed = (await Task.findById(task._id)) ?? task;
     let stepCount = claimed.stepCount;
     const taskId = String(task._id);
+    // Claim lease: a swept-and-reclaimed task rotates the token, so a frozen
+    // twin's reads and writes miss and it exits instead of double-running.
+    // @see #395
+    const lease = task.leaseToken ?? null;
 
     for (;;) {
       // Re-read the header before each step; cancel is observed here.
-      const current = (await Task.findById(task._id)) ?? claimed;
-      if (current.status !== 'running') return;
+      const current = lease
+        ? await Task.findOne({ _id: task._id, leaseToken: lease })
+        : ((await Task.findById(task._id)) ?? claimed);
+      if (!current || current.status !== 'running') return;
       const maxSteps = current.budget.maxSteps;
 
       if (stepCount >= maxSteps) {
@@ -116,7 +133,7 @@ export const makeTaskProcessor =
           stepCount,
         );
         await Task.updateOne(
-          { _id: current._id, status: 'running' },
+          { _id: current._id, ...(lease ? { leaseToken: lease } : {}), status: 'running' },
           { $set: { status: 'paused', stepCount, lastError: 'step budget reached' } },
         );
         return;
@@ -132,7 +149,7 @@ export const makeTaskProcessor =
           stepCount,
         );
         await Task.updateOne(
-          { _id: current._id, status: 'running' },
+          { _id: current._id, ...(lease ? { leaseToken: lease } : {}), status: 'running' },
           { $set: { status: 'paused', stepCount, lastError: 'cost budget reached' } },
         );
         return;
@@ -144,16 +161,28 @@ export const makeTaskProcessor =
       const signal = registerTaskAbort(taskId);
       const heartbeat = setInterval(() => {
         void Task.updateOne(
-          { _id: current._id, status: 'running' },
+          {
+            _id: current._id,
+            ...(lease ? { leaseToken: lease } : {}),
+            status: 'running',
+          },
           { $set: { updatedAt: new Date() } },
         ).catch(() => undefined);
       }, TASK_HEARTBEAT_MS);
       let outcome: TaskStepOutcome;
       try {
+        // Cancel can land between the header read and this registration;
+        // re-verify the lease before spending on the step. @see #395
+        const owned = await Task.countDocuments({
+          _id: current._id,
+          status: 'running',
+          ...(lease ? { leaseToken: lease } : {}),
+        });
+        if (!owned) return;
         outcome = await runStep(current, events, { signal });
       } finally {
         clearInterval(heartbeat);
-        releaseTaskAbort(taskId);
+        releaseTaskAbort(taskId, signal);
       }
 
       await appendTaskEvent(current._id, {
@@ -168,7 +197,7 @@ export const makeTaskProcessor =
       stepCount += 1;
       const cost = stepCost(outcome);
       await Task.updateOne(
-        { _id: current._id },
+        { _id: current._id, ...(lease ? { leaseToken: lease } : {}) },
         {
           $set: { stepCount },
           ...(cost !== null ? { $inc: { 'budget.spentUsd': cost } } : {}),
@@ -179,7 +208,7 @@ export const makeTaskProcessor =
       if (outcome.text.trim() !== '' && outcome.tools.length === 0) {
         // Settle guarded on running; a cancel mid-step never false-announces.
         const settled = await Task.updateOne(
-          { _id: current._id, status: 'running' },
+          { _id: current._id, ...(lease ? { leaseToken: lease } : {}), status: 'running' },
           { $set: { status: 'done', stepCount } },
         );
         if (settled.modifiedCount) {

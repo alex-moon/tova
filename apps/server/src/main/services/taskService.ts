@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { Task, type TaskDocument } from '../models/Task';
 import { TaskEvent } from '../models/TaskEvent';
 import { appendTaskEvent, abortTaskRun } from './taskProcessor';
@@ -53,34 +54,40 @@ export const enqueueTask = async (input: {
     });
   } catch (err) {
     // Compensate: a header without its seed event strands an opaque zombie.
-    await Task.deleteOne({ _id: task._id });
+    // Queued-guarded: a poller that claimed it in the window keeps the task.
+    await Task.deleteOne({ _id: task._id, status: 'queued' });
     throw err;
   }
   return task;
 };
 
-// Atomic claim: status + attempts bump in one findOneAndUpdate.
+// Atomic claim: status + attempts + lease in one findOneAndUpdate.
 export const claimNextTask = async (): Promise<TaskDocument | null> =>
   Task.findOneAndUpdate(
     { status: 'queued' },
-    { $set: { status: 'running' }, $inc: { attempts: 1 } },
+    { $set: { status: 'running', leaseToken: randomUUID() }, $inc: { attempts: 1 } },
     { sort: { createdAt: 1 }, new: true },
   );
+
+// The claim's lease scopes every writer to the owning processor.
+const leaseFilter = (task: TaskDocument): Record<string, unknown> =>
+  task.leaseToken ? { leaseToken: task.leaseToken } : {};
 
 // One poll tick: claim, run, settle; failures retry to cap then fail.
 export const runTaskTick = async (processor: TaskProcessor): Promise<void> => {
   const task = await claimNextTask();
   if (!task) return;
+  const owned = { _id: task._id, ...leaseFilter(task) };
   try {
     await processor(task);
-    // Only settle a still-running task; the processor may have settled it.
-    await Task.updateOne({ _id: task._id, status: 'running' }, { $set: { status: 'done' } });
+    // Only settle a still-owned task; the processor may have settled it.
+    await Task.updateOne({ ...owned, status: 'running' }, { $set: { status: 'done' } });
   } catch (err) {
     const message = clampError(err);
     const exhausted = task.attempts >= MAX_TASK_ATTEMPTS;
     // Symmetric with success: never clobber a task that self-settled.
     await Task.updateOne(
-      { _id: task._id, status: 'running' },
+      { ...owned, status: 'running' },
       {
         $set: {
           status: exhausted ? 'failed' : 'queued',
