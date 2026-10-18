@@ -168,12 +168,12 @@ describe('config/index', () => {
     });
 
     it('task budgets default when unset, malformed, empty, or non-positive (#254)', () => {
-      expect(config.task.maxSteps).toBe(25);
+      expect(config.task.maxSteps).toBe(150);
       expect(config.task.maxCostUsd).toBe(5);
       for (const bad of ['garbage', '', '0', '-3', 'Infinity']) {
         process.env.TASK_MAX_STEPS = bad;
         process.env.TASK_MAX_COST_USD = bad;
-        expect(config.task.maxSteps).toBe(25);
+        expect(config.task.maxSteps).toBe(150);
         expect(config.task.maxCostUsd).toBe(5);
       }
     });
@@ -182,7 +182,7 @@ describe('config/index', () => {
       // `0.5` floors to zero steps: default, not 0; fractional cost is fine.
       process.env.TASK_MAX_STEPS = '0.5';
       process.env.TASK_MAX_COST_USD = '0.5';
-      expect(config.task.maxSteps).toBe(25);
+      expect(config.task.maxSteps).toBe(150);
       expect(config.task.maxCostUsd).toBe(0.5);
     });
 
