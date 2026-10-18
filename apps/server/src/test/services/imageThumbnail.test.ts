@@ -1,6 +1,7 @@
 import { createCanvas } from '@napi-rs/canvas';
 import {
   THUMBNAIL_MAX_EDGE,
+  exceedsPixelCap,
   makeThumbnail,
   thumbnailDimensions,
 } from '../../main/services/imageThumbnail';
@@ -51,5 +52,11 @@ describe('makeThumbnail (#208)', () => {
 
   it('throws on an undecodable buffer', async () => {
     await expect(makeThumbnail(Buffer.from('not an image'))).rejects.toThrow();
+  });
+
+  it('guards the pixel budget before canvas allocation (#396)', () => {
+    expect(exceedsPixelCap(8000, 8000)).toBe(false);
+    expect(exceedsPixelCap(8001, 8001)).toBe(true);
+    expect(exceedsPixelCap(1, 1)).toBe(false);
   });
 });

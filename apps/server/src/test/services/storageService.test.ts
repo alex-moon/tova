@@ -1,5 +1,7 @@
 const keys = ['DO_SPACES_KEY', 'DO_SPACES_SECRET', 'DO_SPACES_BUCKET'] as const;
 
+import { Readable } from 'stream';
+
 const backup: Record<string, string | undefined> = {};
 beforeEach(() => {
   for (const k of keys) {
@@ -93,9 +95,42 @@ describe('storageService', () => {
       await expect(deleteObject('u/a/bad.txt')).rejects.toMatchObject({ name: 'InternalError' });
     });
   });
+
+  describe('getObjectBuffer cap (#396)', () => {
+    beforeEach(() => {
+      mockSend.mockReset();
+      process.env.DO_SPACES_KEY = 'k';
+      process.env.DO_SPACES_SECRET = 's';
+      process.env.DO_SPACES_BUCKET = 'tova';
+    });
+
+    it('accumulates by counter and returns null when a headerless body exceeds the cap', async () => {
+      mockSend.mockResolvedValue({
+        // ContentLength absent: the header check is powerless here.
+        ContentLength: undefined,
+        Body: Readable.from([Buffer.alloc(600), Buffer.alloc(600)]),
+      });
+      await expect(getObjectBuffer('u/a/big.bin', 1000)).resolves.toBeNull();
+    });
+
+    it('returns the buffer when a headerless body fits the cap', async () => {
+      mockSend.mockResolvedValue({
+        ContentLength: undefined,
+        Body: Readable.from([Buffer.from('hello '), Buffer.from('world')]),
+      });
+      await expect(getObjectBuffer('u/a/ok.txt', 1000)).resolves.toEqual(
+        Buffer.from('hello world'),
+      );
+    });
+  });
 });
 
-import { deleteObject, isStorageConfigured, putObject } from '../../main/services/storageService';
+import {
+  deleteObject,
+  getObjectBuffer,
+  isStorageConfigured,
+  putObject,
+} from '../../main/services/storageService';
 
 // Commands are jest.fn()s, so inputs are asserted via the constructor mocks.
 import { PutObjectCommand } from '@aws-sdk/client-s3';

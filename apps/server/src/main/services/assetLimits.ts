@@ -38,6 +38,10 @@ const IMAGE_CONTENT_TYPES = [...ALLOWED_CONTENT_TYPES].filter((type) => type.sta
 export const isImageContentType = (contentType: string): boolean =>
   IMAGE_CONTENT_TYPES.includes(contentType);
 
+// Presign + confirm headroom: stale pending rows can never be confirmed.
+// @see #34 #396
+export const CONFIRM_MAX_AGE_MS = 60 * 60 * 1000;
+
 // Filenames become the last key segment: no separators or control chars.
 export const sanitizeFilename = (filename: string): string =>
   filename
@@ -46,3 +50,9 @@ export const sanitizeFilename = (filename: string): string =>
     .join('')
     .replace(/[/\\]/g, '_')
     .trim();
+
+// A sanitized name must never be empty or a path-relative dot segment —
+// an S3 key ending in `..` escapes the asset prefix.
+// @see #396
+export const isSafeFilename = (name: string): boolean =>
+  name !== '' && name !== '.' && name !== '..';

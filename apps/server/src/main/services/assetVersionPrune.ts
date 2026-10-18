@@ -26,11 +26,12 @@ export const pruneOldAssetVersions = async (now: Date = new Date()): Promise<num
 };
 
 let timer: ReturnType<typeof setInterval> | null = null;
+let boot: ReturnType<typeof setTimeout> | null = null;
 
 export const startAssetVersionPruner = (): void => {
   if (timer !== null) return;
   // First sweep shortly after boot, then daily.
-  const first = setTimeout(() => {
+  boot = setTimeout(() => {
     void pruneOldAssetVersions().catch(() => {});
   }, 60_000);
   timer = setInterval(
@@ -39,10 +40,15 @@ export const startAssetVersionPruner = (): void => {
     },
     24 * 60 * 60 * 1000,
   );
-  if (typeof first.unref === 'function') first.unref();
+  if (typeof boot.unref === 'function') boot.unref();
+  if (typeof timer.unref === 'function') timer.unref();
 };
 
 export const stopAssetVersionPruner = (): void => {
+  if (boot !== null) {
+    clearTimeout(boot);
+    boot = null;
+  }
   if (timer === null) return;
   clearInterval(timer);
   timer = null;

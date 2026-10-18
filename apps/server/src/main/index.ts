@@ -26,6 +26,7 @@ import { startTaskPoller } from './services/taskService';
 import { processTaskJob } from './services/taskProcessor';
 import { startTraceStatsPoller } from './services/traceStatsCacheService';
 import { startAssetVersionPruner } from './services/assetVersionPrune';
+import { startPendingAssetSweeper } from './services/assetPresign';
 import { processAssetConversionJob } from './services/assetJobProcessor';
 import { startEvalScheduler, hasRunForUtcDay } from './services/evalScheduler';
 import {
@@ -250,6 +251,10 @@ export const startServer = async (): Promise<Server> => {
     // Daily prune of superseded asset versions (older than a year).
     // @see #369
     startAssetVersionPruner();
+
+    // Hourly reclaim of never-confirmed uploads (rows + Spaces objects).
+    // @see #396
+    startPendingAssetSweeper();
   }
 
   return app.listen(port, () => {

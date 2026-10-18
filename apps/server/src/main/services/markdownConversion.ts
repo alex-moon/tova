@@ -54,6 +54,12 @@ export const finalizeMarkdown = (raw: string): string =>
     .trim()
     .slice(0, MAX_MARKDOWN_CHARS);
 
+// Owned predicate for the empty-output failure, so callers never match
+// against the error string.
+// @see #396
+export const isEmptyConversion = (err: unknown): boolean =>
+  err instanceof Error && err.message.startsWith('conversion produced empty markdown');
+
 // Converts a document buffer to markdown; throws on failure or empty output.
 export const convertToMarkdown = async (
   filename: string,
