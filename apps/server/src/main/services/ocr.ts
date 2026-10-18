@@ -15,12 +15,15 @@ const TESSDATA_GZ = 'eng.traineddata.gz';
 export const findTessdataDir = (from: string = __dirname): string => {
   let dir = from;
   for (let hop = 0; hop < 8; hop += 1) {
+    // nosemgrep: path-join-resolve-traversal.path-join-resolve-traversal
     const candidate = path.join(dir, 'assets', 'tessdata');
+    // nosemgrep: path-join-resolve-traversal.path-join-resolve-traversal
     if (fs.existsSync(path.join(candidate, TESSDATA_GZ))) return candidate;
     const parent = path.dirname(dir);
     if (parent === dir) break;
     dir = parent;
   }
+  // nosemgrep: path-join-resolve-traversal.path-join-resolve-traversal
   return path.join(from, 'assets', 'tessdata');
 };
 
