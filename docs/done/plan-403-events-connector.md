@@ -1,0 +1,23 @@
+# Plan 403 — Things To Do events connector
+
+## Motivation
+
+[Issue #403](https://github.com/alex-moon/tova/issues/403) drops one URL: https://thingstodoapi.com/ — a local-events search API "for AI agents and apps" (Show HN 2026-10-17): plain-words event search (`search_events`, `get_event`, `list_coverage`) over REST and a streamable-HTTP MCP endpoint. The gate in the ticket ("don't do until all the rest are done") is satisfied: every other open ticket is merged or shipped to a review-ready PR (#411, #412).
+
+## Decisions
+
+- **Connector-catalog entry, not a bespoke tool.** Tova's extension surface for third-party capabilities is the curated catalog (`CONNECTOR_CATALOG`, #328–#333) plus the MCP client that already speaks streamable HTTP with Bearer-token paste (#80/#332). The API advertises an MCP endpoint as its agent surface, so a first-class REST client would be glue code the connector system obsoletes. One catalog entry + token instructions is the whole change.
+- **Verified live by hand (the #330 gate):** keyless MCP handshake, `tools/list`, and one `search_events` call all succeeded against `https://api.thingstodoapi.com/mcp` (2026-10-18); a dummy `Authorization: Bearer` key returns 401, so the endpoint reads and validates the header — Tova's `mcp.pat` paste flow (wrapped as `Authorization: Bearer`, routes/connectors.ts) will authenticate with a real key. Their docs' key-in-path form (`/mcp/YOUR_KEY`) is a convenience for header-less clients; not needed here.
+- **`state: 'live'`, `authType: 'mcp.pat'`, no `iconRef`** (no simple-icons mark; letter tile in their pin red `#EF302E`). Appended after GitHub, the only other PAT entry.
+- **Honest copy:** coverage is SF Bay Area only today (NYC/LA next per their FAQ) — the summary and scope note say so; the server's own instructions say to state non-coverage plainly. Free tier: 1,000 calls/month; key required to connect (the client modal requires a token).
+
+## Done
+
+- [x] `thingstodo` entry in `CONNECTOR_CATALOG` (endpoint `https://api.thingstodoapi.com/mcp`)
+- [x] `thingstodo` token-setup instructions in `CONNECTOR_INSTRUCTIONS`
+- [x] Grid-order test extended (golden six → seven) + instructions render pinned
+- [x] `npm run ci` green; connectors e2e (mobile+desktop) and phone-viewport browser check pass
+
+## Follow-ups
+
+- None yet.

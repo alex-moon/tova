@@ -61,9 +61,9 @@ describe('ConnectorsView (#331)', () => {
   it('renders the live grid in market-share order with status badges', async () => {
     render(<ConnectorsView />);
     await screen.findByTestId('connector-card-dropbox');
-    // The grid shows only the verified ("golden six") set, never watchlisted.
-    // @see #333
-    const ids = ['dropbox', 'notion', 'trello', 'linear', 'atlassian', 'github'];
+    // The grid shows only the verified set, never watchlisted.
+    // @see #333 #403
+    const ids = ['dropbox', 'notion', 'trello', 'linear', 'atlassian', 'github', 'thingstodo'];
     for (let i = 0; i < ids.length; i += 1) {
       expect(screen.getByTestId(`connector-card-${ids[i]}`)).toBeInTheDocument();
       if (i > 0) {
@@ -133,6 +133,14 @@ describe('ConnectorsView (#331)', () => {
     expect(steps).toHaveTextContent('personal-access-tokens');
     expect(steps).toHaveTextContent('Fine-grained token');
     expect(steps).toHaveTextContent('invisible to the assistant');
+  });
+
+  it('renders the thingstodo key instructions for its PAT entry (#403)', async () => {
+    render(<ConnectorsView />);
+    fireEvent.click(await screen.findByTestId('connector-card-thingstodo'));
+    const steps = await screen.findByTestId('connector-modal-instructions');
+    expect(steps).toHaveTextContent('1,000 calls a month');
+    expect(steps).toHaveTextContent('San Francisco Bay Area today');
   });
 
   it('offers re-connect and disconnect for a needs-reauth row', async () => {
