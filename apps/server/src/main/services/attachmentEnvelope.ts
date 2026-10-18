@@ -1,9 +1,9 @@
 /* Attachment envelope: untrusted-data rule plus per-item <file> elements. */
 // @see #34 #47
 
-// Tag names that must not be popped early; covers <user:...> envelopes.
-// @see #35
-const CLEAR_TAG_NAMES = 'user_content|file|content|instructions|user:[a-z_]+';
+// Tag names that must not be popped early; covers <user:...>/<task:...> envelopes.
+// @see #35 #392
+const CLEAR_TAG_NAMES = 'user_content|file|content|instructions|user:[a-z_]+|task:[a-z_]+';
 
 export const escapeEnvelopeBreakers = (text: string): string =>
   text.replace(new RegExp(`<\\/(${CLEAR_TAG_NAMES})(?=[\\s>])`, 'gi'), '<\\/$1');

@@ -1,5 +1,5 @@
 import type { UserDocument } from '../models/User';
-import { buildUserEnvelope } from './attachmentEnvelope';
+import { buildUserEnvelope, escapeEnvelopeBreakers } from './attachmentEnvelope';
 
 // Global fallback prompt; single home next to the resolution logic.
 // Knowledge paragraphs are operational rewrites; voice stays verbatim.
@@ -111,7 +111,13 @@ const WORKSPACE_INTRO =
 const workspaceBlock = (block: string | null | undefined): string => {
   const trimmed = block?.trim();
   if (!trimmed) return '';
-  return ['<user:workspace>', WORKSPACE_INTRO, '', trimmed, '</user:workspace>'].join('\n');
+  return [
+    '<user:workspace>',
+    WORKSPACE_INTRO,
+    '',
+    escapeEnvelopeBreakers(trimmed),
+    '</user:workspace>',
+  ].join('\n');
 };
 
 /* Completed background tasks for the next turn; caller drains and marks. */
@@ -124,7 +130,13 @@ const TASK_COMPLETION_INTRO =
 const taskCompletionBlock = (block: string | null | undefined): string => {
   const trimmed = block?.trim();
   if (!trimmed) return '';
-  return ['<task:completed>', TASK_COMPLETION_INTRO, '', trimmed, '</task:completed>'].join('\n');
+  return [
+    '<task:completed>',
+    TASK_COMPLETION_INTRO,
+    '',
+    escapeEnvelopeBreakers(trimmed),
+    '</task:completed>',
+  ].join('\n');
 };
 
 /* Per-message timestamp header: stamp plus elapsed gap; pure. */
