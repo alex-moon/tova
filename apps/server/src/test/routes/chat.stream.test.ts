@@ -1662,6 +1662,15 @@ describe('history window + tool provenance (#360)', () => {
       const docs = [{ content: null }, doc('kept')];
       expect(windowedHistory(docs as { content?: string | null }[])).toHaveLength(2);
     });
+
+    // The current turn must never vanish: it alone may bust the budget.
+    // @see #391
+    it('always retains the newest turn, truncated when it alone busts the budget', () => {
+      const huge = doc('x'.repeat(HISTORY_MAX_CHARS + 10));
+      const kept = windowedHistory([huge, doc('older')]);
+      expect(kept).toHaveLength(1);
+      expect((kept[0] as { content: string }).content).toHaveLength(HISTORY_MAX_CHARS);
+    });
   });
 
   describe('toolProvenanceLine', () => {
