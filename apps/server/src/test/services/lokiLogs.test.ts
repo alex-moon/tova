@@ -113,4 +113,23 @@ describe('queryRetainedLogs', () => {
     const span = Number(u.searchParams.get('end')) - Number(u.searchParams.get('start'));
     expect(span).toBeLessThanOrEqual(168 * 3600 * 1e9);
   });
+
+  it('over-fetches when filters are present so sparse matches still fill the page (#397)', async () => {
+    const fetchSpy = mockLoki([]);
+    const { logs } = await queryRetainedLogs({ limit: 50, level: 'error' });
+    const u = fetchSpy.mock.calls[0][0] as URL;
+    expect(Number(u.searchParams.get('limit'))).toBe(200);
+    expect(logs).toEqual([]);
+    // No filters: the request is exactly the page size.
+    await queryRetainedLogs({ limit: 50 });
+    const u2 = fetchSpy.mock.calls[1][0] as URL;
+    expect(Number(u2.searchParams.get('limit'))).toBe(50);
+  });
+
+  it('caps the filtered over-fetch at MAX_LIMIT', async () => {
+    const fetchSpy = mockLoki([]);
+    await queryRetainedLogs({ limit: 500, q: 'boom' });
+    const u = fetchSpy.mock.calls[0][0] as URL;
+    expect(Number(u.searchParams.get('limit'))).toBe(500);
+  });
 });

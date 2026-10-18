@@ -3,6 +3,7 @@
 
 import { format } from 'util';
 import { ErrorLog } from '../models/ErrorLog';
+import { redactString } from './logRedaction';
 
 export type LogLevel = 'info' | 'warn' | 'error';
 
@@ -12,7 +13,10 @@ const MAX_MSG_LENGTH = 2000;
 // @see #175
 const persistErrorEntry = (ts: string, msg: string) => {
   if (process.env.NODE_ENV === 'test') return;
-  ErrorLog.create({ bufferId: null, ts, msg }).catch(() => {});
+  // Redact before the length cut: a token split at 2000 chars would escape
+  // the redaction patterns and leak in halves.
+  // @see #397
+  ErrorLog.create({ bufferId: null, ts, msg: normalize(redactString(msg)) }).catch(() => {});
 };
 
 let captureAttached = false;
@@ -42,7 +46,7 @@ const record =
   (...args: unknown[]) => {
     (originalConsole[method] ?? noop)(...args);
     // util.format handles placeholders and inspection like the original call.
-    if (level === 'error') persistErrorEntry(new Date().toISOString(), normalize(format(...args)));
+    if (level === 'error') persistErrorEntry(new Date().toISOString(), format(...args));
   };
 
 export const attachConsoleCapture = () => {

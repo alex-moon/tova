@@ -315,4 +315,25 @@ describe('RFC 7009 grant revocation on factory reset (#333 wash-up)', () => {
       fetchSpy.mockRestore();
     }
   });
+
+  it('refuses to POST the bearer token to a non-https revocation endpoint (#397 SSRF)', async () => {
+    const owner = userId();
+    await createVaulted(owner, {
+      accessToken: 'at-3',
+      refreshToken: 'rt-3',
+      metadata: { revocation_endpoint: 'http://169.254.169.254/revoke' },
+    });
+    const fetchSpy = jest
+      .spyOn(global, 'fetch')
+      .mockResolvedValue(new Response(null, { status: 200 }));
+
+    try {
+      await purgeAllUserData(owner);
+      expect(fetchSpy).not.toHaveBeenCalled();
+      // The row still dies: revocation is best-effort, erasure is not.
+      expect(await Connector.countDocuments({ scope: 'user', userId: owner })).toBe(0);
+    } finally {
+      fetchSpy.mockRestore();
+    }
+  });
 });

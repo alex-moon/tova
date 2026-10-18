@@ -10,6 +10,7 @@ import {
 } from '../validation';
 import { authenticate, AuthRequest } from '../middleware/auth';
 import { encryptEnvelope } from '../services/crypto';
+import { redactForLog } from '../services/logRedaction';
 import { listMcpTools } from '../services/connectorService';
 import {
   ConnectorOAuthError,
@@ -87,8 +88,12 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
             'This endpoint requires OAuth sign-in — use Connect on the connector card instead of a token.',
         });
       }
-      const message = err instanceof Error ? err.message : 'MCP handshake failed';
-      return res.status(422).json({ message: `Connector is not reachable: ${message}` });
+      // Upstream error text can name internal hosts; keep it in the log.
+      // @see #397
+      console.warn('MCP handshake failed:', redactForLog(err));
+      return res
+        .status(422)
+        .json({ message: 'Connector is not reachable — verify the URL and token.' });
     }
     const doc = new Connector({
       // Only mcp.pat parses here; mcp.oauth comes from consent.

@@ -40,6 +40,8 @@ const keys = [
   'MEMORY_EVAL_PACE_MS',
   'MEMORY_EVAL_GATE_PACE_MS',
   'MEMORY_EVAL_JUDGE_PACE_MS',
+  'AUX_MODEL',
+  'AUX_PROVIDER',
   'EMBEDDING_MODEL',
   'EMBEDDING_DIM',
   'EMBEDDING_TIMEOUT_MS',
@@ -252,6 +254,18 @@ describe('config/index', () => {
       expect(config.embeddings.model).toBe('BAAI/bge-m3');
       expect(config.embeddings.dim).toBe(1024);
       expect(config.embeddings.timeoutMs).toBe(1500);
+    });
+
+    it('provider env casts degrade to defaults instead of passing garbage through (#397)', () => {
+      process.env.AUX_PROVIDER = 'firewroks';
+      expect(config.aux.provider).toBe('groq');
+      process.env.MEMORY_JUDGE_PROVIDER = 'not-a-provider';
+      expect(config.memoryEval.judgeProvider).toBe('deepinfra');
+      process.env.MEMORY_RESPONDER_PROVIDER = 'typo';
+      expect(config.memoryEval.responderProvider).toBeUndefined();
+      // Valid values still pass through untouched.
+      process.env.AUX_PROVIDER = 'fireworks';
+      expect(config.aux.provider).toBe('fireworks');
     });
   });
 

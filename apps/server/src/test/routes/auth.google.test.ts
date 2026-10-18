@@ -23,9 +23,11 @@ const configureGoogle = () => {
 
 const loginViaGoogle = async (
   app: ReturnType<typeof createApp>,
-  idTokenPayload: Record<string, unknown>,
+  rawIdTokenPayload: Record<string, unknown>,
   userInfo: Record<string, unknown> | { ok: false },
 ) => {
+  // aud defaults to the configured client id, as Google issues it.
+  const idTokenPayload = { aud: 'client-id', ...rawIdTokenPayload };
   const idToken = `header.${Buffer.from(JSON.stringify(idTokenPayload)).toString('base64url')}.sig`;
   fetchMock.mockResolvedValueOnce({
     ok: true,
@@ -134,6 +136,22 @@ describe('Google OAuth', () => {
     );
     expect(res.status).toBe(401);
     expect(await User.findOne({ email: 'unverified@gmail.com' })).toBeNull();
+  });
+
+  it('rejects an id_token minted for another audience (#397)', async () => {
+    const app = createApp();
+    const res = await loginViaGoogle(
+      app,
+      {
+        sub: 'google-sub-aud',
+        email: 'wrongaud@gmail.com',
+        email_verified: true,
+        aud: 'someone-elses-client-id',
+      },
+      {},
+    );
+    expect(res.status).toBe(502);
+    expect(await User.findOne({ email: 'wrongaud@gmail.com' })).toBeNull();
   });
 
   it('stores Google-provided name and avatarUrl on first login', async () => {

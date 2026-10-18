@@ -68,14 +68,23 @@ export const resolveOrCreateUser = async (
   }
 
   const passwordHash = crypto.randomBytes(32).toString('hex');
-  const created = await User.create({
-    email,
-    passwordHash,
-    role: 'user',
-    ...(googleId ? { googleId } : {}),
-    ...(profile?.name ? { name: profile.name } : {}),
-    ...(profile?.avatarUrl ? { avatarUrl: profile.avatarUrl } : {}),
-    permissions: [],
-  });
-  return created;
+  try {
+    const created = await User.create({
+      email,
+      passwordHash,
+      role: 'user',
+      ...(googleId ? { googleId } : {}),
+      ...(profile?.name ? { name: profile.name } : {}),
+      ...(profile?.avatarUrl ? { avatarUrl: profile.avatarUrl } : {}),
+      permissions: [],
+    });
+    return created;
+  } catch (err) {
+    // Loser of a concurrent signup: return the winner instead of a 500.
+    // @see #397
+    if ((err as { code?: unknown } | null)?.code !== 11000) throw err;
+    const winner = await User.findOne({ email });
+    if (!winner) throw err;
+    return winner;
+  }
 };

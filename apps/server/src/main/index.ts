@@ -39,6 +39,31 @@ import { attachConsoleCapture } from './services/logService';
 import { requestLog } from './middleware/requestLog';
 import { redactForLog } from './services/logRedaction';
 
+// Terminal JSON error handler: client input errors stay 4xx, the rest are a
+// logged 500 with a stable message — never raw error text.
+// @see #397
+const jsonErrorMiddleware = (
+  err: unknown,
+  _req: express.Request,
+  res: express.Response,
+  next: express.NextFunction,
+): void => {
+  if (res.headersSent) {
+    next(err);
+    return;
+  }
+  // body-parser tags input errors (malformed JSON, oversized bodies) 4xx.
+  const status = (err as { status?: unknown } | null)?.status;
+  if (typeof status === 'number' && status >= 400 && status < 500) {
+    res
+      .status(status)
+      .json({ message: status === 400 ? 'Malformed JSON body' : 'Request rejected' });
+    return;
+  }
+  console.error('Unhandled route error:', redactForLog(err));
+  res.status(500).json({ message: 'Internal server error' });
+};
+
 attachConsoleCapture();
 
 // Process-level safety net: rejections logged, uncaught exceptions exit.
@@ -67,8 +92,10 @@ export const installProcessSafetyNet = (): void => {
 
 const DEFAULT_PORT = 5000;
 
-const getPort = () => {
-  const parsedPort = Number(process.env.PORT);
+export const getPort = () => {
+  // '' must not become port 0 ("bind any free port") — treat empty as unset.
+  const raw = process.env.PORT?.trim();
+  const parsedPort = raw ? Number(raw) : NaN;
   return Number.isInteger(parsedPort) && parsedPort >= 0 ? parsedPort : DEFAULT_PORT;
 };
 
@@ -133,6 +160,12 @@ export const createApp = (): Express => {
     res.json({ status: 'ok' });
   });
 
+  // Unknown API paths are JSON 404s, never the SPA fallback's HTML 200.
+  // @see #397
+  app.use('/api', (_req, res) => {
+    res.status(404).json({ message: 'Not found' });
+  });
+
   if (process.env.NODE_ENV === 'production') {
     const clientBuildPath = path.join(__dirname, '../../client/dist');
     app.use(express.static(clientBuildPath));
@@ -150,6 +183,8 @@ export const createApp = (): Express => {
       }),
     );
   }
+
+  app.use(jsonErrorMiddleware);
 
   return app;
 };

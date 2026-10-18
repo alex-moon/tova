@@ -35,14 +35,31 @@ export const encryptEnvelope = (plaintext: string): EncryptedEnvelope => {
   };
 };
 
+// IV (12) and tag (16) byte lengths are pinned by the cipher args above.
+const decodeField = (value: string, bytes: number, what: string): Buffer => {
+  if (typeof value !== 'string' || !value) {
+    throw new Error(`Malformed encrypted envelope: ${what} missing`);
+  }
+  const buf = Buffer.from(value, 'base64');
+  if (buf.length !== bytes) {
+    throw new Error(`Malformed encrypted envelope: ${what} must be ${bytes} bytes`);
+  }
+  return buf;
+};
+
 export const decryptEnvelope = (envelope: EncryptedEnvelope): string => {
-  const decipher = crypto.createDecipheriv(
-    'aes-256-gcm',
-    resolveKey(),
-    Buffer.from(envelope.iv, 'base64'),
-    { authTagLength: 16 },
-  );
-  decipher.setAuthTag(Buffer.from(envelope.tag, 'base64'));
+  // Key check first (parity with encrypt); then shape: garbage fields must
+  // fail with a clear error, not crypto internals (a wrong-length tag makes
+  // final() throw opaque errors).
+  // @see #397
+  const key = resolveKey();
+  const iv = decodeField(envelope.iv, 12, 'iv');
+  const tag = decodeField(envelope.tag, 16, 'tag');
+  if (typeof envelope.ciphertext !== 'string' || !envelope.ciphertext) {
+    throw new Error('Malformed encrypted envelope: ciphertext missing');
+  }
+  const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv, { authTagLength: 16 });
+  decipher.setAuthTag(tag);
   return Buffer.concat([
     decipher.update(Buffer.from(envelope.ciphertext, 'base64')),
     decipher.final(),

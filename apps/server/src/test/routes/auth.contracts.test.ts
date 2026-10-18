@@ -211,4 +211,23 @@ describe('auth route hardening (issue #32)', () => {
     expect(sessionCookie).toContain('SameSite=Lax');
     expect(sessionCookie).toContain('HttpOnly');
   });
+
+  it('register maps a lost duplicate-email race to the 400 pre-check message (#397)', async () => {
+    const app = createApp();
+    const { User } = await import('../../main/models/User');
+    const saveSpy = jest
+      .spyOn(User.prototype, 'save')
+      .mockRejectedValue(Object.assign(new Error('E11000'), { code: 11000 }));
+
+    try {
+      const res = await request(app)
+        .post('/api/auth/register')
+        .send({ email: 'race@example.com', password: 'password123' });
+
+      expect(res.status).toBe(400);
+      expect(res.body.message).toMatch(/already registered/u);
+    } finally {
+      saveSpy.mockRestore();
+    }
+  });
 });

@@ -91,63 +91,28 @@ describe('resolveCountry provider selection (#50)', () => {
     expect(global.fetch).toHaveBeenCalledWith('https://api.country.is/', expect.anything());
   });
 
-  it('falls back to ip-api when country.is fails', async () => {
-    global.fetch = jest
-      .fn()
-      .mockRejectedValueOnce(new Error('network down'))
-      .mockResolvedValueOnce(okJson({ country: 'Finland', countryCode: 'fi' }));
-    await expect(resolveCountry('8.8.8.8')).resolves.toEqual({
-      country: 'Finland',
-      countryCode: 'FI',
-    });
-    expect(global.fetch).toHaveBeenCalledTimes(2);
-  });
-
-  it('returns null (never throws) when both providers fail', async () => {
+  it('returns null (never throws) when country.is fails (#397: no http fallback)', async () => {
     global.fetch = jest.fn().mockRejectedValue(new Error('down'));
     await expect(resolveCountry('8.8.8.8')).resolves.toBeNull();
+    expect(global.fetch).toHaveBeenCalledTimes(1);
   });
 
   it('returns null when country.is returns a bad shape', async () => {
-    global.fetch = jest
-      .fn()
-      .mockResolvedValueOnce(okJson({ ip: '8.8.8.8', country: 'FRA' }))
-      .mockResolvedValueOnce(okJson({ country: 'France', countryCode: 'FR' }));
-    await expect(resolveCountry('8.8.8.8')).resolves.toEqual({
-      country: 'France',
-      countryCode: 'FR',
-    });
+    global.fetch = jest.fn().mockResolvedValueOnce(okJson({ ip: '8.8.8.8', country: 'FRA' }));
+    await expect(resolveCountry('8.8.8.8')).resolves.toBeNull();
   });
 
   it('treats a non-ok provider status as failure', async () => {
-    global.fetch = jest
-      .fn()
-      .mockResolvedValueOnce({ ok: false, status: 429 })
-      .mockResolvedValueOnce(okJson({ country: 'Finland', countryCode: 'FI' }));
-    await expect(resolveCountry('8.8.8.8')).resolves.toEqual({
-      country: 'Finland',
-      countryCode: 'FI',
-    });
+    global.fetch = jest.fn().mockResolvedValueOnce({ ok: false, status: 429 });
+    await expect(resolveCountry('8.8.8.8')).resolves.toBeNull();
   });
 
-  it('keeps the answer coarse even though ip-api returns more fields', async () => {
-    global.fetch = jest
-      .fn()
-      .mockRejectedValueOnce(new Error('country.is down'))
-      .mockResolvedValueOnce(
-        okJson({
-          country: 'Finland',
-          countryCode: 'FI',
-          city: 'Helsinki',
-          lat: 60.17,
-          lon: 24.94,
-          isp: 'Some ISP Ltd',
-        }),
-      );
-    await expect(resolveCountry('8.8.8.8')).resolves.toEqual({
-      country: 'Finland',
-      countryCode: 'FI',
-    });
+  it('sends the user IP only over https (no plaintext geo fallback, #397)', async () => {
+    global.fetch = jest.fn().mockRejectedValue(new Error('down'));
+    await resolveCountry('8.8.8.8');
+    for (const [url] of (global.fetch as jest.Mock).mock.calls) {
+      expect(String(url).startsWith('https://')).toBe(true);
+    }
   });
 
   it('never resolves private or missing IPs against live providers', async () => {
@@ -204,8 +169,8 @@ describe('ensureUserLocation caching (#50)', () => {
     const user = userWith();
     await ensureUserLocation(user, '8.8.8.8');
     await ensureUserLocation(user, '8.8.8.8');
-    // Failed resolves try both providers; the second call must cooldown-out.
-    expect(global.fetch).toHaveBeenCalledTimes(2);
+    // A failed resolve tries the one https provider; the second call cooldowns out.
+    expect(global.fetch).toHaveBeenCalledTimes(1);
     expect(User.updateOne).not.toHaveBeenCalled();
   });
 
@@ -215,7 +180,7 @@ describe('ensureUserLocation caching (#50)', () => {
     await ensureUserLocation(user, '8.8.8.8');
     Date.now = () => realNow() + 2 * 60 * 60 * 1000;
     await ensureUserLocation(user, '8.8.8.8');
-    expect(global.fetch).toHaveBeenCalledTimes(4);
+    expect(global.fetch).toHaveBeenCalledTimes(2);
   });
 
   it('a failure followed by a cooldown-window success still resolves', async () => {
@@ -240,12 +205,14 @@ describe('ensureUserLocation caching (#50)', () => {
   });
 
   it('stores only the three coarse fields', async () => {
-    global.fetch = jest
-      .fn()
-      .mockRejectedValueOnce(new Error('country.is down'))
-      .mockResolvedValueOnce(
-        okJson({ country: 'Finland', countryCode: 'FI', city: 'Helsinki', isp: 'x' }),
-      );
+    global.fetch = jest.fn().mockResolvedValueOnce(
+      okJson({
+        ip: '8.8.8.8',
+        country: 'FI',
+        city: 'Helsinki',
+        isp: 'x',
+      }),
+    );
     let written: unknown;
     jest.spyOn(User, 'updateOne').mockImplementation((...args: unknown[]) => {
       written = args[1];

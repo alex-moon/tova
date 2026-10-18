@@ -94,23 +94,47 @@ describe('Safe Link Service', () => {
       expect(body.client.clientId).toBe('tova-agent');
     });
 
-    it('hits the domain cache on the second check without an extra API call', async () => {
+    it('hits the URL cache on a repeat check without an extra API call (#397)', async () => {
       (global.fetch as jest.Mock).mockResolvedValue(matchesResponse(['MALWARE']));
       await expect(checkUrl('https://baddie.example.com/x')).resolves.toMatchObject({
         safe: false,
         source: 'api',
       });
-      await expect(checkUrl('https://baddie.example.com/y')).resolves.toMatchObject({
+      await expect(checkUrl('https://baddie.example.com/x')).resolves.toMatchObject({
         safe: false,
         source: 'cache',
       });
       expect(global.fetch).toHaveBeenCalledTimes(1);
     });
 
-    it('caches safe verdicts per domain too', async () => {
+    it('never widens a verdict across paths on the same host (#397)', async () => {
       (global.fetch as jest.Mock).mockResolvedValue(emptyResponse());
       await checkUrl('https://goodie.example.com/a');
+      // A different path on the same host re-checks: no shared-host green light.
+      (global.fetch as jest.Mock).mockResolvedValue(matchesResponse(['MALWARE']));
       await expect(checkUrl('https://goodie.example.com/b')).resolves.toMatchObject({
+        safe: false,
+        source: 'api',
+      });
+      expect(global.fetch).toHaveBeenCalledTimes(2);
+    });
+
+    it('caches safe verdicts per URL too', async () => {
+      (global.fetch as jest.Mock).mockResolvedValue(emptyResponse());
+      await checkUrl('https://goodie.example.com/a?b=c');
+      await expect(checkUrl('https://goodie.example.com/a?b=c')).resolves.toMatchObject({
+        safe: true,
+        source: 'cache',
+      });
+      expect(global.fetch).toHaveBeenCalledTimes(1);
+    });
+
+    it('normalizes credentials and fragment out of the cache key (#397)', async () => {
+      (global.fetch as jest.Mock).mockResolvedValue(emptyResponse());
+      await checkUrl('https://user:secret@keyed.example.com/a#frag');
+      // Same resource without credentials/fragment must hit the cache — the
+      // secret must not become part of a stored (or logged) key.
+      await expect(checkUrl('https://keyed.example.com/a')).resolves.toMatchObject({
         safe: true,
         source: 'cache',
       });

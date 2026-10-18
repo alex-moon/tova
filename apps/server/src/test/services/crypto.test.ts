@@ -61,4 +61,39 @@ describe('crypto envelope', () => {
     setKey('other-key');
     expect(() => decryptEnvelope(envelope)).toThrow();
   });
+
+  describe('envelope shape validation (#397)', () => {
+    beforeEach(() => setKey('test-key'));
+
+    it('rejects a wrong-length iv with a clear error', () => {
+      const envelope = encryptEnvelope('secret');
+      expect(() => decryptEnvelope({ ...envelope, iv: 'AAAA' })).toThrow(
+        /Malformed encrypted envelope: iv must be 12 bytes/u,
+      );
+    });
+
+    it('rejects a wrong-length tag with a clear error', () => {
+      const envelope = encryptEnvelope('secret');
+      expect(() => decryptEnvelope({ ...envelope, tag: 'AAAA' })).toThrow(
+        /Malformed encrypted envelope: tag must be 16 bytes/u,
+      );
+    });
+
+    it('rejects missing fields with a clear error', () => {
+      expect(() => decryptEnvelope({ iv: '', tag: 'AAAA', ciphertext: 'x' })).toThrow(
+        /Malformed encrypted envelope: iv missing/u,
+      );
+      const envelope = encryptEnvelope('secret');
+      expect(() => decryptEnvelope({ ...envelope, ciphertext: '' })).toThrow(
+        /Malformed encrypted envelope: ciphertext missing/u,
+      );
+    });
+
+    it('reports the missing-key error before shape errors (encrypt parity)', () => {
+      setKey(undefined);
+      expect(() => decryptEnvelope({ iv: 'a', tag: 'b', ciphertext: 'c' })).toThrow(
+        /MCP_ENCRYPTION_KEY is not set/u,
+      );
+    });
+  });
 });

@@ -84,7 +84,16 @@ router.post('/register', async (req, res) => {
     }
 
     const user = new User({ email: registerData.email, passwordHash: registerData.password });
-    await user.save();
+    try {
+      await user.save();
+    } catch (err) {
+      // Loser of a concurrent register: the unique index, not the pre-check.
+      // @see #397
+      if ((err as { code?: unknown } | null)?.code === 11000) {
+        return res.status(400).json({ message: 'Email is already registered' });
+      }
+      throw err;
+    }
 
     const userPayload: LoginUserPayload = {
       id: user._id.toString(),
@@ -203,7 +212,19 @@ router.get('/google/callback', async (req, res) => {
       sub: string;
       email?: string;
       email_verified?: boolean;
+      aud?: string | string[];
     };
+
+    // Token came over TLS from Google's endpoint, but the cheap audience
+    // check still belongs: a minted-for-someone-else token must not log in.
+    // @see #397
+    const audOk =
+      typeof payload.aud === 'string'
+        ? payload.aud === config.clientId
+        : Array.isArray(payload.aud) && payload.aud.includes(config.clientId);
+    if (!audOk) {
+      throw new Error('id_token audience mismatch');
+    }
 
     if (!payload.email || payload.email_verified === false) {
       return res.status(401).send('Google account email could not be verified');
