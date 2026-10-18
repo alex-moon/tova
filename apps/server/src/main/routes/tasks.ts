@@ -177,7 +177,7 @@ router.post('/:id/instruction', authenticate, async (req: AuthRequest, res) => {
   }
 });
 
-// Stop an active task; observed at the next step boundary; idempotent.
+// Stop an active task; aborts the in-flight step; idempotent. @see #395
 router.post('/:id/cancel', authenticate, async (req: AuthRequest, res) => {
   try {
     const task = await ownedTask(req);

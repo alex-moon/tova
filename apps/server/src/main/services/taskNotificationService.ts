@@ -4,17 +4,23 @@ import { Task, type TaskDocument } from '../models/Task';
 // @see #255 #251 #254
 
 // Completed-but-unannounced origin tasks for a session, oldest first.
-// @see #255
+// The drain is capped: many completions must not bloat one turn's context.
+// @see #255 #395
+export const MAX_DRAIN_COMPLETIONS = 5;
+
 export const pendingCompletionsFor = async (
   userId: string,
   sessionId: string,
+  limit: number = MAX_DRAIN_COMPLETIONS,
 ): Promise<TaskDocument[]> =>
   Task.find({
     userId,
     status: 'done',
     'origin.sessionId': sessionId,
     notifiedAt: null,
-  }).sort({ updatedAt: 1 });
+  })
+    .sort({ updatedAt: 1 })
+    .limit(limit);
 
 // Guarded on `notifiedAt: null` so a concurrent drain cannot double-mark.
 export const markNotified = async (taskIds: TaskDocument['_id'][]): Promise<void> => {

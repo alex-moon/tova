@@ -1,9 +1,10 @@
 import { Task, type TaskDocument } from '../models/Task';
 import { TaskEvent } from '../models/TaskEvent';
-import { appendTaskEvent } from './taskProcessor';
+import { appendTaskEvent, abortTaskRun } from './taskProcessor';
+import { redactForLog } from './logRedaction';
 
 /* Sequencer runtime: enqueue, atomic claim, poll tick, boot sweep. */
-// @see #254 #251
+// @see #254 #251 #395
 
 export const MAX_TASK_ATTEMPTS = 3;
 
@@ -24,6 +25,9 @@ const clampError = (err: unknown): string => {
   return message.slice(0, MAX_STORED_ERROR_CHARS);
 };
 
+// Stream is never empty: the driver and the task page need a first turn.
+const NO_INSTRUCTION_PLACEHOLDER = '(no instruction provided)';
+
 // Create a queued task; the budget is snapshotted at creation.
 export const enqueueTask = async (input: {
   userId: string;
@@ -39,14 +43,18 @@ export const enqueueTask = async (input: {
     ...(input.origin ? { origin: input.origin } : {}),
     budget: { maxSteps: input.maxSteps, maxCostUsd: input.maxCostUsd, spentUsd: 0 },
   });
-  if (input.instruction) {
+  try {
     await TaskEvent.create({
       taskId: task._id,
       seq: 0,
       role: 'user',
-      content: input.instruction,
+      content: input.instruction || NO_INSTRUCTION_PLACEHOLDER,
       step: 0,
     });
+  } catch (err) {
+    // Compensate: a header without its seed event strands an opaque zombie.
+    await Task.deleteOne({ _id: task._id });
+    throw err;
   }
   return task;
 };
@@ -90,12 +98,23 @@ let busy = false;
 // Boot sweep requeues stale running tasks from a crashed server.
 export const STALE_RUNNING_MS = 5 * 60 * 1000;
 
+// The stale path charges an attempt: a poison task dies at the cap, and the
+// processor heartbeat keeps any live >cutoff step off the sweep.
+// @see #395
 export const requeueStaleTasks = async (maxAgeMs: number = STALE_RUNNING_MS): Promise<number> => {
-  const result = await Task.updateMany(
-    { status: 'running', updatedAt: { $lt: new Date(Date.now() - maxAgeMs) } },
-    { $set: { status: 'queued' } },
+  const stale = {
+    status: 'running',
+    updatedAt: { $lt: new Date(Date.now() - maxAgeMs) },
+  };
+  const failed = await Task.updateMany(
+    { ...stale, attempts: { $gte: MAX_TASK_ATTEMPTS } },
+    { $set: { status: 'failed', lastError: 'stale after max attempts' } },
   );
-  return result.modifiedCount ?? 0;
+  const requeued = await Task.updateMany(
+    { ...stale, attempts: { $lt: MAX_TASK_ATTEMPTS } },
+    { $set: { status: 'queued' }, $inc: { attempts: 1 } },
+  );
+  return (failed.modifiedCount ?? 0) + (requeued.modifiedCount ?? 0);
 };
 
 export const startTaskPoller = (
@@ -103,7 +122,9 @@ export const startTaskPoller = (
   intervalMs = POLL_INTERVAL_MS,
 ): ReturnType<typeof setInterval> => {
   if (timer) return timer;
-  void requeueStaleTasks().catch(() => undefined);
+  void requeueStaleTasks().catch((err) =>
+    console.error('Task boot sweep error:', redactForLog(err)),
+  );
   timer = setInterval(() => {
     // One task per tick; skip while the previous run is in flight.
     if (busy) return;
@@ -152,6 +173,13 @@ export const steerTask = async (
   if (current.status === 'paused') {
     await Task.updateOne({ _id: current._id, status: 'paused' }, { $set: { status: 'queued' } });
   }
+
+  // The task may have settled between the read and the append; refuse
+  // honestly rather than claim a turn on a dead stream. @see #395
+  const settled = await Task.findById(task._id);
+  if (!settled || isTerminalTaskStatus(settled.status)) {
+    return { status: 'refused' };
+  }
   return { status: 'queued' };
 };
 
@@ -162,4 +190,6 @@ export const cancelTask = async (task: TaskDocument): Promise<void> => {
     { _id: task._id, status: { $nin: ['done', 'failed', 'cancelled'] } },
     { $set: { status: 'cancelled' } },
   );
+  // Abort the in-flight step; an abort on a settled task is a no-op.
+  abortTaskRun(String(task._id));
 };

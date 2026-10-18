@@ -51,6 +51,29 @@ describe('enqueueTask (#254)', () => {
     expect(withOrigin.origin?.kind).toBe('chat');
     expect(withOrigin.origin?.sessionId).toBe('abc');
   });
+
+  it('seeds a placeholder event when the instruction is absent (#395)', async () => {
+    const task = await enqueueTask({
+      userId: '000000000000000000000000',
+      maxSteps: 1,
+      maxCostUsd: 1,
+    });
+    const events = await TaskEvent.find({ taskId: task._id });
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({ role: 'user', seq: 0 });
+    expect(events[0].content).toContain('no instruction');
+  });
+
+  it('deletes the header when the seed event write fails (#395)', async () => {
+    const spy = jest.spyOn(TaskEvent, 'create').mockRejectedValue(new Error('seed write failed'));
+    try {
+      await expect(createTask('doomed')).rejects.toThrow('seed write failed');
+      // No zombie queued task may outlive its failed seed.
+      expect(await Task.countDocuments({ instruction: 'do doomed' })).toBe(0);
+    } finally {
+      spy.mockRestore();
+    }
+  });
 });
 
 describe('claimNextTask (#254)', () => {
@@ -145,7 +168,7 @@ describe('stale `running` requeue (#254)', () => {
     return claimed as TaskDocument;
   };
 
-  it('requeues only running tasks older than the cutoff', async () => {
+  it('requeues only running tasks older than the cutoff, charging an attempt', async () => {
     const fresh = await strandTask(0);
     const stale = await strandTask(STALE_RUNNING_MS + 1000);
 
@@ -153,8 +176,18 @@ describe('stale `running` requeue (#254)', () => {
     expect((await latestTask(String(fresh._id)))?.status).toBe('running');
     const staleAfter = await latestTask(String(stale._id));
     expect(staleAfter?.status).toBe('queued');
-    // The sweep does not charge an attempt.
-    expect(staleAfter?.attempts).toBe(1);
+    // The sweep charges an attempt: a poison task dies at the cap. @see #395
+    expect(staleAfter?.attempts).toBe(2);
+  });
+
+  it('fails a stale task that already exhausted its attempts (#395)', async () => {
+    const stale = await strandTask(STALE_RUNNING_MS + 1000);
+    await Task.collection.updateOne({ _id: stale._id }, { $set: { attempts: MAX_TASK_ATTEMPTS } });
+
+    expect(await requeueStaleTasks()).toBe(1);
+    const settled = await latestTask(String(stale._id));
+    expect(settled?.status).toBe('failed');
+    expect(settled?.lastError).toMatch(/stale/);
   });
 
   it('a stranded running task self-heals on the next poller start', async () => {
@@ -240,6 +273,33 @@ describe('steerTask / cancelTask (#254 routes slice)', () => {
     expect((await latestTask(String(task._id)))?.status).toBe('cancelled');
     // No steering event is appended to a stream that is already terminal.
     expect(await TaskEvent.countDocuments({ taskId: task._id })).toBe(1);
+  });
+
+  // Settle lands between the pre-append read and the append; the response
+  // must still refuse. @see #395
+  it('refuses when the task settles while the steering event is appended', async () => {
+    const task = await createTask('steer-settled');
+    const taskProcessor = await import('../../main/services/taskProcessor');
+    const spy = jest.spyOn(taskProcessor, 'appendTaskEvent').mockImplementation(async () => {
+      await Task.updateOne({ _id: task._id }, { $set: { status: 'done' } });
+    });
+    try {
+      const result = await steerTask(task, 'late steer');
+      expect(result).toEqual({ status: 'refused' });
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it('aborts the in-flight step signal on cancel (#395)', async () => {
+    const task = await createTask('abort');
+    const taskProcessor = await import('../../main/services/taskProcessor');
+    const signal = taskProcessor.registerTaskAbort(String(task._id));
+    expect(signal.aborted).toBe(false);
+
+    await cancelTask(task);
+
+    expect(signal.aborted).toBe(true);
   });
 
   // The processor finishes before the cancel lands; no clobbering.

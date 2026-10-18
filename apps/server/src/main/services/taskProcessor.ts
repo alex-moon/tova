@@ -1,14 +1,48 @@
 import type { TaskDocument } from '../models/Task';
 import { Task } from '../models/Task';
 import { TaskEvent, type TaskEventDocument, type TaskToolEvent } from '../models/TaskEvent';
-import type { TokenUsage } from './llmTypes';
-import { runTaskStep, type TaskStepOutcome } from './taskSequencer';
+import type { TokenUsage, LlmProvider } from './llmTypes';
+import { priceRowsForModel } from './modelDefaults';
+import { estimateCostUsd } from './traceStatsCost';
+import { runTaskStep, type TaskStepOpts, type TaskStepOutcome } from './taskSequencer';
 import { enqueueWorkspaceEmbedding } from './workspaceEmbeddingIngest';
 
 /* Worker loop: one tick claims a task and runs steps to a terminal state. */
-// @see #254 #251
+// @see #254 #251 #395
 
 const MAX_NOTICE_CHARS = 500;
+
+// Heartbeat period; the sweep cutoff is 5 min, so 60s keeps a live step safe.
+const TASK_HEARTBEAT_MS = 60_000;
+
+// Abort registry: one controller per in-flight step; cancel aborts mid-step.
+// @see #395
+const activeAborts = new Map<string, AbortController>();
+
+export const registerTaskAbort = (taskId: string): AbortSignal => {
+  const controller = new AbortController();
+  activeAborts.set(taskId, controller);
+  return controller.signal;
+};
+
+export const abortTaskRun = (taskId: string): void => {
+  activeAborts.get(taskId)?.abort();
+};
+
+const releaseTaskAbort = (taskId: string): void => {
+  activeAborts.delete(taskId);
+};
+
+// Step cost from reported usage; absent usage or an unpriced model is null.
+const stepCost = (outcome: TaskStepOutcome): number | null => {
+  if (!outcome.usage) return null;
+  const row = priceRowsForModel(outcome.model)[outcome.provider as LlmProvider];
+  return estimateCostUsd(
+    outcome.usage.inputTokens ?? 0,
+    outcome.usage.outputTokens ?? 0,
+    row ?? null,
+  );
+};
 
 // Plain event shape: TaskEventDocument.model collides with mongoose's model().
 export interface TaskEventInput {
@@ -58,6 +92,7 @@ export const processTaskJob = async (task: TaskDocument): Promise<void> =>
 export type TaskStepRunner = (
   task: TaskDocument,
   events: TaskEventDocument[],
+  opts?: TaskStepOpts,
 ) => Promise<TaskStepOutcome>;
 
 export const makeTaskProcessor =
@@ -66,6 +101,7 @@ export const makeTaskProcessor =
     // Re-read the claimed task; on a resume it carries prior steps.
     const claimed = (await Task.findById(task._id)) ?? task;
     let stepCount = claimed.stepCount;
+    const taskId = String(task._id);
 
     for (;;) {
       // Re-read the header before each step; cancel is observed here.
@@ -86,8 +122,39 @@ export const makeTaskProcessor =
         return;
       }
 
+      // Cost budget: pause before the next spend, mirroring the step cap.
+      // @see #395
+      const spent = current.budget.spentUsd ?? 0;
+      if (spent >= current.budget.maxCostUsd) {
+        await appendNotice(
+          current._id,
+          `Task paused: reached its cost budget ($${spent.toFixed(2)} of $${current.budget.maxCostUsd.toFixed(2)} estimated).`,
+          stepCount,
+        );
+        await Task.updateOne(
+          { _id: current._id, status: 'running' },
+          { $set: { status: 'paused', stepCount, lastError: 'cost budget reached' } },
+        );
+        return;
+      }
+
       const events = await TaskEvent.find({ taskId: current._id }).sort({ seq: 1 });
-      const outcome = await runStep(current, events);
+      // Heartbeat: a long legitimate step must not look dead to the sweep.
+      // @see #395
+      const signal = registerTaskAbort(taskId);
+      const heartbeat = setInterval(() => {
+        void Task.updateOne(
+          { _id: current._id, status: 'running' },
+          { $set: { updatedAt: new Date() } },
+        ).catch(() => undefined);
+      }, TASK_HEARTBEAT_MS);
+      let outcome: TaskStepOutcome;
+      try {
+        outcome = await runStep(current, events, { signal });
+      } finally {
+        clearInterval(heartbeat);
+        releaseTaskAbort(taskId);
+      }
 
       await appendTaskEvent(current._id, {
         role: 'assistant',
@@ -99,7 +166,14 @@ export const makeTaskProcessor =
         ...(outcome.usage ? { usage: outcome.usage } : {}),
       });
       stepCount += 1;
-      await Task.updateOne({ _id: current._id }, { $set: { stepCount } });
+      const cost = stepCost(outcome);
+      await Task.updateOne(
+        { _id: current._id },
+        {
+          $set: { stepCount },
+          ...(cost !== null ? { $inc: { 'budget.spentUsd': cost } } : {}),
+        },
+      );
 
       // A text step with no tool calls is the driver's final answer.
       if (outcome.text.trim() !== '' && outcome.tools.length === 0) {
