@@ -21,7 +21,7 @@ export const auxCompletion = async <T>(
       provider: config.aux.provider,
       model: config.aux.model,
     });
-    if (!completion || completion.object === undefined) return null;
+    if (!completion || completion.object == null) return null;
     return completion;
   } catch (err) {
     console.error(`${label} error:`, redactForLog(err));

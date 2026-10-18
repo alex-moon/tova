@@ -29,9 +29,11 @@ const connectors: Partial<Record<LlmProvider, LlmConnector>> = {
  */
 export const wiredProviders: readonly LlmProvider[] = Object.keys(connectors) as LlmProvider[];
 
-// Untyped provider strings (Mongo, HTTP) must not TypeError.
+// Untyped provider strings (Mongo, HTTP) must not TypeError. Own-property
+// check: `in` walks the prototype chain and lets 'toString' through.
+// @see #398
 export const isWiredProvider = (value: unknown): value is LlmProvider =>
-  typeof value === 'string' && value in connectors;
+  typeof value === 'string' && Object.hasOwn(connectors, value);
 
 // Record failures against the provider route before rethrowing.
 // @see #175
@@ -50,9 +52,11 @@ const withTally = async <T>(
 
 /* Provider strings from Mongo are untyped; a bad value must not TypeError. */
 const connectorFor = (provider: LlmProvider | undefined): LlmConnector => {
-  const connector = connectors[provider ?? 'groq'];
-  if (!connector) throw new Error(`Unknown LLM provider: ${String(provider)}`);
-  return connector;
+  const key = provider ?? 'groq';
+  if (!Object.hasOwn(connectors, key)) {
+    throw new Error(`Unknown LLM provider: ${String(provider)}`);
+  }
+  return connectors[key]!;
 };
 
 export const inferenceService = {

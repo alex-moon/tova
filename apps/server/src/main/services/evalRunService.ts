@@ -8,7 +8,7 @@ import { CASES, resolveExpectedContent, type EvalCase } from '../evals/cases';
 import { clearEvalSource, seedEvalSource, evalUserId } from '../evals/mongoSource';
 import { runCase } from '../evals/runCase';
 import type { Assertion, AssertionResult } from '../evals/types';
-import { inferenceService } from './inferenceService';
+import { inferenceService, isWiredProvider } from './inferenceService';
 import { sweepModels, CHAT_MODEL } from './modelDefaults';
 import { EvalRunRecord } from '../models/EvalRunRecord';
 import { clampError } from './clampError';
@@ -141,7 +141,7 @@ export const parseModelsFlag = (
     .map((entry) => {
       const sep = entry.indexOf(':');
       if (sep === -1) return { provider: 'deepinfra' as const, model: entry };
-      if (!(entry.slice(0, sep) in connectorsByProvider)) {
+      if (!isWiredProvider(entry.slice(0, sep))) {
         throw new EvalConfigError(
           `Unknown provider in --models '${entry}' (wired: deepinfra, fireworks, groq).`,
         );
@@ -403,7 +403,7 @@ export const resolveScheduledModels = (
     const parsed = parseModelsFlag(evals.models);
     if (parsed && parsed.length > 0) return parsed;
   }
-  if (evals.provider && !(evals.provider in connectorsByProvider)) {
+  if (evals.provider && !isWiredProvider(evals.provider)) {
     throw new EvalConfigError(
       `Unknown provider '${evals.provider}' in the eval provider config ` +
         `(wired: ${Object.keys(connectorsByProvider).join(', ')}).`,

@@ -34,6 +34,13 @@
 - [x] Small ones: rerankDocText uses withEmbedTitle, single 12k constant, first-hop SSRF dedupe in fetchPage, agent id/name includes model, agentCache bounded
 - [x] `npm run ci` green
 
+## Review round (2026-10-18)
+
+- **Found and fixed:** provider membership used `in` (`isWiredProvider`, `connectorFor`, two eval sites), which walks the prototype chain — `'toString'`/`'constructor'`/`'valueOf'`/`'__proto__'` passed as wired providers, and `connectorFor` could return an inherited function to the caller instead of the named error. All four sites now use `Object.hasOwn`; regression tests pin the rejection.
+- **Found and fixed:** `auxCompletion` guarded `object === undefined` but every caller dereferences `.object.x`, so a null contract breach escaped the catch-to-null contract. Now `== null`.
+- **Found and fixed:** `profile.purge.test.ts`'s soft-deleted-sessions case flaked on the default 5s timeout (3 runs: pass, pass, fail) while sibling factory-reset cases carry 15s; gave it the same.
+- Verified as claimed, no change needed: first-hop SSRF/SafeBrowsing removal (the redirect loop screens every hop including the first), unreachable `documentUnits` branch (`starts.length >= 2` guaranteed), no-op eval filter (`EvalRunRecord` status enum is exactly the three filtered values), Mastra re-registration after cache eviction (duplicate `addAgent` keys are ignored), promptMetrics `match(/g)` statelessness.
+
 ## Follow-ups
 
 - None yet.

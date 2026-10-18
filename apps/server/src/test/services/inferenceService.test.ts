@@ -1,4 +1,8 @@
-import { inferenceService } from '../../main/services/inferenceService';
+import {
+  inferenceService,
+  isWiredProvider,
+  wiredProviders,
+} from '../../main/services/inferenceService';
 
 /* Pins dispatch: options reach the right connector; default is groq. */
 const mockGroqCompletion = jest.fn();
@@ -101,6 +105,31 @@ describe('Inference Service provider dispatch', () => {
       await corruptCall().catch(() => {});
       expect(mockGroqCompletion).not.toHaveBeenCalled();
       expect(mockDeepinfraCompletion).not.toHaveBeenCalled();
+    });
+
+    it('prototype-chain names are not wired providers', () => {
+      for (const name of ['toString', 'constructor', 'hasOwnProperty', 'valueOf', '__proto__']) {
+        expect(isWiredProvider(name)).toBe(false);
+      }
+      expect(isWiredProvider('groq')).toBe(true);
+      expect(isWiredProvider('deepinfra')).toBe(true);
+      expect(isWiredProvider('fireworks')).toBe(true);
+      expect(isWiredProvider(42)).toBe(false);
+      expect(isWiredProvider(undefined)).toBe(false);
+    });
+
+    it('the registry enumerates exactly the wired providers', () => {
+      expect([...wiredProviders].sort()).toEqual(['deepinfra', 'fireworks', 'groq']);
+    });
+
+    it('a prototype-chain provider name fails clean, not with a TypeError', async () => {
+      await expect(
+        inferenceService.createCompletion({
+          provider: 'toString' as never,
+          model: 'x',
+          messages: [],
+        }),
+      ).rejects.toThrow('Unknown LLM provider: toString');
     });
   });
 });
