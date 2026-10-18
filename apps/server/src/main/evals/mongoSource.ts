@@ -125,6 +125,7 @@ const FIXTURE_ASSETS = (): FixtureWithUnits[] => [
   },
 ];
 
+/** Upsert the eval user; never touches other users. */
 export const ensureEvalUser = async (): Promise<void> => {
   await User.updateOne(
     { _id: evalUserId },
@@ -132,28 +133,24 @@ export const ensureEvalUser = async (): Promise<void> => {
     { upsert: true },
   );
 };
-/** Upsert every fixture asset for the eval user; never touches other users. */
+/** Fresh fixtures on every seed: a crashed run's stale rows cannot survive. */
+// @see #394
 export const seedEvalSource = async (): Promise<void> => {
   await ensureEvalUser();
-  for (const file of FIXTURE_ASSETS()) {
-    await Asset.updateOne(
-      { userId: evalUserId, filename: file.filename },
-      {
-        $setOnInsert: {
-          userId: evalUserId,
-          filename: file.filename,
-          key: `${evalUserId.toHexString()}/eval/${file.filename}`,
-          contentType: file.contentType,
-          size: Buffer.byteLength(file.text),
-          textExtracted: file.text,
-          units: file.units,
-          status: 'ready',
-          origin: 'user-upload',
-        },
-      },
-      { upsert: true },
-    );
-  }
+  await Asset.deleteMany({ userId: evalUserId });
+  await Asset.insertMany(
+    FIXTURE_ASSETS().map((file) => ({
+      userId: evalUserId,
+      filename: file.filename,
+      key: `${evalUserId.toHexString()}/eval/${file.filename}`,
+      contentType: file.contentType,
+      size: Buffer.byteLength(file.text),
+      textExtracted: file.text,
+      units: file.units,
+      status: 'ready',
+      origin: 'user-upload',
+    })),
+  );
 };
 
 /** Remove the eval user and all their seeded assets (runner teardown). */

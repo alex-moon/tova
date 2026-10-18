@@ -1,12 +1,14 @@
 import { CASES } from '../../main/evals/cases';
 import { EvalRunRecord } from '../../main/models/EvalRunRecord';
 import {
+  EVAL_SUITE_CAP_MS,
+  EvalConfigError,
   EvalRunBusyError,
   parseModelsFlag,
   resolveScheduledModels,
   runEvalSuite,
   startEvalRun,
-  type EvalSuiteDeps,
+  type EvalRunDeps,
 } from '../../main/services/evalRunService';
 
 /* Service coverage: all collaborators injected so flows are deterministic. */
@@ -21,9 +23,9 @@ const sweepModels = [
 const connectors = {
   deepinfra: { createStreamingCompletion: async () => null },
   groq: { createStreamingCompletion: async () => null },
-} as unknown as EvalSuiteDeps['connectors'];
+} as unknown as EvalRunDeps['connectors'];
 
-const baseDeps = (over: EvalSuiteDeps = {}): EvalSuiteDeps => ({
+const baseDeps = (over: EvalRunDeps = {}): EvalRunDeps => ({
   seedSource: async () => {},
   clearSource: async () => {},
   readRepoFile: () => '',
@@ -91,10 +93,28 @@ describe('resolveScheduledModels (#225)', () => {
     expect(resolveScheduledModels({ model: 'Qwen/Qwen3-14B', provider: 'groq' })).toEqual([
       { provider: 'groq', model: 'Qwen/Qwen3-14B' },
     ]);
-    // Unknown provider coerces to deepinfra (the completions-pinned default).
-    expect(resolveScheduledModels({ model: 'x', provider: 'bogus' })).toEqual([
-      { provider: 'deepinfra', model: 'x' },
+  });
+
+  it('honours any wired provider, not just groq (#394)', () => {
+    // The model default is that provider's own fixed model, one unit.
+    expect(resolveScheduledModels({ provider: 'fireworks' })).toEqual([
+      {
+        provider: 'fireworks',
+        model: 'accounts/fireworks/models/glm-5p3-flash',
+      },
     ]);
+  });
+
+  it('throws when a wired provider hosts no fixed model (#394)', () => {
+    // groq is wired but hosts none of the fixed models; the deepinfra
+    // default id must never leak across backends.
+    expect(() => resolveScheduledModels({ provider: 'groq' })).toThrow(EvalConfigError);
+  });
+
+  it('throws on an unknown provider instead of stranding the model elsewhere (#394)', () => {
+    expect(() => resolveScheduledModels({ model: 'x', provider: 'bogus' })).toThrow(
+      EvalConfigError,
+    );
   });
 
   it('uses CHAT_MODEL on deepinfra when nothing is configured (#387)', () => {
@@ -122,16 +142,49 @@ describe('runEvalSuite (#225)', () => {
     expect(seen).toHaveLength(CASES.length);
   });
 
-  it('records a thrown case as `error` in sweep mode and `fail` otherwise', async () => {
+  it('scores a whole-run throw as `error` and a lone throw as `fail` (#394)', async () => {
     const runCaseFn = (async () => {
       throw new Error('provider exploded');
     }) as never;
+    // Every case throws: a provider outage, not graded fails — even though
+    // the scheduled default is single-model.
     const single = await runEvalSuite({ models: [model] }, baseDeps({ runCaseFn }));
-    expect(single.every((r) => r.score === 'fail')).toBe(true);
+    expect(single.every((r) => r.score === 'error')).toBe(true);
     expect(single[0].report).toMatch(/ungraded: provider exploded/);
 
     const sweep = await runEvalSuite({ models: sweepModels }, baseDeps({ runCaseFn }));
     expect(sweep.every((r) => r.score === 'error')).toBe(true);
+  });
+
+  it('scores a lone throw beside graded cases as `fail`, not `error` (#394)', async () => {
+    let calls = 0;
+    const runCaseFn = (async () => {
+      calls += 1;
+      if (calls === 1) throw new Error('flaky case');
+      return { run: { toolCalls: [], prompt: 'p' }, evidence: 'ev' };
+    }) as never;
+    const results = await runEvalSuite({ models: [model] }, baseDeps({ runCaseFn }));
+    // Thrown cases flush after the graded ones.
+    expect(results[results.length - 1].score).toBe('fail');
+    expect(results.slice(0, -1).every((r) => r.score === 'pass')).toBe(true);
+  });
+
+  it('logs and skips remaining cases once the suite cap is spent (#394)', async () => {
+    const now = Date.now();
+    const dateSpy = jest.spyOn(Date, 'now').mockReturnValue(now);
+    const errorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+    let calls = 0;
+    const runCaseFn = (async () => {
+      calls += 1;
+      // The budget is exhausted inside the first case; case 2 never starts.
+      if (calls === 1) dateSpy.mockReturnValue(now + EVAL_SUITE_CAP_MS + 1);
+      return { run: { toolCalls: [], prompt: 'p' }, evidence: 'ev' };
+    }) as never;
+    const results = await runEvalSuite({ models: [model] }, baseDeps({ runCaseFn }));
+    expect(results).toHaveLength(1);
+    expect(errorSpy).toHaveBeenCalledWith(expect.stringMatching(/wall-clock cap spent/));
+    dateSpy.mockRestore();
+    errorSpy.mockRestore();
   });
 
   it('clears fixtures unless keepFixtures is set', async () => {
@@ -188,6 +241,32 @@ describe('startEvalRun (#225)', () => {
     await new Promise((resolve) => setTimeout(resolve, 10));
     await expect(
       startEvalRun({ models: [model], trigger: 'manual' }, baseDeps({ runCaseFn })),
+    ).rejects.toBeInstanceOf(EvalRunBusyError);
+    release();
+    await first;
+  });
+
+  it('enforces the lease atomically when the pre-check misses (#394)', async () => {
+    // Simulates the check-then-create race: both callers see no running row,
+    // the unique partial index rejects the second insert.
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const runCaseFn = (async () => {
+      await gate;
+      return { run: { toolCalls: [], prompt: 'p' }, evidence: 'ev' };
+    }) as never;
+    const first = startEvalRun(
+      { models: [model], trigger: 'manual' },
+      baseDeps({ runCaseFn, findRunning: async () => null }),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    await expect(
+      startEvalRun(
+        { models: [model], trigger: 'manual' },
+        baseDeps({ runCaseFn, findRunning: async () => null }),
+      ),
     ).rejects.toBeInstanceOf(EvalRunBusyError);
     release();
     await first;
