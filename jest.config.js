@@ -5,8 +5,7 @@ module.exports = {
     '^.+\\.tsx?$': ['ts-jest', { tsconfig: 'tsconfig.test.json', isolatedModules: true }],
   },
   testEnvironment: 'node',
-  // Recycle workers that balloon past this cap between suites: worker memory
-  // otherwise accumulates past Node's default heap in CI.
+  // Recycle ballooned workers between suites so heap use stays bounded.
   // @see #401
   workerIdleMemoryLimit: '512MB',
   // Silence all console output from tests: suites intentionally exercise
