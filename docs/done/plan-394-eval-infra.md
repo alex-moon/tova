@@ -45,6 +45,17 @@ side channel, and an unboundedly growing LangSmith dataset.
 - **Stage 3 embeds.** `runHelpfulnessEval` gains an `embed` dep defaulting to the
   same `defaultEmbedUser` as stage 2 (exported from `memoryEvalService`),
   degrading to BM25 with a logged error on failure — parity with stage 2.
+- **Review round (pre-ready hardening).** Three holes found and closed on the
+  same branch: (1) `resolveScheduledModels({ provider: 'groq' })` still leaked
+  the deepinfra default model id — any wired provider hosting none of the fixed
+  models now throws `EvalConfigError` unless `TOVA_EVAL_MODEL` is explicit
+  (verified by probe before the fix). (2) The lease index could silently not
+  exist: a Mongoose `autoIndex` build fails permanently when a DB carries ≥2
+  stranded `running` rows (exactly what the pre-lease TOCTOU produces), and
+  nothing ever retried — `reclaimStaleEvalRuns` now rebuilds the lease index
+  after reclaiming, so the boot/tick self-heal path also heals the index.
+  (3) A suite-cap-truncated run was indistinguishable from a complete one; the
+  runner now logs when the cap stops cases. Route tests pin the 400 mapping.
 
 ## Done
 
@@ -58,6 +69,9 @@ side channel, and an unboundedly growing LangSmith dataset.
 - [x] `runHelpfulnessEval` embeds between seed and retrieve
 - [x] `retrieve` dep returns `{ slices, candidateCount? }`; global removed
 - [x] Memory dataset delete-before-push
+- [x] Review round: provider/model unit throws when the provider hosts no fixed model
+- [x] Review round: reclaim rebuilds a missing lease index (autoIndex self-heal)
+- [x] Review round: suite-cap trip logs; 400 mapping pinned by route test
 - [ ] `npm run ci` green
 
 ## Follow-ups

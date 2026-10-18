@@ -1,6 +1,7 @@
 import { CASES } from '../../main/evals/cases';
 import { EvalRunRecord } from '../../main/models/EvalRunRecord';
 import {
+  EVAL_SUITE_CAP_MS,
   EvalConfigError,
   EvalRunBusyError,
   parseModelsFlag,
@@ -104,6 +105,12 @@ describe('resolveScheduledModels (#225)', () => {
     ]);
   });
 
+  it('throws when a wired provider hosts no fixed model (#394)', () => {
+    // groq is wired but hosts none of the fixed models; the deepinfra
+    // default id must never leak across backends.
+    expect(() => resolveScheduledModels({ provider: 'groq' })).toThrow(EvalConfigError);
+  });
+
   it('throws on an unknown provider instead of stranding the model elsewhere (#394)', () => {
     expect(() => resolveScheduledModels({ model: 'x', provider: 'bogus' })).toThrow(
       EvalConfigError,
@@ -160,6 +167,24 @@ describe('runEvalSuite (#225)', () => {
     // Thrown cases flush after the graded ones.
     expect(results[results.length - 1].score).toBe('fail');
     expect(results.slice(0, -1).every((r) => r.score === 'pass')).toBe(true);
+  });
+
+  it('logs and skips remaining cases once the suite cap is spent (#394)', async () => {
+    const now = Date.now();
+    const dateSpy = jest.spyOn(Date, 'now').mockReturnValue(now);
+    const errorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+    let calls = 0;
+    const runCaseFn = (async () => {
+      calls += 1;
+      // The budget is exhausted inside the first case; case 2 never starts.
+      if (calls === 1) dateSpy.mockReturnValue(now + EVAL_SUITE_CAP_MS + 1);
+      return { run: { toolCalls: [], prompt: 'p' }, evidence: 'ev' };
+    }) as never;
+    const results = await runEvalSuite({ models: [model] }, baseDeps({ runCaseFn }));
+    expect(results).toHaveLength(1);
+    expect(errorSpy).toHaveBeenCalledWith(expect.stringMatching(/wall-clock cap spent/));
+    dateSpy.mockRestore();
+    errorSpy.mockRestore();
   });
 
   it('clears fixtures unless keepFixtures is set', async () => {

@@ -55,6 +55,23 @@ export const hasRunForUtcDay = async (
   return existing !== null;
 };
 
+/* A failed autoIndex build never retries; the self-heal path rebuilds the
+ * lease index so the atomic guarantee cannot silently vanish. @see #394 */
+const ensureLeaseIndex = async (): Promise<void> => {
+  try {
+    await EvalRunRecord.collection.createIndex(
+      { status: 1 },
+      {
+        unique: true,
+        partialFilterExpression: { status: 'running' },
+        name: 'evalruns_running_lease',
+      },
+    );
+  } catch (error) {
+    console.error('eval scheduler: lease index build failed:', error);
+  }
+};
+
 /** Reclaims a stranded `running` lease older than `maxAgeMs`. */
 export const reclaimStaleEvalRuns = async (
   maxAgeMs: number = STALE_EVAL_RUNNING_MS,
@@ -68,6 +85,7 @@ export const reclaimStaleEvalRuns = async (
     },
     { $set: { status: 'error', finishedAt: new Date(), error: 'stale lease reclaimed' } },
   );
+  await ensureLeaseIndex();
   return result.modifiedCount ?? 0;
 };
 

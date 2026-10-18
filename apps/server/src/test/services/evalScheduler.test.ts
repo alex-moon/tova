@@ -273,4 +273,22 @@ describe('reclaimStaleEvalRuns (#225)', () => {
     expect(await reclaimStaleEvalRuns(STALE_EVAL_RUNNING_MS, 'memory')).toBe(1);
     expect((await EvalRunRecord.findById(staleMemory._id))?.status).toBe('error');
   });
+
+  it('rebuilds a missing lease index so the atomic guarantee self-heals (#394)', async () => {
+    // A failed autoIndex build (≥2 stranded rows from the pre-lease era)
+    // leaves the lease unenforced for the process lifetime; reclaiming the
+    // rows must also restore the index that enforces it.
+    await EvalRunRecord.collection.dropIndex('evalruns_running_lease').catch(() => undefined);
+    // Two stranded rows could only coexist while the lease was unenforced.
+    await EvalRunRecord.insertMany([
+      { startedAt: new Date(Date.now() - STALE_EVAL_RUNNING_MS - 1000), status: 'running' },
+      { startedAt: new Date(Date.now() - STALE_EVAL_RUNNING_MS - 2000), status: 'running' },
+    ]);
+    await reclaimStaleEvalRuns();
+    expect(await EvalRunRecord.countDocuments({ status: 'running' })).toBe(0);
+    await EvalRunRecord.create({ startedAt: new Date(), status: 'running' });
+    await expect(
+      EvalRunRecord.create({ startedAt: new Date(), status: 'running' }),
+    ).rejects.toMatchObject({ code: 11000 });
+  });
 });

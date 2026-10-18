@@ -201,10 +201,14 @@ export const runEvalSuite = async (
       const connector = connectors[provider];
       const thrown: { testCase: EvalCase; error: unknown }[] = [];
       let graded = 0;
+      let capped = false;
       for (const testCase of CASES) {
         // Suite wall-clock cap: stop once the budget is spent.
         const remainingMs = EVAL_SUITE_CAP_MS - (Date.now() - suiteStart);
-        if (remainingMs <= 0) break;
+        if (remainingMs <= 0) {
+          capped = true;
+          break;
+        }
         const caseMs = Math.min(EVAL_CASE_TIMEOUT_MS, remainingMs);
         const assertions = resolveAssertions(testCase, readRepoFile);
         try {
@@ -238,6 +242,12 @@ export const runEvalSuite = async (
         results.push({ testCase, model, provider, score: crashScore, report });
         deps.onCase?.({ provider, model, caseId: testCase.id, score: crashScore, report });
       }
+      // A capped run must not look like a complete one. @see #394
+      if (capped)
+        console.error(
+          `eval suite: wall-clock cap spent; remaining cases on ` +
+            `${provider}:${model} and any later models are skipped`,
+        );
     }
   } finally {
     if (!options.keepFixtures) await clearSource();
@@ -409,14 +419,16 @@ export const resolveScheduledModels = (
   }
   const fallback = defaultEvalRef();
   const provider = (evals.provider as WiredProvider) || fallback.provider;
-  return [
-    {
-      // Model+provider resolve as one unit: the model default is the fixed
-      // model hosted by the chosen provider, never another backend's id.
-      // @see #394
-      provider,
-      model:
-        evals.model ?? sweepModels().find((m) => m.provider === provider)?.model ?? fallback.model,
-    },
-  ];
+  if (evals.model) return [{ provider, model: evals.model }];
+  // Model+provider resolve as one unit: with no explicit model, the provider
+  // must host a fixed model or the config is an error — never a silent
+  // cross-backend model id. @see #394
+  const known = sweepModels().find((m) => m.provider === provider);
+  if (!known) {
+    throw new EvalConfigError(
+      `Provider '${provider}' hosts no fixed eval model ` +
+        '(CHAT_MODEL/TASK_MODEL backends); set TOVA_EVAL_MODEL explicitly.',
+    );
+  }
+  return [{ provider, model: known.model }];
 };
