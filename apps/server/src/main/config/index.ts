@@ -45,7 +45,7 @@ export const config = {
     get secret(): string | undefined {
       return process.env.DO_SPACES_SECRET;
     },
-    get region(): string {
+    get region(): string | undefined {
       return process.env.DO_SPACES_REGION || 'lon1';
     },
   },
@@ -224,7 +224,9 @@ export const config = {
       const parsed = raw === undefined || raw === '' ? NaN : Number(raw);
       // Floor before the positivity guard: 0.5 must degrade, not become 0.
       const floored = Math.floor(parsed);
-      return Number.isFinite(parsed) && floored > 0 ? floored : 25;
+      // 150: deep tasks (codebase investigations) pause at 25 far too early;
+      // the cost cap remains the real runaway fuse.
+      return Number.isFinite(parsed) && floored > 0 ? floored : 150;
     },
     get maxCostUsd(): number {
       const raw = process.env.TASK_MAX_COST_USD;
