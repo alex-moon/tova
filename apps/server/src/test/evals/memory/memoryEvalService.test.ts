@@ -82,7 +82,7 @@ describe('runRetrievalEval (#289)', () => {
         realId = 'real-1';
         return { 'seed-a': realId };
       },
-      retrieve: async () => [slice(realId)],
+      retrieve: async () => ({ slices: [slice(realId)] }),
     });
     expect(cleared).toBe(2); // once before the scenario, once at teardown
     expect(results[0].surfaced).toBe(true);
@@ -94,10 +94,26 @@ describe('runRetrievalEval (#289)', () => {
       scenarios: [scenario, { ...scenario, id: 's2', expectSurfaced: false }],
       clear: async () => {},
       seed: async () => ({ 'seed-a': 'real-1' }),
-      retrieve: async () => [],
+      retrieve: async () => ({ slices: [] }),
     });
     expect(results[0]).toMatchObject({ pass: false, surfaced: false, expected: true });
     expect(results[1]).toMatchObject({ pass: true, surfaced: false, expected: false });
+  });
+
+  it('derives cutEmpty from the returned diagnostics, not a side channel (#394)', async () => {
+    let calls = 0;
+    const { results } = await runRetrievalEval({
+      scenarios: [scenario, { ...scenario, id: 's2' }],
+      clear: async () => {},
+      seed: async () => ({ 'seed-a': 'real-1' }),
+      retrieve: async () => {
+        calls += 1;
+        // s1: no candidates; s2: candidates existed but none survived the cut.
+        return calls === 1 ? { slices: [] } : { slices: [], candidateCount: 3 };
+      },
+    });
+    expect(results[0].cutEmpty).toBe(false);
+    expect(results[1].cutEmpty).toBe(true);
   });
 
   it('clears fixtures in a finally when retrieve throws (T14e)', async () => {
@@ -113,7 +129,7 @@ describe('runRetrievalEval (#289)', () => {
         retrieve: async () => {
           calls += 1;
           if (calls === 2) throw new Error('mongo down');
-          return [slice('real-1')];
+          return { slices: [slice('real-1')] };
         },
       }),
     ).rejects.toThrow('mongo down');
@@ -161,6 +177,34 @@ describe('pushMemoryCorpusToLangSmith (#289)', () => {
     // The shared corpus carries the same per-subtype split the metrics report.
     expect(outputs[0]).toMatchObject({ refersBack: true, subtype: 'explicit' });
   });
+
+  it('replaces existing examples so re-runs cannot grow the dataset (#394)', async () => {
+    const deleted: string[] = [];
+    let created = 0;
+    const client = {
+      hasDataset: jest.fn().mockResolvedValue(true),
+      createDataset: jest.fn(),
+      createExample: jest.fn(async () => {
+        created += 1;
+        return { id: `new-${created}` };
+      }),
+      listExamples: jest.fn(async function* () {
+        for (const id of ['old-1', 'old-2']) yield { id };
+      }) as unknown,
+      deleteExample: jest.fn(async (id: string) => {
+        deleted.push(id);
+      }),
+    } as unknown as Client;
+
+    await pushMemoryCorpusToLangSmith(
+      client,
+      [],
+      [{ id: 'g1', prompt: 'p', refersBack: true, subtype: 'explicit' }],
+    );
+
+    expect(deleted).toEqual(['old-1', 'old-2']);
+    expect(created).toBe(1);
+  });
 });
 
 describe('memoryCorpusHash (#289 T6/D15)', () => {
@@ -182,7 +226,12 @@ describe('memoryCorpusHash (#289 T6/D15)', () => {
 describe('runMemoryEvals stage selector (#289 T6, #310)', () => {
   it('runs only the requested stages', async () => {
     const retrievalOnly = await runMemoryEvals(
-      { scenarios: [], clear: async () => {}, seed: async () => ({}), retrieve: async () => [] },
+      {
+        scenarios: [],
+        clear: async () => {},
+        seed: async () => ({}),
+        retrieve: async () => ({ slices: [] }),
+      },
       ['retrieval'],
     );
     expect(retrievalOnly.retrieval?.metrics.total).toBe(0);

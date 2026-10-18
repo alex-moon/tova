@@ -9,6 +9,7 @@ import {
 import { config } from '../../config';
 import { evalUserId } from '../mongoSource';
 import { MEMORY_SCENARIOS } from './corpus';
+import { defaultEmbedUser } from './memoryEvalService';
 import { clearMemoryCorpus, seedMemoryScenario, type SeedIdMap } from './memorySource';
 import type { MemoryScenario, ScenarioCategory } from './types';
 import { z } from 'zod';
@@ -142,6 +143,8 @@ export interface HelpfulnessDeps {
   seed?: (scenario: MemoryScenario) => Promise<SeedIdMap>;
   clear?: () => Promise<void>;
   retrieve?: (query: string, userId: string) => Promise<WorkspaceSlice[]>;
+  /** Embeds the seeded corpus between seed and retrieve; off = BM25-only. */
+  embed?: (userId: string) => Promise<void>;
   /** Answer `query` with `block` injected; `''` is the counterfactual arm. */
   respond?: (query: string, block: string) => Promise<RespondResult>;
   /** Return the better answer (`'A'`/`'B'`) or `'tie'` for one pair. */
@@ -227,6 +230,7 @@ export const runHelpfulnessEval = async (
   const seed = deps.seed ?? seedMemoryScenario;
   const clear = deps.clear ?? clearMemoryCorpus;
   const retrieve = deps.retrieve ?? retrieveWorkspaceSlices;
+  const embed = deps.embed ?? defaultEmbedUser;
   const respond = deps.respond ?? defaultRespond;
   const judge = deps.judge ?? defaultJudge;
   const pace = deps.pace ?? defaultPace;
@@ -236,6 +240,13 @@ export const runHelpfulnessEval = async (
     for (const scenario of scenarios) {
       await clear();
       const idMap = await seed(scenario);
+      // Embed the freshly seeded corpus: without this the with/without arms
+      // are graded against a silently degraded BM25-only retriever. @see #394
+      try {
+        await embed(evalUserId.toHexString());
+      } catch (err) {
+        console.error('Memory eval embedding degraded to BM25:', err);
+      }
       const picks = await retrieve(scenario.query, evalUserId.toHexString());
       const expectedId = idMap[scenario.expectedSliceId];
       const blockCarriesId = expectedId !== undefined && picks.some((p) => p.id === expectedId);

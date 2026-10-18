@@ -111,6 +111,14 @@ export const pushToLangSmith = async (client: Client, results: EvalResult[]): Pr
   }
 };
 
+/* Model+provider config errors: the caller can fix them, unlike a crash. */
+export class EvalConfigError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'EvalConfigError';
+  }
+}
+
 /* `--models` csv: `<provider>:<model>` or bare model; null when absent. */
 // @see #94
 export const parseModelsFlag = (
@@ -138,7 +146,7 @@ export const parseModelsFlag = (
       const sep = entry.indexOf(':');
       if (sep === -1) return { provider: 'deepinfra' as const, model: entry };
       if (!(entry.slice(0, sep) in connectorsByProvider)) {
-        throw new Error(
+        throw new EvalConfigError(
           `Unknown provider in --models '${entry}' (wired: deepinfra, fireworks, groq).`,
         );
       }
@@ -148,6 +156,12 @@ export const parseModelsFlag = (
 
 const resolveAssertionResults = (assertions: AssertionResult[]): string =>
   assertions.map((r) => `${JSON.stringify(r.assertion.type)}=${r.passed ? 'y' : 'n'}`).join(' ');
+
+/* One hung stream must not wedge the suite; the cap stays under the
+ * scheduler's 2 h stale-lease reclaim so a capped run can never race it. */
+// @see #394
+export const EVAL_CASE_TIMEOUT_MS = 5 * 60 * 1000;
+export const EVAL_SUITE_CAP_MS = 90 * 60 * 1000;
 
 export interface EvalSuiteOptions {
   models: { provider: WiredProvider; model: string }[];
@@ -180,12 +194,18 @@ export const runEvalSuite = async (
   const readRepoFile = deps.readRepoFile ?? defaultReadRepoFile;
 
   const results: EvalResult[] = [];
-  const sweep = options.models.length > 1;
+  const suiteStart = Date.now();
   await seedSource();
   try {
     for (const { provider, model } of options.models) {
       const connector = connectors[provider];
+      const thrown: { testCase: EvalCase; error: unknown }[] = [];
+      let graded = 0;
       for (const testCase of CASES) {
+        // Suite wall-clock cap: stop once the budget is spent.
+        const remainingMs = EVAL_SUITE_CAP_MS - (Date.now() - suiteStart);
+        if (remainingMs <= 0) break;
+        const caseMs = Math.min(EVAL_CASE_TIMEOUT_MS, remainingMs);
         const assertions = resolveAssertions(testCase, readRepoFile);
         try {
           const { run, evidence } = await runCaseFn(
@@ -196,6 +216,7 @@ export const runEvalSuite = async (
               messages: [{ role: 'user', content: testCase.prompt }],
               userId: evalUserId.toHexString(),
               trace: { sessionId: `tova-evals-${testCase.id}` },
+              abortSignal: AbortSignal.timeout(caseMs),
             },
             testCase,
           );
@@ -203,12 +224,19 @@ export const runEvalSuite = async (
           const report = resolveAssertionResults(assertionResults);
           results.push({ testCase, model, provider, score, report: `${report}\n${evidence}` });
           deps.onCase?.({ provider, model, caseId: testCase.id, score, report, evidence });
+          graded += 1;
         } catch (error) {
-          const report = `ungraded: ${error instanceof Error ? error.message : String(error)}`;
-          const score: EvalScore = sweep ? 'error' : 'fail';
-          results.push({ testCase, model, provider, score, report });
-          deps.onCase?.({ provider, model, caseId: testCase.id, score, report });
+          thrown.push({ testCase, error });
         }
+      }
+      // A crash with nothing graded is a run-level provider failure, not N
+      // graded fails; a lone throw beside passing cases is case-level.
+      // @see #394
+      const crashScore: EvalScore = graded > 0 ? 'fail' : 'error';
+      for (const { testCase, error } of thrown) {
+        const report = `ungraded: ${error instanceof Error ? error.message : String(error)}`;
+        results.push({ testCase, model, provider, score: crashScore, report });
+        deps.onCase?.({ provider, model, caseId: testCase.id, score: crashScore, report });
       }
     }
   } finally {
@@ -253,16 +281,16 @@ export class EvalRunBusyError extends Error {
   }
 }
 
-const MAX_STORED_ERROR_CHARS = 500;
-
-type EvalRunDeps = EvalSuiteDeps & {
+export const MAX_STORED_ERROR_CHARS = 500;
+/** Lease seams shared by both suite runners; the memory runner adds `run`. */
+export interface EvalLeaseDeps {
   createRecord?: typeof EvalRunRecord.create;
   findRunning?: () => Promise<unknown | null>;
   updateRecord?: (id: unknown, update: Record<string, unknown>) => Promise<unknown>;
-};
+}
 
-/** Resolves the injectable seams, defaulting to the real collection. */
-const resolveRunDeps = (deps: EvalRunDeps) => ({
+/** Resolves the injectable lease seams, defaulting to the real collection. */
+export const resolveLeaseDeps = (deps: EvalLeaseDeps) => ({
   createRecord: deps.createRecord ?? EvalRunRecord.create.bind(EvalRunRecord),
   findRunning:
     deps.findRunning ?? (() => EvalRunRecord.findOne({ status: 'running' }).lean().exec()),
@@ -270,22 +298,44 @@ const resolveRunDeps = (deps: EvalRunDeps) => ({
     deps.updateRecord ?? ((id, update) => EvalRunRecord.updateOne({ _id: id }, update).exec()),
 });
 
+/* Atomically writes the `running` lease; the unique partial index turns a
+ * concurrent second write into E11000, surfaced as EvalRunBusyError. */
+// @see #394
+export const writeEvalLease = async (
+  doc: Record<string, unknown>,
+  deps: Pick<EvalLeaseDeps, 'createRecord'>,
+): Promise<string> => {
+  try {
+    const createRecord = deps.createRecord ?? EvalRunRecord.create.bind(EvalRunRecord);
+    const record = await createRecord(doc);
+    return String((record as { _id: unknown })._id);
+  } catch (error) {
+    if ((error as { code?: number })?.code === 11000) throw new EvalRunBusyError();
+    throw error;
+  }
+};
+
+/** Suite seams plus the lease seams; what `startEvalRun` accepts. */
+export type EvalRunDeps = EvalSuiteDeps & EvalLeaseDeps;
+
 /* Writes the `running` lease; rejects EvalRunBusyError when one is live. */
-// @see #225
+// @see #225 #394
 export const beginEvalRun = async (
   options: StartEvalRunOptions,
   deps: EvalRunDeps = {},
 ): Promise<string> => {
-  const { createRecord, findRunning } = resolveRunDeps(deps);
+  const { findRunning } = resolveLeaseDeps(deps);
   if (await findRunning()) throw new EvalRunBusyError();
 
   const modelKeys = options.models.map(({ provider, model }) => `${provider}:${model}`);
-  const record = await createRecord({
-    startedAt: new Date(),
-    status: 'running',
-    models: modelKeys,
-  });
-  return String((record as { _id: unknown })._id);
+  return writeEvalLease(
+    {
+      startedAt: new Date(),
+      status: 'running',
+      models: modelKeys,
+    },
+    deps,
+  );
 };
 
 /** Runs the suite for an existing lease, settling to done/error. */
@@ -294,7 +344,7 @@ export const executeEvalRun = async (
   options: StartEvalRunOptions,
   deps: EvalRunDeps = {},
 ): Promise<EvalResult[]> => {
-  const { updateRecord } = resolveRunDeps(deps);
+  const { updateRecord } = resolveLeaseDeps(deps);
   try {
     const results = await runEvalSuite({ models: options.models }, deps);
     await updateRecord(id, {
@@ -351,11 +401,22 @@ export const resolveScheduledModels = (
     const parsed = parseModelsFlag(evals.models);
     if (parsed && parsed.length > 0) return parsed;
   }
+  if (evals.provider && !(evals.provider in connectorsByProvider)) {
+    throw new EvalConfigError(
+      `Unknown provider '${evals.provider}' in the eval provider config ` +
+        `(wired: ${Object.keys(connectorsByProvider).join(', ')}).`,
+    );
+  }
   const fallback = defaultEvalRef();
+  const provider = (evals.provider as WiredProvider) || fallback.provider;
   return [
     {
-      provider: evals.provider === 'groq' ? 'groq' : fallback.provider,
-      model: evals.model ?? fallback.model,
+      // Model+provider resolve as one unit: the model default is the fixed
+      // model hosted by the chosen provider, never another backend's id.
+      // @see #394
+      provider,
+      model:
+        evals.model ?? sweepModels().find((m) => m.provider === provider)?.model ?? fallback.model,
     },
   ];
 };

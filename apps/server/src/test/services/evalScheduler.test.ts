@@ -240,35 +240,37 @@ describe('startEvalScheduler (#225)', () => {
 });
 
 describe('reclaimStaleEvalRuns (#225)', () => {
-  it('settles only stranded running rows older than the window', async () => {
+  // The unique running lease (#394) admits one running row at a time, so
+  // stale/fresh coexistence is no longer expressible.
+  it('settles a stranded running row and leaves settled rows alone', async () => {
     const stale = await EvalRunRecord.create({
       startedAt: new Date(Date.now() - STALE_EVAL_RUNNING_MS - 1000),
       status: 'running',
     });
-    const fresh = await EvalRunRecord.create({ startedAt: new Date(), status: 'running' });
     const done = await EvalRunRecord.create({ startedAt: new Date(0), status: 'done' });
 
     const reclaimed = await reclaimStaleEvalRuns();
     expect(reclaimed).toBe(1);
     expect((await EvalRunRecord.findById(stale._id))?.status).toBe('error');
-    expect((await EvalRunRecord.findById(fresh._id))?.status).toBe('running');
     expect((await EvalRunRecord.findById(done._id))?.status).toBe('done');
   });
 
-  it('#289 T8: a kind-scoped sweep reclaims only that kind', async () => {
+  it('leaves a fresh running row alone', async () => {
+    const fresh = await EvalRunRecord.create({ startedAt: new Date(), status: 'running' });
+    expect(await reclaimStaleEvalRuns()).toBe(0);
+    expect((await EvalRunRecord.findById(fresh._id))?.status).toBe('running');
+  });
+
+  it('#289 T8: kind-scoped sweep reclaims only the matching kind', async () => {
     const staleMemory = await EvalRunRecord.create({
       startedAt: new Date(Date.now() - STALE_EVAL_RUNNING_MS - 1000),
       status: 'running',
       kind: 'memory',
     });
-    const staleTool = await EvalRunRecord.create({
-      startedAt: new Date(Date.now() - STALE_EVAL_RUNNING_MS - 1000),
-      status: 'running',
-      kind: 'tool-use',
-    });
 
+    expect(await reclaimStaleEvalRuns(STALE_EVAL_RUNNING_MS, 'tool-use')).toBe(0);
+    expect((await EvalRunRecord.findById(staleMemory._id))?.status).toBe('running');
     expect(await reclaimStaleEvalRuns(STALE_EVAL_RUNNING_MS, 'memory')).toBe(1);
     expect((await EvalRunRecord.findById(staleMemory._id))?.status).toBe('error');
-    expect((await EvalRunRecord.findById(staleTool._id))?.status).toBe('running');
   });
 });
