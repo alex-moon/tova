@@ -125,16 +125,26 @@ jobs:
         if: needs.changed.outputs.client == 'true'
         run: npm run build:client
 
-  # Security scans are a deploy gate (main pushes only), not a merge gate.
-  # @see #141
-  gitleaks:
+  # Security scans (gitleaks, semgrep, npm-audit, osv-scanner) as one deploy gate on main pushes.
+  # One runner instead of four: shared checkout and npm ci, tools run sequentially.
+  # Not nightly: these gate deploys — a nightly-only scan would let a bad commit deploy before it's caught.
+  # @see #141, #257, #32
+  scans:
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v4
         with:
+          # Full history for gitleaks; harmless overhead for the other tools.
           fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
 
       # Direct CLI, not gitleaks-action: its v2 flow needs API calls this repo can't satisfy.
       - name: Detect secrets in full git history
@@ -142,15 +152,7 @@ jobs:
           curl -sSfL https://github.com/gitleaks/gitleaks/releases/download/v8.24.3/gitleaks_8.24.3_linux_x64.tar.gz | tar -xz
           ./gitleaks detect --source . --redact --no-banner
 
-  # Semgrep runs via login + docker run: container images pull before any step can authenticate.
-  # @see #257
-  semgrep:
-    if: github.event_name == 'push'
-    runs-on: ubuntu-latest
-
-    steps:
-      - uses: actions/checkout@v4
-
+      # Semgrep runs via login + docker run: container images pull before any step can authenticate.
       - name: Log in to Docker Hub
         env:
           DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
@@ -165,33 +167,12 @@ jobs:
           docker run --rm -v "$PWD:/src" -w /src semgrep/semgrep \
             semgrep --config p/default --error --metrics=off apps/server/src/main
 
-  npm-audit:
-    if: github.event_name == 'push'
-    runs-on: ubuntu-latest
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-
-      - run: npm ci
-
       # better-npm-audit honours the .nsprc allowlist (npm audit has no ignore mechanism).
       - name: Audit production dependencies
         run: npm run audit
 
-  # osv-scanner over the lockfile: self-contained alternative to dependency-review-action (needs GH Advanced Security).
-  # @see #32
-  osv-scanner:
-    if: github.event_name == 'push'
-    runs-on: ubuntu-latest
-    # Image is scratch-based (no shell), so run it directly via docker.
-    steps:
-      - uses: actions/checkout@v4
-
+      # osv-scanner over the lockfile: self-contained alternative to dependency-review-action (needs GH Advanced Security).
+      # Image is scratch-based (no shell), so run it directly via docker.
       - name: Scan package-lock.json for known vulnerabilities
         run: docker run --rm -v "$PWD:/repo" ghcr.io/google/osv-scanner:latest --lockfile=/repo/package-lock.json
 
@@ -199,7 +180,7 @@ jobs:
   # e2e is not in this gate: it moved to e2e-nightly.yml (nightly schedule + manual dispatch).
   # @see #141
   ci-gate:
-    needs: [ci, gitleaks, semgrep, npm-audit, osv-scanner]
+    needs: [ci, scans]
     if: always()
     runs-on: ubuntu-latest
 
@@ -209,7 +190,7 @@ jobs:
           event="${{ github.event_name }}"
           if [[ "$event" == "push" ]]; then
             # On push to main, deploy follows this run: every guard must pass.
-            for status in "${{ needs.ci.result }}" "${{ needs.gitleaks.result }}" "${{ needs.semgrep.result }}" "${{ needs.npm-audit.result }}" "${{ needs.osv-scanner.result }}"; do
+            for status in "${{ needs.ci.result }}" "${{ needs.scans.result }}"; do
               if [[ "$status" != "success" ]]; then
                 echo "guard status: $status"
                 exit 1
