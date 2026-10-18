@@ -71,9 +71,20 @@ router.post('/', authenticate, async (req: AuthRequest, res) => {
     return res.status(400).json({ message: parsed.error.issues[0]?.message ?? 'Invalid payload' });
   }
   const { name, url } = parsed.data;
-  // A pasted value may include the scheme; wrap exactly one Bearer.
+  const rawToken = parsed.data.authToken?.trim();
+  // A pasted value may include the scheme or the whole header; wrap exactly one Bearer.
   // @see #403
-  const authToken = parsed.data.authToken?.trim().replace(/^bearer\s+/i, '');
+  const authToken = rawToken
+    ?.replace(/^authorization:\s*/i, '')
+    .replace(/^bearer(?=\s|$)/i, '')
+    .trim();
+  // A scheme-only paste strips to nothing; say so instead of probing with a bad header.
+  // @see #403
+  if (rawToken && !authToken) {
+    return res
+      .status(400)
+      .json({ message: 'Paste the key only — the Bearer scheme alone is not a key.' });
+  }
   const headers = authToken ? { Authorization: `Bearer ${authToken}` } : undefined;
   try {
     let tools;

@@ -221,6 +221,46 @@ describe('POST /api/connectors (issues #36, #329)', () => {
     }
   });
 
+  it('strips a pasted whole Authorization header so the header wraps once (#403)', async () => {
+    // The provider docs show `Authorization: Bearer YOUR_KEY` — the natural
+    // copy-paste is the whole line, not just the value.
+    // @see #403
+    const { app, cookie } = await registerUser('conn-full-header@example.com');
+    for (const [i, pasted] of [
+      'Authorization: Bearer ttd_abc123',
+      'authorization: bearer ttd_abc123',
+    ].entries()) {
+      const res = await request(app)
+        .post('/api/connectors')
+        .set('Cookie', cookie)
+        .send({
+          type: 'mcp.pat',
+          name: 'pasted-header',
+          url: `https://full-header-${i}.example.com/mcp`,
+          authToken: pasted,
+        });
+      expect(res.status).toBe(201);
+      expect(mockListMcpTools).toHaveBeenCalledWith(`https://full-header-${i}.example.com/mcp`, {
+        Authorization: 'Bearer ttd_abc123',
+      });
+    }
+  });
+
+  it('rejects a scheme-only paste instead of silently connecting keyless (#403)', async () => {
+    const { app, cookie } = await registerUser('conn-scheme-only@example.com');
+    for (const pasted of ['Bearer', 'Bearer   ']) {
+      const res = await request(app).post('/api/connectors').set('Cookie', cookie).send({
+        type: 'mcp.pat',
+        name: 'scheme-only',
+        url: 'https://scheme-only.example.com/mcp',
+        authToken: pasted,
+      });
+      expect(res.status).toBe(400);
+      expect(res.body.message).toMatch(/key only/iu);
+    }
+    expect(mockListMcpTools).not.toHaveBeenCalled();
+  });
+
   it('stores the header value encrypted at rest and not in plaintext form', async () => {
     const { app, cookie } = await registerUser('conn-enc@example.com');
     const res = await request(app).post('/api/connectors').set('Cookie', cookie).send({

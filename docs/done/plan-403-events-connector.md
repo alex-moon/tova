@@ -33,6 +33,19 @@
 - Verified non-issues: letter-tile fallback (exercised by Slack), e2e count pins (none), grid
   ordering (catalog order), trailing-slash normalization, modal's token-required gate.
 
+## Break/harden round (pre-ready)
+
+- **Whole-header paste still trapped:** the first strip only removed a bare `bearer ` scheme, so the
+  docs' literal `Authorization: Bearer YOUR_KEY` paste still wrapped to
+  `Bearer Authorization: Bearer …` → 401 → the same unhelpful 422. The ingest now also strips an
+  `authorization:` prefix (case-insensitive) before the scheme strip; pinned by route tests.
+- **Scheme-only paste probe:** `Bearer`/`Bearer   ` trimmed to a bare scheme the scheme regex
+  (requiring trailing whitespace) never removed, so the probe ran with `Bearer Bearer`. The strip
+  now uses an end-or-whitespace lookahead and a scheme-only paste is rejected 400 ("paste the key
+  only") instead of probing a knowingly-bad header; pinned by route test. Tokenless custom-add
+  connects stay allowed — the 400 fires only when a paste strips to nothing.
+- **Boundary safety:** `bearerly-key`-style tokens are untouched (lookahead, not a bare match).
+
 ## Follow-ups
 
 - None yet.
