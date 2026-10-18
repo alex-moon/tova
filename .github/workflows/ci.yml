@@ -6,6 +6,11 @@ on:
   pull_request:
     branches: [main]
 
+# Superseded runs (e.g. follow-up agent commits racing the previous CI) cancel in flight.
+concurrency:
+  group: ci-${{ github.event.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   # Detect which areas a PR touched so the ci job runs only affected gates; push runs get the full gate.
   # @see #141
@@ -17,7 +22,6 @@ jobs:
       client: ${{ steps.detect.outputs.client }}
       deps: ${{ steps.detect.outputs.deps }}
       tooling: ${{ steps.detect.outputs.tooling }}
-      e2e: ${{ steps.detect.outputs.e2e }}
 
     steps:
       - uses: actions/checkout@v4
@@ -30,7 +34,7 @@ jobs:
         run: |
           if [[ "${{ github.event_name }}" != "pull_request" ]]; then
             # Push to main: no staging, full gate.
-            echo "server=true client=true deps=true tooling=true e2e=true" |
+            echo "server=true client=true deps=true tooling=true" |
               tr ' ' '\n' >> "$GITHUB_OUTPUT"
             exit 0
           fi
@@ -39,7 +43,7 @@ jobs:
 
           if [[ ! -s /tmp/changed-files.txt ]]; then
             # Empty diff (race between dispatch and merge-base): full gate.
-            echo "server=true client=true deps=true tooling=true e2e=true" |
+            echo "server=true client=true deps=true tooling=true" |
               tr ' ' '\n' >> "$GITHUB_OUTPUT"
             exit 0
           fi
@@ -49,16 +53,8 @@ jobs:
           client=false
           deps=false
           tooling=false
-          e2e=false
 
           while IFS= read -r file; do
-            # e2e is default-on: it runs unless every changed path is provably inert for the dev stack.
-            # @see #288
-            case "$file" in
-              docs/*|*.md|.opencode/*|Dockerfile) ;;
-              *) e2e=true ;;
-            esac
-
             case "$file" in
               apps/server/*|apps/shared/*|apps/migrations/*|Dockerfile)
                 server=true ;;
@@ -86,7 +82,6 @@ jobs:
           echo "client=$client" >> "$GITHUB_OUTPUT"
           echo "deps=$deps" >> "$GITHUB_OUTPUT"
           echo "tooling=$tooling" >> "$GITHUB_OUTPUT"
-          echo "e2e=$e2e" >> "$GITHUB_OUTPUT"
 
   ci:
     runs-on: ubuntu-latest
@@ -129,89 +124,6 @@ jobs:
       - name: Client build
         if: needs.changed.outputs.client == 'true'
         run: npm run build:client
-
-  # Responsive e2e gate: mobile+desktop Playwright must pass; Mongo runs via docker run because service images pull before auth.
-  # @see #220 #288 #141 #257
-  e2e:
-    runs-on: ubuntu-latest
-    needs: changed
-    if: needs.changed.outputs.e2e == 'true'
-
-    env:
-      MONGODB_HOST: localhost
-      MONGODB_PASSWORD: tova
-      E2E_BASE_URL: http://localhost:5173
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-
-      - run: npm ci
-
-      - name: Install Playwright browsers
-        run: npx playwright install --with-deps chromium
-
-      # Direct CLI docker login (no third-party actions); skipped when secrets are unset.
-      - name: Log in to Docker Hub
-        env:
-          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
-          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
-        run: |
-          if [[ -n "$DOCKERHUB_USERNAME" && -n "$DOCKERHUB_TOKEN" ]]; then
-            printf '%s' "$DOCKERHUB_TOKEN" | docker login -u "$DOCKERHUB_USERNAME" --password-stdin
-          fi
-
-      - name: Start fixture Mongo
-        run: |
-          docker run -d --name mongodb -p 27017:27017 \
-            -e MONGO_INITDB_ROOT_USERNAME=tova \
-            -e MONGO_INITDB_ROOT_PASSWORD=tova \
-            mongo:latest
-          for i in $(seq 1 30); do
-            if (exec 3<>/dev/tcp/127.0.0.1/27017) 2>/dev/null; then
-              exec 3>&- 3<&-
-              echo "mongo is up"
-              exit 0
-            fi
-            sleep 2
-          done
-          echo "mongo did not come up" >&2
-          exit 1
-
-      - name: Migrate and set the test fixture password
-        run: |
-          npm run db:migrate
-          npm run db:password
-
-      - name: Start the dev stack
-        run: |
-          npm run dev &
-          for i in $(seq 1 60); do
-            if curl -sf http://localhost:5173 >/dev/null && curl -sf http://localhost:5000/api/health >/dev/null; then
-              echo "stack is up"
-              exit 0
-            fi
-            sleep 2
-          done
-          echo "dev stack failed to come up" >&2
-          exit 1
-
-      - name: Responsive e2e suite
-        run: npm run test:e2e
-
-      - name: Upload Playwright report on failure
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: playwright-report
-          path: |
-            playwright-report/
-            test-results/
-          retention-days: 5
 
   # Security scans are a deploy gate (main pushes only), not a merge gate.
   # @see #141
@@ -284,8 +196,10 @@ jobs:
         run: docker run --rm -v "$PWD:/repo" ghcr.io/google/osv-scanner:latest --lockfile=/repo/package-lock.json
 
   # Gate always runs and fails unless every guard succeeded — a cancelled workflow_run must never look successful.
+  # e2e is not in this gate: it moved to e2e-nightly.yml (nightly schedule + manual dispatch).
+  # @see #141
   ci-gate:
-    needs: [ci, e2e, gitleaks, semgrep, npm-audit, osv-scanner]
+    needs: [ci, gitleaks, semgrep, npm-audit, osv-scanner]
     if: always()
     runs-on: ubuntu-latest
 
@@ -295,22 +209,17 @@ jobs:
           event="${{ github.event_name }}"
           if [[ "$event" == "push" ]]; then
             # On push to main, deploy follows this run: every guard must pass.
-            for status in "${{ needs.ci.result }}" "${{ needs.e2e.result }}" "${{ needs.gitleaks.result }}" "${{ needs.semgrep.result }}" "${{ needs.npm-audit.result }}" "${{ needs.osv-scanner.result }}"; do
+            for status in "${{ needs.ci.result }}" "${{ needs.gitleaks.result }}" "${{ needs.semgrep.result }}" "${{ needs.npm-audit.result }}" "${{ needs.osv-scanner.result }}"; do
               if [[ "$status" != "success" ]]; then
                 echo "guard status: $status"
                 exit 1
               fi
             done
           else
-            # PR runs: scans are a deploy gate only; e2e skipped only for provably-inert PRs.
-            # @see #141 #288
+            # PR runs: scans are a deploy gate only.
+            # @see #141
             if [[ "${{ needs.ci.result }}" != "success" ]]; then
               echo "ci result: ${{ needs.ci.result }}"
-              exit 1
-            fi
-            e2e="${{ needs.e2e.result }}"
-            if [[ "$e2e" != "success" && "$e2e" != "skipped" ]]; then
-              echo "e2e result: $e2e"
               exit 1
             fi
           fi
