@@ -533,7 +533,7 @@ export const rerankAndCut = async (
 
 export interface RankedWithCut {
   ranked: WorkspaceSlice[];
-  /** Fused candidates the reranker graded (#305: ≤ ~12). */
+  /** Graded window size (≤ RERANK_MAX_CANDIDATES); degradation grades nothing. */
   candidateCount: number;
   /** Candidates the cut removed — all of them is the graceful-refusal path. */
   cutCount: number;

@@ -394,6 +394,34 @@ describe('workspaceRetrievalService', () => {
       expect(block).toContain('AX-4471');
     });
 
+    it('does not retrieve a seed older than the newest-500 window (#393)', async () => {
+      // The #293 unbounded read is deliberately a newest-500 window now; pin
+      // the boundary so widening or shifting it is a conscious change.
+      const userId = String(new Types.ObjectId());
+      const session = await Session.create({ userId, title: 'Old policy' });
+      await Message.create({
+        sessionId: session._id,
+        role: 'user',
+        content: 'my travel insurance policy number is AX-4471',
+        timestamp: new Date('2026-01-05T10:00:00.000Z'),
+      });
+      const filler = await Session.create({ userId, title: 'Filler' });
+      await Message.insertMany(
+        Array.from({ length: 500 }, (_, i) => ({
+          sessionId: filler._id,
+          role: 'user',
+          content: `Filler turn ${i}: unrelated notes about the weather and lunch.`,
+          timestamp: new Date(Date.parse('2026-09-30T10:00:00.000Z') + i * 1000),
+        })),
+      );
+
+      const block = await retrieveWorkspaceBlock(
+        'what is my travel insurance policy number',
+        userId,
+      );
+      expect(block).not.toContain('AX-4471');
+    });
+
     it('excludes the just-saved current turn from the corpus', async () => {
       const userId = String(new Types.ObjectId());
       const session = await Session.create({ userId, title: 'Move' });
@@ -842,6 +870,10 @@ describe('workspaceRetrievalService', () => {
   // The post-retrieval relevance bar: pure via the injectable rerank.
   // @see #305
   describe('rerankAndCut (#305)', () => {
+    afterEach(() => {
+      delete process.env.WORKSPACE_MEMORY_ENABLED;
+    });
+
     it('cuts candidates below the threshold and orders the rest by relevance', async () => {
       const a = slice({ id: 'a', text: 'budget' });
       const b = slice({ id: 'b', text: 'move budget' });

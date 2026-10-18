@@ -72,11 +72,13 @@ export const enqueueWorkspaceEmbedding = (input: EmbedWorkspaceSliceInput): void
     inFlightEmbeds.set(input.userId, set);
   }
   set.add(pending);
-  void pending.finally(() => {
+  // Both paths, so a future rejection can never surface as unhandled.
+  const cleanup = () => {
     const current = inFlightEmbeds.get(input.userId);
     current?.delete(pending);
     if (current && current.size === 0) inFlightEmbeds.delete(input.userId);
-  });
+  };
+  void pending.then(cleanup, cleanup);
 };
 
 /* Await every in-flight ingest for a user; the purge drains around the sweep. */

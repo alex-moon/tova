@@ -243,6 +243,8 @@ describe('purgeAllUserData (issue #143: factory reset)', () => {
 
     try {
       const purgePromise = purgeAllUserData(owner);
+      // Handler from the start: an early rejection must not surface unhandled.
+      purgePromise.catch(() => undefined);
       // Pre-reads settle well within this wait; the purge then blocks in the
       // drain on the still-closed gate.
       await new Promise((resolve) => setTimeout(resolve, 50));
@@ -252,6 +254,7 @@ describe('purgeAllUserData (issue #143: factory reset)', () => {
       // the drain, this upsert would land after the sweep and survive.
       expect(await WorkspaceEmbedding.countDocuments({ userId: owner })).toBe(0);
     } finally {
+      release();
       delete process.env.WORKSPACE_MEMORY_ENABLED;
     }
   });

@@ -184,9 +184,12 @@ describe('workspaceEmbeddingIngest (#294)', () => {
     const drain = drainUserEmbeddings(userId).then(() => {
       drained = true;
     });
-    await new Promise((resolve) => setImmediate(resolve));
-    expect(drained).toBe(false);
-    release();
+    try {
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(drained).toBe(false);
+    } finally {
+      release();
+    }
     await drain;
     expect(drained).toBe(true);
     expect(await WorkspaceEmbedding.countDocuments({ sourceId: 'drain-1' })).toBe(1);

@@ -75,4 +75,13 @@ corpus size onto per-turn cost.
 
 ## Follow-ups
 
-- None yet.
+- A dim change re-embeds rows, but `ensureVectorIndex` never recreates the Atlas
+  index, so `numDimensions` stays at the old value and the vector path degrades to
+  BM25 until the index is deleted and recreated. Index lifecycle is infra, not app
+  code — flagged here so a dim change is known to need the manual step.
+- The purge's race closure is airtight for embeds enqueued up to the second drain's
+  snapshot. An enqueue landing after that snapshot but before the final deleteMany
+  can still write after it; that content is a live post-reset message (not leaked
+  PII), matching the documented out-of-scope stance. Closing it fully would need a
+  purge tombstone checked at write time, which drops the embedding for content that
+  survives — judged worse than the residual window.
