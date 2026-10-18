@@ -1267,6 +1267,9 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
         routingResult.model,
         redactForLog(err),
       );
+      // The user turn is already persisted: failed turns still adopt their
+      // session, or a client retry mints a duplicate. @see #391
+      if (streamSessionId) sendEvent('meta', { sessionId: streamSessionId });
       sendEvent('error', { message: streamingErrorMessage(err) });
       sendEvent('done', { complete: false });
       await cleanupEphemeralAsset(attachedAsset);

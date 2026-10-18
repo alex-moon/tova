@@ -38,6 +38,11 @@ handlers duplicate is gone with the roster).
   `meta.routing` could name a provider that never served the turn. The race resolves at the
   winner's first chunk, which stays buffered until consumption — so meta still precedes
   every delta.
+- **Failed races still deliver `meta` (hardening review)**: with meta now post-race, a
+  failed race would leave the client without the sessionId — but the user turn is already
+  persisted by then, so a client retry would mint a duplicate session. The stream error
+  path emits a sessionId-only meta (no routing: naming a provider that never served would
+  be the very lie this PR removes) before the error frame. Test-pinned.
 - **SSE keep-alive**: a comment-frame ping (`: ping\n\n`) every 15s starts before each
   race attempt and is cleared when it resolves, covering the silent header-to-first-token
   window (and honesty retries). SSE comments are ignored by parsers.
@@ -60,7 +65,13 @@ handlers duplicate is gone with the roster).
 - [x] `appendAssetBlock` string guard
 - [x] SSE `meta` after the race
 - [x] SSE ping keep-alive until first chunk
+- [x] Failed-race `meta` (sessionId adoption) + test
 - [x] `npm run ci` green
+
+## Notes
+
+- The legacy non-streaming endpoint's 500 body also omits the sessionId on a failed turn —
+  pre-existing on main, no consumer reads it; left as-is.
 
 ## Follow-ups
 
