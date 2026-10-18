@@ -128,6 +128,18 @@ describe('Safe Link Service', () => {
       });
       expect(global.fetch).toHaveBeenCalledTimes(1);
     });
+
+    it('normalizes credentials and fragment out of the cache key (#397)', async () => {
+      (global.fetch as jest.Mock).mockResolvedValue(emptyResponse());
+      await checkUrl('https://user:secret@keyed.example.com/a#frag');
+      // Same resource without credentials/fragment must hit the cache — the
+      // secret must not become part of a stored (or logged) key.
+      await expect(checkUrl('https://keyed.example.com/a')).resolves.toMatchObject({
+        safe: true,
+        source: 'cache',
+      });
+      expect(global.fetch).toHaveBeenCalledTimes(1);
+    });
   });
 
   describe('cache degradation (Mongo failure must not green-light a flagged URL)', () => {

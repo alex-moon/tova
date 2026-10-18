@@ -85,6 +85,54 @@ export interface ConnectorOAuthProbe {
 const PRIVATE_HOST =
   /^(localhost|127\.|10\.|192\.168\.|169\.254\.|172\.(1[6-9]|2\d|3[01])\.|\[::1\])/i;
 
+// Literal checks close what the name regex misses (0.0.0.0, IPv6 forms the
+// URL parser canonicalizes, e.g. [::ffff:7f00:1] reaching loopback). Hostname
+// inputs are WHATWG-canonical, so v4 is dotted and v6 hex hextets.
+// @see #397
+const blockedIpv4 = (hostname: string): boolean => {
+  const octets = hostname.split('.');
+  if (octets.length !== 4) return false;
+  const n = octets.map((o) => Number(o));
+  if (n.some((v) => !Number.isInteger(v) || v < 0 || v > 255)) return false;
+  const [a, b] = n;
+  return (
+    a === 0 ||
+    a === 10 ||
+    a === 127 ||
+    (a === 100 && b >= 64 && b <= 127) ||
+    (a === 169 && b === 254) ||
+    (a === 172 && b >= 16 && b <= 31) ||
+    (a === 192 && b === 168)
+  );
+};
+
+const ipv6Hextets = (hostname: string): number[] | null => {
+  if (!hostname.startsWith('[') || !hostname.endsWith(']')) return null;
+  const halves = hostname.slice(1, -1).split('::');
+  if (halves.length > 2) return null;
+  const head = halves[0] === '' ? [] : halves[0].split(':');
+  const tail = halves.length === 2 && halves[1] !== '' ? halves[1].split(':') : [];
+  if (halves.length === 1 ? head.length !== 8 : head.length + tail.length > 7) return null;
+  const groups = [...head, ...Array<string>(8 - head.length - tail.length).fill('0'), ...tail];
+  const values = groups.map((g) => (/^[0-9A-Fa-f]{1,4}$/.test(g) ? Number.parseInt(g, 16) : NaN));
+  return values.some(Number.isNaN) ? null : values;
+};
+
+const blockedIpv6 = (hostname: string): boolean => {
+  const g = ipv6Hextets(hostname);
+  if (!g) return false;
+  if (g.every((h) => h === 0)) return true; // ::
+  if (g[0] === 1 && g.slice(1).every((h) => h === 0)) return true; // ::1
+  if ((g[0] & 0xfe00) === 0xfc00) return true; // fc00::/7 ULA
+  if ((g[0] & 0xffc0) === 0xfe80) return true; // fe80::/10 link-local
+  // v4-mapped ::ffff:x.x.x.x: judge the embedded v4 the same as a literal.
+  if (g[0] === 0 && g[1] === 0 && g[2] === 0 && g[3] === 0 && g[4] === 0 && g[5] === 0xffff) {
+    const v4 = `${(g[6] >> 8) & 0xff}.${g[6] & 0xff}.${(g[7] >> 8) & 0xff}.${g[7] & 0xff}`;
+    return blockedIpv4(v4);
+  }
+  return false;
+};
+
 export const assertPublicHttpsUrl = (raw: string | URL, what: string): URL => {
   let parsed: URL;
   try {
@@ -92,7 +140,14 @@ export const assertPublicHttpsUrl = (raw: string | URL, what: string): URL => {
   } catch {
     throw new ConnectorOAuthError(`The ${what} is not a valid URL.`, 422);
   }
-  if (parsed.protocol !== 'https:' || PRIVATE_HOST.test(parsed.hostname)) {
+  if (parsed.protocol !== 'https:') {
+    throw new ConnectorOAuthError(`The ${what} must be a public https URL.`, 422);
+  }
+  if (
+    PRIVATE_HOST.test(parsed.hostname) ||
+    blockedIpv4(parsed.hostname) ||
+    blockedIpv6(parsed.hostname)
+  ) {
     throw new ConnectorOAuthError(`The ${what} must be a public https URL.`, 422);
   }
   return parsed;

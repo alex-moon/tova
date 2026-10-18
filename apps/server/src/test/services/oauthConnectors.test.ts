@@ -2,6 +2,7 @@ import type { ConnectorDocument } from '../../main/models/Connector';
 import { Connector } from '../../main/models/Connector';
 import { MCP_ENCRYPTION_KEY_ENV_VAR } from '../../main/services/crypto';
 import {
+  assertPublicHttpsUrl,
   clearOauthStateForTests,
   completeConnectorOAuth,
   ConnectorOAuthError,
@@ -67,6 +68,58 @@ beforeEach(() => {
     refresh_token: 'rt-2',
     expires_in: 3600,
     token_type: 'Bearer',
+  });
+});
+
+describe('assertPublicHttpsUrl literal hardening (#397)', () => {
+  it('blocks 0.0.0.0 and IPv6 loopback/ULA/link-local/unspecified literals', () => {
+    // 0.0.0.0 connects to localhost on Linux; the old name-regex let it pass.
+    for (const bad of [
+      'https://0.0.0.0/revoke',
+      'https://0.1.2.3/revoke',
+      'https://[::1]/revoke',
+      'https://[::]/revoke',
+      'https://[fe80::1]/revoke',
+      'https://[fc00::1]/revoke',
+      'https://[fd00::1]/revoke',
+      // v4-mapped loopback, canonicalized by the URL parser.
+      'https://[::ffff:7f00:1]/revoke',
+      'https://[::ffff:0a00:1]/revoke',
+      // Integer v4 forms canonicalize to loopback and are blocked too.
+      'https://2130706433/revoke',
+      'https://0x7f.0.0.1/revoke',
+    ]) {
+      expect(() => assertPublicHttpsUrl(bad, 'endpoint')).toThrow(/public https/u);
+    }
+  });
+
+  it('keeps the pre-existing name-regex blocks intact', () => {
+    for (const bad of [
+      'https://localhost/revoke',
+      'https://localhost.evil.com/revoke',
+      'https://10.1.2.3/revoke',
+      'https://192.168.1.1/revoke',
+      'https://169.254.169.254/revoke',
+      'https://172.16.0.1/revoke',
+      'http://as.example.com/revoke',
+    ]) {
+      expect(() => assertPublicHttpsUrl(bad, 'endpoint')).toThrow(/public https/u);
+    }
+  });
+
+  it('still admits public hostnames and v4 literals, canonical or not', () => {
+    for (const ok of [
+      'https://as.example.com/revoke',
+      'https://11.22.33.44/revoke',
+      'https://172.32.0.1/revoke',
+      'https://100.200.100.200/revoke',
+      // WHATWG canonicalizes hex/octal/integer v4 before we ever see it —
+      // 8.8.8.8 as an integer stays public.
+      'https://134744073/revoke',
+      'https://[2001:db8::1]/revoke',
+    ]) {
+      expect(assertPublicHttpsUrl(ok, 'endpoint').protocol).toBe('https:');
+    }
   });
 });
 

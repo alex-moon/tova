@@ -9,6 +9,7 @@ import {
   resolveScheduledModels,
 } from '../services/evalRunService';
 import { config } from '../config';
+import { redactForLog } from '../services/logRedaction';
 
 const router = express.Router();
 
@@ -32,7 +33,8 @@ router.get('/evals/runs', ...adminGuard, async (req, res) => {
     const rawLimit = Number(req.query.limit);
     const runs = await listEvalRuns(Number.isInteger(rawLimit) ? rawLimit : undefined);
     res.json({ runs });
-  } catch {
+  } catch (err) {
+    console.error('List eval runs failed:', redactForLog(err));
     res.status(500).json({ message: 'Failed to list eval runs' });
   }
 });
@@ -45,7 +47,8 @@ router.get('/evals/runs/:id', ...adminGuard, async (req, res) => {
     const run = await getEvalRun(id);
     if (!run) return res.status(404).json({ message: 'Run not found' });
     res.json(run);
-  } catch {
+  } catch (err) {
+    console.error('Fetch eval run failed:', redactForLog(err));
     res.status(500).json({ message: 'Failed to fetch eval run' });
   }
 });

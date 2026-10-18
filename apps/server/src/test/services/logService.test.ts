@@ -95,4 +95,21 @@ describe('logService', () => {
     expect(entry.msg).not.toContain('sk-abcdefghijklmnop1234');
     expect(entry.msg).toContain('[redacted]');
   });
+
+  it('redacts before the 2000-char cut so a split token cannot leak (#397)', () => {
+    const prev = process.env.NODE_ENV;
+    process.env.NODE_ENV = 'development';
+    attachConsoleCapture();
+    try {
+      // The quoted secret straddles the MAX_MSG_LENGTH boundary: truncating
+      // first would leave an unmatchable half-token for the redactor.
+      console.error(`${'a'.repeat(1990)} "secretvalue1234567890" trailer`);
+    } finally {
+      process.env.NODE_ENV = prev;
+      detachConsoleCapture();
+    }
+    const [entry] = (ErrorLog.create as jest.Mock).mock.calls[0];
+    expect(entry.msg.length).toBeLessThanOrEqual(2000);
+    expect(entry.msg).not.toContain('secretvalue');
+  });
 });

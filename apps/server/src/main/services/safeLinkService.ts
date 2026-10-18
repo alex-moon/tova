@@ -66,9 +66,14 @@ const callThreatMatches = async (url: string, apiKey: string): Promise<string[]>
 const cacheKey = (url: string): string | null => {
   try {
     // Full-URL key: a host-level verdict would green-light unrelated paths.
+    // Credentials and fragment are stripped — they'd otherwise ride into the
+    // stored key (and the failure logs) without changing the verdict.
     // @see #397
     const parsed = new URL(url);
     if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null;
+    parsed.username = '';
+    parsed.password = '';
+    parsed.hash = '';
     return parsed.toString();
   } catch {
     return null;

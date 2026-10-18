@@ -61,6 +61,30 @@ smaller hardening gaps.
 - [x] 17. Loki over-fetch when filters present; slice post-filter.
 - [x] `npm run ci` green.
 
+## Hardening round (pre-review break/harden pass)
+
+Attack round on the draft found and fixed:
+
+- **SSRF literal bypass in `assertPublicHttpsUrl`**: the name-regex missed
+  `0.0.0.0` (connects to loopback on Linux) and IPv6 forms the URL parser
+  canonicalizes (`[::ffff:7f00:1]` = v4-mapped loopback, `[fe80::1]`,
+  `[fc00::1]`, `[::]`) — each could receive the bearer token despite item 1.
+  Structured v4/v6 literal checks added behind the regex (which is kept for
+  its name-shaped over-blocks); canonical integer/hex v4 was already safe.
+- **Cache schema rename shipped without a migration**: prod rows keyed by
+  `host` make the unique `url` index un-creatable (multiple `url: null`) and
+  the stale unique `host_1` index E11000s every url-era upsert after the
+  first. Migration `20261018120000-safelink-cache-per-url` drops the
+  collection (24h-TTL cache, refills organically).
+- **ErrorLog redaction ran after the 2000-char cut**: a secret straddling
+  the boundary truncated into an unmatchable half-token. Redact first, then
+  truncate.
+- **Safe Browsing cache key kept credentials and fragment**: embedded
+  `user:pass@` rode into stored rows and failure logs. Stripped pre-key.
+- **adminEvals catches swallowed errors silently**: now logged redacted.
+
 ## Follow-ups
 
 - HKDF + rotation path for `MCP_ENCRYPTION_KEY` (item 13 remainder) — candidate new issue.
+- Hostname-based SSRF checks cannot stop DNS rebinding (attacker A record →
+  loopback); complete fix is resolve-and-pin at connect time — candidate new issue.
