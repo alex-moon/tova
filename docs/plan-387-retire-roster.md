@@ -82,6 +82,18 @@ diagnostics only. Tasks get a lean tool-use system prompt and
   cast error-row test for a retired id.
 - **Task step latency (TTFT-equivalent) logged, not persisted** — the task path
   is non-streaming, so the logged wall-clock step time is the diagnostic.
+- **Review hardening: the completion race aborts losers** (draft-PR review).
+  `raceRosterCompletion` failed over sequentially, so the parallel
+  `raceChatCompletion` silently changed semantics: a losing completion ran the
+  full agent loop to resolution in the background — duplicate tool side
+  effects (a second `delegate_task`/`generate_file`) and double token spend.
+  Losers now get per-attempt abort controllers aborted on the win, mirroring
+  the stream race; an all-fail surface prefers an actionable provider error
+  over a client abort (`isClientAbort`), as the old race did.
+- **Coverage hole from the draft: `chatRace` had no direct tests** (the route
+  suites mock the race). New `chatRace.test.ts` pins winner-claim, loser
+  self-abort, loser abort on stream end, empty-stream fall-through, client
+  abort propagation, and the all-fail error pick — stream and completion.
 
 ## Done
 
@@ -94,11 +106,13 @@ diagnostics only. Tasks get a lean tool-use system prompt and
 - [x] `roster` manage command dies; eval sweep over deduped backend pairs
 - [x] Migration drops `modelrosters` (down re-seeds the two rows)
 - [x] Retired roster env vars; client tests rewritten; `npm run ci` green; e2e 60/60
+- [x] Draft review: completion race aborts losers; chatRace test suite; docs/env drift fixed
 
 ## Verification
 
 - `npm run ci` green locally; reworked tests: chat routes (5 files mock the
   race), taskSequencer, evalRunService, modelConfigService, traceStatsCost,
   sessionCostService, admin, manageCommands; deleted: racingService,
-  rosterConfig, migrationSeed drift tests; new: chatRace tests.
+  rosterConfig, migrationSeed drift tests; new: `chatRace.test.ts` (the race
+  mechanics, direct).
 - Playwright phone-viewport check of the reworked admin Models tab.

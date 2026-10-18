@@ -1,4 +1,5 @@
 import { inferenceService } from './inferenceService';
+import { isClientAbort } from './modelFailover';
 import { CHAT_MODEL, chatBackends, contextLengthFor } from './modelDefaults';
 import type {
   CompletionOptions,
@@ -114,6 +115,10 @@ const firstWin = (
   });
 };
 
+/* All backends failed: surface the actionable error, not a client abort. */
+const actionableError = (errors: unknown[]): unknown =>
+  errors.find((e) => !isClientAbort(e)) ?? errors[0];
+
 const routingFor = (provider: LlmProvider, reason: string): FixedRoutingResult => ({
   model: CHAT_MODEL,
   provider,
@@ -168,7 +173,7 @@ const raceStream = async (
     const errors = settled
       .filter((r): r is Extract<FirstResult, { kind: 'failed' }> => r.kind === 'failed')
       .map((r) => r.error);
-    throw errors[0] ?? new Error('All chat backends failed');
+    throw actionableError(errors) ?? new Error('All chat backends failed');
   }
   // Abort losers when the winner's stream completes; don't outlive the turn.
   const loserControllers = controllers.filter((_, i) => backends[i].provider !== winner.provider);
@@ -228,13 +233,19 @@ const raceCompletion = async (
   const start =
     deps.startCompletion ?? ((o: CompletionOptions) => inferenceService.createCompletion(o));
 
-  // First resolver wins; slower ones settle in the background, ignored.
-  const attempts = backends.map(async ({ provider, modelId }): Promise<CompletionAttempt> => {
+  const clientSignal = options.abortSignal;
+  // First resolver wins; losers are aborted so they stop burning tokens
+  // (a racing completion runs the same agent loop, tools included).
+  const controllers = backends.map(() => new AbortController());
+  const attempts = backends.map(async ({ provider, modelId }, i): Promise<CompletionAttempt> => {
+    const perCall = controllers[i];
     try {
+      const signal = clientSignal ? combineSignals(clientSignal, perCall.signal) : perCall.signal;
       const completion = await start({
         ...options,
         provider,
         model: modelId,
+        abortSignal: signal,
         trace: raceTrace(options.trace, provider),
       });
       return { provider, completion };
@@ -244,13 +255,15 @@ const raceCompletion = async (
   });
   const won = await firstCompletionWin(attempts);
   if (won) {
+    const loserControllers = controllers.filter((_, i) => backends[i].provider !== won.provider);
+    for (const controller of loserControllers) controller.abort();
     return { routing: routingFor(won.provider, 'fixed-model'), completion: won.completion };
   }
   const settled = await Promise.all(attempts);
   const failures = settled
     .filter((r): r is Extract<CompletionAttempt, { failed: unknown }> => 'failed' in r)
     .map((r) => r.failed);
-  throw failures[0] ?? new Error('All chat backends failed');
+  throw actionableError(failures) ?? new Error('All chat backends failed');
 };
 
 /* Metadata-only route so callers can name the model before the race. */

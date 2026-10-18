@@ -162,7 +162,7 @@ export interface AdminLangsmithModelStats {
   totalTokens: number;
   inputTokens: number;
   outputTokens: number;
-  // Estimated USD spend from the roster price; null (unknown) ≠ $0.
+  // Estimated USD spend from the static price table; null (unknown) ≠ $0.
   // @see #224 #235 #199 #237
   estimatedCostUsd: number | null;
 }

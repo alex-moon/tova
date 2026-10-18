@@ -134,7 +134,7 @@ const answerText = (body: {
 
 export const probeImageToolsCommand: ManageCommand = {
   description:
-    '#318 probe: image-in-tool-message vs image-in-user-message wire matrix (both roster providers)',
+    '#318 probe: image-in-tool-message vs image-in-user-message wire matrix (the chat backends)',
   run: async () => {
     const uniqueFiles = [
       ...new Map(PROBE_CASES.map((c): [string, string] => [c.fixture[0], c.fixture[1]])).entries(),
