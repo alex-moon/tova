@@ -1,5 +1,5 @@
 import type { UserDocument } from '../models/User';
-import { buildUserEnvelope } from './attachmentEnvelope';
+import { buildUserEnvelope, escapeEnvelopeBreakers } from './attachmentEnvelope';
 
 // Global fallback prompt; single home next to the resolution logic.
 // Knowledge paragraphs are operational rewrites; voice stays verbatim.
@@ -108,10 +108,12 @@ const WORKSPACE_INTRO =
   'with what they already worked on; it may be stale or superseded, so do not assert ' +
   'it as fact if the current chat contradicts it, and never read it back verbatim.';
 
-const workspaceBlock = (block: string | null | undefined): string => {
+/* Tag-first envelope (intro inside); body escapes forged closers. */
+// @see #392
+const taggedBlock = (tag: string, intro: string, block: string | null | undefined): string => {
   const trimmed = block?.trim();
   if (!trimmed) return '';
-  return ['<user:workspace>', WORKSPACE_INTRO, '', trimmed, '</user:workspace>'].join('\n');
+  return [`<${tag}>`, intro, '', escapeEnvelopeBreakers(trimmed), `</${tag}>`].join('\n');
 };
 
 /* Completed background tasks for the next turn; caller drains and marks. */
@@ -120,12 +122,6 @@ const TASK_COMPLETION_INTRO =
   'One or more background tasks the user started have finished since the last ' +
   'message. Tell the user briefly what finished and the key result; do not repeat ' +
   'the task’s full output.';
-
-const taskCompletionBlock = (block: string | null | undefined): string => {
-  const trimmed = block?.trim();
-  if (!trimmed) return '';
-  return ['<task:completed>', TASK_COMPLETION_INTRO, '', trimmed, '</task:completed>'].join('\n');
-};
 
 /* Per-message timestamp header: stamp plus elapsed gap; pure. */
 // @see #261
@@ -249,8 +245,8 @@ export const buildSystemContent = (
     includeDate ? `Today's date is ${clockIn(now, timezone).date} (${zoneLabel}).` : '',
     timezoneContextLine(timezone),
     profileContextBlock(user),
-    workspaceBlock(workspaceMemoryBlock),
-    taskCompletionBlock(taskCompletion),
+    taggedBlock('user:workspace', WORKSPACE_INTRO, workspaceMemoryBlock),
+    taggedBlock('task:completed', TASK_COMPLETION_INTRO, taskCompletion),
     customInstructionsBlock(user?.settings ?? null),
   ].filter(Boolean);
   return parts.join('\n\n');
