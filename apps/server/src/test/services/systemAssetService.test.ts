@@ -6,6 +6,7 @@ import {
   findFreshScrape,
 } from '../../main/services/systemAssetService';
 import { sanitizeFilename } from '../../main/services/assetLimits';
+import { MAX_MARKDOWN_CHARS } from '../../main/services/markdownConversion';
 
 jest.mock('../../main/services/storageService', () => ({
   putObject: jest.fn(),
@@ -225,10 +226,23 @@ describe('findFreshScrape (#340)', () => {
     expect(await findFreshScrape(userId, URL)).toBeNull();
   });
 
-  it('returns null when the TTL is disabled (no cache horizon)', async () => {
+  it('reuses regardless of age when the TTL is disabled (0 = no expiry, #396)', async () => {
     process.env.AGENT_ASSET_TTL_DAYS = '0';
     const userId = oid();
     await createSystemSideAsset(userId, 'page.md', MARKDOWN, undefined, URL);
-    expect(await findFreshScrape(userId, URL)).toBeNull();
+    await Asset.collection.updateOne(
+      { userId: new mongoose.Types.ObjectId(userId) },
+      { $set: { createdAt: new Date(Date.now() - 400 * DAY_MS) } },
+    );
+    expect(await findFreshScrape(userId, URL)).toMatchObject({ filename: 'page.md' });
+  });
+
+  it('caps agent-side markdown at the shared store cap (#396)', async () => {
+    const huge = `${'# headline\n\nbody\n'.repeat(50_000)}tail-marker`;
+    const saved = await createSystemSideAsset(oid(), 'huge.md', huge);
+    expect(saved).not.toBeNull();
+    const asset = await Asset.findOne({ origin: 'system-side', filename: 'huge.md' });
+    expect(asset?.textExtracted?.length).toBeLessThanOrEqual(MAX_MARKDOWN_CHARS);
+    expect(asset?.textExtracted).not.toContain('tail-marker');
   });
 });

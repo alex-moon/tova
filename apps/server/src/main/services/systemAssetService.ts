@@ -1,7 +1,8 @@
 import { Asset } from '../models/Asset';
 import type { AssetProvenance } from '../models/Asset';
 import { spacesWorkspaceStorage } from './workspaceStorage';
-import { MAX_ASSET_SIZE, sanitizeFilename } from './assetLimits';
+import { MAX_ASSET_SIZE, isSafeFilename, sanitizeFilename } from './assetLimits';
+import { MAX_MARKDOWN_CHARS } from './markdownConversion';
 import { enqueueWorkspaceEmbedding } from './workspaceEmbeddingIngest';
 import { config } from '../config';
 
@@ -40,7 +41,7 @@ export const createSystemAsset = async (
   }
 
   const safeName = sanitizeFilename(filename);
-  if (!safeName) {
+  if (!isSafeFilename(safeName)) {
     return fail('invalid', 'Generated filename is invalid');
   }
 
@@ -99,19 +100,22 @@ export const createSystemSideAsset = async (
   provenance?: AssetProvenance,
   sourceUrl?: string,
 ): Promise<{ fileId: string; filename: string } | null> => {
-  if (!markdown.trim()) return null;
+  // Store-time cap shared with every markdownExtracted producer.
+  // @see #396
+  const text = markdown.slice(0, MAX_MARKDOWN_CHARS);
+  if (!text.trim()) return null;
   const safeName = sanitizeFilename(filename);
-  if (!safeName) return null;
+  if (!isSafeFilename(safeName)) return null;
   const ttlDays = config.agentAssets.ttlDays;
   const asset = await Asset.create({
     userId,
     filename: safeName,
     key: 'pending',
     contentType: 'text/markdown',
-    size: Buffer.byteLength(markdown, 'utf8'),
+    size: Buffer.byteLength(text, 'utf8'),
     status: 'ready',
     origin: 'system-side',
-    textExtracted: markdown,
+    textExtracted: text,
     // Native TTL; 0 days disables expiry (field stays absent).
     // @see #340
     ...(ttlDays > 0 ? { expiresAt: new Date(Date.now() + ttlDays * 24 * 60 * 60 * 1000) } : {}),
@@ -125,19 +129,21 @@ export const createSystemSideAsset = async (
 };
 
 // Reuse a fresh agent-side copy instead of re-scraping; exact match.
-// @see #340
+// ttlDays 0 means no expiry: any age is reusable, matching the write side.
+// @see #340 #396
 export const findFreshScrape = async (
   userId: string,
   sourceUrl: string,
 ): Promise<{ fileId: string; filename: string; content: string } | null> => {
   const ttlDays = config.agentAssets.ttlDays;
-  if (!ttlDays) return null;
   const row = await Asset.findOne({
     userId,
     origin: 'system-side',
     status: 'ready',
     sourceUrl,
-    createdAt: { $gte: new Date(Date.now() - ttlDays * 24 * 60 * 60 * 1000) },
+    ...(ttlDays > 0
+      ? { createdAt: { $gte: new Date(Date.now() - ttlDays * 24 * 60 * 60 * 1000) } }
+      : {}),
   });
   if (!row?.textExtracted) return null;
   return { fileId: String(row._id), filename: row.filename, content: row.textExtracted };

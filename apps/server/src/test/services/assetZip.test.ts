@@ -17,6 +17,11 @@ describe('sanitizeZipEntryName', () => {
   it('falls back to unnamed.bin for whitespace-only names', () => {
     expect(sanitizeZipEntryName('   ')).toBe('unnamed.bin');
   });
+
+  it('falls back to unnamed.bin for path-relative dot segments (#396)', () => {
+    expect(sanitizeZipEntryName('..')).toBe('unnamed.bin');
+    expect(sanitizeZipEntryName('.')).toBe('unnamed.bin');
+  });
 });
 
 describe('dedupeEntryNames', () => {

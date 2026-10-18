@@ -82,6 +82,8 @@ describe('runAssetJobTick (#67)', () => {
     expect(String(claimedJob?.assetId)).toBe(asset.id);
     const job = await latestJobFor(asset.id);
     expect(job?.status).toBe('done');
+    // Settled jobs are TTL-reclaimed later, not immediately. @see #396
+    expect(job?.expiresAt?.getTime()).toBeGreaterThan(Date.now());
   });
 
   it('requeues a failed attempt under the retry cap and stores lastError', async () => {
@@ -163,8 +165,52 @@ describe('stale `processing` requeue (#67, plan Open Question C)', () => {
     expect(freshJob?.status).toBe('processing');
     const staleJob = await latestJobFor(stale.id);
     expect(staleJob?.status).toBe('pending');
-    // The sweep does not charge an attempt.
-    expect(staleJob?.attempts).toBe(1);
+    // The sweep charges an attempt so poison jobs hit the cap. @see #396
+    expect(staleJob?.attempts).toBe(2);
+    // Requeue rotates the lease away from any frozen twin. @see #396
+    expect(staleJob?.leaseToken).toBeNull();
+  });
+
+  it('terminal-fails stale jobs already at the attempt cap (#396)', async () => {
+    const asset = await createAssetDoc('stale-cap');
+    await enqueueAssetJob(asset.id);
+    const claimed = await claimNextAssetJob();
+    await AssetJob.collection.updateOne(
+      { _id: claimed?._id },
+      {
+        $set: {
+          attempts: MAX_JOB_ATTEMPTS,
+          updatedAt: new Date(Date.now() - STALE_PROCESSING_MS - 1000),
+        },
+      },
+    );
+    expect(await requeueStaleAssetJobs()).toBe(0);
+    const job = await latestJobFor(asset.id);
+    expect(job?.status).toBe('failed');
+    expect(job?.attempts).toBe(MAX_JOB_ATTEMPTS);
+  });
+
+  it('a settled write guarded by a rotated lease modifies nothing (#396)', async () => {
+    const asset = await createAssetDoc('stale-lease');
+    await enqueueAssetJob(asset.id);
+    const claimed = await claimNextAssetJob();
+    const staleLease = claimed?.leaseToken ?? '';
+    await AssetJob.collection.updateOne(
+      { _id: claimed?._id },
+      { $set: { updatedAt: new Date(Date.now() - STALE_PROCESSING_MS - 1000) } },
+    );
+    await requeueStaleAssetJobs();
+    const reclaimed = await claimNextAssetJob();
+    expect(String(reclaimed?._id)).toBe(String(claimed?._id));
+    expect(reclaimed?.leaseToken).not.toBe(staleLease);
+    // The frozen twin's settle (done) misses the rotated lease.
+    const staleSettle = await AssetJob.updateOne(
+      { _id: claimed?._id, leaseToken: staleLease, status: 'processing' },
+      { $set: { status: 'done' } },
+    );
+    expect(staleSettle.modifiedCount).toBe(0);
+    const current = await latestJobFor(asset.id);
+    expect(current?.status).toBe('processing');
   });
 
   it('a stranded processing job self-heals on the next poller start', async () => {

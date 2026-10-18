@@ -174,7 +174,12 @@ describe('OCR job end-to-end (#209)', () => {
     // pdf-parse yields no text for the scanned fixture, so the fallback fires.
     const pageA = pngOf(100, 100);
     const pageB = pngOf(100, 100);
-    mockRasterizePdf.mockResolvedValue({ pages: [pageA, pageB], totalPages: 2 });
+    mockRasterizePdf.mockImplementation(async (_buffer: unknown, onPage: unknown) => {
+      const emit = onPage as (page: Buffer, index: number, total: number) => Promise<void>;
+      await emit(pageA, 0, 2);
+      await emit(pageB, 1, 2);
+      return { totalPages: 2 };
+    });
     mockRecognizeImage
       .mockResolvedValueOnce('Page one words')
       .mockResolvedValueOnce('Page two words');
