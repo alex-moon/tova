@@ -45,6 +45,14 @@ describe('pendingCompletionsFor (#255)', () => {
     });
     expect(await pendingCompletionsFor(UID, 's1')).toEqual([]);
   });
+
+  it('caps the drain so many completions cannot bloat one turn (#395)', async () => {
+    for (const i of [1, 2, 3, 4, 5, 6, 7]) {
+      await makeTask({ origin: { kind: 'chat', sessionId: 's1' }, instruction: `t${i}` });
+    }
+    expect(await pendingCompletionsFor(UID, 's1')).toHaveLength(5);
+    expect(await pendingCompletionsFor(UID, 's1', 2)).toHaveLength(2);
+  });
 });
 
 describe('markNotified (#255)', () => {

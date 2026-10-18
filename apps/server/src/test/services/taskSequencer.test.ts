@@ -7,6 +7,7 @@ import {
   parseStepOutcome,
   renderToolReplay,
   runTaskStep,
+  windowedTaskHistory,
 } from '../../main/services/taskSequencer';
 
 // Sequencer primitives: history reassembly, step parsing, one pinned step.
@@ -72,9 +73,10 @@ describe('assembleTaskHistory (#254)', () => {
       maxSteps: 5,
       maxCostUsd: 5,
     });
+    // No instruction: the placeholder seed occupies seq 0. @see #395
     await TaskEvent.create({
       taskId: task._id,
-      seq: 0,
+      seq: 1,
       role: 'assistant',
       content: '',
       step: 0,
@@ -82,7 +84,10 @@ describe('assembleTaskHistory (#254)', () => {
     });
 
     const messages = assembleTaskHistory(await events(task._id));
-    expect(messages).toEqual([{ role: 'assistant', content: '[tool list_files]' }]);
+    expect(messages).toEqual([
+      { role: 'user', content: '(no instruction provided)' },
+      { role: 'assistant', content: '[tool list_files]' },
+    ]);
   });
 
   it('replays the tool query and result so the next step sees the output (D10)', async () => {
@@ -151,6 +156,41 @@ describe('assembleTaskHistory (#254)', () => {
       content:
         'I\'ll start by finding and reading the draft.\n[tool list_files] → {"files":[{"id":"f1","filename":"draft.md"}]}',
     });
+  });
+});
+
+describe('windowedTaskHistory (#395)', () => {
+  const msg = (role: 'user' | 'assistant', content: string) => ({ role, content });
+
+  it('keeps the anchor and newest while dropping the oldest middle under the char budget', () => {
+    const messages = [
+      msg('user', 'instruction'),
+      msg('assistant', 'a'.repeat(450_000)),
+      msg('user', 'steer'),
+      msg('assistant', 'newest state'),
+    ];
+    const windowed = windowedTaskHistory(messages);
+    expect(windowed.map((m) => m.content)).toEqual(['instruction', 'steer', 'newest state']);
+  });
+
+  it('truncates an over-budget newest and still rides it', () => {
+    const messages = [msg('user', 'instruction'), msg('assistant', 'x'.repeat(400_001))];
+    const windowed = windowedTaskHistory(messages);
+    expect(windowed).toHaveLength(2);
+    expect((windowed[1].content as string).length).toBe(400_000);
+  });
+
+  it('keeps the anchor even when the message cap is full', () => {
+    const messages = [
+      msg('user', 'instruction'),
+      ...Array.from({ length: 300 }, (_, i) => msg('assistant', `step ${i}`)),
+    ];
+    const windowed = windowedTaskHistory(messages);
+    expect(windowed).toHaveLength(200);
+    expect(windowed[0].content).toBe('instruction');
+    // The oldest middle steps are the ones dropped.
+    expect(windowed[1].content).toBe('step 101');
+    expect(windowed.at(-1)?.content).toBe('step 299');
   });
 });
 

@@ -122,6 +122,121 @@ describe('processTaskJob sequencer loop (#254)', () => {
     expect(events.at(-1)?.step).toBe(2);
   });
 
+  it('passes an abort signal to every step (#395)', async () => {
+    await enqueue();
+    const claimed = await claimNextTask();
+    const signals: AbortSignal[] = [];
+    const runStep: TaskStepRunner = jest.fn().mockImplementation(async (_t, _e, opts) => {
+      signals.push(opts!.signal!);
+      return blankStep({ text: 'done' });
+    });
+
+    await makeTaskProcessor(runStep)(claimed!);
+
+    expect(signals).toHaveLength(1);
+    expect(signals[0]).toBeInstanceOf(AbortSignal);
+    expect(signals[0].aborted).toBe(false);
+  });
+
+  it('a frozen twin with a rotated lease exits without stepping or writing (#395)', async () => {
+    const task = await enqueue();
+    const claimed = await claimNextTask();
+    // The sweep requeued and a twin reclaimed, rotating the lease token.
+    await Task.collection.updateOne({ _id: task._id }, { $set: { leaseToken: 'twin-token' } });
+    const runStep: TaskStepRunner = jest.fn();
+
+    await makeTaskProcessor(runStep)(claimed!);
+
+    expect(runStep).not.toHaveBeenCalled();
+    const settled = await Task.findById(task._id);
+    expect(settled?.status).toBe('running');
+    expect(settled?.stepCount).toBe(0);
+    expect(await eventsOf(task._id)).toHaveLength(1);
+  });
+
+  it('does not run a billed step when cancel lands before step start (#395)', async () => {
+    const task = await enqueue();
+    const claimed = await claimNextTask();
+    // Cancel races in during the stream fetch, before the step-start re-check.
+    const realCount = Task.countDocuments.bind(Task);
+    const spy = jest.spyOn(Task, 'countDocuments').mockImplementation((async (
+      ...args: Parameters<typeof realCount>
+    ) => {
+      await Task.updateOne({ _id: claimed!._id }, { $set: { status: 'cancelled' } });
+      return realCount(...args);
+    }) as never);
+    const runStep: TaskStepRunner = jest.fn();
+    try {
+      await makeTaskProcessor(runStep)(claimed!);
+    } finally {
+      spy.mockRestore();
+    }
+
+    expect(runStep).not.toHaveBeenCalled();
+    const settled = await Task.findById(task._id);
+    expect(settled?.status).toBe('cancelled');
+    expect(await eventsOf(task._id)).toHaveLength(1);
+  });
+
+  it('charges reported step usage to the cost budget (#395)', async () => {
+    const task = await enqueue();
+    const claimed = await claimNextTask();
+    const usage = { inputTokens: 1_000_000, outputTokens: 1_000_000 };
+    // DS4.1F on deepinfra is $0.2/$0.6 per 1M: one step costs 0.8.
+    const runStep: TaskStepRunner = jest
+      .fn()
+      .mockResolvedValueOnce(
+        blankStep({ usage, tools: [{ phase: 'result', name: 'r', label: 'r', status: 'ok' }] }),
+      )
+      .mockResolvedValueOnce(blankStep({ text: 'done', usage }));
+
+    await makeTaskProcessor(runStep)(claimed!);
+
+    const settled = await Task.findById(task._id);
+    expect(settled?.status).toBe('done');
+    expect(settled?.budget.spentUsd).toBeCloseTo(1.6);
+  });
+
+  it('pauses at the cost budget with a visible system event (#395)', async () => {
+    const task = await enqueue({ maxCostUsd: 0.5 });
+    const claimed = await claimNextTask();
+    const usage = { inputTokens: 1_000_000, outputTokens: 1_000_000 };
+    const runStep: TaskStepRunner = jest.fn().mockResolvedValue(blankStep({ usage }));
+
+    await makeTaskProcessor(runStep)(claimed!);
+
+    // The first step spent 0.8 of 0.5; the next loop top pauses.
+    expect(runStep).toHaveBeenCalledTimes(1);
+    const settled = await Task.findById(task._id);
+    expect(settled?.status).toBe('paused');
+    expect(settled?.lastError).toMatch(/cost budget/);
+    expect(settled?.budget.spentUsd).toBeCloseTo(0.8);
+    const events = await eventsOf(task._id);
+    expect(events.at(-1)?.role).toBe('system');
+    expect(events.at(-1)?.content).toMatch(/cost budget/i);
+  });
+
+  it('does not charge the budget when usage is unpriced or absent (#395)', async () => {
+    const task = await enqueue();
+    const claimed = await claimNextTask();
+    const runStep: TaskStepRunner = jest.fn().mockResolvedValue(blankStep({ text: 'done' }));
+    // The unpriced model id is never faked into a cost; absent usage neither.
+    (runStep as jest.Mock).mockResolvedValueOnce(
+      blankStep({
+        model: 'unpriced-model',
+        provider: 'deepinfra',
+        usage: { inputTokens: 1, outputTokens: 1 },
+        tools: [{ phase: 'result', name: 'r', label: 'r', status: 'ok' }],
+      }),
+    );
+
+    await makeTaskProcessor(runStep)(claimed!);
+
+    const settled = await Task.findById(task._id);
+    expect(settled?.status).toBe('done');
+    expect(settled?.budget.spentUsd).toBe(0);
+  });
+
   it('feeds queued steering to the next step boundary (D2)', async () => {
     const task = await enqueue();
     const claimed = await claimNextTask();
@@ -219,9 +334,13 @@ describe('processTaskJob sequencer loop (#254)', () => {
 });
 
 describe('appendTaskEvent seq allocation (#254)', () => {
-  it('appends after any existing stream events', async () => {
+  it('appends after the seed event a no-instruction task receives (#395)', async () => {
     const task = await enqueue({ instruction: undefined });
-    await TaskEvent.create({ taskId: task._id, seq: 0, role: 'user', content: 'seed' });
+    // The placeholder seed now occupies seq 0 on an uninstructed task.
+    const seed = await eventsOf(task._id);
+    expect(seed.map((e) => [e.seq, e.role, e.content])).toEqual([
+      [0, 'user', '(no instruction provided)'],
+    ]);
     const { appendTaskEvent } = await import('../../main/services/taskProcessor');
     await appendTaskEvent(task._id, { role: 'system', content: 'note', step: 0 });
     const events = await eventsOf(task._id);
@@ -231,8 +350,8 @@ describe('appendTaskEvent seq allocation (#254)', () => {
   it('retries the seq on a duplicate-key collision from a concurrent writer (D12)', async () => {
     const task = await enqueue({ instruction: undefined });
     const { appendTaskEvent } = await import('../../main/services/taskProcessor');
-    // The pre-existing event the "other writer" landed at seq 0.
-    await TaskEvent.create({ taskId: task._id, seq: 0, role: 'user', content: 'other' });
+    // The pre-existing event the "other writer" landed at seq 1 (seed is 0).
+    await TaskEvent.create({ taskId: task._id, seq: 1, role: 'user', content: 'other' });
     // The first insert collides on the unique index; the retry re-reads seq.
     const realCreate = TaskEvent.create.bind(TaskEvent);
     let thrown = false;
@@ -251,8 +370,9 @@ describe('appendTaskEvent seq allocation (#254)', () => {
     spy.mockRestore();
     const events = await eventsOf(task._id);
     expect(events.map((e) => [e.seq, e.content])).toEqual([
-      [0, 'other'],
-      [1, 'a'],
+      [0, '(no instruction provided)'],
+      [1, 'other'],
+      [2, 'a'],
     ]);
   });
 });

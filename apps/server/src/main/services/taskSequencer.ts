@@ -18,9 +18,13 @@ export interface TaskStepOutcome {
   usage?: NeutralCompletion['usage'];
 }
 
-/* Injectable completion transport (tests). */
-// @see #387
-export interface TaskStepDeps {
+/* Injectable completion transport (tests) plus the per-call abort signal. */
+// @see #387 #395
+export interface TaskStepOpts {
+  signal?: AbortSignal;
+}
+
+export interface TaskStepDeps extends TaskStepOpts {
   startCompletion?: (options: CompletionOptions) => Promise<NeutralCompletion>;
 }
 
@@ -59,7 +63,40 @@ export const assembleTaskHistory = (events: TaskEventDocument[]): CompletionOpti
     }
     // A driver-executed tool row is a future path; skip, don't mis-replay.
   }
-  return messages;
+  return windowedTaskHistory(messages);
+};
+
+/* Replay window, mirroring chat's windowedHistory. @see #395 */
+export const TASK_HISTORY_MAX_MESSAGES = 200;
+export const TASK_HISTORY_MAX_CHARS = 400_000;
+
+/* Newest always rides (truncated when alone over budget); the first message
+   anchors the instruction; the middle fills newest-first. @see #395 */
+export const windowedTaskHistory = (
+  messages: CompletionOptions['messages'],
+): CompletionOptions['messages'] => {
+  if (messages.length === 0) return [];
+  const [anchor, ...rest] = messages;
+  if (rest.length === 0) return [anchor];
+  const newest = rest[rest.length - 1];
+  const newestContent = typeof newest.content === 'string' ? newest.content : '';
+  const kept: CompletionOptions['messages'] =
+    newestContent.length > TASK_HISTORY_MAX_CHARS
+      ? [{ ...newest, content: newestContent.slice(0, TASK_HISTORY_MAX_CHARS) }]
+      : [newest];
+  let used = Math.min(newestContent.length, TASK_HISTORY_MAX_CHARS);
+  for (let i = rest.length - 2; i >= 1; i -= 1) {
+    const content = typeof rest[i].content === 'string' ? rest[i].content : '';
+    if (
+      used + content.length > TASK_HISTORY_MAX_CHARS ||
+      kept.length >= TASK_HISTORY_MAX_MESSAGES - 1
+    ) {
+      break;
+    }
+    used += content.length;
+    kept.unshift(rest[i]);
+  }
+  return [anchor, ...kept];
 };
 
 /* Parse a completed step into its persistable shape (chip-shaped tools). */
@@ -103,6 +140,8 @@ export const runTaskStep = async (
     taskId: String(task._id),
     maxSteps: 1,
     max_tokens: outputTokensFor(contextLengthFor(TASK_MODEL), promptCharsFrom(messages)),
+    // Cancel aborts the in-flight step through the completion layer. @see #395
+    ...(deps.signal ? { abortSignal: deps.signal } : {}),
     trace: { tags: ['task', `task:${String(task._id)}`], metadata: { taskId: String(task._id) } },
   };
   const start =

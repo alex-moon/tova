@@ -68,6 +68,12 @@ describe('POST /api/tasks (#254 routes)', () => {
     expect(res.status).toBe(400);
   });
 
+  it('rejects an empty instruction with 400 (#395)', async () => {
+    const cookie = await registerUser(OWNER);
+    const res = await createTask(cookie, { instruction: '' });
+    expect(res.status).toBe(400);
+  });
+
   it('refuses to create a task for a ZDR account (D7)', async () => {
     const cookie = await registerUser('tasks-zdr@example.com');
     await User.updateOne({ email: 'tasks-zdr@example.com' }, { $set: { settings: { zdr: true } } });

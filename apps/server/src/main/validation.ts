@@ -98,11 +98,12 @@ export const feedbackValueSchema = z.object({
   value: z.enum(['up', 'down'], { message: 'value must be "up" or "down"' }),
 });
 
-// Task creation: `instruction` optional, `origin` a thin reference.
-// @see #254
+// Task creation: `instruction` optional but never empty, `origin` a thin ref.
+// @see #254 #395
 export const taskCreateSchema = z.strictObject({
   instruction: z
     .string({ message: 'instruction must be a string' })
+    .min(1, { message: 'instruction must not be empty' })
     .max(4000, { message: 'instruction must be 4000 characters or fewer' })
     .optional(),
   origin: z
