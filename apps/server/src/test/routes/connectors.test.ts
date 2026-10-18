@@ -204,7 +204,7 @@ describe('POST /api/connectors (issues #36, #329)', () => {
 
   it('strips a pasted Bearer scheme prefix so the header wraps once (#403)', async () => {
     const { app, cookie } = await registerUser('conn-bearer@example.com');
-    for (const [i, pasted] of ['Bearer ttd_abc123', 'bearer ttd_abc123'].entries()) {
+    for (const [i, pasted] of ['Bearer pat_abc123', 'bearer pat_abc123'].entries()) {
       const res = await request(app)
         .post('/api/connectors')
         .set('Cookie', cookie)
@@ -216,7 +216,7 @@ describe('POST /api/connectors (issues #36, #329)', () => {
         });
       expect(res.status).toBe(201);
       expect(mockListMcpTools).toHaveBeenCalledWith(`https://bearer-${i}.example.com/mcp`, {
-        Authorization: 'Bearer ttd_abc123',
+        Authorization: 'Bearer pat_abc123',
       });
     }
   });
@@ -227,8 +227,8 @@ describe('POST /api/connectors (issues #36, #329)', () => {
     // @see #403
     const { app, cookie } = await registerUser('conn-full-header@example.com');
     for (const [i, pasted] of [
-      'Authorization: Bearer ttd_abc123',
-      'authorization: bearer ttd_abc123',
+      'Authorization: Bearer pat_abc123',
+      'authorization: bearer pat_abc123',
     ].entries()) {
       const res = await request(app)
         .post('/api/connectors')
@@ -241,7 +241,7 @@ describe('POST /api/connectors (issues #36, #329)', () => {
         });
       expect(res.status).toBe(201);
       expect(mockListMcpTools).toHaveBeenCalledWith(`https://full-header-${i}.example.com/mcp`, {
-        Authorization: 'Bearer ttd_abc123',
+        Authorization: 'Bearer pat_abc123',
       });
     }
   });

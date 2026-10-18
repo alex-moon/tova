@@ -146,15 +146,4 @@ export const CONNECTOR_CATALOG: CatalogEntry[] = [
     iconRef: 'github',
     instructionsRef: 'github',
   },
-  {
-    id: 'thingstodo',
-    name: 'Things To Do',
-    authType: 'mcp.pat',
-    endpoint: 'https://api.thingstodoapi.com/mcp',
-    summary:
-      'Search local events in plain words — shows, markets, festivals, pop-ups. Bay Area today; more metros coming.',
-    state: 'live',
-    brandColor: '#EF302E',
-    instructionsRef: 'thingstodo',
-  },
 ];

@@ -60,26 +60,6 @@ export const CONNECTOR_INSTRUCTIONS: Record<string, ConnectorInstructions> = {
     scopeNote:
       'Going narrow has a known cost: repositories you do not select — including ones in organizations you belong to — are invisible to the assistant, and tool listings will come back empty for them. If tools seem missing later, widen the repository selection and reconnect.',
   },
-  thingstodo: {
-    intro:
-      'Things To Do’s remote MCP server authenticates with an API key sent as a bearer token; the free tier covers 1,000 calls a month.',
-    steps: [
-      {
-        title: 'Create a free account',
-        body: 'Go to thingstodoapi.com and choose “Get a key”. The free tier needs no card and covers 1,000 calls a month.',
-      },
-      {
-        title: 'Copy your key from the console',
-        body: 'The console shows usage and spend, makes and revokes keys, and can set a monthly spend cap.',
-      },
-      {
-        title: 'Paste it here',
-        body: 'Paste the key only — not a URL or a Bearer header. The key is submitted once, stored encrypted, and never shown again. Disconnecting deletes it.',
-      },
-    ],
-    scopeNote:
-      'Coverage is the San Francisco Bay Area today — New York and Los Angeles are next. Outside coverage the assistant is told to say so plainly rather than guess.',
-  },
 };
 
 // Real content when the ref resolves; undefined falls back to generic copy.
