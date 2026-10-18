@@ -115,7 +115,7 @@ export const runEvalSchedulerTick = async (
       if (await suite.hasRun(now)) continue;
       await suite.run();
     } catch (error) {
-      console.error(`eval scheduler: suite ${suite.kind} failed:`, error);
+      console.error('eval scheduler: suite %s failed:', suite.kind, error);
     }
   }
 };
