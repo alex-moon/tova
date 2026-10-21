@@ -1,14 +1,18 @@
 import 'dotenv/config';
-import type { LlmProvider } from '../apps/server/src/main/services/llmTypes';
-import { runModelComparison } from '../apps/server/src/main/services/modelCompare';
-import { ROSTER_SEED } from '../apps/server/src/main/services/rosterConfig';
+import type { LlmProvider } from '../apps/server/src/main/services/llm/llmTypes';
+import { runModelComparison } from '../apps/server/src/main/services/model/modelCompare';
+import {
+  chatBackends,
+  TASK_MODEL,
+} from '../apps/server/src/main/services/model/modelDefaults';
 
 /* One-off eval: one prompt against several models side by side. */
 // @see #129 #236
 
-const DEFAULT_REFS = ROSTER_SEED.flatMap((model) =>
-  model.providers.map((p) => `${p.provider}/${p.modelId}`),
-);
+const DEFAULT_REFS = [
+  ...chatBackends().map((b) => `${b.provider}/${b.modelId}`),
+  `deepinfra/${TASK_MODEL}`,
+];
 
 interface Args {
   prompt: string;

@@ -23,6 +23,32 @@ mitigation may be warranted regardless of cause.
 - Clip mechanics: `taskSequencer.ts` 2000-char `.slice` splits astral surrogates — real
   for class 1, cannot explain class 2.
 
+## Step 1 findings — incident scan (2026-10-21, formsatz corpus only)
+
+Scan: 502 assistant messages + 178 task events, CJK-range detector
+(`scripts/_strayScan.ts`, working name).
+
+1. **All 35 stray chars belong to `zai-org/GLM-5.3-Flash`.** Zero strays in any other
+   model's cohort (DeepSeek-V4.1-Flash 83 msgs, gpt-oss-120b 40, Qwen2.5-72B 40 — all
+   clean). GLM-5.3-Flash incident rate ≈ 4% of messages; **Oct 19 burst: 5 incidents in
+   18 messages (28%)**.
+2. **The strays are semantic-equivalent substitutions**: 模型 for "model", 多方 for "many
+   parties", 都没 for "haven't", 快要 for "almost", 过程中 for "in the process", 诊断 for
+   "diagnosis", 死神 for "death" (self-corrected in-output: "(sorry — death-honouring)").
+   Class 1 (script strays) and class 2 (English near-misses) are **one mechanism**: a
+   logit near-tie flip landing on a vector-space neighbour — for a multilingual model,
+   the Chinese gloss of the intended word.
+3. **Clip-repair is dead for these incidents**: every stray is a *valid* CJK word in a
+   semantically coherent slot; zero U+FFFD in any stored content.
+4. **Task-event stream (short contexts) is clean** — strays appear only in long-context
+   chat. Points at context length/accumulation, not sampling.
+5. One false positive excluded: deliberate `[内卷/involution](…)` wiki link.
+
+Design consequence: the battery's dirty-clip variant (was C-iii) demotes to a control;
+the dose-response axis becomes **context length / replay accumulation**. The discriminator
+matrix stands: same flip at temp 0 on a bf16 host (Fireworks) = pollution; fp4-only =
+quantisation.
+
 ## Steps
 
 0. **Fix #418-broken script imports** — `scripts/` has no tsconfig coverage; 7 harness

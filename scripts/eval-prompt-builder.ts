@@ -7,21 +7,21 @@ import type {
   CompletionOptions,
   LlmConnector,
   LlmProvider,
-} from '../apps/server/src/main/services/llmTypes';
+} from '../apps/server/src/main/services/llm/llmTypes';
 import {
   deepinfraConnector,
   fireworksConnector,
   groqConnector,
-} from '../apps/server/src/main/services/mastraService';
-import { buildSystemContent } from '../apps/server/src/main/services/promptAssembly';
-import { retrieveWorkspaceBlock } from '../apps/server/src/main/services/workspaceRetrievalService';
-import { classifyAssistantTurn } from '../apps/server/src/main/services/honestyGuardService';
+} from '../apps/server/src/main/services/llm/mastraService';
+import { buildSystemContent } from '../apps/server/src/main/services/llm/promptAssembly';
+import { retrieveWorkspaceBlock } from '../apps/server/src/main/services/workspace/workspaceRetrievalService';
+import { classifyAssistantTurn } from '../apps/server/src/main/services/llm/honestyGuardService';
 import {
   pendingCompletionsFor,
   completionNotificationLine,
-} from '../apps/server/src/main/services/taskNotificationService';
-import { listRoster } from '../apps/server/src/main/services/rosterConfig';
-import { outputTokensFor, promptCharsFrom } from '../apps/server/src/main/services/outputTokenCap';
+} from '../apps/server/src/main/services/task/taskNotificationService';
+import { chatBackends, contextLengthFor } from '../apps/server/src/main/services/model/modelDefaults';
+import { outputTokensFor, promptCharsFrom } from '../apps/server/src/main/services/llm/outputTokenCap';
 import {
   HISTORY_MAX_MESSAGES,
   messagesFromPersistedHistory,
@@ -173,14 +173,12 @@ async function main() {
     content: m.content as string,
   }));
 
-  const rosterRefs = (await listRoster())
-    .flatMap((m) =>
-      m.providers.map((p) => ({
-        provider: p.provider,
-        model: m.modelId,
-        contextLength: m.contextLength,
-      })),
-    )
+  const rosterRefs = chatBackends()
+    .map((b) => ({
+      provider: b.provider,
+      model: b.modelId,
+      contextLength: contextLengthFor(b.modelId),
+    }))
     .filter((r) => MODELS.some((name) => r.model.includes(name)) && r.provider === PROVIDER_FILTER);
   if (rosterRefs.length < MODELS.length)
     throw new Error(`wanted ${MODELS.length} refs, roster offered ${rosterRefs.length}`);

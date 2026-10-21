@@ -1,6 +1,6 @@
 import 'dotenv/config';
 import zlib from 'node:zlib';
-import { deepinfraConnector, groqConnector } from '../apps/server/src/main/services/mastraService';
+import { deepinfraConnector, groqConnector } from '../apps/server/src/main/services/llm/mastraService';
 
 /* Manual smoke: real DeepInfra multimodal turn (text+image data-URI). */
 //   npx tsx scripts/smokeImageTurn.ts [model]
