@@ -14,7 +14,7 @@ export const TASK_PROVIDER: LlmProvider = 'deepinfra';
 
 /* Provider-specific model ids per chat backend; only known defaults map. */
 // @see #232
-const BACKEND_IDS: Record<string, Partial<Record<LlmProvider, string>>> = {
+export const BACKEND_IDS: Record<string, Partial<Record<LlmProvider, string>>> = {
   'zai-org/GLM-5.3-Flash': {
     deepinfra: 'zai-org/GLM-5.3-Flash',
     fireworks: 'accounts/fireworks/models/glm-5p3-flash',
