@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { Task, type TaskDocument } from '../../models/Task';
 import { TaskEvent } from '../../models/TaskEvent';
+import { config } from '../../config';
 import { appendTaskEvent, abortTaskRun } from './taskProcessor';
 import { redactForLog } from '../logRedaction';
 import { clampError } from '../clampError';
@@ -171,8 +172,16 @@ export const steerTask = async (
   });
 
   // Guarded on paused so a concurrent settle is never resurrected.
+  // Resume tops the budget up by one increment: a step pause is a
+  // checkpoint, not a kill; a human spoke, so more work is consented.
   if (current.status === 'paused') {
-    await Task.updateOne({ _id: current._id, status: 'paused' }, { $set: { status: 'queued' } });
+    await Task.updateOne(
+      { _id: current._id, status: 'paused' },
+      {
+        $set: { status: 'queued' },
+        $inc: { 'budget.maxSteps': config.task.maxSteps },
+      },
+    );
   }
 
   // The task may have settled between the read and the append; refuse

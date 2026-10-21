@@ -46,7 +46,7 @@ describe('POST /api/tasks (#254 routes)', () => {
       status: 'queued',
       instruction: 'Summarise the workspace',
       stepCount: 0,
-      budget: { maxSteps: 25, maxCostUsd: 5, spentUsd: 0 },
+      budget: { maxSteps: 150, maxCostUsd: 5, spentUsd: 0 },
     });
 
     const events = await TaskEvent.find({}).sort({ seq: 1 });
