@@ -1,4 +1,4 @@
-import { reviseSessionSubtitle } from '../../../main/services/content/subtitleService';
+import { reviseSessionSubtitle } from '../../../main/services/llm/subtitleService';
 import { muteConsoleError } from '../../muteConsole';
 /* Subtitle revision: tool-free aux call; a failure never clobbers. */
 // @see #359

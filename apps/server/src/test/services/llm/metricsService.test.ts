@@ -1,4 +1,7 @@
-import { classifyPromptDimensions, isTriviallyNeutral } from '../../main/services/metricsService';
+import {
+  classifyPromptDimensions,
+  isTriviallyNeutral,
+} from '../../../main/services/llm/metricsService';
 
 const mockGenerate = jest.fn();
 

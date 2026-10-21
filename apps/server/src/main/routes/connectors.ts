@@ -10,9 +10,9 @@ import {
   zodMessage,
 } from '../validation';
 import { authenticate, AuthRequest } from '../middleware/auth';
-import { encryptEnvelope } from '../services/crypto';
+import { encryptEnvelope } from '../services/connectors/crypto';
 import { redactForLog } from '../services/logRedaction';
-import { listMcpTools } from '../services/connectorService';
+import { listMcpTools } from '../services/connectors/connectorService';
 import {
   ConnectorOAuthError,
   completeConnectorOAuth,
@@ -21,7 +21,7 @@ import {
   readConnectorVault,
   redirectOriginFrom,
   startConnectorOAuth,
-} from '../services/oauthConnectors';
+} from '../services/connectors/oauthConnectors';
 
 const router = express.Router();
 

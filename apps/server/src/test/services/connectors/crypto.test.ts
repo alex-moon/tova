@@ -2,7 +2,7 @@ import {
   decryptEnvelope,
   encryptEnvelope,
   MCP_ENCRYPTION_KEY_ENV_VAR,
-} from '../../main/services/crypto';
+} from '../../../main/services/connectors/crypto';
 
 const setKey = (key: string | undefined) => {
   if (key === undefined) {

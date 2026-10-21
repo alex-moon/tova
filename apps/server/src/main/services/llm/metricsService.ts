@@ -1,5 +1,5 @@
-import { auxCompletion, AUX_INPUT_CHAR_CAP } from './llm/auxCompletion';
-import { Message } from '../models/Message';
+import { auxCompletion, AUX_INPUT_CHAR_CAP } from './auxCompletion';
+import { Message } from '../../models/Message';
 import { computeDeterministicMetrics } from './promptMetrics';
 import { z } from 'zod';
 

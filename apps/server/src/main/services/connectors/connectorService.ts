@@ -5,8 +5,8 @@ import { CallToolResultSchema } from '@modelcontextprotocol/sdk/types.js';
 import { createTool } from '@mastra/core/tools';
 import mongoose from 'mongoose';
 import { z } from 'zod';
-import type { ConnectorDocument } from '../models/Connector';
-import { Connector } from '../models/Connector';
+import type { ConnectorDocument } from '../../models/Connector';
+import { Connector } from '../../models/Connector';
 import { decryptEnvelope } from './crypto';
 import { oauthAuthHeaders } from './oauthConnectors';
 import {
@@ -15,7 +15,7 @@ import {
   reasonFrom,
   toolDegradeReason,
   toolIsFailed,
-} from './llm/toolDegrade';
+} from '../toolDegrade';
 
 /* DB-facing layer over the MCP wire code; dispatches auth per type. */
 // @see #329 #328 #36

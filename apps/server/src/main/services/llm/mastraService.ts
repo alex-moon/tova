@@ -15,14 +15,14 @@ import { Asset } from '../../models/Asset';
 import { User } from '../../models/User';
 import { MAX_PROMPT_TEXT_CHARS, truncateForPrompt } from '../content/textExtraction';
 import { evaluateExpression } from './calculator';
-import { connectorToolsetsForUser } from '../connectorService';
+import { connectorToolsetsForUser } from '../connectors/connectorService';
 import {
   degradedToolError,
   markToolFailed,
   reasonFrom,
   toolDegradeReason,
   toolIsFailed,
-} from './toolDegrade';
+} from '../toolDegrade';
 import {
   CompletionOptions,
   LlmConnector,

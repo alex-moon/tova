@@ -1,10 +1,10 @@
-import { reviewAssistantTurn } from '../../main/services/honestyGuardService';
-import { Message } from '../../main/models/Message';
-import { muteConsoleError } from '../muteConsole';
+import { reviewAssistantTurn } from '../../../main/services/llm/honestyGuardService';
+import { Message } from '../../../main/models/Message';
+import { muteConsoleError } from '../../muteConsole';
 
 const mockCreateToolFree = jest.fn();
 
-jest.mock('../../main/services/llm/inferenceService', () => ({
+jest.mock('../../../main/services/llm/inferenceService', () => ({
   inferenceService: {
     createToolFreeCompletion: (...args: unknown[]) => mockCreateToolFree(...args),
     createStructuredCompletion: (...args: unknown[]) => mockCreateToolFree(...args),

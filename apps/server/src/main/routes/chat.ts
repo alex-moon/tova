@@ -16,20 +16,23 @@ import {
 } from '../services/llm/chatRace';
 import { contextLengthFor, CHAT_MODEL } from '../services/model/modelDefaults';
 import { generateChatTitle } from '../services/llm/titleService';
-import { reviseSessionSubtitle, type SubtitleTurn } from '../services/content/subtitleService';
+import { reviseSessionSubtitle, type SubtitleTurn } from '../services/llm/subtitleService';
 import { hasPermission, ROUTING_PERMISSION } from '../services/userService';
 import { buildSystemContent, timestampHeader } from '../services/llm/promptAssembly';
 import { ensureUserLocation } from '../services/web/geoLocationService';
 import { outputTokensFor, promptCharsFrom } from '../services/llm/outputTokenCap';
 import type { MessageContentPart } from '../services/llm/llmTypes';
-import { classifyAndPersistPromptDimensions, isTriviallyNeutral } from '../services/metricsService';
-import { computeDeterministicMetrics } from '../services/promptMetrics';
+import {
+  classifyAndPersistPromptDimensions,
+  isTriviallyNeutral,
+} from '../services/llm/metricsService';
+import { computeDeterministicMetrics } from '../services/llm/promptMetrics';
 import { generateFollowups } from '../services/llm/followupService';
 import {
   classifyAssistantTurn,
   reviewAssistantTurn,
   type HonestyVerdict,
-} from '../services/honestyGuardService';
+} from '../services/llm/honestyGuardService';
 import { zdrHistorySchema } from '../validation';
 import { redactForLog } from '../services/logRedaction';
 import {

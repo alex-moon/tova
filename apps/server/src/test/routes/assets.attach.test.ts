@@ -5,7 +5,7 @@ import { Message } from '../../main/models/Message';
 import { Session } from '../../main/models/Session';
 import { User } from '../../main/models/User';
 import { Asset } from '../../main/models/Asset';
-import { classifyAndPersistPromptDimensions } from '../../main/services/metricsService';
+import { classifyAndPersistPromptDimensions } from '../../main/services/llm/metricsService';
 
 const mockAgentStream = jest.fn();
 const mockPlainGenerate = jest.fn();
@@ -18,7 +18,7 @@ jest.mock('../../main/services/llm/inferenceService', () => ({
   },
 }));
 
-jest.mock('../../main/services/metricsService', () => ({
+jest.mock('../../main/services/llm/metricsService', () => ({
   classifyAndPersistPromptDimensions: jest.fn().mockResolvedValue(undefined),
   isTriviallyNeutral: (content: string) => content.trim().length === 0,
 }));

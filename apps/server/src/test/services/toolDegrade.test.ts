@@ -1,25 +1,25 @@
 import { RequestContext } from '@mastra/core/request-context';
-import { webSearchTool, fetchUrlTool } from '../../../main/services/llm/mastraService';
+import { webSearchTool, fetchUrlTool } from '../../main/services/llm/mastraService';
 import {
   degradedToolError,
   markToolFailed,
   reasonFrom,
   toolDegradeReason,
   toolIsFailed,
-} from '../../../main/services/llm/toolDegrade';
-import { muteConsoleError } from '../../muteConsole';
+} from '../../main/services/toolDegrade';
+import { muteConsoleError } from '../muteConsole';
 
-jest.mock('../../../main/services/web/webSearchService', () => ({
+jest.mock('../../main/services/web/webSearchService', () => ({
   webSearch: jest.fn(),
 }));
-jest.mock('../../../main/services/web/webFetchService', () => ({
+jest.mock('../../main/services/web/webFetchService', () => ({
   fetchPage: jest.fn(),
   safeSlice: (text: string, max: number) => text.slice(0, max),
   MAX_FETCH_CHARS: 8000,
 }));
 
-import { fetchPage } from '../../../main/services/web/webFetchService';
-import { webSearch } from '../../../main/services/web/webSearchService';
+import { fetchPage } from '../../main/services/web/webFetchService';
+import { webSearch } from '../../main/services/web/webSearchService';
 
 const mockedSearch = webSearch as unknown as jest.Mock;
 const mockedFetch = fetchPage as unknown as jest.Mock;

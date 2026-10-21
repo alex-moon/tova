@@ -18,7 +18,7 @@ jest.mock('../../main/services/llm/inferenceService', () => ({
   },
 }));
 
-jest.mock('../../main/services/metricsService', () => ({
+jest.mock('../../main/services/llm/metricsService', () => ({
   classifyAndPersistPromptDimensions: jest.fn().mockResolvedValue(undefined),
   isTriviallyNeutral: (content: string) => content.trim().length === 0,
 }));

@@ -1,6 +1,6 @@
 import express from 'express';
 import { authenticate, AuthRequest } from '../middleware/auth';
-import { connectorToolsetsForUser } from '../services/connectorService';
+import { connectorToolsetsForUser } from '../services/connectors/connectorService';
 import { config } from '../config';
 
 const router = express.Router();

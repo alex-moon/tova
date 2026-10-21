@@ -8,7 +8,7 @@ import { spacesWorkspaceStorage } from './workspace/workspaceStorage';
 import { purgeUserTraces } from './trace/tracePurge';
 import { Connector } from '../models/Connector';
 import type { ConnectorDocument } from '../models/Connector';
-import { readConnectorVault, assertPublicHttpsUrl } from './oauthConnectors';
+import { readConnectorVault, assertPublicHttpsUrl } from './connectors/oauthConnectors';
 import { drainUserEmbeddings } from './workspace/workspaceEmbeddingIngest';
 
 /* Factory reset: full wipe of every user-owned PII-bearing collection. */

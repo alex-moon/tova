@@ -41,6 +41,9 @@ TypeScript is the safety net: every missed import is a compile error. After all 
 - [x] Iteration 1: six prefix groups moved, imports rewritten (287 specifiers across 87
   files), tests mirrored
 - [x] Iteration 2: llm/, web/, content/ + absorptions (232 specifiers across 90 files)
+- [x] Iteration 3: connectors/ unlocked via the root toolDegrade contract;
+  metrics/subtitle/honestyGuard/promptMetrics reclassified into llm/; sessionCostService
+  into trace/
 - [x] `npm run ci` green (ran whole once — failed at server lint — then per-side: `ci:server` + `ci:client`)
 
 ## Iteration 2 — dependency-traced grouping
@@ -64,6 +67,30 @@ grouping them would cycle against llm/ via toolDegrade) and observability leftov
 (metricsService → auxCompletion would cycle the same way); shared kernel logRedaction,
 clampError, sleep, cursorPage; boundary-protected storageService; route-facing singles
 userService, userDataPurge, zdrTurn, honestyGuardService.
+
+## Iteration 3 — resolving the cycles by reclassification
+
+The two cycle tensions from iteration 2 both dissolved under scrutiny:
+
+- `toolDegrade` is not llm/ or connectors/ code — it is the **contract between them**
+  (per-completion tool-failure state on mastra's requestContext, honored by both the
+  agent runner and the MCP executor, which use the same four exports). It moved back to
+  the services root, letting both domains import "up" to a shared seam. That unlocked
+  `connectors/` (connectorService, oauthConnectors, crypto) with a strictly acyclic
+  directory graph.
+- `metricsService` was misfiled as observability by lexicon — it actually runs the aux
+  model to classify prompts (a chat-analytics feature, consumer: chat route). It went to
+  `llm/` with its satellite `promptMetrics`, dissolving the metrics cycle by
+  reclassification rather than tolerance.
+- `subtitleService` and `honestyGuardService` joined `llm/` for the same shape:
+  chat-route features whose engine is auxCompletion (the "content" in subtitleService's
+  name had seduced it into the extraction pile).
+
+Left flat, by the same evidence: logService, lokiLogs, langsmithTracesService,
+langsmithDataset (no mutual import edges — grouping them would be lexical, exactly what
+this pass exists to avoid), plus the shared kernels logRedaction, clampError, sleep,
+cursorPage, the toolDegrade contract, boundary-protected storageService, and
+route-facing userService, userDataPurge, zdrTurn.
 
 ## Deviations found during iteration 1
 

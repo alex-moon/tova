@@ -1,6 +1,6 @@
-import type { ConnectorDocument } from '../../main/models/Connector';
-import { Connector } from '../../main/models/Connector';
-import { MCP_ENCRYPTION_KEY_ENV_VAR } from '../../main/services/crypto';
+import type { ConnectorDocument } from '../../../main/models/Connector';
+import { Connector } from '../../../main/models/Connector';
+import { MCP_ENCRYPTION_KEY_ENV_VAR } from '../../../main/services/connectors/crypto';
 import {
   assertPublicHttpsUrl,
   clearOauthStateForTests,
@@ -10,7 +10,7 @@ import {
   probeConnectorOAuth,
   redirectOriginFrom,
   startConnectorOAuth,
-} from '../../main/services/oauthConnectors';
+} from '../../../main/services/connectors/oauthConnectors';
 
 /* OAuth engine tests: SDK auth mocked; we own orchestration and vault. */
 // @see #327
@@ -425,7 +425,7 @@ describe('oauthAuthHeaders (refresh policy)', () => {
   const userId = '507f1f77bcf86cd799439011';
   const createOauthConnector = async (vault: Record<string, unknown>) => {
     // Vault written as an already-encrypted-looking envelope for the mock.
-    const { encryptEnvelope } = await import('../../main/services/crypto');
+    const { encryptEnvelope } = await import('../../../main/services/connectors/crypto');
     return Connector.create({
       type: 'mcp.oauth',
       scope: 'user',
@@ -461,7 +461,7 @@ describe('oauthAuthHeaders (refresh policy)', () => {
     );
     // The rotated vault is on the doc: a fresh read gets the new token.
     expect(doc.authState).toBe('ok');
-    const { decryptEnvelope } = await import('../../main/services/crypto');
+    const { decryptEnvelope } = await import('../../../main/services/connectors/crypto');
     const vault = JSON.parse(decryptEnvelope(doc.oauth!)) as { accessToken: string };
     expect(vault.accessToken).toBe('at-2');
   });

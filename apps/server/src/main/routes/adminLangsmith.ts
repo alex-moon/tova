@@ -12,7 +12,7 @@ import {
   TRACE_STATS_WINDOW_DAYS,
 } from '../services/trace/traceStatsCacheService';
 import { applyCostToStats } from '../services/trace/traceStatsCost';
-import { sessionCostBreakdown } from '../services/sessionCostService';
+import { sessionCostBreakdown } from '../services/trace/sessionCostService';
 
 const router = express.Router();
 

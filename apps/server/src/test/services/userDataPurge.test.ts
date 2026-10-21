@@ -5,7 +5,7 @@ import { Asset } from '../../main/models/Asset';
 import { AssetJob } from '../../main/models/AssetJob';
 import { WorkspaceEmbedding } from '../../main/models/WorkspaceEmbedding';
 import { Connector } from '../../main/models/Connector';
-import { encryptEnvelope, MCP_ENCRYPTION_KEY_ENV_VAR } from '../../main/services/crypto';
+import { encryptEnvelope, MCP_ENCRYPTION_KEY_ENV_VAR } from '../../main/services/connectors/crypto';
 import { purgeAllUserData } from '../../main/services/userDataPurge';
 import { embedTexts } from '../../main/services/workspace/embeddingService';
 import { enqueueWorkspaceEmbedding } from '../../main/services/workspace/workspaceEmbeddingIngest';

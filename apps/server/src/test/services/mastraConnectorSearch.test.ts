@@ -6,7 +6,7 @@ import type { CompletionOptions } from '../../main/services/llm/llmTypes';
 // @see #360
 
 const mockToolsetsFor = jest.fn();
-jest.mock('../../main/services/connectorService', () => ({
+jest.mock('../../main/services/connectors/connectorService', () => ({
   connectorToolsetsForUser: (...args: unknown[]) => mockToolsetsFor(...args),
 }));
 

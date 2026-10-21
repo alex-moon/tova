@@ -9,7 +9,7 @@ import {
   listFilesTool,
   readFileTool,
 } from '../../main/services/llm/mastraService';
-import { toolIsFailed } from '../../main/services/llm/toolDegrade';
+import { toolIsFailed } from '../../main/services/toolDegrade';
 import { truncateForPrompt } from '../../main/services/content/textExtraction';
 
 jest.mock('../../main/services/storageService', () => ({

@@ -14,8 +14,8 @@ import type {
   OAuthProtectedResourceMetadata,
   OAuthTokens,
 } from '@modelcontextprotocol/sdk/shared/auth.js';
-import type { ConnectorDocument } from '../models/Connector';
-import { Connector } from '../models/Connector';
+import type { ConnectorDocument } from '../../models/Connector';
+import { Connector } from '../../models/Connector';
 import { decryptEnvelope, encryptEnvelope } from './crypto';
 
 /* OAuth engine for mcp.oauth connectors; SDK handles RFC plumbing. */

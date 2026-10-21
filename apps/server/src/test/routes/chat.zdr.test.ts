@@ -20,7 +20,7 @@ jest.mock('../../main/services/llm/inferenceService', () => ({
   },
 }));
 
-jest.mock('../../main/services/metricsService', () => ({
+jest.mock('../../main/services/llm/metricsService', () => ({
   classifyAndPersistPromptDimensions: jest.fn().mockResolvedValue(undefined),
   isTriviallyNeutral: (content: string) => content.trim().length === 0,
 }));
@@ -346,7 +346,7 @@ describe('Zero-data retention chats (issue #116)', () => {
 
     const { generateChatTitle } = jest.requireMock('../../main/services/llm/titleService');
     const { classifyAndPersistPromptDimensions } = jest.requireMock(
-      '../../main/services/metricsService',
+      '../../main/services/llm/metricsService',
     );
 
     const response = await streamMessage(cookies, { content: 'Fix this for me please' });

@@ -63,7 +63,7 @@ jest.mock('../../main/services/llm/titleService', () => ({
 // Subtitle revision is fire-and-forget on a turn cadence; mock it here.
 // @see #359
 const mockRevise = jest.fn();
-jest.mock('../../main/services/content/subtitleService', () => ({
+jest.mock('../../main/services/llm/subtitleService', () => ({
   reviseSessionSubtitle: (...args: unknown[]) => mockRevise(...args),
 }));
 

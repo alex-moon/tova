@@ -8,7 +8,7 @@ import {
   estimateSyllablesAvg,
   hasImperative,
   hasQuestionMark,
-} from '../../main/services/promptMetrics';
+} from '../../../main/services/llm/promptMetrics';
 
 describe('Prompt Metrics (deterministic)', () => {
   describe('countWords', () => {

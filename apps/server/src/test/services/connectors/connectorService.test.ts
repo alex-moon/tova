@@ -1,13 +1,13 @@
 import { RequestContext } from '@mastra/core/request-context';
-import { Connector } from '../../main/models/Connector';
+import { Connector } from '../../../main/models/Connector';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import {
   callMcpTool,
   clearConnectorCachesForTests,
   connectorToolsetsForUser,
   zodFromJsonSchema,
-} from '../../main/services/connectorService';
-import { toolIsFailed } from '../../main/services/llm/toolDegrade';
+} from '../../../main/services/connectors/connectorService';
+import { toolIsFailed } from '../../../main/services/toolDegrade';
 
 const LIST_TOOLS_RESULT = {
   tools: [
@@ -46,7 +46,7 @@ jest.mock('@modelcontextprotocol/sdk/client/sse.js', () => ({
     .mockImplementation((...args: unknown[]) => sseTransport(...(args as []))),
 }));
 
-jest.mock('../../main/services/crypto', () => ({
+jest.mock('../../../main/services/connectors/crypto', () => ({
   decryptEnvelope: jest.fn(() => JSON.stringify({ Authorization: 'Bearer from-mock-decrypt' })),
   encryptEnvelope: jest.fn((plaintext: string) => ({
     iv: 'a',
@@ -124,7 +124,7 @@ describe('connectorService', () => {
       oauth: { iv: 'a', tag: 'b', ciphertext: 'vault' },
     });
     // Vault JSON differs from the pat header; point the mock at the vault.
-    const { decryptEnvelope } = jest.requireMock('../../main/services/crypto') as {
+    const { decryptEnvelope } = jest.requireMock('../../../main/services/connectors/crypto') as {
       decryptEnvelope: jest.Mock;
     };
     decryptEnvelope.mockReturnValueOnce(

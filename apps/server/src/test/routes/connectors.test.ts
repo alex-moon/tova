@@ -1,12 +1,12 @@
 import request from 'supertest';
 import { Types } from 'mongoose';
 import { createApp } from '../../main/index';
-import { MCP_ENCRYPTION_KEY_ENV_VAR } from '../../main/services/crypto';
+import { MCP_ENCRYPTION_KEY_ENV_VAR } from '../../main/services/connectors/crypto';
 import { Connector } from '../../main/models/Connector';
 import { User } from '../../main/models/User';
-import { ConnectorOAuthError } from '../../main/services/oauthConnectors';
+import { ConnectorOAuthError } from '../../main/services/connectors/oauthConnectors';
 
-jest.mock('../../main/services/connectorService', () => ({
+jest.mock('../../main/services/connectors/connectorService', () => ({
   listMcpTools: jest.fn(),
   callMcpTool: jest.fn(),
   connectorToolsetsForUser: jest.fn(),
@@ -14,22 +14,23 @@ jest.mock('../../main/services/connectorService', () => ({
 }));
 
 // OAuth engine mocked; pure helpers stay real so routes' use is exercised.
-jest.mock('../../main/services/oauthConnectors', () => ({
-  ...jest.requireActual('../../main/services/oauthConnectors'),
+jest.mock('../../main/services/connectors/oauthConnectors', () => ({
+  ...jest.requireActual('../../main/services/connectors/oauthConnectors'),
   startConnectorOAuth: jest.fn(),
   completeConnectorOAuth: jest.fn(),
   probeConnectorOAuth: jest.fn(),
 }));
 
-const mockStartConnectorOAuth = jest.requireMock('../../main/services/oauthConnectors')
+const mockStartConnectorOAuth = jest.requireMock('../../main/services/connectors/oauthConnectors')
   .startConnectorOAuth as jest.Mock;
-const mockCompleteConnectorOAuth = jest.requireMock('../../main/services/oauthConnectors')
-  .completeConnectorOAuth as jest.Mock;
-const mockProbeConnectorOAuth = jest.requireMock('../../main/services/oauthConnectors')
+const mockCompleteConnectorOAuth = jest.requireMock(
+  '../../main/services/connectors/oauthConnectors',
+).completeConnectorOAuth as jest.Mock;
+const mockProbeConnectorOAuth = jest.requireMock('../../main/services/connectors/oauthConnectors')
   .probeConnectorOAuth as jest.Mock;
 
 // The mock registry resolves lazily; read the jest.fn from the mock itself.
-const mockListMcpTools = jest.requireMock('../../main/services/connectorService')
+const mockListMcpTools = jest.requireMock('../../main/services/connectors/connectorService')
   .listMcpTools as jest.Mock;
 
 const registerUser = async (email: string) => {
@@ -513,7 +514,7 @@ describe('POST /api/connectors/oauth/callback (#327)', () => {
   });
 
   it('handshakes with the fresh grant: lists tools and marks the row connected', async () => {
-    const { encryptEnvelope } = await import('../../main/services/crypto');
+    const { encryptEnvelope } = await import('../../main/services/connectors/crypto');
     const { app, cookie } = await registerUser('oauth-cb-tools@example.com');
     const doc = await Connector.create({
       type: 'mcp.oauth',
@@ -539,7 +540,7 @@ describe('POST /api/connectors/oauth/callback (#327)', () => {
   });
 
   it('keeps the grant on a failed handshake but marks the row unreachable', async () => {
-    const { encryptEnvelope } = await import('../../main/services/crypto');
+    const { encryptEnvelope } = await import('../../main/services/connectors/crypto');
     const { app, cookie } = await registerUser('oauth-cb-dead@example.com');
     const doc = await Connector.create({
       type: 'mcp.oauth',

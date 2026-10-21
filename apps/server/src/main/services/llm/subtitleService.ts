@@ -1,4 +1,4 @@
-import { auxCompletion, stripSurroundingQuotes } from '../llm/auxCompletion';
+import { auxCompletion, stripSurroundingQuotes } from './auxCompletion';
 import { z } from 'zod';
 
 const SUBTITLE_PROMPT =
