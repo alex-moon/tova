@@ -1,12 +1,12 @@
 import { buildSystemContent } from '../../services/promptAssembly';
 import { sleep } from '../../services/sleep';
 import { inferenceService } from '../../services/inferenceService';
-import { resolveScheduledModels } from '../../services/evalRunService';
+import { resolveScheduledModels } from '../../services/eval/evalRunService';
 import {
   buildWorkspaceBlock,
   retrieveWorkspaceSlices,
   type WorkspaceSlice,
-} from '../../services/workspaceRetrievalService';
+} from '../../services/workspace/workspaceRetrievalService';
 import { config } from '../../config';
 import { evalUserId } from '../mongoSource';
 import { MEMORY_SCENARIOS } from './corpus';

@@ -1,9 +1,9 @@
 import { Asset } from '../models/Asset';
 import type { AssetProvenance } from '../models/Asset';
-import { spacesWorkspaceStorage } from './workspaceStorage';
-import { MAX_ASSET_SIZE, isSafeFilename, sanitizeFilename } from './assetLimits';
+import { spacesWorkspaceStorage } from './workspace/workspaceStorage';
+import { MAX_ASSET_SIZE, isSafeFilename, sanitizeFilename } from './asset/assetLimits';
 import { MAX_MARKDOWN_CHARS } from './markdownConversion';
-import { enqueueWorkspaceEmbedding } from './workspaceEmbeddingIngest';
+import { enqueueWorkspaceEmbedding } from './workspace/workspaceEmbeddingIngest';
 import { config } from '../config';
 
 // Write path for system-generated assets in the user's library.

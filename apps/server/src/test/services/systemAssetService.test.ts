@@ -5,7 +5,7 @@ import {
   createSystemSideAsset,
   findFreshScrape,
 } from '../../main/services/systemAssetService';
-import { sanitizeFilename } from '../../main/services/assetLimits';
+import { sanitizeFilename } from '../../main/services/asset/assetLimits';
 import { MAX_MARKDOWN_CHARS } from '../../main/services/markdownConversion';
 
 jest.mock('../../main/services/storageService', () => ({

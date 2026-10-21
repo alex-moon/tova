@@ -2,7 +2,7 @@ import { evalUserId } from '../../../main/evals/mongoSource';
 import {
   buildWorkspaceBlock,
   retrieveWorkspaceSlices,
-} from '../../../main/services/workspaceRetrievalService';
+} from '../../../main/services/workspace/workspaceRetrievalService';
 import { MEMORY_SCENARIOS } from '../../../main/evals/memory/corpus';
 import { clearMemoryCorpus, seedMemoryScenario } from '../../../main/evals/memory/memorySource';
 

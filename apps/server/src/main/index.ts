@@ -21,20 +21,20 @@ import { buildMongoUri } from '@tova/shared';
 import { getJwtSecret } from './config/jwt';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
-import { startAssetJobPoller } from './services/assetJobService';
-import { startTaskPoller } from './services/taskService';
-import { processTaskJob } from './services/taskProcessor';
-import { startTraceStatsPoller } from './services/traceStatsCacheService';
-import { startAssetVersionPruner } from './services/assetVersionPrune';
-import { startPendingAssetSweeper } from './services/assetPresign';
-import { processAssetConversionJob } from './services/assetJobProcessor';
-import { startEvalScheduler, hasRunForUtcDay } from './services/evalScheduler';
+import { startAssetJobPoller } from './services/asset/assetJobService';
+import { startTaskPoller } from './services/task/taskService';
+import { processTaskJob } from './services/task/taskProcessor';
+import { startTraceStatsPoller } from './services/trace/traceStatsCacheService';
+import { startAssetVersionPruner } from './services/asset/assetVersionPrune';
+import { startPendingAssetSweeper } from './services/asset/assetPresign';
+import { processAssetConversionJob } from './services/asset/assetJobProcessor';
+import { startEvalScheduler, hasRunForUtcDay } from './services/eval/evalScheduler';
 import {
   resolveScheduledModels,
   startEvalRun,
   langsmithClientFromEnv,
-} from './services/evalRunService';
-import { startMemoryEvalRun } from './services/memoryEvalRunService';
+} from './services/eval/evalRunService';
+import { startMemoryEvalRun } from './services/eval/memoryEvalRunService';
 import { config } from './config';
 import { attachConsoleCapture } from './services/logService';
 import { requestLog } from './middleware/requestLog';

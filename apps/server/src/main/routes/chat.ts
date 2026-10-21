@@ -6,15 +6,15 @@ import { Message } from '../models/Message';
 import { User } from '../models/User';
 import { Asset } from '../models/Asset';
 import { buildAttachmentEnvelope } from '../services/attachmentEnvelope';
-import { isImageContentType } from '../services/assetLimits';
-import { spacesWorkspaceStorage } from '../services/workspaceStorage';
+import { isImageContentType } from '../services/asset/assetLimits';
+import { spacesWorkspaceStorage } from '../services/workspace/workspaceStorage';
 import {
   raceChatCompletion,
   raceChatStream,
   chatRoute,
   type FixedRoutingResult,
 } from '../services/chatRace';
-import { contextLengthFor, CHAT_MODEL } from '../services/modelDefaults';
+import { contextLengthFor, CHAT_MODEL } from '../services/model/modelDefaults';
 import { generateChatTitle } from '../services/titleService';
 import { reviseSessionSubtitle, type SubtitleTurn } from '../services/subtitleService';
 import { hasPermission, ROUTING_PERMISSION } from '../services/userService';
@@ -48,15 +48,15 @@ import { workspaceGateFrom, workspaceTraceMetadata } from '../services/workspace
 import {
   isWorkspaceMemoryEnabled,
   retrieveWorkspaceBlock,
-} from '../services/workspaceRetrievalService';
-import { enqueueWorkspaceEmbedding } from '../services/workspaceEmbeddingIngest';
+} from '../services/workspace/workspaceRetrievalService';
+import { enqueueWorkspaceEmbedding } from '../services/workspace/workspaceEmbeddingIngest';
 import { TaskEvent } from '../models/TaskEvent';
 import type { TaskDocument } from '../models/Task';
 import {
   completionNotificationLine,
   markNotified,
   pendingCompletionsFor,
-} from '../services/taskNotificationService';
+} from '../services/task/taskNotificationService';
 
 const router = express.Router();
 

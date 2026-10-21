@@ -4,7 +4,7 @@ import { User, UserDocument } from '../models/User';
 import { adminGuard, AuthRequest } from '../middleware/auth';
 import { AdminFixedModel, AdminModelError, AdminUser } from '@tova/shared';
 import { ModelRouteError } from '../models/ModelRouteError';
-import { CHAT_MODEL, TASK_MODEL, contextLengthFor } from '../services/modelDefaults';
+import { CHAT_MODEL, TASK_MODEL, contextLengthFor } from '../services/model/modelDefaults';
 import { wiredProviders } from '../services/inferenceService';
 import { LogLevel } from '../services/logService';
 import { queryRetainedLogs } from '../services/lokiLogs';
@@ -12,7 +12,7 @@ import {
   MAX_COMPARE_MODELS,
   runModelComparison,
   type CompareModelRef,
-} from '../services/modelCompare';
+} from '../services/model/modelCompare';
 
 const router = express.Router();
 

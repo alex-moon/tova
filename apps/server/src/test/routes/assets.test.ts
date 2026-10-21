@@ -30,14 +30,14 @@ jest.mock('../../main/services/storageService', () => ({
 }));
 
 // Enqueue mocked so confirm tests can simulate failure; defaults to real.
-jest.mock('../../main/services/assetJobService', () => {
-  const actual = jest.requireActual('../../main/services/assetJobService');
+jest.mock('../../main/services/asset/assetJobService', () => {
+  const actual = jest.requireActual('../../main/services/asset/assetJobService');
   return {
     ...actual,
     enqueueAssetJob: (assetId: unknown) => mockEnqueueAssetJob(assetId),
   };
 });
-const actualAssetJobService = jest.requireActual('../../main/services/assetJobService');
+const actualAssetJobService = jest.requireActual('../../main/services/asset/assetJobService');
 
 jest.mock('../../main/services/titleService', () => ({
   generateChatTitle: jest.fn().mockResolvedValue('Hello'),
@@ -209,8 +209,8 @@ describe('Assets confirm', () => {
 
   it('embeds extracted text on confirm but never for an ephemeral upload (#294)', async () => {
     const enqueueEmbed = jest.spyOn(
-      jest.requireActual<typeof import('../../main/services/workspaceEmbeddingIngest')>(
-        '../../main/services/workspaceEmbeddingIngest',
+      jest.requireActual<typeof import('../../main/services/workspace/workspaceEmbeddingIngest')>(
+        '../../main/services/workspace/workspaceEmbeddingIngest',
       ),
       'enqueueWorkspaceEmbedding',
     );

@@ -1,4 +1,4 @@
-import { isWorkspaceMemoryEnabled } from './workspaceRetrievalService';
+import { isWorkspaceMemoryEnabled } from './workspace/workspaceRetrievalService';
 
 /* Workspace-memory facts for traces: gate label + flat identifier metadata. */
 // @see #308 #310 #305

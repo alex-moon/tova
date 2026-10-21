@@ -1,6 +1,6 @@
 import express from 'express';
 import { adminGuard } from '../middleware/auth';
-import { getEvalRun, listEvalRuns } from '../services/evalRunsAdminService';
+import { getEvalRun, listEvalRuns } from '../services/eval/evalRunsAdminService';
 import {
   beginEvalRun,
   EvalConfigError,
@@ -8,7 +8,7 @@ import {
   executeEvalRun,
   langsmithClientFromEnv,
   resolveScheduledModels,
-} from '../services/evalRunService';
+} from '../services/eval/evalRunService';
 import { config } from '../config';
 import { redactForLog } from '../services/logRedaction';
 

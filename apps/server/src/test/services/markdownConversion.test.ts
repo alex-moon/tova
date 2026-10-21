@@ -9,10 +9,10 @@ import {
   isConvertible,
   withTimeout,
 } from '../../main/services/markdownConversion';
-import { processAssetConversionJob } from '../../main/services/assetJobProcessor';
+import { processAssetConversionJob } from '../../main/services/asset/assetJobProcessor';
 import { Asset } from '../../main/models/Asset';
 import { AssetJob } from '../../main/models/AssetJob';
-import { runAssetJobTick } from '../../main/services/assetJobService';
+import { runAssetJobTick } from '../../main/services/asset/assetJobService';
 
 const mockGetObjectBuffer = jest.fn();
 const mockPutObject = jest.fn();

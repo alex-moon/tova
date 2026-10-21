@@ -415,9 +415,9 @@ describe('Zero-data retention chats (issue #116)', () => {
   const forceWorkspaceBlock = (block: string) => {
     const retrieve = jest
       .spyOn(
-        jest.requireActual<typeof import('../../main/services/workspaceRetrievalService')>(
-          '../../main/services/workspaceRetrievalService',
-        ),
+        jest.requireActual<
+          typeof import('../../main/services/workspace/workspaceRetrievalService')
+        >('../../main/services/workspace/workspaceRetrievalService'),
         'retrieveWorkspaceBlock',
       )
       .mockResolvedValue(block);
@@ -436,8 +436,8 @@ describe('Zero-data retention chats (issue #116)', () => {
     // The ingest hook lives in the non-ZDR save path; ZDR never enqueues.
     // @see #294
     const enqueue = jest.spyOn(
-      jest.requireActual<typeof import('../../main/services/workspaceEmbeddingIngest')>(
-        '../../main/services/workspaceEmbeddingIngest',
+      jest.requireActual<typeof import('../../main/services/workspace/workspaceEmbeddingIngest')>(
+        '../../main/services/workspace/workspaceEmbeddingIngest',
       ),
       'enqueueWorkspaceEmbedding',
     );

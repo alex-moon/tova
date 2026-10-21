@@ -6,7 +6,7 @@ import {
   StructuredOutputConfig,
 } from './llmTypes';
 import { deepinfraConnector, fireworksConnector, groqConnector } from './mastraService';
-import { recordModelError } from './modelErrorTally';
+import { recordModelError } from './model/modelErrorTally';
 
 /* Delegating LLM service: provider swaps happen in one place. */
 // @see #151

@@ -1,4 +1,4 @@
-import type { WorkspaceSlice } from '../../../main/services/workspaceRetrievalService';
+import type { WorkspaceSlice } from '../../../main/services/workspace/workspaceRetrievalService';
 import {
   buildJudgePrompt,
   helpfulnessMetrics,

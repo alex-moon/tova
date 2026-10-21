@@ -3,9 +3,9 @@ import { User } from '../../main/models/User';
 import { Asset } from '../../main/models/Asset';
 import { AssetVersion } from '../../main/models/AssetVersion';
 import { generateFileTool, readFileTool, editFileTool } from '../../main/services/mastraService';
-import { pruneOldAssetVersions } from '../../main/services/assetVersionPrune';
+import { pruneOldAssetVersions } from '../../main/services/asset/assetVersionPrune';
 
-jest.mock('../../main/services/workspaceStorage', () => ({
+jest.mock('../../main/services/workspace/workspaceStorage', () => ({
   spacesWorkspaceStorage: {
     isConfigured: () => true,
     putByKey: jest.fn().mockResolvedValue(undefined),

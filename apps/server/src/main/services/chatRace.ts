@@ -1,6 +1,6 @@
 import { inferenceService } from './inferenceService';
-import { isClientAbort } from './modelFailover';
-import { CHAT_MODEL, chatBackends, contextLengthFor } from './modelDefaults';
+import { isClientAbort } from './model/modelFailover';
+import { CHAT_MODEL, chatBackends, contextLengthFor } from './model/modelDefaults';
 import type {
   CompletionOptions,
   LlmProvider,

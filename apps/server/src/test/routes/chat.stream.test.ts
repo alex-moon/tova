@@ -251,9 +251,9 @@ describe('Chat streaming route', () => {
 
     const retrieve = jest
       .spyOn(
-        jest.requireActual<typeof import('../../main/services/workspaceRetrievalService')>(
-          '../../main/services/workspaceRetrievalService',
-        ),
+        jest.requireActual<
+          typeof import('../../main/services/workspace/workspaceRetrievalService')
+        >('../../main/services/workspace/workspaceRetrievalService'),
         'retrieveWorkspaceBlock',
       )
       .mockResolvedValue('- chat "Move" (2026-10-01) — budget is twelve thousand');

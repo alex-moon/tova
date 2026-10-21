@@ -6,7 +6,7 @@ import { InMemoryStore } from '@mastra/core/storage';
 import { Observability } from '@mastra/observability';
 import { buildTracingOptions } from '@mastra/observability';
 import { withLangsmithMetadata } from '@mastra/langsmith';
-import { RedactedLangSmithExporter } from './traceRedaction';
+import { RedactedLangSmithExporter } from './trace/traceRedaction';
 import { createTool } from '@mastra/core/tools';
 import { createTwoFilesPatch } from 'diff';
 import { z } from 'zod';
@@ -36,9 +36,9 @@ import { webSearch } from './webSearchService';
 import { fetchPage, safeSlice, MAX_FETCH_CHARS, type FetchedPage } from './webFetchService';
 import { firecrawlScrape } from './firecrawlService';
 import { createSystemAsset, createSystemSideAsset, findFreshScrape } from './systemAssetService';
-import { sanitizeFilename } from './assetLimits';
-import { applyAssetEdits, writeAssetContent, type AssetEdit } from './assetEditService';
-import { spacesWorkspaceStorage } from './workspaceStorage';
+import { sanitizeFilename } from './asset/assetLimits';
+import { applyAssetEdits, writeAssetContent, type AssetEdit } from './asset/assetEditService';
+import { spacesWorkspaceStorage } from './workspace/workspaceStorage';
 import { config } from '../config';
 
 /* LangSmith tracing via the official Mastra plugin, env-gated on the key. */
@@ -979,7 +979,7 @@ export const delegateTaskTool = createTool({
       if (!user || user.settings?.zdr) {
         return { error: 'Delegation is not available with zero-data-retention enabled.' };
       }
-      const { enqueueTask } = await import('./taskService');
+      const { enqueueTask } = await import('./task/taskService');
       const task = await enqueueTask({
         userId,
         instruction,

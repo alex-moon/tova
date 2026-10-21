@@ -4,12 +4,12 @@ import { Message } from '../models/Message';
 import { Asset } from '../models/Asset';
 import { AssetJob } from '../models/AssetJob';
 import { WorkspaceEmbedding } from '../models/WorkspaceEmbedding';
-import { spacesWorkspaceStorage } from './workspaceStorage';
-import { purgeUserTraces } from './tracePurge';
+import { spacesWorkspaceStorage } from './workspace/workspaceStorage';
+import { purgeUserTraces } from './trace/tracePurge';
 import { Connector } from '../models/Connector';
 import type { ConnectorDocument } from '../models/Connector';
 import { readConnectorVault, assertPublicHttpsUrl } from './oauthConnectors';
-import { drainUserEmbeddings } from './workspaceEmbeddingIngest';
+import { drainUserEmbeddings } from './workspace/workspaceEmbeddingIngest';
 
 /* Factory reset: full wipe of every user-owned PII-bearing collection. */
 // @see #143 #327

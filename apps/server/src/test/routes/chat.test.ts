@@ -318,9 +318,9 @@ describe('Chat route routing metadata', () => {
 
       const retrieve = jest
         .spyOn(
-          jest.requireActual<typeof import('../../main/services/workspaceRetrievalService')>(
-            '../../main/services/workspaceRetrievalService',
-          ),
+          jest.requireActual<
+            typeof import('../../main/services/workspace/workspaceRetrievalService')
+          >('../../main/services/workspace/workspaceRetrievalService'),
           'retrieveWorkspaceBlock',
         )
         .mockResolvedValue('- chat "Move" (2026-10-01) — budget is twelve thousand');
@@ -349,9 +349,9 @@ describe('Chat route routing metadata', () => {
       const cookies = await registerUser(app, 'prompt-workspace-off@example.com');
 
       const retrieve = jest.spyOn(
-        jest.requireActual<typeof import('../../main/services/workspaceRetrievalService')>(
-          '../../main/services/workspaceRetrievalService',
-        ),
+        jest.requireActual<
+          typeof import('../../main/services/workspace/workspaceRetrievalService')
+        >('../../main/services/workspace/workspaceRetrievalService'),
         'retrieveWorkspaceBlock',
       );
       delete process.env.WORKSPACE_MEMORY_ENABLED;
