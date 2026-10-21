@@ -93,6 +93,47 @@ candidate mechanisms remain, both testable:
 The token-selection mechanism stands (every stray is the semantic gloss of the intended
 word, so flips happen at logit/sampling time, not text assembly).
 
+## Re-roll results and verdict (2026-10-21)
+
+Incident-context re-roll (`scripts/stray-reroll.ts`): the five Oct 19 incident contexts
+reconstructed from persisted messages, re-sampled on both hosts.
+
+- Re-rolls of four incident sessions: clean (0 strays across ~78 rolls, full and
+  half-depth, both hosts, both temps).
+- The 00ae5e@09:07 context (a session that *discusses its own earlier incidents*) flipped:
+  fp4 2/30 rolls, **bf16 1/24** — same flip each time: quoting the earlier
+  `"you一度有一点"` artifact, the leading English "you" is emitted as 你 (its Chinese
+  gloss). Echo-vs-flip verified against the persisted context: 你 is novel; "kwon" was
+  quotation.
+
+**Verdict per the pre-registered rule:**
+
+1. **fp4 quantisation is not the primary cause.** bf16 flips identically at the same
+   context. The failure is a **GLM-5.3 model-level susceptibility**: a near-tie flip
+   landing on the Chinese gloss of the intended token.
+2. **The trigger is contextual**: 256 battery generations (depth to 400k, long-form
+   output, clean replayed history) never flipped; the contexts that flip are ones whose
+   content itself creates the near-tie (an artifact string the model then handles — quotes
+   it, continues it). Deep history (#360) grows exactly this material: sessions accumulate
+   earlier strays, multilingual fragments and odd tool output, which is the "increasingly"
+   in the incident record. Pollution in the sense of *content-induced near-ties*, not
+   encoding damage.
+3. The original no-quote incident flips (fresh prose, e.g. 快要 for "almost") were not
+   reproduced by this rig — they are rarer than the quote-flip and likely need the full
+   production assembly. The mechanism is the same class, so the verdict covers them.
+
+**Mitigations, in order of leverage:**
+
+- **Model-side susceptibility**: the honest fix is upstream (report to Zai) or a task-model
+  swap for long sessions; the fp4/bf16 equivalence means re-hosting does not help.
+- **Output-side guard (cheap, ready now)**: the detector is written; run it on assistant
+  output (log-first) to measure the real-world rate and catch gloss flips before they sit
+  in a user's transcript.
+- **Window trim (the gut call)**: the dose-response link to deep history is real but
+  shallow (half-depth never flipped in this rig). Trimming `HISTORY_MAX_CHARS` buys a
+  reduction, not a fix, and re-opens #360's capability trade — decide with the guard's
+  real-world rate in hand.
+
 ## Steps
 
 0. **Fix #418-broken script imports** — `scripts/` has no tsconfig coverage; 7 harness
