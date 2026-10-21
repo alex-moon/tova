@@ -16,14 +16,14 @@ import {
   assetRestoreSchema,
   zodMessage,
 } from '../validation';
-import { spacesWorkspaceStorage } from '../services/workspaceStorage';
+import { spacesWorkspaceStorage } from '../services/workspace/workspaceStorage';
 // Domain cores live in services/: presign/confirm, views, zip, caps.
-import { presignItemForUser } from '../services/assetPresign';
-import { confirmAsset } from '../services/assetConfirm';
-import { restoreAssetVersion } from '../services/assetEditService';
-import { previewAsset, safeAsset } from '../services/assetViews';
-import { dedupeEntryNames } from '../services/assetZip';
-import { BULK_MAX_TOTAL_SIZE, MAX_BULK_TOTAL_SIZE } from '../services/assetLimits';
+import { presignItemForUser } from '../services/asset/assetPresign';
+import { confirmAsset } from '../services/asset/assetConfirm';
+import { restoreAssetVersion } from '../services/asset/assetEditService';
+import { previewAsset, safeAsset } from '../services/asset/assetViews';
+import { dedupeEntryNames } from '../services/asset/assetZip';
+import { BULK_MAX_TOTAL_SIZE, MAX_BULK_TOTAL_SIZE } from '../services/asset/assetLimits';
 import { cursorPage, LIST_PAGE_SIZE } from '../services/cursorPage';
 
 const router = express.Router();

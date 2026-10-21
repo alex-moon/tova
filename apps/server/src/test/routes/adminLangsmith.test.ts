@@ -8,8 +8,8 @@ import { listTraces, RETRY_WAIT_MS } from '../../main/services/langsmithTracesSe
 
 // Pin the static price table so HTTP cost tests keep their figures.
 // @see #387
-jest.mock('../../main/services/modelDefaults', () => {
-  const actual = jest.requireActual('../../main/services/modelDefaults');
+jest.mock('../../main/services/model/modelDefaults', () => {
+  const actual = jest.requireActual('../../main/services/model/modelDefaults');
   return {
     ...actual,
     CHAT_MODEL: 'priced/cached',

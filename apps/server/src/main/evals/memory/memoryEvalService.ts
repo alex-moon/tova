@@ -5,8 +5,8 @@ import {
   isWorkspaceMemoryEnabled,
   rankWorkspaceSlicesWithCut,
   type WorkspaceSlice,
-} from '../../services/workspaceRetrievalService';
-import { embedWorkspaceUser } from '../../services/workspaceEmbeddingIngest';
+} from '../../services/workspace/workspaceRetrievalService';
+import { embedWorkspaceUser } from '../../services/workspace/workspaceEmbeddingIngest';
 import { asDatasetClient, ensureDataset } from '../../services/langsmithDataset';
 import { evalUserId } from '../mongoSource';
 import { GATE_CASES, MEMORY_SCENARIOS } from './corpus';

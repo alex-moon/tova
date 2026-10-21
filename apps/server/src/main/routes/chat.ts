@@ -5,31 +5,34 @@ import { Session } from '../models/Session';
 import { Message } from '../models/Message';
 import { User } from '../models/User';
 import { Asset } from '../models/Asset';
-import { buildAttachmentEnvelope } from '../services/attachmentEnvelope';
-import { isImageContentType } from '../services/assetLimits';
-import { spacesWorkspaceStorage } from '../services/workspaceStorage';
+import { buildAttachmentEnvelope } from '../services/content/attachmentEnvelope';
+import { isImageContentType } from '../services/asset/assetLimits';
+import { spacesWorkspaceStorage } from '../services/workspace/workspaceStorage';
 import {
   raceChatCompletion,
   raceChatStream,
   chatRoute,
   type FixedRoutingResult,
-} from '../services/chatRace';
-import { contextLengthFor, CHAT_MODEL } from '../services/modelDefaults';
-import { generateChatTitle } from '../services/titleService';
-import { reviseSessionSubtitle, type SubtitleTurn } from '../services/subtitleService';
+} from '../services/llm/chatRace';
+import { contextLengthFor, CHAT_MODEL } from '../services/model/modelDefaults';
+import { generateChatTitle } from '../services/llm/titleService';
+import { reviseSessionSubtitle, type SubtitleTurn } from '../services/llm/subtitleService';
 import { hasPermission, ROUTING_PERMISSION } from '../services/userService';
-import { buildSystemContent, timestampHeader } from '../services/promptAssembly';
-import { ensureUserLocation } from '../services/geoLocationService';
-import { outputTokensFor, promptCharsFrom } from '../services/outputTokenCap';
-import type { MessageContentPart } from '../services/llmTypes';
-import { classifyAndPersistPromptDimensions, isTriviallyNeutral } from '../services/metricsService';
-import { computeDeterministicMetrics } from '../services/promptMetrics';
-import { generateFollowups } from '../services/followupService';
+import { buildSystemContent, timestampHeader } from '../services/llm/promptAssembly';
+import { ensureUserLocation } from '../services/web/geoLocationService';
+import { outputTokensFor, promptCharsFrom } from '../services/llm/outputTokenCap';
+import type { MessageContentPart } from '../services/llm/llmTypes';
+import {
+  classifyAndPersistPromptDimensions,
+  isTriviallyNeutral,
+} from '../services/llm/metricsService';
+import { computeDeterministicMetrics } from '../services/llm/promptMetrics';
+import { generateFollowups } from '../services/llm/followupService';
 import {
   classifyAssistantTurn,
   reviewAssistantTurn,
   type HonestyVerdict,
-} from '../services/honestyGuardService';
+} from '../services/llm/honestyGuardService';
 import { zdrHistorySchema } from '../validation';
 import { redactForLog } from '../services/logRedaction';
 import {
@@ -37,26 +40,29 @@ import {
   toolCallEvent,
   toolResultEvent,
   type PersistedToolEvent,
-} from '../services/toolChips';
+} from '../services/llm/toolChips';
 export {
   reconcileToolEvent,
   toolResultEvent,
   type PersistedToolEvent,
-} from '../services/toolChips';
+} from '../services/llm/toolChips';
 import { decideTurn } from '../services/zdrTurn';
-import { workspaceGateFrom, workspaceTraceMetadata } from '../services/workspaceTraceFacts';
+import {
+  workspaceGateFrom,
+  workspaceTraceMetadata,
+} from '../services/workspace/workspaceTraceFacts';
 import {
   isWorkspaceMemoryEnabled,
   retrieveWorkspaceBlock,
-} from '../services/workspaceRetrievalService';
-import { enqueueWorkspaceEmbedding } from '../services/workspaceEmbeddingIngest';
+} from '../services/workspace/workspaceRetrievalService';
+import { enqueueWorkspaceEmbedding } from '../services/workspace/workspaceEmbeddingIngest';
 import { TaskEvent } from '../models/TaskEvent';
 import type { TaskDocument } from '../models/Task';
 import {
   completionNotificationLine,
   markNotified,
   pendingCompletionsFor,
-} from '../services/taskNotificationService';
+} from '../services/task/taskNotificationService';
 
 const router = express.Router();
 

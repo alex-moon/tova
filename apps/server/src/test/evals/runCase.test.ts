@@ -1,6 +1,6 @@
 import { runCase } from '../../main/evals/runCase';
 import type { EvalCase } from '../../main/evals/cases';
-import type { NeutralChunkStream, NeutralStreamChunk } from '../../main/services/llmTypes';
+import type { NeutralChunkStream, NeutralStreamChunk } from '../../main/services/llm/llmTypes';
 
 const caseFor = (prompt = 'p'): EvalCase => ({
   id: 't',

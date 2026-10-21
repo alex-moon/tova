@@ -1,24 +1,27 @@
 import { RequestContext } from '@mastra/core/request-context';
-import { fetchUrlTool } from '../../main/services/mastraService';
+import { fetchUrlTool } from '../../main/services/llm/mastraService';
 import { muteConsoleError } from '../muteConsole';
 
 // `fetch_url` falls back to Firecrawl; scraped pages cache for read_file.
 // @see #340
-jest.mock('../../main/services/webFetchService', () => ({
+jest.mock('../../main/services/web/webFetchService', () => ({
   fetchPage: jest.fn(),
   safeSlice: (text: string, max: number) => text.slice(0, max),
   MAX_FETCH_CHARS: 8000,
 }));
-jest.mock('../../main/services/firecrawlService', () => ({ firecrawlScrape: jest.fn() }));
-jest.mock('../../main/services/systemAssetService', () => ({
+jest.mock('../../main/services/web/firecrawlService', () => ({ firecrawlScrape: jest.fn() }));
+jest.mock('../../main/services/asset/systemAssetService', () => ({
   createSystemAsset: jest.fn(),
   createSystemSideAsset: jest.fn(),
   findFreshScrape: jest.fn(),
 }));
 
-import { fetchPage } from '../../main/services/webFetchService';
-import { firecrawlScrape } from '../../main/services/firecrawlService';
-import { createSystemSideAsset, findFreshScrape } from '../../main/services/systemAssetService';
+import { fetchPage } from '../../main/services/web/webFetchService';
+import { firecrawlScrape } from '../../main/services/web/firecrawlService';
+import {
+  createSystemSideAsset,
+  findFreshScrape,
+} from '../../main/services/asset/systemAssetService';
 
 const mockedFetch = fetchPage as unknown as jest.Mock;
 const mockedScrape = firecrawlScrape as unknown as jest.Mock;

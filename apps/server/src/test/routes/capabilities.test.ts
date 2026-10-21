@@ -4,7 +4,7 @@ import { User } from '../../main/models/User';
 
 const mockToolsets = jest.fn();
 
-jest.mock('../../main/services/connectorService', () => ({
+jest.mock('../../main/services/connectors/connectorService', () => ({
   connectorToolsetsForUser: (...args: unknown[]) => mockToolsets(...args),
 }));
 

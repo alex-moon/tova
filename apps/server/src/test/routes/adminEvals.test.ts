@@ -9,12 +9,12 @@ import {
   executeEvalRun,
   langsmithClientFromEnv,
   resolveScheduledModels,
-} from '../../main/services/evalRunService';
+} from '../../main/services/eval/evalRunService';
 
 /* Route coverage: guard wiring, ordering, clamps, 404s, manual-run paths. */
 // @see #225
-jest.mock('../../main/services/evalRunService', () => {
-  const actual = jest.requireActual('../../main/services/evalRunService');
+jest.mock('../../main/services/eval/evalRunService', () => {
+  const actual = jest.requireActual('../../main/services/eval/evalRunService');
   return {
     ...actual,
     beginEvalRun: jest.fn(),
@@ -181,7 +181,7 @@ describe('admin evals (#225)', () => {
 
   it('500s as JSON when a Mongo rejection escapes the GET handlers (#397)', async () => {
     const errorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
-    const svc = await import('../../main/services/evalRunsAdminService');
+    const svc = await import('../../main/services/eval/evalRunsAdminService');
     const listSpy = jest.spyOn(svc, 'listEvalRuns').mockRejectedValue(new Error('mongo down'));
     const getSpy = jest.spyOn(svc, 'getEvalRun').mockRejectedValue(new Error('mongo down'));
     try {

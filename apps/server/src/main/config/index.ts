@@ -1,5 +1,5 @@
 import { getJwtSecret } from './jwt';
-import type { LlmProvider } from '../services/llmTypes';
+import type { LlmProvider } from '../services/llm/llmTypes';
 
 // Typed config surface; lazy accessors because env loads after import.
 // @see #142

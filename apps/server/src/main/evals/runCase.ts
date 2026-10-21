@@ -2,7 +2,7 @@
 // @see #158 #16
 import type { EvalCase } from './cases';
 import type { EvalRun } from './types';
-import type { CompletionOptions, NeutralStreamChunk } from '../services/llmTypes';
+import type { CompletionOptions, NeutralStreamChunk } from '../services/llm/llmTypes';
 import { normalizeArgs } from './graders';
 
 type CreateStreaming = (

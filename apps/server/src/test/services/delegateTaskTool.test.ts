@@ -2,7 +2,7 @@ import { RequestContext } from '@mastra/core/request-context';
 import { User } from '../../main/models/User';
 import { Task } from '../../main/models/Task';
 import { TaskEvent } from '../../main/models/TaskEvent';
-import { delegateTaskTool } from '../../main/services/mastraService';
+import { delegateTaskTool } from '../../main/services/llm/mastraService';
 
 /* `delegate_task`: createTool is identity; `execute` runs direct. */
 // @see #255

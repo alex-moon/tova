@@ -5,7 +5,7 @@ import { TaskEvent, type TaskEventDocument } from '../models/TaskEvent';
 import { User } from '../models/User';
 import { authenticate, AuthRequest } from '../middleware/auth';
 import { zodMessage, taskCreateSchema, taskInstructionSchema } from '../validation';
-import { enqueueTask, steerTask, cancelTask } from '../services/taskService';
+import { enqueueTask, steerTask, cancelTask } from '../services/task/taskService';
 import { cursorPage, LIST_PAGE_SIZE } from '../services/cursorPage';
 import { config } from '../config';
 

@@ -3,7 +3,7 @@ import { createApp } from '../../main/index';
 import { User } from '../../main/models/User';
 import { ModelRouteError } from '../../main/models/ModelRouteError';
 import { queryRetainedLogs } from '../../main/services/lokiLogs';
-import { CHAT_MODEL, TASK_MODEL } from '../../main/services/modelDefaults';
+import { CHAT_MODEL, TASK_MODEL } from '../../main/services/model/modelDefaults';
 
 jest.mock('../../main/services/lokiLogs', () => ({
   queryRetainedLogs: jest.fn(),

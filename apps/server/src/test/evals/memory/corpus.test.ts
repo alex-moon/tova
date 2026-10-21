@@ -1,4 +1,4 @@
-import { promptWords } from '../../../main/services/workspaceRetrievalService';
+import { promptWords } from '../../../main/services/workspace/workspaceRetrievalService';
 import { GATE_CASES, MEMORY_SCENARIOS } from '../../../main/evals/memory/corpus';
 
 /* Corpus invariants: unique ids, resolvable seeds, labelled gate set. */

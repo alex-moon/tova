@@ -5,12 +5,12 @@ import { Message } from '../../main/models/Message';
 import { Session } from '../../main/models/Session';
 import { User } from '../../main/models/User';
 import { Asset } from '../../main/models/Asset';
-import { classifyAndPersistPromptDimensions } from '../../main/services/metricsService';
+import { classifyAndPersistPromptDimensions } from '../../main/services/llm/metricsService';
 
 const mockAgentStream = jest.fn();
 const mockPlainGenerate = jest.fn();
 
-jest.mock('../../main/services/inferenceService', () => ({
+jest.mock('../../main/services/llm/inferenceService', () => ({
   inferenceService: {
     createCompletion: (...args: unknown[]) => mockPlainGenerate(...args),
     createToolFreeCompletion: (...args: unknown[]) => mockPlainGenerate(...args),
@@ -18,7 +18,7 @@ jest.mock('../../main/services/inferenceService', () => ({
   },
 }));
 
-jest.mock('../../main/services/metricsService', () => ({
+jest.mock('../../main/services/llm/metricsService', () => ({
   classifyAndPersistPromptDimensions: jest.fn().mockResolvedValue(undefined),
   isTriviallyNeutral: (content: string) => content.trim().length === 0,
 }));
@@ -31,8 +31,8 @@ const mockRacingState: {
   routing: typeof MOCK_ROUTING | null;
 } = { routing: MOCK_ROUTING };
 
-jest.mock('../../main/services/chatRace', () => {
-  const { inferenceService } = jest.requireMock('../../main/services/inferenceService');
+jest.mock('../../main/services/llm/chatRace', () => {
+  const { inferenceService } = jest.requireMock('../../main/services/llm/inferenceService');
   return {
     chatRoute: () => mockRacingState.routing,
     raceChatCompletion: async (opts: Record<string, unknown>) => {
@@ -54,7 +54,7 @@ jest.mock('../../main/services/chatRace', () => {
   };
 });
 
-jest.mock('../../main/services/titleService', () => ({
+jest.mock('../../main/services/llm/titleService', () => ({
   generateChatTitle: jest.fn().mockResolvedValue('Hello'),
 }));
 
@@ -74,7 +74,7 @@ jest.mock('../../main/services/storageService', () => ({
   deleteObject: jest.fn(),
 }));
 
-jest.mock('../../main/services/followupService', () => ({
+jest.mock('../../main/services/llm/followupService', () => ({
   generateFollowups: jest.fn().mockResolvedValue([]),
 }));
 

@@ -1,5 +1,5 @@
 import { CASES, resolveExpectedContent } from '../../main/evals/cases';
-import { defaultReadRepoFile, resolveAssertions } from '../../main/services/evalRunService';
+import { defaultReadRepoFile, resolveAssertions } from '../../main/services/eval/evalRunService';
 
 describe('#112 golden set', () => {
   it('has unique ids and non-empty prompts for every case', () => {

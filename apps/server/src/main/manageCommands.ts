@@ -1,7 +1,7 @@
 import 'dotenv/config';
 import { readFile } from 'node:fs/promises';
 import * as path from 'node:path';
-import { chatBackends } from './services/modelDefaults';
+import { chatBackends } from './services/model/modelDefaults';
 
 // Django-style management commands: flat registry + argv router.
 // @see #322

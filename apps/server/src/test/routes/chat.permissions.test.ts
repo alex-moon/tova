@@ -14,7 +14,7 @@ jest.mock('@mastra/core/agent', () => {
   };
 });
 
-jest.mock('../../main/services/titleService', () => ({
+jest.mock('../../main/services/llm/titleService', () => ({
   generateChatTitle: jest.fn().mockResolvedValue('Hello'),
 }));
 

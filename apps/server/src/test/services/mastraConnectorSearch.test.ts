@@ -1,12 +1,12 @@
 import { ToolSearchProcessor } from '@mastra/core/processors';
-import { connectorSearchOptionsFrom } from '../../main/services/mastraService';
-import type { CompletionOptions } from '../../main/services/llmTypes';
+import { connectorSearchOptionsFrom } from '../../main/services/llm/mastraService';
+import type { CompletionOptions } from '../../main/services/llm/llmTypes';
 
 /* Pins the deferred-connector option shape the connector builder emits. */
 // @see #360
 
 const mockToolsetsFor = jest.fn();
-jest.mock('../../main/services/connectorService', () => ({
+jest.mock('../../main/services/connectors/connectorService', () => ({
   connectorToolsetsForUser: (...args: unknown[]) => mockToolsetsFor(...args),
 }));
 

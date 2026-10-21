@@ -1,6 +1,6 @@
-import { groqConnector, deepinfraConnector } from '../../main/services/mastraService';
-import { runModelComparison } from '../../main/services/modelCompare';
-import type { CompletionOptions } from '../../main/services/llmTypes';
+import { groqConnector, deepinfraConnector } from '../../main/services/llm/mastraService';
+import { runModelComparison } from '../../main/services/model/modelCompare';
+import type { CompletionOptions } from '../../main/services/llm/llmTypes';
 
 /* Leading system message(s) collapse into a per-call instructions override. */
 // @see #198

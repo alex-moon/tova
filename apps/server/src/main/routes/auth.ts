@@ -8,7 +8,7 @@ import { getJwtSecret } from '../config/jwt';
 import { config } from '../config';
 import { zodMessage, loginSchema, registerSchema } from '../validation';
 import { authenticate, AuthRequest } from '../middleware/auth';
-import { ensureUserLocation } from '../services/geoLocationService';
+import { ensureUserLocation } from '../services/web/geoLocationService';
 
 const router = express.Router();
 

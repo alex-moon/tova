@@ -6,7 +6,10 @@ import {
   SUPPORT_PHONE_PAGE,
 } from '../../main/evals/mongoSource';
 import { Asset } from '../../main/models/Asset';
-import { MAX_PROMPT_TEXT_CHARS, truncateForPrompt } from '../../main/services/textExtraction';
+import {
+  MAX_PROMPT_TEXT_CHARS,
+  truncateForPrompt,
+} from '../../main/services/content/textExtraction';
 
 describe('#112 temp mongo source', () => {
   const userId = evalUserId.toHexString();

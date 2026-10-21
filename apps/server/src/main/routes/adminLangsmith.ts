@@ -7,9 +7,12 @@ import {
   LangsmithError,
 } from '../services/langsmithTracesService';
 import { TraceStatsCache, windowKeyFor } from '../models/TraceStatsCache';
-import { TRACE_STATS_STALE_MS, TRACE_STATS_WINDOW_DAYS } from '../services/traceStatsCacheService';
-import { applyCostToStats } from '../services/traceStatsCost';
-import { sessionCostBreakdown } from '../services/sessionCostService';
+import {
+  TRACE_STATS_STALE_MS,
+  TRACE_STATS_WINDOW_DAYS,
+} from '../services/trace/traceStatsCacheService';
+import { applyCostToStats } from '../services/trace/traceStatsCost';
+import { sessionCostBreakdown } from '../services/trace/sessionCostService';
 
 const router = express.Router();
 

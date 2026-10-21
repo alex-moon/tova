@@ -1,5 +1,5 @@
 import type { Client } from 'langsmith';
-import type { WorkspaceSlice } from '../../../main/services/workspaceRetrievalService';
+import type { WorkspaceSlice } from '../../../main/services/workspace/workspaceRetrievalService';
 import {
   MEMORY_DATASET_NAME,
   memoryCorpusHash,
