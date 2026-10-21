@@ -1,6 +1,6 @@
-import { buildSystemContent } from '../../services/promptAssembly';
+import { buildSystemContent } from '../../services/llm/promptAssembly';
 import { sleep } from '../../services/sleep';
-import { inferenceService } from '../../services/inferenceService';
+import { inferenceService } from '../../services/llm/inferenceService';
 import { resolveScheduledModels } from '../../services/eval/evalRunService';
 import {
   buildWorkspaceBlock,

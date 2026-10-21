@@ -1,5 +1,5 @@
-import { groqConnector } from '../../main/services/mastraService';
-import type { CompletionOptions } from '../../main/services/llmTypes';
+import { groqConnector } from '../../main/services/llm/mastraService';
+import type { CompletionOptions } from '../../main/services/llm/llmTypes';
 
 /* `toolResults` nests under `payload`; pin the unwrap against the shape. */
 // @see #254 #251 #196

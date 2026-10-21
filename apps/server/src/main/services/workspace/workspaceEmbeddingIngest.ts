@@ -1,7 +1,7 @@
 import mongoose from 'mongoose';
 import { config } from '../../config/index';
 import { WorkspaceEmbedding } from '../../models/WorkspaceEmbedding';
-import { embedTexts } from '../embeddingService';
+import { embedTexts } from './embeddingService';
 import { collectWorkspaceSlices } from './workspaceRetrievalService';
 import {
   existingEmbeddingHashes,

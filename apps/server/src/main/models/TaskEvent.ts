@@ -1,5 +1,5 @@
 import mongoose from 'mongoose';
-import type { PersistedToolEvent } from '../services/toolChips';
+import type { PersistedToolEvent } from '../services/llm/toolChips';
 
 // Ordered task event log: content and resume state; never in `messages`.
 // @see #254 #251 #196

@@ -1,7 +1,7 @@
 import type { TaskDocument } from '../../models/Task';
 import { Task } from '../../models/Task';
 import { TaskEvent, type TaskEventDocument, type TaskToolEvent } from '../../models/TaskEvent';
-import type { TokenUsage, LlmProvider } from '../llmTypes';
+import type { TokenUsage, LlmProvider } from '../llm/llmTypes';
 import { priceRowsForModel } from '../model/modelDefaults';
 import { estimateCostUsd } from '../trace/traceStatsCost';
 import { runTaskStep, type TaskStepOpts, type TaskStepOutcome } from './taskSequencer';

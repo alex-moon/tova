@@ -7,7 +7,7 @@ import {
   connectorToolsetsForUser,
   zodFromJsonSchema,
 } from '../../main/services/connectorService';
-import { toolIsFailed } from '../../main/services/toolDegrade';
+import { toolIsFailed } from '../../main/services/llm/toolDegrade';
 
 const LIST_TOOLS_RESULT = {
   tools: [

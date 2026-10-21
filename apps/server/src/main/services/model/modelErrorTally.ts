@@ -1,6 +1,6 @@
 import { redactForLog } from '../logRedaction';
 import { ModelRouteError } from '../../models/ModelRouteError';
-import { isOverloadError } from '../providerErrors';
+import { isOverloadError } from './providerErrors';
 
 /* Per-route error tally: status, count and a coarse category per failure. */
 // @see #175

@@ -40,8 +40,8 @@ const mockRacingState: {
   error?: unknown;
 } = { routing: MOCK_ROUTING };
 
-jest.mock('../../main/services/chatRace', () => {
-  const { inferenceService } = jest.requireActual('../../main/services/inferenceService');
+jest.mock('../../main/services/llm/chatRace', () => {
+  const { inferenceService } = jest.requireActual('../../main/services/llm/inferenceService');
   const failIfSet = () => {
     if (mockRacingState.error) throw mockRacingState.error;
   };
@@ -70,14 +70,14 @@ jest.mock('../../main/services/chatRace', () => {
   };
 });
 
-jest.mock('../../main/services/titleService', () => ({
+jest.mock('../../main/services/llm/titleService', () => ({
   generateChatTitle: jest.fn().mockResolvedValue('Hello'),
 }));
 
 // Enrichment aux stubbed out; trace-fact helpers stay real for route metadata.
 // @see #238 #310
-jest.mock('../../main/services/workspaceTraceFacts', () =>
-  jest.requireActual('../../main/services/workspaceTraceFacts'),
+jest.mock('../../main/services/workspace/workspaceTraceFacts', () =>
+  jest.requireActual('../../main/services/workspace/workspaceTraceFacts'),
 );
 
 const isClassifierCall = (args?: { messages?: { role: string; content: string }[] }) =>

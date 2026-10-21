@@ -1,5 +1,5 @@
-import { mastraMessagesFor } from '../../main/services/mastraService';
-import type { CompletionOptions } from '../../main/services/llmTypes';
+import { mastraMessagesFor } from '../../main/services/llm/mastraService';
+import type { CompletionOptions } from '../../main/services/llm/llmTypes';
 
 /* Neutral contract: image_url parts map over; Groq rejects part arrays. */
 // @see #115 #94

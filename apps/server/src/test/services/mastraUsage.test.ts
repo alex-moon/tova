@@ -1,5 +1,5 @@
-import { groqConnector } from '../../main/services/mastraService';
-import type { CompletionOptions, NeutralStreamChunk } from '../../main/services/llmTypes';
+import { groqConnector } from '../../main/services/llm/mastraService';
+import type { CompletionOptions, NeutralStreamChunk } from '../../main/services/llm/llmTypes';
 
 /* Token usage survives the neutral boundary; absent/NaN dropped (≠ 0). */
 // @see #224

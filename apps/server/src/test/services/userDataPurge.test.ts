@@ -7,7 +7,7 @@ import { WorkspaceEmbedding } from '../../main/models/WorkspaceEmbedding';
 import { Connector } from '../../main/models/Connector';
 import { encryptEnvelope, MCP_ENCRYPTION_KEY_ENV_VAR } from '../../main/services/crypto';
 import { purgeAllUserData } from '../../main/services/userDataPurge';
-import { embedTexts } from '../../main/services/embeddingService';
+import { embedTexts } from '../../main/services/workspace/embeddingService';
 import { enqueueWorkspaceEmbedding } from '../../main/services/workspace/workspaceEmbeddingIngest';
 
 // Data-level purge coverage: storage and trace purge are mocked at the seam.
@@ -28,7 +28,7 @@ jest.mock('../../main/services/trace/tracePurge', () => ({
   purgeUserTraces: jest.fn(),
 }));
 
-jest.mock('../../main/services/embeddingService');
+jest.mock('../../main/services/workspace/embeddingService');
 
 // Tests are exempt from the storage-boundary import rule (eslint.config.js).
 import { spacesWorkspaceStorage } from '../../main/services/workspace/workspaceStorage';

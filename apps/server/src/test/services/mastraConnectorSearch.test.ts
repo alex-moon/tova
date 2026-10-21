@@ -1,6 +1,6 @@
 import { ToolSearchProcessor } from '@mastra/core/processors';
-import { connectorSearchOptionsFrom } from '../../main/services/mastraService';
-import type { CompletionOptions } from '../../main/services/llmTypes';
+import { connectorSearchOptionsFrom } from '../../main/services/llm/mastraService';
+import type { CompletionOptions } from '../../main/services/llm/llmTypes';
 
 /* Pins the deferred-connector option shape the connector builder emits. */
 // @see #360

@@ -6,7 +6,7 @@ import { Asset, type AssetDocument } from '../../../main/models/Asset';
 import { AssetJob } from '../../../main/models/AssetJob';
 import { runAssetJobTick } from '../../../main/services/asset/assetJobService';
 import { processAssetConversionJob } from '../../../main/services/asset/assetJobProcessor';
-import { OCR_MAX_INPUT_BYTES } from '../../../main/services/ocr';
+import { OCR_MAX_INPUT_BYTES } from '../../../main/services/content/ocr';
 
 // OCR branch: `recognizeImage` mocked; born-digital PDFs never hit the mock.
 // @see #209
@@ -21,14 +21,14 @@ jest.mock('../../../main/services/storageService', () => ({
   putObject: (...args: unknown[]) => mockPutObject(...args),
 }));
 
-jest.mock('../../../main/services/ocr', () => {
-  const actual = jest.requireActual<typeof import('../../../main/services/ocr')>(
-    '../../../main/services/ocr',
+jest.mock('../../../main/services/content/ocr', () => {
+  const actual = jest.requireActual<typeof import('../../../main/services/content/ocr')>(
+    '../../../main/services/content/ocr',
   );
   return { ...actual, recognizeImage: (...args: unknown[]) => mockRecognizeImage(...args) };
 });
 
-jest.mock('../../../main/services/pdfRasterize', () => ({
+jest.mock('../../../main/services/content/pdfRasterize', () => ({
   rasterizePdf: (...args: unknown[]) => mockRasterizePdf(...args),
 }));
 

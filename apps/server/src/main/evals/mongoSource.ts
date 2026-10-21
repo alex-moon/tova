@@ -3,7 +3,7 @@
 import mongoose from 'mongoose';
 import { Asset } from '../models/Asset';
 import { User } from '../models/User';
-import { extractUnits, type AssetUnit } from '../services/documentUnits';
+import { extractUnits, type AssetUnit } from '../services/content/documentUnits';
 
 // Stable 24-hex ObjectId so eval runs across sessions reuse one fixture user.
 const EVAL_USER_ID_HEX = '6f61e78155a5b2c0d3e1f7a2';

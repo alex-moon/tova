@@ -6,11 +6,11 @@ import { Task } from '../../models/Task';
 import { TaskEvent } from '../../models/TaskEvent';
 import { WorkspaceEmbedding } from '../../models/WorkspaceEmbedding';
 import { config } from '../../config/index';
-import { VECTOR_INDEX_NAME } from '../atlasVectorIndex';
-import { embedTexts } from '../embeddingService';
-import { rerankQuery } from '../rerankerService';
+import { VECTOR_INDEX_NAME } from './atlasVectorIndex';
+import { embedTexts } from './embeddingService';
+import { rerankQuery } from './rerankerService';
 import { withEmbedTitle } from './workspaceEmbeddingText';
-import { withTimeout } from '../markdownConversion';
+import { withTimeout } from '../content/markdownConversion';
 
 /* Workspace memory: BM25-ranked retrieval over existing rows, pure. */
 // @see #253 #138 #251 #298 #293

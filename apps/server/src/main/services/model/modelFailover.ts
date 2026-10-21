@@ -1,7 +1,7 @@
 /* Provider error classification: aborts, prompt size, rate limits. */
 // @see #233 #232
 
-export { isOverloadError } from '../providerErrors';
+export { isOverloadError } from './providerErrors';
 
 export const isClientAbort = (err: unknown): boolean =>
   err instanceof Error && (err.name === 'AbortError' || err.name === 'CanceledError');

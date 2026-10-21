@@ -26,8 +26,8 @@ const mockRacingState: { routing: typeof MOCK_ROUTING | null; error?: unknown } 
   routing: MOCK_ROUTING,
 };
 
-jest.mock('../../main/services/chatRace', () => {
-  const { inferenceService } = jest.requireActual('../../main/services/inferenceService');
+jest.mock('../../main/services/llm/chatRace', () => {
+  const { inferenceService } = jest.requireActual('../../main/services/llm/inferenceService');
   const failIfSet = () => {
     if (mockRacingState.error) throw mockRacingState.error;
   };
@@ -56,21 +56,21 @@ jest.mock('../../main/services/chatRace', () => {
   };
 });
 
-jest.mock('../../main/services/titleService', () => ({
+jest.mock('../../main/services/llm/titleService', () => ({
   generateChatTitle: jest.fn().mockResolvedValue('Hello'),
 }));
 
 // Subtitle revision is fire-and-forget on a turn cadence; mock it here.
 // @see #359
 const mockRevise = jest.fn();
-jest.mock('../../main/services/subtitleService', () => ({
+jest.mock('../../main/services/content/subtitleService', () => ({
   reviseSessionSubtitle: (...args: unknown[]) => mockRevise(...args),
 }));
 
 // Enrichment aux stubbed off; the trace-fact helpers stay real.
 // @see #238 #310
-jest.mock('../../main/services/workspaceTraceFacts', () =>
-  jest.requireActual('../../main/services/workspaceTraceFacts'),
+jest.mock('../../main/services/workspace/workspaceTraceFacts', () =>
+  jest.requireActual('../../main/services/workspace/workspaceTraceFacts'),
 );
 
 const registerUser = async (app: ReturnType<typeof createApp>, email: string) => {

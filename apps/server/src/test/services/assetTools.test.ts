@@ -8,9 +8,9 @@ import {
   generateFileTool,
   listFilesTool,
   readFileTool,
-} from '../../main/services/mastraService';
-import { toolIsFailed } from '../../main/services/toolDegrade';
-import { truncateForPrompt } from '../../main/services/textExtraction';
+} from '../../main/services/llm/mastraService';
+import { toolIsFailed } from '../../main/services/llm/toolDegrade';
+import { truncateForPrompt } from '../../main/services/content/textExtraction';
 
 jest.mock('../../main/services/storageService', () => ({
   isStorageConfigured: jest.fn(),

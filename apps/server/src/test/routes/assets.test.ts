@@ -39,7 +39,7 @@ jest.mock('../../main/services/asset/assetJobService', () => {
 });
 const actualAssetJobService = jest.requireActual('../../main/services/asset/assetJobService');
 
-jest.mock('../../main/services/titleService', () => ({
+jest.mock('../../main/services/llm/titleService', () => ({
   generateChatTitle: jest.fn().mockResolvedValue('Hello'),
 }));
 

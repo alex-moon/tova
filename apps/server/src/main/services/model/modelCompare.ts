@@ -1,7 +1,7 @@
-import type { CompletionOptions, LlmProvider } from '../llmTypes';
-import { inferenceService, isWiredProvider } from '../inferenceService';
-import { buildSystemContent } from '../promptAssembly';
-import { outputTokensFor, promptCharsFrom } from '../outputTokenCap';
+import type { CompletionOptions, LlmProvider } from '../llm/llmTypes';
+import { inferenceService, isWiredProvider } from '../llm/inferenceService';
+import { buildSystemContent } from '../llm/promptAssembly';
+import { outputTokensFor, promptCharsFrom } from '../llm/outputTokenCap';
 
 /* One prompt through each model; shared core for the CLI and admin tab. */
 // @see #129

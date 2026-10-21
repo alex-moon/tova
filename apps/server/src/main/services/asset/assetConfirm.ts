@@ -2,8 +2,8 @@ import { Asset, type AssetDocument } from '../../models/Asset';
 import { spacesWorkspaceStorage } from '../workspace/workspaceStorage';
 import { CONFIRM_MAX_AGE_MS, MAX_ASSET_SIZE, isImageContentType } from './assetLimits';
 import { enqueueAssetJob } from './assetJobService';
-import { isConvertible } from '../markdownConversion';
-import { extractText, isExtractable } from '../textExtraction';
+import { isConvertible } from '../content/markdownConversion';
+import { extractText, isExtractable } from '../content/textExtraction';
 import { safeAsset } from './assetViews';
 import { enqueueWorkspaceEmbedding } from '../workspace/workspaceEmbeddingIngest';
 

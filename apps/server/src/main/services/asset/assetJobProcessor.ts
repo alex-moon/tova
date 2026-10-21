@@ -6,13 +6,13 @@ import {
   extensionOf,
   isConvertible,
   isEmptyConversion,
-} from '../markdownConversion';
-import { extractUnits } from '../documentUnits';
+} from '../content/markdownConversion';
+import { extractUnits } from '../content/documentUnits';
 import { MAX_ASSET_SIZE, isImageContentType } from './assetLimits';
-import { makeThumbnail } from '../imageThumbnail';
+import { makeThumbnail } from '../content/imageThumbnail';
 import { thumbnailKeyFor } from './assetThumbnails';
-import { OCR_MAX_INPUT_BYTES, finalizeOcrText, isNearEmpty, recognizeImage } from '../ocr';
-import { rasterizePdf } from '../pdfRasterize';
+import { OCR_MAX_INPUT_BYTES, finalizeOcrText, isNearEmpty, recognizeImage } from '../content/ocr';
+import { rasterizePdf } from '../content/pdfRasterize';
 import { enqueueWorkspaceEmbedding } from '../workspace/workspaceEmbeddingIngest';
 
 /* Real processor for the asset-job queue: conversion, OCR, thumbnails. */

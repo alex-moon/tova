@@ -4,7 +4,7 @@ import { muteConsoleError } from '../muteConsole';
 
 const mockCreateToolFree = jest.fn();
 
-jest.mock('../../main/services/inferenceService', () => ({
+jest.mock('../../main/services/llm/inferenceService', () => ({
   inferenceService: {
     createToolFreeCompletion: (...args: unknown[]) => mockCreateToolFree(...args),
     createStructuredCompletion: (...args: unknown[]) => mockCreateToolFree(...args),

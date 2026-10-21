@@ -15,7 +15,7 @@ import {
   reasonFrom,
   toolDegradeReason,
   toolIsFailed,
-} from './toolDegrade';
+} from './llm/toolDegrade';
 
 /* DB-facing layer over the MCP wire code; dispatches auth per type. */
 // @see #329 #328 #36

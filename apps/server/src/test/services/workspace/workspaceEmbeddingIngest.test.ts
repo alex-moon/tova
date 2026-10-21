@@ -3,7 +3,7 @@ import { Message } from '../../../main/models/Message';
 import { Session } from '../../../main/models/Session';
 import { WorkspaceEmbedding } from '../../../main/models/WorkspaceEmbedding';
 import { config } from '../../../main/config/index';
-import { embedTexts } from '../../../main/services/embeddingService';
+import { embedTexts } from '../../../main/services/workspace/embeddingService';
 import { embeddingTextHash } from '../../../main/services/workspace/workspaceEmbeddingText';
 import {
   drainUserEmbeddings,
@@ -12,7 +12,7 @@ import {
   enqueueWorkspaceEmbedding,
 } from '../../../main/services/workspace/workspaceEmbeddingIngest';
 
-jest.mock('../../../main/services/embeddingService');
+jest.mock('../../../main/services/workspace/embeddingService');
 
 /* Ingest/backfill core: flag gate and idempotency are the invariants. */
 // @see #294

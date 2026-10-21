@@ -2,7 +2,11 @@ import { RequestContext } from '@mastra/core/request-context';
 import { User } from '../../main/models/User';
 import { Asset } from '../../main/models/Asset';
 import { AssetVersion } from '../../main/models/AssetVersion';
-import { generateFileTool, readFileTool, editFileTool } from '../../main/services/mastraService';
+import {
+  generateFileTool,
+  readFileTool,
+  editFileTool,
+} from '../../main/services/llm/mastraService';
 import { pruneOldAssetVersions } from '../../main/services/asset/assetVersionPrune';
 
 jest.mock('../../main/services/workspace/workspaceStorage', () => ({

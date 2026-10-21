@@ -8,7 +8,7 @@ import { CASES, resolveExpectedContent, type EvalCase } from '../../evals/cases'
 import { clearEvalSource, seedEvalSource, evalUserId } from '../../evals/mongoSource';
 import { runCase } from '../../evals/runCase';
 import type { Assertion, AssertionResult } from '../../evals/types';
-import { inferenceService, isWiredProvider } from '../inferenceService';
+import { inferenceService, isWiredProvider } from '../llm/inferenceService';
 import { sweepModels, CHAT_MODEL } from '../model/modelDefaults';
 import { EvalRunRecord } from '../../models/EvalRunRecord';
 import { clampError } from '../clampError';

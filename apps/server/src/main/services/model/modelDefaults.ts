@@ -1,4 +1,4 @@
-import type { LlmProvider } from '../llmTypes';
+import type { LlmProvider } from '../llm/llmTypes';
 
 /* Fixed per-function models: env-pinned ids, known backends, static metadata. */
 // @see #387

@@ -1,9 +1,9 @@
 import type { TaskDocument } from '../../models/Task';
 import type { TaskEventDocument, TaskToolEvent } from '../../models/TaskEvent';
-import { toolResultEvent } from '../toolChips';
-import type { CompletionOptions, NeutralCompletion } from '../llmTypes';
-import { outputTokensFor, promptCharsFrom } from '../outputTokenCap';
-import { inferenceService } from '../inferenceService';
+import { toolResultEvent } from '../llm/toolChips';
+import type { CompletionOptions, NeutralCompletion } from '../llm/llmTypes';
+import { outputTokensFor, promptCharsFrom } from '../llm/outputTokenCap';
+import { inferenceService } from '../llm/inferenceService';
 import { contextLengthFor, TASK_MODEL, TASK_PROVIDER } from '../model/modelDefaults';
 
 /* Driver's turn loop: one step = one DeepInfra completion on TASK_MODEL. */

@@ -1,6 +1,6 @@
 import { runModelComparison } from '../../../main/services/model/modelCompare';
 
-jest.mock('../../../main/services/mastraService', () => {
+jest.mock('../../../main/services/llm/mastraService', () => {
   const connectorFor = (tag: string) => ({
     createCompletion: jest.fn(async (options: { model: string }) =>
       options.model.includes('fail')
@@ -14,7 +14,7 @@ jest.mock('../../../main/services/mastraService', () => {
   };
 });
 
-jest.mock('../../../main/services/promptAssembly', () => ({
+jest.mock('../../../main/services/llm/promptAssembly', () => ({
   buildSystemContent: jest.fn(() => 'SYSTEM'),
 }));
 
@@ -24,7 +24,7 @@ const mockCreate = (connector: unknown): jest.Mock => {
 };
 
 const { groqConnector, deepinfraConnector } = jest.requireMock(
-  '../../../main/services/mastraService',
+  '../../../main/services/llm/mastraService',
 );
 
 beforeEach(() => {

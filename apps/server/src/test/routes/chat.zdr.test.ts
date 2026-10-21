@@ -12,7 +12,7 @@ const mockAgentStream = jest.fn();
 const mockPlainGenerate = jest.fn();
 const mockDeleteObject = jest.fn();
 
-jest.mock('../../main/services/inferenceService', () => ({
+jest.mock('../../main/services/llm/inferenceService', () => ({
   inferenceService: {
     createCompletion: (...args: unknown[]) => mockPlainGenerate(...args),
     createToolFreeCompletion: (...args: unknown[]) => mockPlainGenerate(...args),
@@ -25,7 +25,7 @@ jest.mock('../../main/services/metricsService', () => ({
   isTriviallyNeutral: (content: string) => content.trim().length === 0,
 }));
 
-jest.mock('../../main/services/followupService', () => ({
+jest.mock('../../main/services/llm/followupService', () => ({
   generateFollowups: jest.fn().mockResolvedValue([]),
 }));
 
@@ -47,8 +47,8 @@ const mockRacingState: {
   error?: unknown;
 } = { routing: MOCK_ROUTING };
 
-jest.mock('../../main/services/chatRace', () => {
-  const { inferenceService } = jest.requireMock('../../main/services/inferenceService');
+jest.mock('../../main/services/llm/chatRace', () => {
+  const { inferenceService } = jest.requireMock('../../main/services/llm/inferenceService');
   const failIfSet = () => {
     if (mockRacingState.error) throw mockRacingState.error;
   };
@@ -77,14 +77,14 @@ jest.mock('../../main/services/chatRace', () => {
   };
 });
 
-jest.mock('../../main/services/titleService', () => ({
+jest.mock('../../main/services/llm/titleService', () => ({
   generateChatTitle: jest.fn().mockResolvedValue('Hello'),
 }));
 
 // Enrichment aux stubbed out; the trace-fact helpers stay real.
 // @see #238 #310
-jest.mock('../../main/services/workspaceTraceFacts', () =>
-  jest.requireActual('../../main/services/workspaceTraceFacts'),
+jest.mock('../../main/services/workspace/workspaceTraceFacts', () =>
+  jest.requireActual('../../main/services/workspace/workspaceTraceFacts'),
 );
 
 const fullStreamFrom = (chunks: string[]) =>
@@ -344,7 +344,7 @@ describe('Zero-data retention chats (issue #116)', () => {
     const cookies = await registerUser(email);
     await enableZdr(email);
 
-    const { generateChatTitle } = jest.requireMock('../../main/services/titleService');
+    const { generateChatTitle } = jest.requireMock('../../main/services/llm/titleService');
     const { classifyAndPersistPromptDimensions } = jest.requireMock(
       '../../main/services/metricsService',
     );

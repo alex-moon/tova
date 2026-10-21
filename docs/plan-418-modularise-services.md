@@ -38,10 +38,34 @@ TypeScript is the safety net: every missed import is a compile error. After all 
 
 ## Done
 
-- [x] Six groups moved, imports rewritten (287 specifiers across 87 files), tests mirrored
+- [x] Iteration 1: six prefix groups moved, imports rewritten (287 specifiers across 87
+  files), tests mirrored
+- [x] Iteration 2: llm/, web/, content/ + absorptions (232 specifiers across 90 files)
 - [x] `npm run ci` green (ran whole once — failed at server lint — then per-side: `ci:server` + `ci:client`)
 
-## Deviations found during the move
+## Iteration 2 — dependency-traced grouping
+
+Second pass guided by the actual import graph, not name prefixes. New groups:
+
+- `llm/` — llmTypes, inferenceService, mastraService, auxCompletion, chatRace,
+  outputTokenCap, toolChips, toolDegrade, calculator, titleService, followupService,
+  promptAssembly (llmTypes is the hub; title/followup are aux-completion consumers)
+- `web/` — webFetchService, webSearchService, firecrawlService, safeLinkService,
+  geoLocationService (only entered via mastraService/firecrawl)
+- `content/` — textExtraction, markdownConversion, documentUnits, pdfRasterize, ocr,
+  imageThumbnail, subtitleService, attachmentEnvelope (markdownConversion hub)
+
+Absorbed into existing groups where the consumer tree demanded it:
+`embeddingService`/`atlasVectorIndex`/`rerankerService`/`workspaceTraceFacts` →
+`workspace/`; `providerErrors` → `model/`; `systemAssetService` → `asset/`.
+
+Deliberately left flat: the connectors trio (connectorService, oauthConnectors, crypto —
+grouping them would cycle against llm/ via toolDegrade) and observability leftovers
+(metricsService → auxCompletion would cycle the same way); shared kernel logRedaction,
+clampError, sleep, cursorPage; boundary-protected storageService; route-facing singles
+userService, userDataPurge, zdrTurn, honestyGuardService.
+
+## Deviations found during iteration 1
 
 - `eslint.config.js` storage-boundary ignore (#149) was keyed to the old flat path
   `services/workspaceStorage.ts` — updated to `services/workspace/workspaceStorage.ts`

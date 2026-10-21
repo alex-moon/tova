@@ -1,4 +1,4 @@
-import type { CompletionOptions, NeutralCompletion } from '../../../main/services/llmTypes';
+import type { CompletionOptions, NeutralCompletion } from '../../../main/services/llm/llmTypes';
 import { TASK_MODEL, TASK_PROVIDER } from '../../../main/services/model/modelDefaults';
 import { enqueueTask } from '../../../main/services/task/taskService';
 import { TaskEvent } from '../../../main/models/TaskEvent';
