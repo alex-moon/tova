@@ -61,6 +61,38 @@ the dose-response axis becomes **context length / replay accumulation**. The dis
 matrix stands: same flip at temp 0 on a bf16 host (Fireworks) = pollution; fp4-only =
 quantisation.
 
+## Battery results (2026-10-21)
+
+**v1** (recite, ≤139k depth): 128 generations, zero flips in every cell.
+**v2** (escalation per the pre-registered trap — deepmax at the full 400k `windowedHistory`
+ceiling from the four largest real sessions, longform generation ~12k chars, plus recite
+and dirty controls): 128 generations, **zero flips in every cell** — fp4 and bf16, temp 0
+through 0.7.
+
+256 clean generations against a real-world incident rate of 4% of messages (28% on Oct
+19). Depth alone, generation length alone, sampling temperature, and host quantisation do
+not reproduce the failure. The dirty-clip control degraded recitation fidelity but
+produced no strays. (Side finding: the Fireworks GLM deployment burns max_tokens on
+reasoning tokens — longform needs 12k budget.)
+
+## Interpretation and next escalation
+
+What the battery did NOT replicate is the **production context assembly**: the incidents
+happened in live agentic chat with the full instruction stack, tool/connector definitions,
+chip narration, workspace blocks and task notifications — not raw message replay. Two
+candidate mechanisms remain, both testable:
+
+1. **Incident-context re-roll (next step):** reconstruct the exact persisted context of an
+   Oct 19 incident message, re-sample it N times on both hosts. Elevated flip rate there
+   vs the battery → the trigger is in that session's specific content (then bisect).
+   Clean → the trigger lives in the un-persisted context parts or the streaming path.
+2. **Full-stack reproduction:** run the local dev stack, seed a session with real
+   history, exercise the real chat pipeline (streaming path included) — the assembly
+   difference the battery lacks.
+
+The token-selection mechanism stands (every stray is the semantic gloss of the intended
+word, so flips happen at logit/sampling time, not text assembly).
+
 ## Steps
 
 0. **Fix #418-broken script imports** — `scripts/` has no tsconfig coverage; 7 harness
