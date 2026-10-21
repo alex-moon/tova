@@ -1,16 +1,15 @@
-// Stray-token battery for #420: near-tie flip rate across context depth x provider x temperature.
-// Pre-registered decision rule lives in docs/plan-420-stray-glyph-battery.md.
+// Stray-token battery v2 for #420 — escalation per the pre-registered observation trap:
+// v1 (recite, 139k-char max depth) ran 128 generations clean, so the regime moves to the
+// full windowedHistory ceiling (400k chars) and long-form generation. Decision rule:
+// docs/plan-420-stray-glyph-battery.md.
 // Usage: npx tsx scripts/stray-glyph-battery.ts [--pilot] [--cells A1,C1] [--concurrency 6]
 import 'dotenv/config';
+import './batteryEnvClear';
 import fs from 'node:fs';
 import path from 'node:path';
 import { MongoClient, ObjectId } from 'mongodb';
 import { buildMongoUri } from '../apps/shared/src/main/mongoUri';
-import type { LlmProvider } from '../apps/server/src/main/services/llm/llmTypes';
-import {
-  deepinfraConnector,
-  fireworksConnector,
-} from '../apps/server/src/main/services/llm/mastraService';
+import type { LlmProvider, LlmConnector } from '../apps/server/src/main/services/llm/llmTypes';
 import {
   BACKEND_IDS,
   CHAT_MODEL,
@@ -18,6 +17,14 @@ import {
   contextLengthFor,
 } from '../apps/server/src/main/services/model/modelDefaults';
 import { windowedHistory } from '../apps/server/src/main/routes/chat';
+import {
+  deepinfraConnector,
+  fireworksConnector,
+} from '../apps/server/src/main/services/llm/mastraService';
+const connectors: Record<'deepinfra' | 'fireworks', LlmConnector> = {
+  deepinfra: deepinfraConnector,
+  fireworks: fireworksConnector,
+};
 
 const OUT_DIR = 'data/stray-battery';
 const EMAIL = 'formsatz@gmail.com';
@@ -39,6 +46,8 @@ const system = 'You are a precise assistant. Follow the user instruction exactly
 const reciteInline = `Recite the following passage back exactly, verbatim, with no commentary:\n\n${CANARY}`;
 const reciteFromHistory =
   'Recite the passage I saved earlier in this conversation back to me exactly, verbatim, with no commentary.';
+const longformFromHistory =
+  'Draft a detailed technical document of roughly 1500 words summarising the work and the discussion in this conversation so far. Cover the main threads in depth, one section per thread, with concrete detail from the conversation.';
 
 const argv = process.argv.slice(2);
 const argOf = (flag: string) => {
@@ -51,11 +60,13 @@ const concurrency = Number(argOf('--concurrency') ?? '') || 6;
 
 type Row = {
   cell: string;
-  context_variant: 'short' | 'deep' | 'dirty';
+  context_variant: 'short' | 'deepmax' | 'dirty';
+  task: 'recite' | 'longform';
   temperature: number;
   provider: LlmProvider;
   model: string;
   output_chars: number;
+  finish_reason: string | undefined;
   stray_chars: number;
   cjk_substitutions: number;
   nearmiss_substitutions: number;
@@ -125,14 +136,14 @@ const diffWords = (expected: string, actual: string): Sub[] => {
     }
     const n = Math.max(dels.length, ins.length);
     for (let m = 0; m < n; m++) {
-      const expected = dels[m] ?? '';
-      const actual = ins[m] ?? '';
-      const kind = CJK_G.test(actual)
+      const exp = dels[m] ?? '';
+      const act = ins[m] ?? '';
+      const kind = CJK_G.test(act)
         ? 'cjk'
-        : expected && actual && lev(expected, actual) <= (expected.length > 3 ? 2 : 1)
+        : exp && act && lev(exp, act) <= (exp.length > 3 ? 2 : 1)
           ? 'nearmiss'
           : 'paraphrase';
-      subs.push({ expected, actual, kind, pos_pct: posOf({ a: actual, d: expected }) });
+      subs.push({ expected: exp, actual: act, kind, pos_pct: posOf({ a: act, d: exp }) });
     }
   }
   return subs;
@@ -149,23 +160,27 @@ const histogram = (pcts: number[]) => {
 
 type Cell = {
   name: string;
-  context_variant: 'short' | 'deep' | 'dirty';
+  context_variant: 'short' | 'deepmax' | 'dirty';
+  task: 'recite' | 'longform';
   provider: LlmProvider;
   model: string;
   temperature: number;
   n: number;
 };
 
+// 128 pre-registered: recite rows carry the substitution column, longform rows the CJK
+// column at realistic output length; deepinfra vs fireworks at temp 0 is the fp4/bf16
+// discriminator. H1 (mid-surrogate clip) stays as the tokenizer-repair control.
 const CELLS: Cell[] = [
-  { name: 'A1', context_variant: 'short', provider: 'deepinfra', model: CHAT_MODEL, temperature: 0.2, n: 24 },
-  { name: 'A2', context_variant: 'short', provider: 'deepinfra', model: CHAT_MODEL, temperature: 0.7, n: 24 },
-  { name: 'C1', context_variant: 'deep', provider: 'deepinfra', model: CHAT_MODEL, temperature: 0, n: 16 },
-  { name: 'C2', context_variant: 'deep', provider: 'deepinfra', model: CHAT_MODEL, temperature: 0.2, n: 16 },
-  { name: 'D1', context_variant: 'deep', provider: 'fireworks', model: CHAT_MODEL, temperature: 0, n: 8 },
-  { name: 'D2', context_variant: 'deep', provider: 'fireworks', model: CHAT_MODEL, temperature: 0.2, n: 8 },
-  { name: 'F1', context_variant: 'short', provider: 'fireworks', model: CHAT_MODEL, temperature: 0.2, n: 16 },
-  { name: 'G1', context_variant: 'deep', provider: 'deepinfra', model: TASK_MODEL, temperature: 0.2, n: 8 },
-  { name: 'H1', context_variant: 'dirty', provider: 'deepinfra', model: CHAT_MODEL, temperature: 0.2, n: 8 },
+  { name: 'A1', context_variant: 'short', task: 'recite', provider: 'deepinfra', model: CHAT_MODEL, temperature: 0.2, n: 8 },
+  { name: 'R1', context_variant: 'deepmax', task: 'recite', provider: 'deepinfra', model: CHAT_MODEL, temperature: 0, n: 24 },
+  { name: 'R2', context_variant: 'deepmax', task: 'recite', provider: 'fireworks', model: CHAT_MODEL, temperature: 0, n: 8 },
+  { name: 'L1', context_variant: 'deepmax', task: 'longform', provider: 'deepinfra', model: CHAT_MODEL, temperature: 0.2, n: 24 },
+  { name: 'L2', context_variant: 'deepmax', task: 'longform', provider: 'deepinfra', model: CHAT_MODEL, temperature: 0, n: 24 },
+  { name: 'L3', context_variant: 'deepmax', task: 'longform', provider: 'fireworks', model: CHAT_MODEL, temperature: 0, n: 12 },
+  { name: 'L4', context_variant: 'deepmax', task: 'longform', provider: 'fireworks', model: CHAT_MODEL, temperature: 0.2, n: 12 },
+  { name: 'G2', context_variant: 'deepmax', task: 'longform', provider: 'deepinfra', model: TASK_MODEL, temperature: 0.2, n: 8 },
+  { name: 'H1', context_variant: 'dirty', task: 'recite', provider: 'deepinfra', model: CHAT_MODEL, temperature: 0.2, n: 8 },
 ];
 
 const activeCells = CELLS.filter((c) => !cellFilter || cellFilter.split(',').includes(c.name)).map((c) => ({
@@ -173,15 +188,15 @@ const activeCells = CELLS.filter((c) => !cellFilter || cellFilter.split(',').inc
   n: pilot ? 1 : c.n,
 }));
 
-const connector = (p: LlmProvider) => (p === 'fireworks' ? fireworksConnector : deepinfraConnector);
-
+const connector = (p: LlmProvider) =>
+  p === 'fireworks' ? connectors.fireworks : p === 'deepinfra' ? connectors.deepinfra : connectors.fireworks;
 // Providers serve the same model under different ids (Fireworks prefixes its account).
 const hostModelId = (model: string, p: LlmProvider) => BACKEND_IDS[model]?.[p] ?? model;
 
 async function main() {
   const client = new MongoClient(buildMongoUri());
   await client.connect();
-  let deepHistory: { role: 'system' | 'user' | 'assistant'; content: string }[] = [];
+  let deepPlanted: { role: 'system' | 'user' | 'assistant'; content: string }[] = [];
   try {
     const db = client.db('tova');
     const user = await db.collection('users').findOne({ email: EMAIL });
@@ -191,95 +206,105 @@ async function main() {
       .find({ userId: user._id })
       .project({ _id: 1 })
       .toArray();
-    const longest = await db
+    const top = await db
       .collection('messages')
       .aggregate<{ _id: string | null; n: number }>([
-        { $match: { sessionId: { $in: sessions.map((s) => s._id) }, role: 'assistant' } },
-        { $group: { _id: '$sessionId', n: { $sum: 1 } } },
+        { $match: { sessionId: { $in: sessions.map((s) => s._id) } } },
+        { $group: { _id: '$sessionId', n: { $sum: { $strLenCP: '$content' } } } },
         { $sort: { n: -1 } },
-        { $limit: 1 },
+        { $limit: 4 },
       ])
       .toArray();
-    if (!longest.length || !longest[0]._id) throw new Error('no sessions with messages');
+    if (!top.length || !top[0]._id) throw new Error('no sessions with messages');
     const docs = await db
       .collection('messages')
-      .find({ sessionId: new ObjectId(longest[0]._id) })
+      .find({ sessionId: { $in: top.map((t) => new ObjectId(t._id!)) } })
       .sort({ timestamp: 1 })
       .project({ role: 1, content: 1, _id: 0 })
       .toArray();
     const windowed = windowedHistory(docs as { role?: string; content?: string | null }[]);
-    deepHistory = [...windowed].reverse().map((d) => ({
+    const history = [...windowed].reverse().map((d) => ({
       role: (d.role ?? 'user') as 'system' | 'user' | 'assistant',
       content: d.content ?? '',
     }));
+    const chars = history.reduce((a, m) => a + m.content.length, 0);
+    console.log(`deepmax context: ${history.length} messages, ${chars} chars`);
+    deepPlanted = [
+      ...history,
+      { role: 'user' as const, content: `Please save this passage for me:\n\n${CANARY}` },
+      { role: 'assistant' as const, content: 'Saved — recite it back any time.' },
+    ];
   } finally {
     await client.close();
   }
 
-  const deepPlanted = [
-    ...deepHistory,
-    { role: 'user' as const, content: `Please save this passage for me:\n\n${CANARY}` },
-    { role: 'assistant' as const, content: 'Saved — recite it back any time.' },
-  ];
-
-  const buildMessages = (variant: Cell['context_variant']) => {
-    if (variant === 'short')
+  const buildMessages = (cell: Cell) => {
+    if (cell.context_variant === 'short')
       return [
         { role: 'system' as const, content: system },
         { role: 'user' as const, content: reciteInline },
       ];
-    if (variant === 'dirty') {
+    if (cell.context_variant === 'dirty') {
       // Cut through an astral surrogate pair to emulate the taskSequencer 2000-char slice shape.
       const withAstral = `${CANARY.slice(0, 400)} 𠮷 ${CANARY.slice(400)}`;
       const cutAt = withAstral.indexOf('𠮷') + 1;
-      const dirty = `${withAstral.slice(0, cutAt)}…`;
       return [
         { role: 'system' as const, content: system },
-        { role: 'user' as const, content: `Recite this passage exactly, verbatim, no commentary:\n\n${dirty}` },
+        {
+          role: 'user' as const,
+          content: `Recite this passage exactly, verbatim, no commentary:\n\n${withAstral.slice(0, cutAt)}…`,
+        },
       ];
     }
-    return [
-      { role: 'system' as const, content: system },
-      ...deepPlanted,
-      { role: 'user' as const, content: reciteFromHistory },
-    ];
+    const tail =
+      cell.task === 'recite'
+        ? { role: 'user' as const, content: reciteFromHistory }
+        : { role: 'user' as const, content: longformFromHistory };
+    return [{ role: 'system' as const, content: system }, ...deepPlanted, tail];
   };
 
   const runOne = async (cell: Cell, index: number): Promise<Row> => {
+    const messages = buildMessages(cell);
     const completion = await connector(cell.provider).createCompletion({
       model: hostModelId(cell.model, cell.provider),
-      messages: buildMessages(cell.context_variant),
+      messages,
       temperature: cell.temperature,
-      max_tokens: 2048,
+      max_tokens: cell.task === 'longform' ? 12000 : 4096,
     });
     const text = completion.choices[0]?.message?.content ?? '';
     const clean = stripFences(text);
+    const recite = cell.task === 'recite';
     // Verbatim task: any word substitution vs the canary is a flip by definition; the
     // cjk/nearmiss/paraphrase tags are descriptive (BGE cosine cannot separate near-miss
     // from unrelated — calibrated at ~0.5 floor for both, see #420).
-    const subs = diffWords(CANARY, clean);
+    const subs = recite ? diffWords(CANARY, clean) : [];
+    const contextText = messages.map((m) => m.content).join('\n');
     const strays = [...clean.matchAll(CJK_G)].map((m) => {
       const at = m.index ?? 0;
+      const echoed = contextText.includes(m[0]);
       return {
         expected: '',
         actual: m[0],
-        kind: 'cjk',
+        kind: echoed ? 'cjk-echo' : 'cjk',
         pos_pct: Math.round((at / Math.max(1, clean.length)) * 100),
       };
     });
+    const realStrays = strays.filter((s) => s.kind === 'cjk');
     return {
       cell: cell.name,
       context_variant: cell.context_variant,
+      task: cell.task,
       temperature: cell.temperature,
       provider: cell.provider,
       model: cell.model,
       output_chars: text.length,
-      stray_chars: strays.length,
-      cjk_substitutions: subs.filter((s) => s.kind === 'cjk').length,
+      finish_reason: completion.choices[0]?.finishReason,
+      stray_chars: realStrays.length,
+      cjk_substitutions: subs.filter((s) => s.kind === 'cjk' && !contextText.includes(s.actual)).length,
       nearmiss_substitutions: subs.filter((s) => s.kind === 'nearmiss').length,
       paraphrase_words: subs.filter((s) => s.kind === 'paraphrase').length,
-      position_histogram: histogram(strays.map((s) => s.pos_pct)),
-      examples: [...strays, ...subs.filter((s) => s.kind !== 'paraphrase')].slice(0, 5),
+      position_histogram: histogram(realStrays.map((s) => s.pos_pct)),
+      examples: [...realStrays, ...subs.filter((s) => s.kind !== 'paraphrase')].slice(0, 5),
     };
   };
 
@@ -318,7 +343,7 @@ async function main() {
       (r) => r.stray_chars > 0 || r.cjk_substitutions > 0 || r.nearmiss_substitutions > 0,
     ).length;
     console.log(
-      `${cell}: n=${rows.length} flip_rate=${flips}/${rows.length} stray_chars=${rows.reduce((a, r) => a + r.stray_chars, 0)} cjk_subs=${rows.reduce((a, r) => a + r.cjk_substitutions, 0)} nearmiss=${rows.reduce((a, r) => a + r.nearmiss_substitutions, 0)}`,
+      `${cell} (${rows[0].task}, temp=${rows[0].temperature}, ${rows[0].provider}): n=${rows.length} flipMsgs=${flips} strays=${rows.reduce((a, r) => a + r.stray_chars, 0)} cjkSubs=${rows.reduce((a, r) => a + r.cjk_substitutions, 0)} nearMiss=${rows.reduce((a, r) => a + r.nearmiss_substitutions, 0)} avgOut=${Math.round(rows.reduce((a, r) => a + r.output_chars, 0) / rows.length)}`,
     );
   }
 }
