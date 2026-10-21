@@ -44,6 +44,18 @@ Scan: 502 assistant messages + 178 task events, CJK-range detector
    chat. Points at context length/accumulation, not sampling.
 5. One false positive excluded: deliberate `[内卷/involution](…)` wiki link.
 
+## Causal lead — b1439d47 (#360)
+
+Deep history shipped **2026-10-17 13:28** (`HISTORY_MAX_MESSAGES = 200`,
+`HISTORY_MAX_CHARS = 400_000`). Incident rate: ~5% pre-deploy (Oct 4–14), **28% on Oct
+19** — the first heavy-use days after. Strays pre-existed #360 but the jump correlates
+exactly. This is the engineered 1M-context usage the ticket suspected: the pollution
+candidate is now specifically **deep-history replay volume**, not tool-result clips.
+
+Battery consequence: the long-context variant replays **real session histories** from the
+synced corpus through `windowedHistory` (the #360 regime verbatim) with a canonical
+continuation prompt — ecological validity over synthetic padding.
+
 Design consequence: the battery's dirty-clip variant (was C-iii) demotes to a control;
 the dose-response axis becomes **context length / replay accumulation**. The discriminator
 matrix stands: same flip at temp 0 on a bf16 host (Fireworks) = pollution; fp4-only =
