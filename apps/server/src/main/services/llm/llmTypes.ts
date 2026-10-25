@@ -40,9 +40,9 @@ export interface CompletionOptions {
   /* Cap on the agent's own tool loop (task path pins 1). */
   // @see #254 #251
   maxSteps?: number;
-  /* Force the agent to call tools; task steps pin 'required'. */
-  // @see #387
-  toolUse?: 'required';
+  /* Task worker steps ride the lean task agent; selects mode, forces nothing. */
+  // @see #387 #417
+  taskMode?: true;
   /* Client-disconnect signal wired by the chat routes. */
   abortSignal?: AbortSignal;
   trace?: TraceContext;

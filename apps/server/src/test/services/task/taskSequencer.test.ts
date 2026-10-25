@@ -245,7 +245,7 @@ describe('parseStepOutcome (#254)', () => {
 });
 
 describe('runTaskStep (#254/#387)', () => {
-  it('pins DeepInfra/TASK_MODEL, toolUse required, maxSteps 1, and the userId', async () => {
+  it('pins DeepInfra/TASK_MODEL, taskMode, maxSteps 1, and the userId', async () => {
     const task = await enqueueTask({
       userId: '0000000000000000000042ab',
       instruction: 'do it',
@@ -267,7 +267,7 @@ describe('runTaskStep (#254/#387)', () => {
     expect(outcome.provider).toBe(TASK_PROVIDER);
     expect(seen[0].model).toBe(TASK_MODEL);
     expect(seen[0].provider).toBe(TASK_PROVIDER);
-    expect(seen[0].toolUse).toBe('required');
+    expect(seen[0].taskMode).toBe(true);
     expect(seen[0].maxSteps).toBe(1);
     expect(seen[0].userId).toBe('0000000000000000000042ab');
     expect(seen[0].max_tokens).toBeGreaterThan(0);

@@ -131,8 +131,9 @@ export const runTaskStep = async (
   const options: CompletionOptions = {
     provider: TASK_PROVIDER,
     model: TASK_MODEL,
-    // A task step must act; the agent's toolChoice is forced. @see #387
-    toolUse: 'required',
+    // Lean task agent; tool choice is auto so a text step can settle done.
+    // @see #387 #417
+    taskMode: true,
     messages,
     userId: String(task.userId),
     // Files this step generates attribute to the task (kind 'task').
