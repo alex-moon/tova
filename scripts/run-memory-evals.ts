@@ -3,7 +3,7 @@
 import 'dotenv/config';
 import mongoose from 'mongoose';
 import { buildMongoUri } from '../apps/shared/src/main/mongoUri';
-import { langsmithClientFromEnv } from '../apps/server/src/main/services/evalRunService';
+import { langsmithClientFromEnv } from '../apps/server/src/main/services/eval/evalRunService';
 import {
   pushMemoryCorpusToLangSmith,
   runMemoryEvals,

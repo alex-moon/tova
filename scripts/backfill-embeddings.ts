@@ -5,7 +5,7 @@ import mongoose from 'mongoose';
 import { buildMongoUri } from '../apps/shared/src/main/mongoUri';
 import { config } from '../apps/server/src/main/config';
 import { User } from '../apps/server/src/main/models/User';
-import { embedWorkspaceUser } from '../apps/server/src/main/services/workspaceEmbeddingIngest';
+import { embedWorkspaceUser } from '../apps/server/src/main/services/workspace/workspaceEmbeddingIngest';
 
 // Rough public embedding pricing; order-of-magnitude bound, not a bill.
 const USD_PER_MILLION_TOKENS = 0.067;

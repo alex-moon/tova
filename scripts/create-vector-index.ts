@@ -9,7 +9,7 @@ import {
   assertAtlasUrl,
   ensureVectorIndex,
   type SearchIndexManager,
-} from '../apps/server/src/main/services/atlasVectorIndex';
+} from '../apps/server/src/main/services/workspace/atlasVectorIndex';
 
 const main = async (): Promise<void> => {
   const url = assertAtlasUrl(buildMongoUri());

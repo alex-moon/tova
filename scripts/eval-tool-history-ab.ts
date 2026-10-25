@@ -7,21 +7,27 @@ import type {
   CompletionOptions,
   LlmConnector,
   LlmProvider,
-} from '../apps/server/src/main/services/llmTypes';
+} from '../apps/server/src/main/services/llm/llmTypes';
 import {
   deepinfraConnector,
   fireworksConnector,
   groqConnector,
-} from '../apps/server/src/main/services/mastraService';
-import { buildSystemContent } from '../apps/server/src/main/services/promptAssembly';
-import { retrieveWorkspaceBlock } from '../apps/server/src/main/services/workspaceRetrievalService';
-import { classifyAssistantTurn } from '../apps/server/src/main/services/honestyGuardService';
+} from '../apps/server/src/main/services/llm/mastraService';
+import { buildSystemContent } from '../apps/server/src/main/services/llm/promptAssembly';
+import { retrieveWorkspaceBlock } from '../apps/server/src/main/services/workspace/workspaceRetrievalService';
+import { classifyAssistantTurn } from '../apps/server/src/main/services/llm/honestyGuardService';
 import {
   pendingCompletionsFor,
   completionNotificationLine,
-} from '../apps/server/src/main/services/taskNotificationService';
-import { listRoster } from '../apps/server/src/main/services/rosterConfig';
-import { outputTokensFor, promptCharsFrom } from '../apps/server/src/main/services/outputTokenCap';
+} from '../apps/server/src/main/services/task/taskNotificationService';
+import {
+  chatBackends,
+  contextLengthFor,
+} from '../apps/server/src/main/services/model/modelDefaults';
+import {
+  outputTokensFor,
+  promptCharsFrom,
+} from '../apps/server/src/main/services/llm/outputTokenCap';
 import {
   HISTORY_MAX_MESSAGES,
   messagesFromPersistedHistory,
@@ -305,14 +311,11 @@ async function main() {
     ...structuredMessages(turns, assets, 400),
   ];
 
-  const roster = await listRoster();
-  const refs = roster.flatMap((m) =>
-    m.providers.map((p) => ({
-      provider: p.provider,
-      model: m.modelId,
-      contextLength: m.contextLength,
-    })),
-  );
+  const refs = chatBackends().map((b) => ({
+    provider: b.provider,
+    model: b.modelId,
+    contextLength: contextLengthFor(b.modelId),
+  }));
   console.log(
     `session ${sessionId} · ${turns.length} turns · arms A/B · ${refs.length} models · ${reps} reps\n`,
   );

@@ -10,7 +10,7 @@ import {
   runEvalSuite,
   type EvalResult,
   type WiredProvider,
-} from '../apps/server/src/main/services/evalRunService';
+} from '../apps/server/src/main/services/eval/evalRunService';
 
 const parseModelsArg = (): { provider: WiredProvider; model: string }[] | null => {
   const index = process.argv.indexOf('--models');

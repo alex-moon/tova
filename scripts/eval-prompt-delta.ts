@@ -7,21 +7,24 @@ import type {
   CompletionOptions,
   LlmConnector,
   LlmProvider,
-} from '../apps/server/src/main/services/llmTypes';
+} from '../apps/server/src/main/services/llm/llmTypes';
 import {
   deepinfraConnector,
   fireworksConnector,
   groqConnector,
-} from '../apps/server/src/main/services/mastraService';
-import { buildSystemContent } from '../apps/server/src/main/services/promptAssembly';
-import { retrieveWorkspaceBlock } from '../apps/server/src/main/services/workspaceRetrievalService';
-import { classifyAssistantTurn } from '../apps/server/src/main/services/honestyGuardService';
+} from '../apps/server/src/main/services/llm/mastraService';
+import { buildSystemContent } from '../apps/server/src/main/services/llm/promptAssembly';
+import { retrieveWorkspaceBlock } from '../apps/server/src/main/services/workspace/workspaceRetrievalService';
+import { classifyAssistantTurn } from '../apps/server/src/main/services/llm/honestyGuardService';
 import {
   pendingCompletionsFor,
   completionNotificationLine,
-} from '../apps/server/src/main/services/taskNotificationService';
-import { listRoster } from '../apps/server/src/main/services/rosterConfig';
-import { outputTokensFor, promptCharsFrom } from '../apps/server/src/main/services/outputTokenCap';
+} from '../apps/server/src/main/services/task/taskNotificationService';
+import { contextLengthFor, TASK_MODEL } from '../apps/server/src/main/services/model/modelDefaults';
+import {
+  outputTokensFor,
+  promptCharsFrom,
+} from '../apps/server/src/main/services/llm/outputTokenCap';
 import {
   HISTORY_MAX_MESSAGES,
   messagesFromPersistedHistory,
@@ -163,16 +166,13 @@ async function main() {
     { name: 'P5-specific-rewrite', messages: base(rewriteEpistemics(system)) },
   ];
 
-  const ref = (await listRoster())
-    .flatMap((m) =>
-      m.providers.map((p) => ({
-        provider: p.provider,
-        model: m.modelId,
-        contextLength: m.contextLength,
-      })),
-    )
-    .find((r) => r.model.includes(MODEL_FILTER) && r.provider === PROVIDER_FILTER);
-  if (!ref) throw new Error('no deepinfra DeepSeek ref on the roster');
+  const ref = {
+    provider: 'deepinfra' as const,
+    model: TASK_MODEL,
+    contextLength: contextLengthFor(TASK_MODEL),
+  };
+  if (!ref.model.includes(MODEL_FILTER) || ref.provider !== PROVIDER_FILTER)
+    throw new Error(`pinned TASK_MODEL ${TASK_MODEL} does not match the filters`);
 
   console.log(
     `session ${sessionId} · ${arms.length} arms · ${reps} reps each, interleaved · ${ref.provider}/${ref.model}\n`,
@@ -214,15 +214,13 @@ async function main() {
 async function listRosterRefs(): Promise<
   { provider: LlmProvider; model: string; contextLength?: number }[]
 > {
-  const { listRoster } = await import('../apps/server/src/main/services/rosterConfig');
-  const roster = await listRoster();
-  return roster.flatMap((m) =>
-    m.providers.map((p) => ({
-      provider: p.provider,
-      model: m.modelId,
-      contextLength: m.contextLength,
-    })),
-  );
+  return [
+    {
+      provider: 'deepinfra' as LlmProvider,
+      model: TASK_MODEL,
+      contextLength: contextLengthFor(TASK_MODEL),
+    },
+  ];
 }
 
 main().catch((err) => {
