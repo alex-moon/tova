@@ -6,10 +6,28 @@ import { buildMongoUri } from '../apps/shared/src/main/mongoUri';
 const CJK =
   /[\u3040-\u30FF\u3400-\u4DBF\u4E00-\u9FFF\uAC00-\uD7AF\uF900-\uFAFF\uFF66-\uFF9D\u3000-\u303F]/g;
 
-const scan = (text: string) => {
-  const hits = [];
+interface Hit {
+  char: string;
+  codepoint: string;
+  pos: number | undefined;
+  pct: number;
+  before: string;
+  after: string;
+}
+
+interface Finding extends Hit {
+  kind: 'message' | 'taskEvent';
+  model?: string;
+  provider?: string;
+  step?: number;
+  at: Date | undefined;
+}
+
+const scan = (text: string): Hit[] => {
+  const hits: Hit[] = [];
   for (const m of text.matchAll(CJK)) {
     const at = m.index;
+    if (at === undefined) continue;
     hits.push({
       char: m[0],
       codepoint: m[0].codePointAt(0)!.toString(16),
@@ -56,7 +74,7 @@ async function main() {
           .toArray()
       : [];
 
-    const findings = [];
+    const findings: Finding[] = [];
     for (const m of msgs)
       for (const hit of scan(m.content || ''))
         findings.push({ kind: 'message', model: m.modelName, at: m.timestamp, ...hit });
