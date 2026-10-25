@@ -19,7 +19,8 @@ import { CHAT_MODEL } from '../apps/server/src/main/services/model/modelDefaults
 
 const OUT_DIR = 'data/stray-battery';
 const EMAIL = 'formsatz@gmail.com';
-const CJK_G = /[\u3040-\u30FF\u3400-\u4DBF\u4E00-\u9FFF\uAC00-\uD7AF\uF900-\uFAFF\uFF66-\uFF9D\u3000-\u303F]/g;
+const CJK_G =
+  /[\u3040-\u30FF\u3400-\u4DBF\u4E00-\u9FFF\uAC00-\uD7AF\uF900-\uFAFF\uFF66-\uFF9D\u3000-\u303F]/g;
 const ROLLS = 6;
 
 // The five verified incidents: session ObjectId suffix, incident timestamp, the stray.
@@ -58,7 +59,8 @@ type Row = {
 const histogram = (pcts: number[]) => {
   const h: Record<string, number> = {};
   for (const p of pcts) {
-    const b = p === 0 ? '0' : `${Math.floor((p - 1) / 10) * 10 + 1}-${Math.floor((p - 1) / 10) * 10 + 10}`;
+    const b =
+      p === 0 ? '0' : `${Math.floor((p - 1) / 10) * 10 + 1}-${Math.floor((p - 1) / 10) * 10 + 10}`;
     h[b] = (h[b] ?? 0) + 1;
   }
   return h;
@@ -67,12 +69,22 @@ const histogram = (pcts: number[]) => {
 async function main() {
   const client = new MongoClient(buildMongoUri());
   await client.connect();
-  const arms: { incident: string; provider: LlmProvider; temperature: number; messages: Msg[]; contextChars: number }[] = [];
+  const arms: {
+    incident: string;
+    provider: LlmProvider;
+    temperature: number;
+    messages: Msg[];
+    contextChars: number;
+  }[] = [];
   try {
     const db = client.db('tova');
     const user = await db.collection('users').findOne({ email: EMAIL });
     if (!user) throw new Error('user not found');
-    const sessions = await db.collection('sessions').find({ userId: user._id }).project({ _id: 1 }).toArray();
+    const sessions = await db
+      .collection('sessions')
+      .find({ userId: user._id })
+      .project({ _id: 1 })
+      .toArray();
 
     for (const inc of INCIDENTS) {
       if (only && !inc.at.startsWith(`2026-10-19T${only}`)) continue;
@@ -85,14 +97,18 @@ async function main() {
         .project({ role: 1, content: 1, _id: 0 })
         .toArray();
       // Drop the trailing incident response itself: re-roll from the user turn that prompted it.
-      while (docs.length && (docs.at(-1) as { role?: string } | undefined)?.role !== 'user') docs.pop();
+      while (docs.length && (docs.at(-1) as { role?: string } | undefined)?.role !== 'user')
+        docs.pop();
       docs.pop(); // and the prompting user turn becomes the final message, not history
       if (docs.length < 2) throw new Error(`${inc.sessionSuffix}: too short to reconstruct`);
       const promptTurn = docs.pop()!;
       const windowed = windowedHistory(docs as { role?: string; content?: string | null }[]);
       // Oldest-first replay of the exact pre-incident history, prompting user turn last.
       const ordered: Msg[] = [
-        ...windowed.map((d) => ({ role: (d.role ?? 'user') as Msg['role'], content: d.content ?? '' })),
+        ...windowed.map((d) => ({
+          role: (d.role ?? 'user') as Msg['role'],
+          content: d.content ?? '',
+        })),
         { role: 'user', content: promptTurn.content ?? '' },
       ];
       const contextChars = ordered.reduce((a, m) => a + m.content.length, 0);
@@ -122,7 +138,10 @@ async function main() {
     await client.close();
   }
 
-  const connectors: Record<string, LlmConnector> = { deepinfra: deepinfraConnector, fireworks: fireworksConnector };
+  const connectors: Record<string, LlmConnector> = {
+    deepinfra: deepinfraConnector,
+    fireworks: fireworksConnector,
+  };
   const runOne = async (arm: (typeof arms)[number], roll: number): Promise<Row> => {
     const completion = await connectors[arm.provider].createCompletion({
       model: arm.provider === 'fireworks' ? 'accounts/fireworks/models/glm-5p3-flash' : CHAT_MODEL,
@@ -154,7 +173,9 @@ async function main() {
     };
   };
 
-  const jobs = arms.flatMap((arm, i) => Array.from({ length: pilot ? 1 : rollsArg }, (_, r) => ({ arm, i, r })));
+  const jobs = arms.flatMap((arm, i) =>
+    Array.from({ length: pilot ? 1 : rollsArg }, (_, r) => ({ arm, i, r })),
+  );
   const results: Row[] = [];
   const total = jobs.length;
   let done = 0;
@@ -165,7 +186,10 @@ async function main() {
       try {
         results.push(await runOne(job.arm, job.r));
       } catch (err) {
-        console.error(`[${job.arm.incident}#${job.r}] failed:`, err instanceof Error ? err.message : err);
+        console.error(
+          `[${job.arm.incident}#${job.r}] failed:`,
+          err instanceof Error ? err.message : err,
+        );
       }
       done++;
       if (done % 10 === 0 || done === total) console.log(`${done}/${total}`);
@@ -187,10 +211,11 @@ async function main() {
   }
   for (const [k, rows] of [...byArm].sort()) {
     const withStrays = rows.filter((r) => r.strays.length > 0).length;
-    console.log(`${k}: n=${rows.length} strays=${rows.reduce((a, r) => a + r.strays.length, 0)} armsWithStrays=${withStrays}`);
+    console.log(
+      `${k}: n=${rows.length} strays=${rows.reduce((a, r) => a + r.strays.length, 0)} armsWithStrays=${withStrays}`,
+    );
     for (const r of rows.filter((r) => r.strays.length).slice(0, 2))
-      for (const s of r.strays.slice(0, 2))
-        console.log(`   …${s.before}[${s.char}]${s.after}…`);
+      for (const s of r.strays.slice(0, 2)) console.log(`   …${s.before}[${s.char}]${s.after}…`);
   }
 }
 

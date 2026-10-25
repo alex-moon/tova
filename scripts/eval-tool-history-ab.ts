@@ -20,8 +20,14 @@ import {
   pendingCompletionsFor,
   completionNotificationLine,
 } from '../apps/server/src/main/services/task/taskNotificationService';
-import { chatBackends, contextLengthFor } from '../apps/server/src/main/services/model/modelDefaults';
-import { outputTokensFor, promptCharsFrom } from '../apps/server/src/main/services/llm/outputTokenCap';
+import {
+  chatBackends,
+  contextLengthFor,
+} from '../apps/server/src/main/services/model/modelDefaults';
+import {
+  outputTokensFor,
+  promptCharsFrom,
+} from '../apps/server/src/main/services/llm/outputTokenCap';
 import {
   HISTORY_MAX_MESSAGES,
   messagesFromPersistedHistory,

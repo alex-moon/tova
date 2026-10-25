@@ -1,10 +1,7 @@
 import 'dotenv/config';
 import type { LlmProvider } from '../apps/server/src/main/services/llm/llmTypes';
 import { runModelComparison } from '../apps/server/src/main/services/model/modelCompare';
-import {
-  chatBackends,
-  TASK_MODEL,
-} from '../apps/server/src/main/services/model/modelDefaults';
+import { chatBackends, TASK_MODEL } from '../apps/server/src/main/services/model/modelDefaults';
 
 /* One-off eval: one prompt against several models side by side. */
 // @see #129 #236

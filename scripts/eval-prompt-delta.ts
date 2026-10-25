@@ -21,7 +21,10 @@ import {
   completionNotificationLine,
 } from '../apps/server/src/main/services/task/taskNotificationService';
 import { contextLengthFor, TASK_MODEL } from '../apps/server/src/main/services/model/modelDefaults';
-import { outputTokensFor, promptCharsFrom } from '../apps/server/src/main/services/llm/outputTokenCap';
+import {
+  outputTokensFor,
+  promptCharsFrom,
+} from '../apps/server/src/main/services/llm/outputTokenCap';
 import {
   HISTORY_MAX_MESSAGES,
   messagesFromPersistedHistory,
@@ -163,7 +166,11 @@ async function main() {
     { name: 'P5-specific-rewrite', messages: base(rewriteEpistemics(system)) },
   ];
 
-  const ref = { provider: 'deepinfra' as const, model: TASK_MODEL, contextLength: contextLengthFor(TASK_MODEL) };
+  const ref = {
+    provider: 'deepinfra' as const,
+    model: TASK_MODEL,
+    contextLength: contextLengthFor(TASK_MODEL),
+  };
   if (!ref.model.includes(MODEL_FILTER) || ref.provider !== PROVIDER_FILTER)
     throw new Error(`pinned TASK_MODEL ${TASK_MODEL} does not match the filters`);
 
@@ -208,7 +215,11 @@ async function listRosterRefs(): Promise<
   { provider: LlmProvider; model: string; contextLength?: number }[]
 > {
   return [
-    { provider: 'deepinfra' as LlmProvider, model: TASK_MODEL, contextLength: contextLengthFor(TASK_MODEL) },
+    {
+      provider: 'deepinfra' as LlmProvider,
+      model: TASK_MODEL,
+      contextLength: contextLengthFor(TASK_MODEL),
+    },
   ];
 }
 

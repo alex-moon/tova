@@ -28,7 +28,8 @@ const connectors: Record<'deepinfra' | 'fireworks', LlmConnector> = {
 
 const OUT_DIR = 'data/stray-battery';
 const EMAIL = 'formsatz@gmail.com';
-const CJK_G = /[\u3040-\u30FF\u3400-\u4DBF\u4E00-\u9FFF\uAC00-\uD7AF\uF900-\uFAFF\uFF66-\uFF9D\u3000-\u303F]/g;
+const CJK_G =
+  /[\u3040-\u30FF\u3400-\u4DBF\u4E00-\u9FFF\uAC00-\uD7AF\uF900-\uFAFF\uFF66-\uFF9D\u3000-\u303F]/g;
 
 // Flip-prone vocabulary: words with common CJK glosses (model, party, almost, process, …).
 const CANARY = [
@@ -93,7 +94,12 @@ const lev = (a: string, b: string) => {
   return dp[a.length][b.length];
 };
 
-type Sub = { expected: string; actual: string; kind: 'cjk' | 'nearmiss' | 'paraphrase'; pos_pct: number };
+type Sub = {
+  expected: string;
+  actual: string;
+  kind: 'cjk' | 'nearmiss' | 'paraphrase';
+  pos_pct: number;
+};
 
 const diffWords = (expected: string, actual: string): Sub[] => {
   const ew = words(expected);
@@ -152,7 +158,8 @@ const diffWords = (expected: string, actual: string): Sub[] => {
 const histogram = (pcts: number[]) => {
   const h: Record<string, number> = {};
   for (const p of pcts) {
-    const b = p === 0 ? '0' : `${Math.floor((p - 1) / 10) * 10 + 1}-${Math.floor((p - 1) / 10) * 10 + 10}`;
+    const b =
+      p === 0 ? '0' : `${Math.floor((p - 1) / 10) * 10 + 1}-${Math.floor((p - 1) / 10) * 10 + 10}`;
     h[b] = (h[b] ?? 0) + 1;
   }
   return h;
@@ -172,24 +179,102 @@ type Cell = {
 // column at realistic output length; deepinfra vs fireworks at temp 0 is the fp4/bf16
 // discriminator. H1 (mid-surrogate clip) stays as the tokenizer-repair control.
 const CELLS: Cell[] = [
-  { name: 'A1', context_variant: 'short', task: 'recite', provider: 'deepinfra', model: CHAT_MODEL, temperature: 0.2, n: 8 },
-  { name: 'R1', context_variant: 'deepmax', task: 'recite', provider: 'deepinfra', model: CHAT_MODEL, temperature: 0, n: 24 },
-  { name: 'R2', context_variant: 'deepmax', task: 'recite', provider: 'fireworks', model: CHAT_MODEL, temperature: 0, n: 8 },
-  { name: 'L1', context_variant: 'deepmax', task: 'longform', provider: 'deepinfra', model: CHAT_MODEL, temperature: 0.2, n: 24 },
-  { name: 'L2', context_variant: 'deepmax', task: 'longform', provider: 'deepinfra', model: CHAT_MODEL, temperature: 0, n: 24 },
-  { name: 'L3', context_variant: 'deepmax', task: 'longform', provider: 'fireworks', model: CHAT_MODEL, temperature: 0, n: 12 },
-  { name: 'L4', context_variant: 'deepmax', task: 'longform', provider: 'fireworks', model: CHAT_MODEL, temperature: 0.2, n: 12 },
-  { name: 'G2', context_variant: 'deepmax', task: 'longform', provider: 'deepinfra', model: TASK_MODEL, temperature: 0.2, n: 8 },
-  { name: 'H1', context_variant: 'dirty', task: 'recite', provider: 'deepinfra', model: CHAT_MODEL, temperature: 0.2, n: 8 },
+  {
+    name: 'A1',
+    context_variant: 'short',
+    task: 'recite',
+    provider: 'deepinfra',
+    model: CHAT_MODEL,
+    temperature: 0.2,
+    n: 8,
+  },
+  {
+    name: 'R1',
+    context_variant: 'deepmax',
+    task: 'recite',
+    provider: 'deepinfra',
+    model: CHAT_MODEL,
+    temperature: 0,
+    n: 24,
+  },
+  {
+    name: 'R2',
+    context_variant: 'deepmax',
+    task: 'recite',
+    provider: 'fireworks',
+    model: CHAT_MODEL,
+    temperature: 0,
+    n: 8,
+  },
+  {
+    name: 'L1',
+    context_variant: 'deepmax',
+    task: 'longform',
+    provider: 'deepinfra',
+    model: CHAT_MODEL,
+    temperature: 0.2,
+    n: 24,
+  },
+  {
+    name: 'L2',
+    context_variant: 'deepmax',
+    task: 'longform',
+    provider: 'deepinfra',
+    model: CHAT_MODEL,
+    temperature: 0,
+    n: 24,
+  },
+  {
+    name: 'L3',
+    context_variant: 'deepmax',
+    task: 'longform',
+    provider: 'fireworks',
+    model: CHAT_MODEL,
+    temperature: 0,
+    n: 12,
+  },
+  {
+    name: 'L4',
+    context_variant: 'deepmax',
+    task: 'longform',
+    provider: 'fireworks',
+    model: CHAT_MODEL,
+    temperature: 0.2,
+    n: 12,
+  },
+  {
+    name: 'G2',
+    context_variant: 'deepmax',
+    task: 'longform',
+    provider: 'deepinfra',
+    model: TASK_MODEL,
+    temperature: 0.2,
+    n: 8,
+  },
+  {
+    name: 'H1',
+    context_variant: 'dirty',
+    task: 'recite',
+    provider: 'deepinfra',
+    model: CHAT_MODEL,
+    temperature: 0.2,
+    n: 8,
+  },
 ];
 
-const activeCells = CELLS.filter((c) => !cellFilter || cellFilter.split(',').includes(c.name)).map((c) => ({
-  ...c,
-  n: pilot ? 1 : c.n,
-}));
+const activeCells = CELLS.filter((c) => !cellFilter || cellFilter.split(',').includes(c.name)).map(
+  (c) => ({
+    ...c,
+    n: pilot ? 1 : c.n,
+  }),
+);
 
 const connector = (p: LlmProvider) =>
-  p === 'fireworks' ? connectors.fireworks : p === 'deepinfra' ? connectors.deepinfra : connectors.fireworks;
+  p === 'fireworks'
+    ? connectors.fireworks
+    : p === 'deepinfra'
+      ? connectors.deepinfra
+      : connectors.fireworks;
 // Providers serve the same model under different ids (Fireworks prefixes its account).
 const hostModelId = (model: string, p: LlmProvider) => BACKEND_IDS[model]?.[p] ?? model;
 
@@ -300,7 +385,8 @@ async function main() {
       output_chars: text.length,
       finish_reason: completion.choices[0]?.finishReason,
       stray_chars: realStrays.length,
-      cjk_substitutions: subs.filter((s) => s.kind === 'cjk' && !contextText.includes(s.actual)).length,
+      cjk_substitutions: subs.filter((s) => s.kind === 'cjk' && !contextText.includes(s.actual))
+        .length,
       nearmiss_substitutions: subs.filter((s) => s.kind === 'nearmiss').length,
       paraphrase_words: subs.filter((s) => s.kind === 'paraphrase').length,
       position_histogram: histogram(realStrays.map((s) => s.pos_pct)),
@@ -308,7 +394,9 @@ async function main() {
     };
   };
 
-  const jobs = activeCells.flatMap((cell) => Array.from({ length: cell.n }, (_, i) => ({ cell, i })));
+  const jobs = activeCells.flatMap((cell) =>
+    Array.from({ length: cell.n }, (_, i) => ({ cell, i })),
+  );
   const results: Row[] = [];
   const total = jobs.length;
   let done = 0;
@@ -319,7 +407,10 @@ async function main() {
       try {
         results.push(await runOne(job.cell, job.i));
       } catch (err) {
-        console.error(`[${job.cell.name}#${job.i}] failed:`, err instanceof Error ? err.message : err);
+        console.error(
+          `[${job.cell.name}#${job.i}] failed:`,
+          err instanceof Error ? err.message : err,
+        );
       }
       done++;
       if (done % 10 === 0 || done === total) console.log(`${done}/${total}`);
