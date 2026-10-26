@@ -200,8 +200,6 @@ const callOptionsFrom = (
     // The merged system message rides in as a per-call instructions override.
     // @see #198
     ...(instructions ? { instructions } : {}),
-    // Tasks force tool use; the model must act, not chat. @see #387
-    ...(options.toolUse === 'required' ? { toolChoice: 'required' as const } : {}),
     // Caller may pin the per-call step cap; absent falls back to the default.
     // @see #254
     maxSteps: options.maxSteps ?? (mode === 'full' ? 12 : 1),
@@ -1175,11 +1173,10 @@ const MASTRA_PROVIDER_ID: Record<LlmProvider, string> = {
 };
 
 const buildConnector = (provider: LlmProvider): LlmConnector => {
-  // Chat rides the full toolset; `toolUse: 'required'` (tasks) rides the lean
-  // task agent with toolChoice forced.
-  // @see #52 #387
-  const modeFor = (options: CompletionOptions): ToolsMode =>
-    options.toolUse === 'required' ? 'task' : 'full';
+  // Chat rides the full toolset; `taskMode` (tasks) rides the lean task agent.
+  // Tool choice is not forced — a text-only step is how a task settles.
+  // @see #52 #387 #417
+  const modeFor = (options: CompletionOptions): ToolsMode => (options.taskMode ? 'task' : 'full');
   const instructionsFor = (options: CompletionOptions, system: string | undefined): string =>
     mergedInstructions(modeFor(options) === 'task' ? TASK_INSTRUCTIONS : TOOL_INSTRUCTIONS, system);
 
