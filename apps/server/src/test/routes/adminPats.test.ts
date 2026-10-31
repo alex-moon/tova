@@ -85,8 +85,15 @@ describe('admin pats (#184)', () => {
 
     const list = await request(app).get('/api/admin/pats').set('Cookie', cookie);
     expect(list.status).toBe(200);
-    const listed = list.body.pats[0] as { lastUsedAt: string | null };
-    expect(listed.lastUsedAt).not.toBeNull();
+    // The stamp is a fire-and-forget write; poll briefly rather than race it.
+    let stamped: { lastUsedAt: string | null } | null = list.body.pats[0];
+    for (let i = 0; i < 100 && !stamped?.lastUsedAt; i++) {
+      await new Promise((r) => setTimeout(r, 20));
+      stamped = (await Pat.findOne({ name: 'agent' }).lean()) as {
+        lastUsedAt: string | null;
+      } | null;
+    }
+    expect(stamped?.lastUsedAt ?? null).not.toBeNull();
   });
 
   it('throttles the lastUsedAt stamp to one write per window (#397)', async () => {
