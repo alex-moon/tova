@@ -8,7 +8,7 @@
 
 - Authenticated user accounts with secure session handling
 - Persistent chat sessions and message history stored in MongoDB
-- Intelligent backend routing: a fixed model roster ranked by measured TTFT × price, hedged across providers per turn
+- Intelligent backend routing: models pinned per function from env (#387), chat hedged across provider backends per turn
 - A React frontend served through a unified local development experience
 
 ## Product Scope
@@ -17,7 +17,7 @@
 
 - Account registration, login, logout, and protected chat access
 - Session-based chat persistence and session history navigation
-- Router logic that picks the roster's lowest-scoring eligible model and hedges it across provider backends (tier-era heuristic/classifier routing is retired, #387)
+- Router logic that races the pinned chat model across its known provider backends, first token winning (tier-era heuristic/classifier routing and the Mongo roster are retired, #387)
 - Production serving through the backend and a practical local developer workflow
 
 ### Out of Scope

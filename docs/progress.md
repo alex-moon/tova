@@ -6,9 +6,10 @@ Snapshot 2026-10-31: `main` is at #425 (task-settle fix — `toolChoice` forcing
 dropped, tasks settle on a text-only step; #417 closed). The #420 stray-token
 investigation concluded: GLM-5.3 model-level gloss flips, content-triggered
 (#422, plan doc in `docs/done/`); the output-side guard follow-ups #423/#424
-were closed without action — no runtime stray-glyph guard for now. Sole open
-ticket: #419 (flash cards/pop quiz). Plan archive is current: no in-flight
-plan docs sit in `docs/` root. Entries below are the delivery log.
+were closed without action — no runtime stray-glyph guard for now. #419 (admin
+flash-card quiz on the backend pipeline) shipped the same day — plan doc in
+`docs/done/`. Plan archive is current: no in-flight plan docs sit in `docs/`
+root. Entries below are the delivery log.
 
 #362 tasks-stopping fix (branch `fix/tv/362-task-history-replay`): a task
 settled `done` after two steps having done nothing — step 0 narrated _and_

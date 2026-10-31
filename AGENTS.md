@@ -8,7 +8,7 @@ This repository keeps shared, agent-agnostic project coordination documents in `
 
 - authenticated users
 - persistent chat sessions stored in MongoDB
-- a fixed-model router that races providers per turn (roster ranked by measured TTFT × price)
+- a router that pins models per function from env (#387) and races providers per turn
 - a React frontend served through a unified local development experience
 
 In short: it is aiming to be an application-layer service for inference providers with a built-in chat product.
