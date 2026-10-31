@@ -1,15 +1,21 @@
-# Accepted-risk entries for advisories with no upstream fix.
+# Accepted-risk entries for advisories with no compatible fix (a "fixed
+# version" that is a breaking major of a transitive/build-time package).
 #
 # Each entry is time-boxed: once `ignoreUntil` passes, the scan fails again so
 # the exception is revisited. Remove an entry as soon as its dependency can be
 # bumped to a patched release.
 
 [[IgnoredVulns]]
-id = "GHSA-vfj7-8cjw-p6xm"
-ignoreUntil = 2026-11-03
-reason = "braces <=3.0.3 stack-exhaustion DoS; no fixed release exists (3.0.3 is the latest). Reached only via http-proxy-middleware -> micromatch -> braces during dev-server proxying, never with untrusted glob input. Re-check when a patched braces ships."
+id = "GHSA-3g3m-2fjr-6pw4"
+ignoreUntil = 2026-11-14
+reason = "glob AbortSignal cancellation bypass can allow post-timeout filesystem traversal (medium). Fixed only in glob 14 — a breaking major; the lockfile carries glob transitively (10.5.0 prod-side, 13.0.6 dev-side) for build/migration tooling, never with attacker-controlled paths. Re-check when dependents support glob 14."
 
 [[IgnoredVulns]]
-id = "GHSA-hp3w-g68c-fv3c"
-ignoreUntil = 2026-11-07
-reason = "sprintf-js <=1.1.3 unbounded-precision DoS; no patched release exists (1.1.3 is the latest and remains affected). Reached only via mammoth -> argparse@1.0.10, which pins sprintf-js ~1.0.2 and is used to parse uploaded .docx text, never attacker-controlled format strings. Re-check when a patched sprintf-js ships."
+id = "GHSA-g3hv-75wg-m249"
+ignoreUntil = 2026-11-14
+reason = "minimatch globparts amplification DoS (medium). Fixed only in minimatch 11 — a breaking major; the lockfile carries 3.x/5.x/9.x/10.x transitively (readdir-glob, mongo-migrate-ts, build tooling), none matching untrusted globs at runtime. Re-check when dependents support minimatch 11."
+
+[[IgnoredVulns]]
+id = "GHSA-gcqx-w48m-w2h4"
+ignoreUntil = 2026-11-14
+reason = "deepmerge prototype-package DoS (medium, dev-only). No fixed release exists yet. Reached only through dev/build tooling. Re-check when a patched deepmerge ships."
