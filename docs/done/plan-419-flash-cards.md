@@ -40,9 +40,10 @@ racing, task runtime, workspace memory, aux model & honesty guard, system prompt
 & privacy, redaction & observability, files & storage, connectors, bootstrap & background.
 Distractors reuse real retired mechanisms (roster scoring, cool-offs, forced
 `toolChoice`) so wrong answers are plausible. Each question carries a one-line
-explanation. Two owner constraints: player-facing copy references modules/mechanisms
-only — never tickets or the dev process — and no questions about tests; functionality
-only.
+explanation. Owner constraints from play: player-facing copy references modules/mechanisms
+only — never tickets, tests, or the dev process; the rationale lives in `explain`, never
+in the option text; and options stay length-balanced so the answer is not guessable by
+size (all pinned by the bank-integrity test).
 
 ## Done
 

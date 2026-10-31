@@ -32,6 +32,19 @@ describe('quiz bank integrity', () => {
   it('question ids are unique and non-empty', () => {
     expect(new Set(QUIZ_QUESTIONS.map((q) => q.id)).size).toBe(QUIZ_QUESTIONS.length);
   });
+
+  it('the correct option is not a length giveaway', () => {
+    for (const q of QUIZ_QUESTIONS) {
+      const lens = q.options.map((o) => o.length);
+      const correct = lens[q.answer];
+      const others = lens.filter((_, i) => i !== q.answer);
+      const avg = others.reduce((a, b) => a + b, 0) / others.length;
+      // Within ±35% of the distractor average — a much longer (or much
+      // shorter) correct option is guessable by size.
+      expect(correct, `${q.id} too long`).toBeLessThan(avg * 1.35);
+      expect(correct, `${q.id} too short`).toBeGreaterThan(avg * 0.65);
+    }
+  });
 });
 
 describe('weighted sampling', () => {
