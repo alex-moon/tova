@@ -8,6 +8,7 @@ import AdminService, {
 } from '../services/admin';
 import AdminLangsmithView from './AdminLangsmithView';
 import AdminEvalsView from './AdminEvalsView';
+import AdminQuizView from './AdminQuizView';
 import type {
   AdminFixedModel,
   AdminLogEntry,
@@ -42,7 +43,7 @@ const AdminView = () => {
   const [logsError, setLogsError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [activeSection, setActiveSection] = useState<
-    'users' | 'models' | 'logs' | 'compare' | 'traces' | 'evals' | 'access'
+    'users' | 'models' | 'logs' | 'compare' | 'traces' | 'evals' | 'access' | 'quiz'
   >('users');
   // PAT rows plus one-time plaintext shown after creation; never recoverable.
   // @see #184
@@ -243,7 +244,7 @@ const AdminView = () => {
   };
 
   const sectionContent: {
-    id: 'users' | 'models' | 'logs' | 'compare' | 'traces' | 'evals' | 'access';
+    id: 'users' | 'models' | 'logs' | 'compare' | 'traces' | 'evals' | 'access' | 'quiz';
     label: string;
   }[] = [
     { id: 'users', label: 'Users' },
@@ -253,6 +254,7 @@ const AdminView = () => {
     { id: 'evals', label: 'Evals' },
     { id: 'logs', label: 'Logs' },
     { id: 'access', label: 'Access' },
+    { id: 'quiz', label: 'Quiz' },
   ];
 
   return (
@@ -602,6 +604,7 @@ const AdminView = () => {
           )}
           {activeSection === 'traces' && <AdminLangsmithView />}
           {activeSection === 'evals' && <AdminEvalsView />}
+          {activeSection === 'quiz' && <AdminQuizView />}
           {activeSection === 'logs' && (
             <section data-testid="admin-logs-section">
               <h3 className="font-heading text-lg font-semibold">Logs</h3>
