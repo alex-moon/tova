@@ -2,6 +2,14 @@
 
 ## Status (current)
 
+Snapshot 2026-10-31: `main` is at #425 (task-settle fix — `toolChoice` forcing
+dropped, tasks settle on a text-only step; #417 closed). The #420 stray-token
+investigation concluded: GLM-5.3 model-level gloss flips, content-triggered
+(#422, plan doc in `docs/done/`); the output-side guard follow-ups #423/#424
+were closed without action — no runtime stray-glyph guard for now. Sole open
+ticket: #419 (flash cards/pop quiz). Plan archive is current: no in-flight
+plan docs sit in `docs/` root. Entries below are the delivery log.
+
 #362 tasks-stopping fix (branch `fix/tv/362-task-history-replay`): a task
 settled `done` after two steps having done nothing — step 0 narrated _and_
 called `list_files`, and `assembleTaskHistory` replayed an assistant event as
@@ -38,7 +46,7 @@ own message dispatch, e.g. a double-settled job rejecting into a deleted
 promise slot; the blast radius is one per-call worker, so the process keeps
 serving — everything else keeps the #248 exit policy).
 
-#260 db:sync discoverability (in flight, branch `fix/tv/260-db-sync-friction`):
+#260 db:sync discoverability (landed via PR #268, branch `fix/tv/260-db-sync-friction`):
 agents kept reaching for `mongosh`/`mongodump`/`mongorestore` instead of
 `npm run db:sync` for three reinforcing reasons, all doc/artifact-level — the
 tooling itself works (verified with a real dump → drop → restore round-trip):
@@ -164,7 +172,7 @@ badge and an errors table reading that collection; no second stats service.
 Builds on #173 (cool-off scaffolding) and supersedes PR #177. Follow-ups
 filed: #178 (429 back-off), #179 (persistent log retention).
 
-#170 More models (in flight, branch `feat/tv/168-170-model-pool`, was
+#170 More models (landed, branch `feat/tv/168-170-model-pool`, was
 `feat/170-more-models`/PR #180): 14 more DeepInfra
 models seeded into the large completion tier so the admin elimination process
 has candidates to evaluate on live traffic. ZDR-only selection — no
@@ -204,7 +212,7 @@ unchanged, first-enable soft-deletes prior sessions and hard-deletes their messa
 and copy states chats/files are never used to train models. Turned off, chat behaves
 exactly as before.
 
-#138 Productivity app (in flight, branch `feat/138-productivity-app`): the data
+#138 Productivity app (landed via PR #140; the entity graph it introduced was retired by #256, branch `feat/138-productivity-app`): the data
 substrate for a per-user entity graph so Tova can reason over entities accumulated
 across chats. Minimal back-end per the ticket's "most minimal implementation" —
 `entities`/`entityEdges` MongoDB collections with a loose schema (`kind`, `attrs`,
@@ -221,7 +229,7 @@ Preference inference, fuzzy disambiguation, ontology enforcement, files feeding 
 graph and tool-based querying are deliberately deferred; open questions in the plan
 doc.
 
-#145 Log redaction (in flight, PR #154): `logRedaction.ts` (`redactForLog`) redacts
+#145 Log redaction (landed, PR #154): `logRedaction.ts` (`redactForLog`) redacts
 error message text at every user-content-adjacent `console.*` call site (verified
 hit-by-hit audit of `src/server`), protecting stdout and the admin logs buffer via the
 logService console capture; `traceRedaction.ts` applies the same policy to LangSmith
@@ -239,7 +247,7 @@ per `docs/workflow.md`.
 - Per-message prompt metrics: fixed as of this entry. Every new turn gets a `metrics` subdocument (deterministic for user + assistant; LLM-classified dimensions for user messages, fire-and-forget post-save). Inspect with:
   `npx tsx scripts/mongo.ts "await db.collection('messages').find({ 'metrics': { $exists: true, $ne: null } }).sort({ timestamp: -1 }).limit(3).toArray()"` — or filter for pending LLM classification with `{ 'metrics.llm': null, role: 'user' }`.
 
-#112 Evals (in flight): deterministic tool-use grader (`src/server/evals/`), golden
+#112 Evals (landed): deterministic tool-use grader (`src/server/evals/`), golden
 set in `cases.ts` (GitHub README two-tool chain, Bupa policy list-then-read,
 PM-announcements web search, plus wrong-tool/save-file extras), temporary Mongo
 source seeded by `mongoSource.ts`, runner `scripts/run-evals.ts` (`npm run evals`)

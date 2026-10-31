@@ -8,7 +8,7 @@
 
 - Authenticated user accounts with secure session handling
 - Persistent chat sessions and message history stored in MongoDB
-- Intelligent backend routing that selects models based on prompt complexity
+- Intelligent backend routing: a fixed model roster ranked by measured TTFT × price, hedged across providers per turn
 - A React frontend served through a unified local development experience
 
 ## Product Scope
@@ -17,7 +17,7 @@
 
 - Account registration, login, logout, and protected chat access
 - Session-based chat persistence and session history navigation
-- Router logic that can combine heuristics with model-assisted classification
+- Router logic that picks the roster's lowest-scoring eligible model and hedges it across provider backends (tier-era heuristic/classifier routing is retired, #387)
 - Production serving through the backend and a practical local developer workflow
 
 ### Out of Scope
@@ -38,11 +38,11 @@
 
 - Express-based API and app server
 - MongoDB-backed persistence for users, sessions, and messages
-- Routing is env-pinned per function (#387): `CHAT_MODEL` (default `zai-org/GLM-5.3-Flash`) serves chat and `TASK_MODEL` (default `deepseek-ai/DeepSeek-V4.1-Flash-1017`) serves task steps. Chat hedges across the chosen model's known provider backends (DeepInfra + Fireworks) with the first token winning and the loser aborted; an unknown model override rides DeepInfra alone. Tasks pin DeepInfra with `toolChoice: 'required'`.
+- Routing is env-pinned per function (#387): `CHAT_MODEL` (default `zai-org/GLM-5.3-Flash`) serves chat and `TASK_MODEL` (default `deepseek-ai/DeepSeek-V4.1-Flash-1017`) serves task steps. Chat hedges across the chosen model's known provider backends (DeepInfra + Fireworks) with the first token winning and the loser aborted; an unknown model override rides DeepInfra alone. Tasks pin DeepInfra and run the lean task agent (`taskMode`); tool choice is not forced, so a text-only step settles the task done (#425).
 - Model pricing: a static (model, provider) → USD/1M table in `modelDefaults.ts` feeds the cost estimates; unknown model ids estimate as null (cached pricing deliberately not modelled).
 - Tool-using turns end with a user-visible confirmation: if a turn executed at least one user-facing tool but produced no assistant text (e.g. the run ended on a tool call at the step cap), the server synthesizes a short sentence naming what completed — "Created `agi-final.md`." — and streams/persists it like model text. A real model answer is never altered.
 - Per-message prompt metrics persisted as a `metrics` subdocument on each message: deterministic features (counts, buckets, code/stopword/question/imperative indicators, session indices) computed synchronously at save time, plus LLM-classified dimensions (`metrics.llm`: emotional, technical, abstract, sentiment, open-ended) for user messages, filled post-save fire-and-forget via an auxiliary tool-free model call. Keeps message routing decisions and prompt features in one document for later routing-correlation analysis.
-- Auxiliary LLM calls (chat title, entity extraction, follow-up suggestions, and prompt-metric classification) run on a single cheap fixed **aux model** (`AUX_MODEL`/`AUX_PROVIDER`, default `openai/gpt-oss-20b` on groq — the retired guard model), independent of the chat/task models (#238).
+- Auxiliary LLM calls (chat title, chat subtitle, follow-up suggestions, prompt-metric classification, and the honesty guard) run on a single cheap fixed **aux model** (`AUX_MODEL`/`AUX_PROVIDER`, default `openai/gpt-oss-20b` on groq — the retired guard model), independent of the chat/task models (#238). The entity graph retired with #256.
 - **Workspace memory retrieval** (#253/#310): the enrichment gate is retired — the workspace-memory block (past chats, file contents, task transcripts) is retrieved unconditionally on every text turn, ranked by BM25 + Atlas vector search with a cross-encoder rerank-and-cut stage (#305) as the relevance bar. File discovery lives with the `list_files` tool.
 
 ### Frontend
@@ -69,6 +69,6 @@
 
 This file is the stable product-intent summary.
 
-- `docs/plan.md` is the ordered backlog index for numbered work packets.
-- `docs/progress.md` is the execution log and current queue snapshot.
-- Detailed implementation work should be defined in `docs/plan-XXX-*.md` packets rather than expanded here.
+- Open work is tracked on GitHub (`alex-moon/tova`): issues for tickets, PRs for changes; there is no local backlog index.
+- `docs/progress.md` is the static execution log.
+- In-flight work gets a `docs/plan-<ticket>-<summary>.md` packet, archived to `docs/done/` when ready for review; detailed implementation work should be defined there rather than expanded here.

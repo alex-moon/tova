@@ -8,7 +8,7 @@ This repository keeps shared, agent-agnostic project coordination documents in `
 
 - authenticated users
 - persistent chat sessions stored in MongoDB
-- an intelligent router that selects models based on prompt complexity
+- a fixed-model router that races providers per turn (roster ranked by measured TTFT × price)
 - a React frontend served through a unified local development experience
 
 In short: it is aiming to be an application-layer service for inference providers with a built-in chat product.
@@ -68,10 +68,10 @@ _No known client drift as of #220; this section is a standing slot for the next 
 
 ### Model routing decisions
 
-Any change to routing policy (tier boundaries, guard classification, pool defaults) must be evidence-first, not instinct:
+Any change to routing policy (roster composition, per-function model pins, provider racing, cool-off defaults) must be evidence-first, not instinct:
 
 - Compare candidate models directly with the one-off eval script (`scripts/eval-model-compare.ts`): `npx tsx scripts/eval-model-compare.ts "<prompt>" --models deepinfra/Qwen/Qwen3-14B,groq/openai/gpt-oss-20b`. It runs a single prompt through the existing agent on each model, printing answers side by side. The admin view's "Compare" tab does the exact same thing in the browser (it shares the same server code).
-- Read LangSmith traces liberally before judging a routing change (read-only): project `tova-dev` via the `LANGCHAIN_*` credentials in `.env`. Real traces are the best evidence for which tier a conversational prompt belongs in — e.g. ticket #129 was diagnosed entirely from a trace showing the guard model returning empty replies.
+- Read LangSmith traces liberally before judging a routing change (read-only): project `tova-dev` via the `LANGCHAIN_*` credentials in `.env`. Real traces are the best evidence for which model a conversational prompt belongs on — e.g. ticket #129 was diagnosed entirely from a trace showing the guard model returning empty replies.
 
 ### Admin API access
 
@@ -98,7 +98,7 @@ Reading the dump artifacts directly has a catch: they live under `data/`, which 
 
 ### Reading logs from Grafana Cloud (Loki)
 
-Retained production logs live in Grafana Cloud (hosted Loki) and are readable directly with the `LOKI_*` credentials in `.env` — the same ones the admin logs view uses (`apps/server/src/services/lokiLogs.ts`). The token is both read- and write-scoped; `LOKI_URL` is the push URL and the query API lives on the same host.
+Retained production logs live in Grafana Cloud (hosted Loki) and are readable directly with the `LOKI_*` credentials in `.env` — the same ones the admin logs view uses (`apps/server/src/main/services/lokiLogs.ts`). The token is both read- and write-scoped; `LOKI_URL` is the push URL and the query API lives on the same host.
 
 - `npm run logs -- '<logql>' --since <window> --limit <n> [--raw] [--json]` — runs `scripts/loki.ts`. The query is a LogQL stream selector; `--since` accepts `30m`/`2h`/`24h`/`7d` (default `1h`); `--limit` defaults to 100; `--raw` drops timestamps, `--json` prints the raw Loki response. Default selector is `{job="tova"}`.
 - Examples: `npm run logs -- --since 6h`, `npm run logs -- '{job="tova"} |= "GET /api"' --since 24h --raw`, `npm run logs -- '{service="backend"} |~ "error|fail"' --since 2h`.
@@ -158,6 +158,6 @@ emit path (#257, #288):
   image's tree minimal, and there are **no workspace `prepare` scripts** — adding one is a
   trap, because npm runs a workspace `prepare` before its sources are copied even under
   `--ignore-scripts`.
-- `apps/server/src/sharedResolution.contracts.test.ts` pins all of the above (the four
+- `apps/server/src/test/sharedResolution.contracts.test.ts` pins all of the above (the four
   source-resolution legs, the paths-free build config, the no-`prepare` rule), so the
   contract cannot drift silently.
