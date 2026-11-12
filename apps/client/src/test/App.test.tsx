@@ -240,7 +240,7 @@ describe('App startup chat (issue #96)', () => {
       'data: {"content":"Read it — 87 lines."}',
       '',
       'event: honesty',
-      'data: {"flagged":true,"reason":"claims a file read","retrying":true}',
+      'data: {"flagged":true,"confidence":0.93,"retrying":true}',
       '',
       'event: delta',
       'data: {"content":"I cannot read files."}',

@@ -103,7 +103,10 @@ const messageSchema = new mongoose.Schema({
     type: {
       _id: false,
       flagged: { type: Boolean, required: true },
+      // reason kept for pre-#426 docs; verdicts now carry the decision confidence.
+      // @see #426
       reason: { type: String, default: null },
+      confidence: { type: Number, default: null },
       checkedAt: { type: Date, required: true },
     },
     default: undefined,
