@@ -127,6 +127,19 @@ export const config = {
     },
   },
 
+  // System One decision model for classification calls; disable falls back to aux LLM.
+  // @see #426
+  decision: {
+    get model(): string {
+      return process.env.DECISION_MODEL || 'Cloudflare/clef';
+    },
+    get classifierEnabled(): boolean {
+      const raw = process.env.DECISION_CLASSIFIER_ENABLED;
+      if (raw === undefined || raw === '') return true;
+      return raw !== '0' && raw.toLowerCase() !== 'false';
+    },
+  },
+
   // Aux model for small latency-insensitive calls.
   // @see #238
   aux: {

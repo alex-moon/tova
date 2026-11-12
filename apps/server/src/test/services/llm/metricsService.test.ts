@@ -3,7 +3,13 @@ import {
   isTriviallyNeutral,
 } from '../../../main/services/llm/metricsService';
 
+const mockDecide = jest.fn();
 const mockGenerate = jest.fn();
+
+jest.mock('../../../main/services/llm/systemOneClient', () => ({
+  ...jest.requireActual('../../../main/services/llm/systemOneClient'),
+  systemOneDecide: (...args: unknown[]) => mockDecide(...args),
+}));
 
 jest.mock('@mastra/core/agent', () => {
   return {
@@ -25,7 +31,9 @@ const NULL_LLM = {
 
 describe('metricsService', () => {
   beforeEach(() => {
+    mockDecide.mockReset().mockResolvedValue(null);
     mockGenerate.mockReset();
+    delete process.env.DECISION_CLASSIFIER_ENABLED;
   });
 
   describe('classifyPromptDimensions', () => {
@@ -87,6 +95,88 @@ describe('metricsService', () => {
         llm: NULL_LLM,
         skipReason: 'parse',
       });
+    });
+
+    it('#426: maps decision answers to flags without touching the aux LLM', async () => {
+      mockDecide.mockResolvedValueOnce({
+        emotional: { type: 'noul', noul: 0.9729 },
+        technical: { type: 'noul', noul: 0.0128 },
+        abstract: { type: 'noul', noul: 0.7417 },
+        sentiment: {
+          type: 'choice',
+          choice: 'negative',
+          confidence: 0.7814,
+          probabilities: { positive: 0.0146, negative: 0.922, neutral: 0.0634 },
+        },
+        openEnded: { type: 'noul', noul: 0.8026 },
+      });
+      expect(await classifyPromptDimensions('I feel overwhelmed')).toEqual({
+        llm: {
+          emotional: true,
+          technical: false,
+          abstract: true,
+          sentiment: 'negative',
+          openEnded: true,
+        },
+        skipReason: null,
+      });
+      expect(mockGenerate).not.toHaveBeenCalled();
+    });
+
+    it('#426: an unknown sentiment choice degrades that flag to null, not the call', async () => {
+      mockDecide.mockResolvedValueOnce({
+        emotional: { type: 'noul', noul: 0.99 },
+        technical: { type: 'noul', noul: 0.01 },
+        abstract: { type: 'noul', noul: 0.2 },
+        sentiment: { type: 'choice', choice: 'joyful' },
+        openEnded: { type: 'noul', noul: 0.1 },
+      });
+      const { llm, skipReason } = await classifyPromptDimensions('hello');
+      expect(llm.sentiment).toBeNull();
+      expect(llm.emotional).toBe(true);
+      expect(skipReason).toBeNull();
+    });
+
+    it('#426: all-null decision answers retry through the aux LLM path', async () => {
+      mockDecide.mockResolvedValueOnce({});
+      mockGenerate.mockResolvedValueOnce({
+        text: 'x',
+        object: {
+          emotional: true,
+          technical: false,
+          abstract: false,
+          sentiment: 'neutral',
+          openEnded: true,
+        },
+      });
+      expect(await classifyPromptDimensions('hello')).toEqual({
+        llm: {
+          emotional: true,
+          technical: false,
+          abstract: false,
+          sentiment: 'neutral',
+          openEnded: true,
+        },
+        skipReason: null,
+      });
+      expect(mockGenerate).toHaveBeenCalled();
+    });
+
+    it('#426: DECISION_CLASSIFIER_ENABLED=0 skips the decision path entirely', async () => {
+      process.env.DECISION_CLASSIFIER_ENABLED = '0';
+      mockGenerate.mockResolvedValueOnce({
+        text: 'x',
+        object: {
+          emotional: false,
+          technical: true,
+          abstract: false,
+          sentiment: 'neutral',
+          openEnded: false,
+        },
+      });
+      await classifyPromptDimensions('hello');
+      expect(mockDecide).not.toHaveBeenCalled();
+      expect(mockGenerate).toHaveBeenCalled();
     });
   });
 

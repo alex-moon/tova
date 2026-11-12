@@ -14,6 +14,12 @@ jest.mock('@mastra/core/agent', () => {
   };
 });
 
+// Decision path stays out of route tests; they pin the aux LLM fallback.
+jest.mock('../../main/services/llm/systemOneClient', () => ({
+  ...jest.requireActual('../../main/services/llm/systemOneClient'),
+  systemOneDecide: async () => null,
+}));
+
 const MOCK_ROUTING = {
   model: 'mock-small-model',
   provider: 'deepinfra',

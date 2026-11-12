@@ -1,6 +1,14 @@
 import { auxCompletion, AUX_INPUT_CHAR_CAP } from './auxCompletion';
 import { Message } from '../../models/Message';
 import { computeDeterministicMetrics } from './promptMetrics';
+import {
+  systemOneDecide,
+  isNoulAnswer,
+  isChoiceAnswer,
+  type DecisionAnswers,
+  type DecisionQuestion,
+} from './systemOneClient';
+import { config } from '../../config';
 import { z } from 'zod';
 
 const LLM_PROMPT =
@@ -10,6 +18,60 @@ const LLM_PROMPT =
   '"abstract": the prompt is strategic/high-level rather than a concrete step-by-step task. ' +
   '"sentiment": the overall tone of the prompt. ' +
   '"openEnded": true if it invites an open discussion, false if it is a one-shot task.';
+
+// One decision request scores all five flags; instructions mirror LLM_PROMPT.
+// @see #426
+const CLASSIFIER_QUESTIONS: Record<string, DecisionQuestion> = {
+  emotional: {
+    type: 'noul',
+    instructions: 'Is the prompt about feelings or personal life rather than a task?',
+  },
+  technical: {
+    type: 'noul',
+    instructions: 'Does the prompt use engineering or domain jargon?',
+  },
+  abstract: {
+    type: 'noul',
+    instructions: 'Is the prompt strategic or high-level rather than a concrete step-by-step task?',
+  },
+  sentiment: {
+    type: 'choice',
+    instructions: 'What is the overall tone of the prompt?',
+    criteria: { positive: 'Positive tone', negative: 'Negative tone', neutral: 'Neutral tone' },
+  },
+  openEnded: {
+    type: 'noul',
+    instructions: 'Does the prompt invite an open discussion rather than being a one-shot task?',
+  },
+};
+
+const SENTIMENTS = ['positive', 'negative', 'neutral'] as const;
+
+const metricsFromDecision = (answers: DecisionAnswers): LlmMetrics => {
+  const flag = (key: string): boolean | null =>
+    isNoulAnswer(answers[key]) ? answers[key].noul >= 0.5 : null;
+  const sentimentAnswer = isChoiceAnswer(answers.sentiment) ? answers.sentiment.choice : null;
+  return {
+    emotional: flag('emotional'),
+    technical: flag('technical'),
+    abstract: flag('abstract'),
+    sentiment: sentimentAnswer ? (SENTIMENTS.find((s) => s === sentimentAnswer) ?? null) : null,
+    openEnded: flag('openEnded'),
+  };
+};
+
+const classifyViaDecision = async (content: string): Promise<LlmMetrics | null> => {
+  const answers = await systemOneDecide(
+    'Prompt classification',
+    content.trim().substring(0, AUX_INPUT_CHAR_CAP),
+    CLASSIFIER_QUESTIONS,
+  );
+  if (!answers) return null;
+  const llm = metricsFromDecision(answers);
+  // An all-null read means the reply was garbage; retry through the aux LLM path.
+  if (isAllNullLlm(llm)) return null;
+  return llm;
+};
 
 export interface LlmMetrics {
   emotional: boolean | null;
@@ -39,6 +101,17 @@ const FLAGS_SCHEMA = z.object({
 
 // Classify a prompt and report why flags could be missing: parse or error.
 export const classifyPromptDimensions = async (
+  content: string,
+  sessionId?: string,
+): Promise<{ llm: LlmMetrics; skipReason: 'parse' | 'error' | null }> => {
+  if (config.decision.classifierEnabled) {
+    const llm = await classifyViaDecision(content);
+    if (llm) return { llm, skipReason: null };
+  }
+  return classifyViaAuxLlm(content, sessionId);
+};
+
+const classifyViaAuxLlm = async (
   content: string,
   sessionId?: string,
 ): Promise<{ llm: LlmMetrics; skipReason: 'parse' | 'error' | null }> => {
