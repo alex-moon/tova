@@ -771,7 +771,7 @@ const persistAssistantTurn = async (input: {
   sources: string[];
   sourceTitles: { url: string; title: string }[];
   toolEvents: PersistedToolEvent[];
-  honesty?: Pick<HonestyVerdict, 'flagged' | 'reason'> | null;
+  honesty?: Pick<HonestyVerdict, 'flagged' | 'confidence'> | null;
   taskIds: TaskDocument['_id'][];
 }) => {
   const assistantMessage = new Message({
@@ -1024,7 +1024,7 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
           resetAttemptState();
           sendEvent('honesty', {
             flagged: true,
-            reason: honestyVerdict?.reason ?? null,
+            confidence: honestyVerdict?.confidence ?? null,
             retrying: true,
           });
           appendHonestyRetryNote(messages);
@@ -1191,7 +1191,7 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
       sourceTitles: sourceTitleList,
       toolEvents,
       honesty: honestyVerdict
-        ? { flagged: honestyVerdict.flagged, reason: honestyVerdict.reason }
+        ? { flagged: honestyVerdict.flagged, confidence: honestyVerdict.confidence }
         : null,
       taskIds: streamTaskIds,
     });
@@ -1219,7 +1219,7 @@ router.post('/stream', authenticate, async (req: AuthRequest, res) => {
     // Only an exhausted retry reaches the user as a flag.
     // @see #371 #381
     if (honestyVerdict?.flagged) {
-      sendEvent('honesty', { flagged: true, reason: honestyVerdict.reason });
+      sendEvent('honesty', { flagged: true, confidence: honestyVerdict.confidence });
     }
     res.end();
   } catch (err) {

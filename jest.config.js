@@ -26,6 +26,10 @@ module.exports = {
     // @tova/shared now carries a runtime helper (buildMongoUri); resolve it to
     // source so suites never depend on a prior shared build.
     '^@tova/shared$': '<rootDir>/apps/shared/src/main/index.ts',
+    // Inert System One default for every suite; the decision seam is jest.mocked
+    // where it is under test. Prevents live /v1/systemone calls from tests.
+    // @see #426
+    systemOneClient$: '<rootDir>/apps/server/src/test/systemOneStub.ts',
     '^@mastra/core/agent$': '<rootDir>/apps/server/src/test/mastraAgentStub.ts',
     '^@mastra/core/tools$': '<rootDir>/apps/server/src/test/mastraToolsStub.ts',
     '^@mastra/core/processors$': '<rootDir>/apps/server/src/test/mastraToolSearchStub.ts',

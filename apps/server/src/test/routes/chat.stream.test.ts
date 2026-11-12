@@ -27,12 +27,6 @@ jest.mock('@mastra/core/agent', () => {
   };
 });
 
-// Decision path stays out of route tests; they pin the aux LLM fallback.
-jest.mock('../../main/services/llm/systemOneClient', () => ({
-  ...jest.requireActual('../../main/services/llm/systemOneClient'),
-  systemOneDecide: async () => null,
-}));
-
 const MOCK_ROUTING = {
   model: 'mock-small-model',
   provider: 'deepinfra',
@@ -1201,7 +1195,7 @@ describe('Chat streaming route', () => {
       const retryFrame = frameOf(response.text, 'honesty');
       expect(retryFrame).toEqual({
         flagged: true,
-        reason: 'claims a file read with no tools executed',
+        confidence: null,
         retrying: true,
       });
       // The settled turn is the restart, not the discarded attempt.
@@ -1255,7 +1249,7 @@ describe('Chat streaming route', () => {
         ),
       ).toEqual({
         flagged: true,
-        reason: 'claims a file read with no tools executed',
+        confidence: null,
       });
       const persisted = await Message.findOne({ role: 'assistant' });
       expect(persisted?.honesty?.flagged).toBe(true);

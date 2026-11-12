@@ -60,7 +60,7 @@ export interface Message {
   tools?: ToolEvent[];
   // Honesty-guard verdict; absent = unassessed.
   // @see #371
-  honesty?: { flagged?: boolean | null; reason?: string | null; checkedAt?: string | null };
+  honesty?: { flagged?: boolean | null; confidence?: number | null; checkedAt?: string | null };
   // assetId persists server-side; assetFilename is display-only.
   // @see #34
   assetId?: string;

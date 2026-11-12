@@ -8,7 +8,7 @@ const flagged = (): Message => ({
   role: 'assistant',
   content: 'Read it — 87 lines, all of it.',
   modelName: 'test-model',
-  honesty: { flagged: true, reason: 'no tools executed', checkedAt: new Date().toISOString() },
+  honesty: { flagged: true, confidence: 0.93, checkedAt: new Date().toISOString() },
 });
 
 const renderWith = (messages: Message[], onSendMessage = vi.fn()) => {
